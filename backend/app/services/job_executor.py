@@ -136,6 +136,7 @@ async def aggregate_parent_image_job(
                 "quality": parent.get("quality"),
                 "output_format": parent.get("output_format"),
                 "output_compression": parent.get("output_compression"),
+                "background": parent.get("background"),
                 "response_format": parent.get("response_format"),
                 "n": parent.get("n"),
                 "api_path": parent.get("api_path"),

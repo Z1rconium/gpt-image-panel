@@ -3,6 +3,7 @@
   import { tick } from 'svelte';
 import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput } from '$lib/api/types/snippets';
   import { dialog } from '$lib/actions/dialog';
+  import { MAX_PROMPT_CHARS, promptLength } from '$lib/utils/imageModels';
   import { plainTextInput } from '$lib/actions/plainTextInput';
   import { swipeClose } from '$lib/actions/swipeClose';
   import { t } from '$lib/i18n';
@@ -35,8 +36,8 @@ import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput 
   let titleInput: HTMLInputElement | null = null;
 
   $: isEditing = Boolean(editingId);
-  $: formReady = Boolean(title.trim() && promptText.trim()) && !saving;
-  $: hasCurrentPrompt = Boolean(currentPrompt.trim());
+  $: formReady = Boolean(title.trim() && promptText.trim()) && promptLength(promptText.trim()) <= MAX_PROMPT_CHARS && !saving;
+  $: hasCurrentPrompt = Boolean(currentPrompt.trim()) && promptLength(currentPrompt.trim()) <= MAX_PROMPT_CHARS;
   $: emptyLabel = query.trim() ? $t.promptSnippets.noMatch : $t.promptSnippets.noSnippets;
   $: emptyHint = query.trim() ? $t.promptSnippets.noMatchHint : $t.promptSnippets.noSnippetsHint;
   $: formDirty = editingId
@@ -67,7 +68,7 @@ import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput 
 
   async function saveCurrentPrompt() {
     const prompt = currentPrompt.trim();
-    if (!prompt || saving) return;
+    if (!prompt || promptLength(prompt) > MAX_PROMPT_CHARS || saving) return;
     await onCreate({
       title: snippetTitleFromPrompt(prompt),
       prompt,
@@ -195,13 +196,15 @@ import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput 
             <span class="mb-1.5 block text-xs font-medium text-stone-600 dark:text-zinc-400">{$t.promptSnippets.promptLabel}</span>
             <textarea
               bind:value={promptText}
-              maxlength="4000"
+              aria-invalid={promptLength(promptText.trim()) > MAX_PROMPT_CHARS}
               rows="5"
               class="control-focus w-full resize-y rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm leading-6 text-stone-900 focus:border-emerald-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
               spellcheck="false"
               placeholder={$t.promptSnippets.promptPlaceholder}
               use:plainTextInput
             ></textarea>
+            <span class="mt-1 block text-xs text-stone-500">{promptLength(promptText)}/{MAX_PROMPT_CHARS}</span>
+            {#if promptLength(promptText.trim()) > MAX_PROMPT_CHARS}<span role="alert" class="text-xs text-red-600">{$t.promptForm.promptTooLong}</span>{/if}
           </label>
           <div class="mt-3 flex items-center justify-between gap-3">
             <label class="inline-flex items-center gap-2 text-xs font-medium text-stone-700 dark:text-zinc-300">

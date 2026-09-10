@@ -12,7 +12,7 @@ export function normalizeApiPath(value: string | null | undefined, fallback: Api
 }
 
 function normalizeJobQuality(value: string | null | undefined): PromptFormState['quality'] {
-  if (value === 'auto' || value === 'low' || value === 'medium' || value === 'high') return value;
+  if (value === 'auto' || value === 'low' || value === 'medium' || value === 'high' || value === 'xhigh' || value === 'max') return value;
   return initialPromptFormState.quality;
 }
 

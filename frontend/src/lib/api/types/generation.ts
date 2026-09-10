@@ -1,3 +1,4 @@
+import type { ImageQuality } from '$lib/utils/imageModels';
 import type { ApiPath } from './common';
 
 export type GenerateRequestBody = {
@@ -5,12 +6,11 @@ export type GenerateRequestBody = {
   size: string;
   model: string;
   n: number;
-  quality: 'auto' | 'low' | 'medium' | 'high';
+  quality: ImageQuality;
   output_format: 'png' | 'jpeg' | 'webp';
   output_compression?: number | null;
   background?: 'auto' | 'opaque' | 'transparent';
   response_format?: 'url' | 'b64_json' | null;
   api_path?: ApiPath | null;
 };
-
 

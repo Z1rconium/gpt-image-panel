@@ -12,6 +12,8 @@
   import NodeImageSettingsSection from './NodeImageSettingsSection.svelte';
   import PromptOptimizerSettingsSection from './PromptOptimizerSettingsSection.svelte';
   import R2SettingsSection from './R2SettingsSection.svelte';
+  import ImageModelPicker from '$lib/components/ImageModelPicker.svelte';
+  import { isImage25 } from '$lib/utils/imageModels';
 
   export let settings: SettingsResponse | null = null;
   export let activePresetId = '';
@@ -133,18 +135,19 @@
               <option value="/v1/chat/completions">/v1/chat/completions</option>
             </select>
           </label>
-          <label class="block">
-            <span class="mb-1.5 block text-xs font-medium text-stone-600 dark:text-zinc-400">{$t.settings.defaultModel}</span>
-            <input bind:value={defaultModel} class="control-focus w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-2.5 font-mono text-sm text-stone-900 focus:border-emerald-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100" placeholder="gpt-image-2" />
-          </label>
+          <ImageModelPicker bind:value={defaultModel} label={$t.settings.defaultModel} />
+          {#if isImage25(defaultModel) && apiPath !== '/v1/images/generations'}
+            <p role="alert" class="text-xs text-amber-600">{$t.promptForm.image25Endpoint}</p>
+          {/if}
           <label class="block">
             <span class="mb-1.5 block text-xs font-medium text-stone-600 dark:text-zinc-400">{$t.settings.defaultResponseFormat}</span>
-            <select bind:value={defaultResponseFormat} class="control-focus form-select border-stone-300 bg-stone-50 text-stone-900 focus:border-emerald-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100">
+            <select value={isImage25(defaultModel) ? '' : defaultResponseFormat} on:change={(event) => defaultResponseFormat = event.currentTarget.value as ResponseFormatDefault} disabled={isImage25(defaultModel)} class="control-focus form-select border-stone-300 bg-stone-50 text-stone-900 focus:border-emerald-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100">
               {#each RESPONSE_FORMAT_OPTIONS as responseFormat}
-                <option value={responseFormat}>{responseFormat || $t.promptForm.defaultResponseFormat}</option>
+                <option value={responseFormat}>{responseFormat || (isImage25(defaultModel) ? $t.promptForm.base64Automatic : $t.promptForm.defaultResponseFormat)}</option>
               {/each}
             </select>
           </label>
+          {#if isImage25(defaultModel)}<p class="text-xs text-stone-500">{$t.promptForm.base64Automatic}</p>{/if}
           <label class="block">
             <span class="mb-1.5 block text-xs font-medium text-stone-600 dark:text-zinc-400">{$t.settings.apiKey}</span>
             <input bind:value={apiKey} type={apiKeyInputType} class="control-focus w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-2.5 font-mono text-sm text-stone-900 focus:border-emerald-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100" />

@@ -12,6 +12,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Body, File, Form, HTTPException, UploadFile
 
+from ..core.image_models import MAX_PROMPT_CHARS
 from ..api import presets
 from ..api.app_state import app
 from ..api.uploads import is_image_upload, resolve_upload_content_type
@@ -119,9 +120,9 @@ AI_ASSISTANT_TEXT_FIELD_LIMITS = {
     "angle": 1200,
     "title": 120,
     "description": 2000,
-    "prompt": 4000,
-    "rewritten_prompt": 4000,
-    "edit_prompt": 4000,
+    "prompt": MAX_PROMPT_CHARS,
+    "rewritten_prompt": MAX_PROMPT_CHARS,
+    "edit_prompt": MAX_PROMPT_CHARS,
     "style": 500,
     "composition": 800,
     "lighting": 500,

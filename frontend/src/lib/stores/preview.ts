@@ -5,6 +5,7 @@ import { MAX_EDIT_SOURCE_IMAGES, editSourceCount, editSourceStore, type EditSour
 import type { ApiPath, ResponseFormatDefault } from '$lib/api/types/common';
 import type { GenerateRequestBody } from '$lib/api/types/generation';
 import type { GenerateJobResponse, GenerateJobStatus } from '$lib/api/types/jobs';
+import { MAX_PROMPT_CHARS, imageQualities, isImage25, promptLength, validImageSize } from '$lib/utils/imageModels';
 
 export type PreviewState = {
   loading: boolean;
@@ -65,7 +66,7 @@ function buildRequestBody(form: PromptFormState): GenerateRequestBody {
     output_format: form.outputFormat,
     output_compression: null,
     background: form.background,
-    response_format: form.responseFormat ? (form.responseFormat as 'url' | 'b64_json') : null,
+    response_format: !isImage25(form.model) && form.responseFormat ? (form.responseFormat as 'url' | 'b64_json') : null,
     api_path: form.apiPath
   };
 
@@ -79,6 +80,16 @@ function buildRequestBody(form: PromptFormState): GenerateRequestBody {
   }
 
   return body;
+}
+
+function submissionError(body: GenerateRequestBody, edit = false): string {
+  const messages = get(t);
+  if (!body.prompt) return messages.messages.promptRequired;
+  if (promptLength(body.prompt) > MAX_PROMPT_CHARS) return messages.promptForm.promptTooLong;
+  if (isImage25(body.model) && !edit && body.api_path !== '/v1/images/generations') return messages.promptForm.image25Endpoint;
+  if (!imageQualities(body.model).includes(body.quality)) return messages.promptForm.qualityReset;
+  if ((edit || body.api_path === '/v1/images/generations') && !validImageSize(body.size)) return messages.sizeDialog.invalidSize;
+  return '';
 }
 
 function createPreviewStore() {
@@ -111,8 +122,9 @@ function createPreviewStore() {
     loadJobs?: () => Promise<void>
   ) {
     const body = buildRequestBody(form);
-    if (!body.prompt) {
-      setError(get(t).messages.promptRequired);
+    const error = submissionError(body);
+    if (error) {
+      setError(error);
       return;
     }
     lastRequest = body;
@@ -154,8 +166,9 @@ function createPreviewStore() {
     }
 
     const body = buildRequestBody(form);
-    if (!body.prompt) {
-      setError(get(t).messages.promptRequired);
+    const error = submissionError(body, true);
+    if (error) {
+      setError(error);
       return;
     }
     lastRequest = body;

@@ -288,6 +288,22 @@ Overall Config persists overrides in SQLite. Some settings are hot-reloaded; res
 8. Generate images from a prompt, or upload/select source images and run edits.
 9. Use Gallery for reuse, filtering, favorites, batch actions, import/export, and R2 sync.
 
+## GPT Image 2.5
+
+The generation form and preset settings offer `gpt-image-2.5-flare` (fast everyday generation) and `gpt-image-2.5-sunburst` (precise editing). `gpt-image-2` remains the default; saved presets and custom model names are preserved. Choose **Custom model / snapshot** to pin either model to its `-2026-09-08` snapshot.
+
+Use `/v1/images/generations` for generation. Uploading reference images or selecting a gallery image uses multipart `/v1/images/edits`. Both 2.5 variants support `auto`, `low`, `medium`, `high`, `xhigh`, and `max` quality. Earlier/custom models retain the existing quality options. Selecting a model that does not support the current quality resets it to `auto`.
+
+- Prompts support 32,000 Unicode characters across generation, editing, assistants and saved snippets. Prompt Optimizer defaults to the same character limit; an explicitly configured `PROMPT_OPTIMIZER_MAX_OUTPUT_CHARS` still takes precedence. Assistant engines retain their own token limits and report truncated upstream responses as errors.
+- Size accepts `auto` or `WIDTHxHEIGHT`: both edges must be positive multiples of 16, neither may exceed 3840, aspect ratio must not exceed 3:1, and total pixels must be 655,360–8,294,400. Resolutions above 2560×1440 are experimental.
+- Output formats are PNG, JPEG and WebP. Compression is sent only for JPEG/WebP (0–100, default 100). Transparent backgrounds require PNG/WebP; choosing transparency with JPEG switches output to PNG.
+- 2.5 always returns Base64. The panel omits `response_format`, including values inherited from older presets, saves the image, and exposes its local image URL. Existing models and gateway modes keep their prior response-format behavior.
+- This integration accepts up to 16 PNG/JPEG/WebP edit inputs, each smaller than 50 MB and subject to the configured upload limits. Convert other formats before editing. Requests for 1–10 outputs use the existing queue, one upstream image per unit.
+
+GPT Image 2.5 is supported through the Images API here. The existing Responses gateway format, Chat Completions, masks and partial-image streaming are not part of this integration. Model access depends on the upstream account. Higher quality settings can consume more tokens; equal token prices do not imply equal per-image costs between Flare and Sunburst.
+
+API rules checked on 2026-09-10: [image generation guide](https://developers.openai.com/api/docs/guides/image-generation), [generation reference](https://developers.openai.com/api/reference/resources/images/methods/generate), [edit reference](https://developers.openai.com/api/reference/resources/images/methods/edit).
+
 ## Supported Upstream Paths
 
 | Path | Notes |

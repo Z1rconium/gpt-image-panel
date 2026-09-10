@@ -3,6 +3,7 @@
   import { browser } from '$app/environment';
   import { onDestroy, onMount } from 'svelte';
   import { dialog } from '$lib/actions/dialog';
+  import { MAX_PROMPT_CHARS, promptLength } from '$lib/utils/imageModels';
   import { plainTextInput } from '$lib/actions/plainTextInput';
   import { apiFetch } from '$lib/api/client';
   import { language, t } from '$lib/i18n';
@@ -487,7 +488,7 @@ import type { ApiPath } from '$lib/api/types/common';
                 <span class="text-xs font-medium text-stone-600 dark:text-zinc-400">
                   {$t.promptOptimizerAssistant.currentPromptLabel}
                 </span>
-                <span class="text-xs text-stone-500 dark:text-zinc-500">{currentPrompt.trim().length}/4000</span>
+                <span class="text-xs text-stone-500 dark:text-zinc-500">{promptLength(currentPrompt.trim())}/{MAX_PROMPT_CHARS}</span>
               </div>
               <div class="rounded-xl border border-stone-200 bg-stone-50 px-4 py-3 text-sm leading-6 text-stone-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300">
                 {#if currentPrompt.trim()}

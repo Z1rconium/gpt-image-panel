@@ -283,6 +283,22 @@ Overall Config 會將 Override 持久化至 SQLite。部分設定可熱更新；
 8. 輸入 Prompt 生成圖片，或上傳/選取來源圖片進行編輯。
 9. 在 Gallery 中沿用參數、篩選、收藏、批次操作、匯入/匯出、執行 R2 同步，或上傳至 NodeImage。
 
+## GPT Image 2.5
+
+生成表單和預設設定提供 `gpt-image-2.5-flare`（快速日常生成）與 `gpt-image-2.5-sunburst`（精細編輯）。預設模型仍為 `gpt-image-2`，保留已儲存預設和自訂模型；透過自訂模型欄位可輸入兩個模型的 `-2026-09-08` 日期快照名稱。
+
+文生圖使用 `/v1/images/generations`，上傳參考圖或選取圖庫圖片後使用 multipart `/v1/images/edits`。兩個變體均支援 `auto/low/medium/high/xhigh/max` 品質；舊模型和自訂模型沿用原有品質選項，切換至不支援目前品質的模型時恢復為 `auto`。
+
+- 生成、編輯、助手和提示詞收藏支援 32,000 個 Unicode 字元。提示詞最佳化器預設字元上限同步調整；使用者明確設定的 `PROMPT_OPTIMIZER_MAX_OUTPUT_CHARS` 仍優先。助手引擎有獨立的輸出 token 上限，上游截斷時會回報錯誤。
+- 尺寸支援 `auto` 或 `寬x高`：邊長為正整數且是 16 的倍數，最長邊不超過 3840，寬高比不超過 3:1，總像素為 655,360–8,294,400。超過 2560×1440 的解析度屬於實驗性支援。
+- 輸出支援 PNG/JPEG/WebP；壓縮參數僅用於 JPEG/WebP，範圍 0–100，預設 100。透明背景需要 PNG/WebP；JPEG 搭配透明背景時自動切換 PNG。
+- 2.5 自動回傳 Base64。面板省略 `response_format`，包括舊預設繼承的值，儲存圖片後提供本地圖片 URL；舊模型和閘道模式保持原有回傳格式行為。
+- 本次整合支援最多 16 張 PNG/JPEG/WebP 編輯輸入，單張小於 50 MB，並受應用程式上傳限制約束；其他格式請先轉換。1–10 張輸出沿用現有佇列，每個執行單元請求一張圖片。
+
+本次僅整合 Images API，不增加官方 Responses 圖像工具、遮罩或分片圖片串流預覽。上游帳號需要具備模型存取權限；更高品質可能使用更多 token，兩個變體的相同 token 單價不代表每張圖片費用相同。
+
+規範核對日期：2026-09-10。[官方指南](https://developers.openai.com/api/docs/guides/image-generation) · [生成介面](https://developers.openai.com/api/reference/resources/images/methods/generate) · [編輯介面](https://developers.openai.com/api/reference/resources/images/methods/edit)。
+
 ## 支援的上游路徑
 
 | 路徑 | 說明 |

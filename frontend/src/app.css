@@ -977,7 +977,9 @@ html.dark .gallery-loading-overlay {
     --lift-press: 0px;
   }
 
-  .preview-image {
+  .preview-image,
+  .gallery-card:hover,
+  .gallery-card:hover .gallery-image {
     transform: none;
   }
 

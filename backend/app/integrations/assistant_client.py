@@ -323,6 +323,11 @@ async def request_assistant_json(
     except aiohttp.ClientError as e:
         raise AssistantError(f"AI Assistant connection error: {e}") from e
 
+    if data.get("status") == "incomplete" or any(
+        choice.get("finish_reason") == "length"
+        for choice in data.get("choices", []) if isinstance(choice, dict)
+    ):
+        raise AssistantError("AI Assistant output was truncated; shorten the prompt or increase the output budget")
     content = _extract_assistant_text(data)
     parsed = parse_json_text(content)
     model_used = str(data.get("model") or model)

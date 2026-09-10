@@ -218,6 +218,13 @@ const en = {
     cancelSelected: 'Cancel Selected'
   },
   promptForm: {
+    customModel: 'Custom model / snapshot',
+    flareHint: 'Fast, high-quality everyday generation',
+    sunburstHint: 'Greater precision for image editing',
+    qualityReset: 'Quality reset to auto because this model does not support the previous setting.',
+    base64Automatic: 'Base64 (automatic)',
+    image25Endpoint: 'GPT Image 2.5 requires the Images API. Select /v1/images/generations for generation.',
+    promptTooLong: 'Prompt must contain at most 32,000 characters.',
     title: 'Prompt',
     subtitle: 'Generation and edit requests use the same frozen API contract.',
     responsesMode: 'Responses mode',
@@ -496,6 +503,8 @@ const en = {
     clearJobHistoryDetail: 'Gallery images and queued/running jobs are not deleted.'
   },
   sizeDialog: {
+    invalidSize: 'Use auto or WIDTHxHEIGHT: multiples of 16, edges up to 3840, aspect ratio up to 3:1, and 655,360–8,294,400 pixels.',
+    experimentalSize: 'Resolutions above 2560×1440 are experimental.',
     title: 'Image Size',
     subtitle: 'Choose a preset or enter WIDTHxHEIGHT.'
   },

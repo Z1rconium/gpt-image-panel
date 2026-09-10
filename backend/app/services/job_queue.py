@@ -21,6 +21,7 @@ from ..api.presets import (
 from ..core import settings as config
 from ..core import validators as ssrf
 from ..core.api_paths import normalize_default_model, normalize_default_response_format
+from ..core.image_models import is_image_25
 from ..core.constants import ACTIVE_GENERATE_JOB_STATUSES
 from ..core.observability import metrics
 from ..core.utils import utc_now
@@ -186,6 +187,7 @@ def build_pending_job(
         "quality": req.quality,
         "output_format": req.output_format,
         "output_compression": req.output_compression,
+        "background": req.background,
         "response_format": req.response_format,
         "n": req.n,
         "image_units": max(1, int(image_units or 1)),
@@ -215,6 +217,7 @@ def gallery_entry_job_result(entry: GalleryEntry) -> dict:
     image["quality"] = entry.quality
     image["output_format"] = entry.output_format
     image["output_compression"] = entry.output_compression
+    image["background"] = entry.background
     image["response_format"] = entry.response_format
     image["api_path"] = entry.api_path
     image["api_preset_name"] = entry.api_preset_name
@@ -304,6 +307,7 @@ def build_edit_request_from_form(
     output_compression: int | None,
     response_format: str | None,
     webhook_url: str | None,
+    background: str = "auto",
 ) -> EditRequest:
     try:
         return EditRequest(
@@ -314,6 +318,7 @@ def build_edit_request_from_form(
             quality=quality,
             output_format=output_format,
             output_compression=output_compression,
+            background=background,
             response_format=response_format,
             webhook_url=webhook_url,
         )
@@ -350,6 +355,17 @@ async def queue_image_job(
             active_preset.get("default_response_format")
         )
         req.response_format = default_response_format or None
+
+    try:
+        req.normalize_model_options(resolved_api_path)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    if operation == "edit" and is_image_25(req.model):
+        for source in edit_sources_payload or []:
+            if source.get("content_type") not in {"image/png", "image/jpeg", "image/webp"}:
+                raise HTTPException(status_code=422, detail="GPT Image 2.5 edit inputs must be PNG, JPEG or WebP; convert this image before editing")
+            if int(source.get("byte_size") or 0) >= 50 * 1024 * 1024:
+                raise HTTPException(status_code=422, detail="GPT Image 2.5 edit inputs must be smaller than 50 MB")
 
     if not api_url:
         raise HTTPException(

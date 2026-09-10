@@ -155,7 +155,7 @@ def test_image_prompt_optimization_contract_uses_active_preset_and_does_not_pers
 
     assert response.status_code == 200
     body = response.json()
-    assert len(body["prompt"]) == 4000
+    assert body["prompt"] == ("refined prompt " * 500).strip()
     assert 0 < len(body["comparison_summary"]) <= 2000
     assert len(body["warnings"]) == 10
     assert body["model"] == "assistant-vision-model"
@@ -210,7 +210,7 @@ def test_image_prompt_optimization_validates_form_and_active_path(client, monkey
     assert empty_prompt.status_code == 422
     long_prompt = client.post(
         "/api/assistant/image/prompt/optimize",
-        data={"prompt": "x" * 4001},
+        data={"prompt": "x" * 32001},
         files={"image": ("target.png", PNG_BYTES, "image/png")},
     )
     assert long_prompt.status_code == 422

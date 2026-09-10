@@ -19,17 +19,17 @@ from .session_pool import TIMEOUT_PROMPT_OPTIMIZER, get_pool
 logger = logging.getLogger(__name__)
 
 PROMPT_OPTIMIZER_SYSTEM_PROMPT = """# Role
-You are an expert Prompt Engineer specializing in generative AI art for the "gpt-image-2" model.
+You are an expert Prompt Engineer specializing in generative AI art for the image model specified in the request context.
 
 # Goal
-Take the user's short image description and rewrite it into a detailed, high-quality, and visually rich image generation prompt optimized specifically for "gpt-image-2".
+Take the user's short image description and rewrite it into a detailed, high-quality, and visually rich image generation prompt optimized for the image model specified in the request context.
 
 # Core Priority
 - Follow the user's original intent as closely as possible.
 - Treat the user's subject, action, composition, framing, viewpoint, mood, and scene structure as constraints unless the user explicitly asks for changes.
 - Improve clarity, specificity, and visual richness without changing what the user is asking for.
 
-# Style Guidelines for gpt-image-2
+# Style Guidelines
 - **Natural Language**: Write a coherent, descriptive natural language paragraph. Focus on storytelling and descriptive scene building.
 - **Detailed Elements**: Enrich the prompt by elaborating on:
   - **Subject**: Specific appearance, textures, details, and expressions.
@@ -355,6 +355,9 @@ async def optimize_prompt(
 
     if not content or not content.strip():
         raise UpstreamOptimizerError("Optimizer returned empty content")
+
+    if data["choices"][0].get("finish_reason") == "length":
+        raise UpstreamOptimizerError("Optimizer output was truncated by its token limit; shorten the prompt or increase the output budget")
 
     model_used = data.get("model", model)
     optimized = _clean_output(content, max_output_chars)

@@ -84,7 +84,7 @@ OVERALL_CONFIG_REGISTRY: tuple[OverallConfigSpec, ...] = (
     _spec("PROMPT_OPTIMIZER_API_KEY", "secret", "", "Prompt Optimizer", "Optimizer API key.", secret=True, exposed_in_settings=True),
     _spec("PROMPT_OPTIMIZER_MODEL", "string", "gpt-4o-mini", "Prompt Optimizer", "Optimizer model.", exposed_in_settings=True),
     _spec("PROMPT_OPTIMIZER_TIMEOUT_SECONDS", "int", "60", "Prompt Optimizer", "Optimizer timeout.", exposed_in_settings=True, min_value=1),
-    _spec("PROMPT_OPTIMIZER_MAX_OUTPUT_CHARS", "int", "4000", "Prompt Optimizer", "Max optimized prompt characters.", min_value=1),
+    _spec("PROMPT_OPTIMIZER_MAX_OUTPUT_CHARS", "int", "32000", "Prompt Optimizer", "Max optimized prompt characters.", min_value=1),
     _spec("PROMPT_OPTIMIZER_MAX_RESPONSE_MB", "int", "8", "Prompt Optimizer", "Max optimizer response body size.", min_value=1),
     _spec("PROMPT_OPTIMIZER_HOST_ALLOWLIST", "string", "", "Prompt Optimizer", "Optimizer endpoint host allowlist.", validator="host_list", startup_only=True, restart_required=True),
     _spec("AI_ASSISTANT_ENABLED", "bool", "true", "AI Assistant", "Enable AI Assistant tools.", exposed_in_settings=True),

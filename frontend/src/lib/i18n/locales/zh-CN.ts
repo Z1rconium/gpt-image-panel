@@ -220,6 +220,13 @@ const zh: Translation = {
     cancelSelected: '取消所选任务'
   },
   promptForm: {
+    customModel: '自定义模型 / 日期快照',
+    flareHint: '适合快速、高质量的日常生成',
+    sunburstHint: '适合更精细的图像编辑',
+    qualityReset: '当前模型不支持之前的质量设置，已恢复为 auto。',
+    base64Automatic: 'Base64（自动）',
+    image25Endpoint: 'GPT Image 2.5 需要使用 Images API，文生图请选择 /v1/images/generations。',
+    promptTooLong: '提示词最多支持 32,000 个字符。',
     title: '提示词',
     subtitle: '生成和编辑请求共用同一套冻结 API 契约。',
     responsesMode: 'Responses 模式',
@@ -498,6 +505,8 @@ const zh: Translation = {
     clearJobHistoryDetail: '图库图片和排队中/运行中的任务不会被删除。'
   },
   sizeDialog: {
+    invalidSize: '请使用 auto 或 宽x高：边长为 16 的倍数且不超过 3840，宽高比不超过 3:1，总像素为 655,360–8,294,400。',
+    experimentalSize: '超过 2560×1440 的分辨率属于实验性支持。',
     title: '图像尺寸',
     subtitle: '选择预设或输入 宽x高。'
   },

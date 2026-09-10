@@ -123,7 +123,7 @@ test('settings drawer traps focus and key form controls have accessible names', 
   const drawer = page.getByRole('dialog', { name: 'Settings' });
   await expect(drawer).toBeVisible();
   await expect(page.getByLabel('API URL')).toHaveValue('https://api.example.com');
-  await expect(page.getByLabel('Default model')).toHaveValue('preset-default-model');
+  await expect(drawer.getByRole('textbox', { name: 'Default model', exact: true })).toHaveValue('preset-default-model');
   await expect(page.getByLabel('Default response format')).toHaveValue('url');
   await expect(page.getByLabel('Webhook URL')).toHaveValue('https://hooks.example.com/***');
   await expect(page.getByLabel('Sync interval hours')).toHaveValue('0');
@@ -165,6 +165,7 @@ test('reduced motion keeps overlays usable and removes control travel', async ({
   expect(['none', 'matrix(1, 0, 0, 1, 0, 0)']).toContain(
     await card.evaluate((node) => getComputedStyle(node).transform)
   );
+  await expect(card.locator('.gallery-image')).toHaveCSS('transform', 'none');
 
   // Overlays still open and close, and closing hands control straight back.
   await page.getByRole('button', { name: 'Settings' }).click();

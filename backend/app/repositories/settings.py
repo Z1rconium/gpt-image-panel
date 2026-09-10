@@ -1,5 +1,6 @@
 """Settings, assistant metadata, and prompt snippet persistence."""
 
+from ..core.image_models import MAX_PROMPT_CHARS
 from .db import *
 
 
@@ -106,7 +107,7 @@ def upsert_gallery_ai_metadata(
     now = utc_now()
     normalized_analysis = analysis if isinstance(analysis, dict) else {}
     normalized_description = str(description or "")[:2000]
-    normalized_prompt = str(prompt or "")[:4000]
+    normalized_prompt = str(prompt or "")[:MAX_PROMPT_CHARS]
     analysis_json = json.dumps(normalized_analysis, ensure_ascii=False, sort_keys=True)[:12000]
     with _connect() as conn:
         with _transaction(conn):

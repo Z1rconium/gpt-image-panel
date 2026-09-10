@@ -44,6 +44,7 @@ def edit_request_from_form(
     quality: str = Form("auto"),
     output_format: str = Form("png"),
     output_compression: int | None = Form(None),
+    background: str = Form("auto"),
     response_format: str | None = Form(None),
     webhook_url: str | None = Form(None),
 ) -> EditRequest:
@@ -55,6 +56,7 @@ def edit_request_from_form(
         quality=quality,
         output_format=output_format,
         output_compression=output_compression,
+        background=background,
         response_format=response_format,
         webhook_url=webhook_url,
     )

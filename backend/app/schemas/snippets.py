@@ -2,6 +2,7 @@ from typing import Optional
 
 from pydantic import BaseModel, Field, field_validator
 
+from ..core.image_models import MAX_PROMPT_CHARS
 from .common import StrictRequestModel
 
 class PromptSnippet(BaseModel):
@@ -15,7 +16,7 @@ class PromptSnippet(BaseModel):
 
 class PromptSnippetCreateRequest(StrictRequestModel):
     title: str = Field(..., min_length=1, max_length=160)
-    prompt: str = Field(..., min_length=1, max_length=4000)
+    prompt: str = Field(..., min_length=1, max_length=MAX_PROMPT_CHARS)
     favorite: bool = False
 
     @field_validator("title", "prompt")
@@ -29,7 +30,7 @@ class PromptSnippetCreateRequest(StrictRequestModel):
 
 class PromptSnippetUpdateRequest(StrictRequestModel):
     title: Optional[str] = Field(default=None, min_length=1, max_length=160)
-    prompt: Optional[str] = Field(default=None, min_length=1, max_length=4000)
+    prompt: Optional[str] = Field(default=None, min_length=1, max_length=MAX_PROMPT_CHARS)
     favorite: Optional[bool] = None
 
     @field_validator("title", "prompt")

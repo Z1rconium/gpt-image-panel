@@ -1,9 +1,11 @@
 <script lang="ts">
   import PromptHelperPanel from '$lib/components/PromptHelperPanel.svelte';
+  import ImageModelPicker from '$lib/components/ImageModelPicker.svelte';
   import { plainTextInput } from '$lib/actions/plainTextInput';
   import { t } from '$lib/i18n';
   import type { PromptFormState } from '$lib/stores/preview';
   import { RESPONSE_FORMAT_OPTIONS, sanitizeQuantityInput } from '$lib/utils/promptForm';
+  import { imageQualities, isImage25, MAX_PROMPT_CHARS, promptLength } from '$lib/utils/imageModels';
 
   export let form: PromptFormState;
   export let loading = false;
@@ -18,7 +20,14 @@
   export let onPlanEdit: () => void = () => {};
   export let onAppendPromptTag: (value: string) => void = () => {};
 
-  $: promptLen = form.prompt.length;
+  $: promptLen = promptLength(form.prompt);
+  $: qualities = imageQualities(form.model);
+  let qualityResetModel = '';
+  $: if (!imageQualities(form.model).includes(form.quality)) {
+    form = { ...form, quality: 'auto' };
+    qualityResetModel = form.model;
+  }
+  $: image25 = isImage25(form.model);
   $: promptOnlyMode = form.apiPath === '/v1/responses' || form.apiPath === '/v1/chat/completions';
   $: parameterControlsDisabled = (promptOnlyMode && !hasEditSource) || loading;
   $: modeLabel = form.apiPath === '/v1/chat/completions' ? $t.promptForm.chatCompletionsMode : $t.promptForm.responsesMode;
@@ -74,7 +83,7 @@
           id="prompt"
           name="prompt"
           bind:value={form.prompt}
-          maxlength="4000"
+          aria-invalid={promptLen > MAX_PROMPT_CHARS}
           rows="8"
           autocomplete="off"
           spellcheck="false"
@@ -83,7 +92,7 @@
           class="ui-field h-full min-h-[13rem] flex-1 resize-y px-4 py-3 pb-8 leading-6 lg:resize-none"
           use:plainTextInput
         ></textarea>
-        <div class="pointer-events-none absolute bottom-3 right-4 text-xs text-stone-500 dark:text-zinc-500">{promptLen}/4000</div>
+        <div class="pointer-events-none absolute bottom-3 right-4 text-xs text-stone-500 dark:text-zinc-500">{promptLen}/{MAX_PROMPT_CHARS}</div>
       </div>
     </div>
 
@@ -95,14 +104,7 @@
     <!-- Block 1: Core Generation Parameters (4 columns, balanced 100%) -->
     <div class="app-well rounded-xl border border-stone-200/80 bg-stone-50/50 p-3.5 dark:border-zinc-800/80 dark:bg-zinc-950/40">
       <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <label class="block">
-          <span class="mb-1.5 block text-xs font-medium text-stone-600 dark:text-zinc-400">{$t.common.model}</span>
-          <input
-            bind:value={form.model}
-            disabled={loading}
-            class="control-focus h-10 w-full rounded-lg border border-stone-200 bg-white px-3 font-mono text-sm text-stone-900 focus:border-emerald-500 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100"
-          />
-        </label>
+        <ImageModelPicker bind:value={form.model} disabled={loading} />
 
         <label class="block">
           <span class="mb-1.5 block text-xs font-medium text-stone-600 dark:text-zinc-400">{$t.common.size}</span>
@@ -119,12 +121,10 @@
 
         <label class="block">
           <span class="mb-1.5 block text-xs font-medium text-stone-600 dark:text-zinc-400">{$t.promptForm.quality}</span>
-          <select bind:value={form.quality} disabled={parameterControlsDisabled} class="control-focus form-select !bg-white focus:border-emerald-500 dark:!bg-zinc-900">
-            <option value="auto">auto</option>
-            <option value="low">low</option>
-            <option value="medium">medium</option>
-            <option value="high">high</option>
+          <select bind:value={form.quality} aria-label={$t.promptForm.quality} disabled={parameterControlsDisabled} class="control-focus form-select !bg-white focus:border-emerald-500 dark:!bg-zinc-900">
+            {#each qualities as quality}<option value={quality}>{quality}</option>{/each}
           </select>
+          {#if qualityResetModel === form.model && form.quality === 'auto'}<p role="status" class="mt-1 text-xs text-stone-500">{$t.promptForm.qualityReset}</p>{/if}
         </label>
 
         <label class="block">
@@ -198,9 +198,9 @@
 
           <label class="block">
             <span class="mb-1.5 block text-xs font-medium text-stone-600 dark:text-zinc-400">{$t.promptForm.responseFormat}</span>
-            <select bind:value={form.responseFormat} disabled={parameterControlsDisabled} class="control-focus form-select !bg-white focus:border-emerald-500 dark:!bg-zinc-900">
+            <select value={image25 ? '' : form.responseFormat} on:change={(event) => form = { ...form, responseFormat: event.currentTarget.value as PromptFormState['responseFormat'] }} disabled={parameterControlsDisabled || image25} class="control-focus form-select !bg-white focus:border-emerald-500 dark:!bg-zinc-900">
               {#each RESPONSE_FORMAT_OPTIONS as responseFormat}
-                <option value={responseFormat}>{responseFormat || $t.promptForm.defaultResponseFormat}</option>
+                <option value={responseFormat}>{responseFormat || (image25 ? $t.promptForm.base64Automatic : $t.promptForm.defaultResponseFormat)}</option>
               {/each}
             </select>
           </label>

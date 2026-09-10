@@ -333,7 +333,7 @@ def test_ai_assistant_response_fields_are_truncated_before_persistence(client, m
         return (
             {
                 "description": "d" * 5000,
-                "prompt": "p" * 9000,
+                "prompt": "p" * 40000,
                 "analysis": {
                     "subjects": ["s" * 500 for _ in range(20)],
                     "style": "x" * 2000,
@@ -352,7 +352,7 @@ def test_ai_assistant_response_fields_are_truncated_before_persistence(client, m
     assert resp.status_code == 200
     body = resp.json()
     assert len(body["description"]) == 2000
-    assert len(body["prompt"]) == 4000
+    assert len(body["prompt"]) == 32000
     assert len(body["analysis"]["style"]) == 500
     assert len(body["analysis"]["composition"]) == 800
     assert len(body["warnings"]) == 10
@@ -361,7 +361,7 @@ def test_ai_assistant_response_fields_are_truncated_before_persistence(client, m
     metadata = settings_repo.get_gallery_ai_metadata("assistant-long-fields")
     assert metadata is not None
     assert len(metadata["description"]) == 2000
-    assert len(metadata["prompt"]) == 4000
+    assert len(metadata["prompt"]) == 32000
 
 
 def test_ai_assistant_job_diagnose_does_not_expose_secrets(client, monkeypatch):
@@ -521,7 +521,7 @@ def test_ai_assistant_uploaded_image_prompt_is_bounded_language_aware_and_not_pe
 
     assert response.status_code == 200
     body = response.json()
-    assert body["prompt"] == "p" * 4000
+    assert body["prompt"] == "p" * 5000
     assert body["model"] == "assistant-vision-model"
     assert body["duration_ms"] == 23
     assert len(body["warnings"]) == 10

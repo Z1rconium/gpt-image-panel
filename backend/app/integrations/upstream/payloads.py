@@ -252,6 +252,7 @@ def get_image_transfer_stage(image_data: dict) -> tuple[str, str]:
 
 
 def _build_image_params(payload: GenerateRequest) -> dict[str, Any]:
+    payload.normalize_model_options("/v1/images/generations")
     request_data: dict[str, Any] = {
         "model": payload.model,
         "prompt": payload.prompt,
@@ -293,5 +294,4 @@ def build_responses_request_data(payload: GenerateRequest) -> dict[str, Any]:
 
 
 __all__ = [name for name in globals() if not name.startswith("__")]
-
 

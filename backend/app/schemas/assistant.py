@@ -2,6 +2,7 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
+from ..core.image_models import MAX_PROMPT_CHARS, ImageQuality
 from .common import ApiPath, GalleryImportJobStatusValue, StrictRequestModel
 from .gallery import GalleryBatchRequest
 
@@ -23,13 +24,13 @@ class PromptOptimizerSystemPromptRequest(StrictRequestModel):
 
 
 class PromptOptimizeRequest(StrictRequestModel):
-    prompt: str = Field(..., min_length=1, max_length=4000)
+    prompt: str = Field(..., min_length=1, max_length=MAX_PROMPT_CHARS)
     intent: Optional[str] = Field(default=None, max_length=1200)
     target_language: Literal["en", "zh-CN", "same"] = "en"
     api_path: Optional[ApiPath] = None
     model: Optional[str] = Field(default=None, max_length=200)
     size: Optional[str] = Field(default=None, max_length=40)
-    quality: Optional[Literal["auto", "low", "medium", "high"]] = None
+    quality: Optional[ImageQuality] = None
 
     @field_validator("prompt")
     @classmethod
@@ -71,13 +72,13 @@ class AssistantHealthResponse(BaseModel):
 
 
 class AssistantPromptRewriteRequest(StrictRequestModel):
-    prompt: str = Field(..., min_length=1, max_length=4000)
+    prompt: str = Field(..., min_length=1, max_length=MAX_PROMPT_CHARS)
     instruction: Optional[str] = Field(default=None, max_length=1200)
     target_language: Literal["en", "zh-CN", "same"] = "en"
     api_path: Optional[ApiPath] = None
     model: Optional[str] = Field(default=None, max_length=200)
     size: Optional[str] = Field(default=None, max_length=40)
-    quality: Optional[Literal["auto", "low", "medium", "high"]] = None
+    quality: Optional[ImageQuality] = None
 
     @field_validator("prompt")
     @classmethod
@@ -101,11 +102,11 @@ class AssistantPromptRewriteResponse(AssistantBaseResponse):
 
 
 class AssistantPromptCheckRequest(StrictRequestModel):
-    prompt: str = Field(..., min_length=1, max_length=4000)
+    prompt: str = Field(..., min_length=1, max_length=MAX_PROMPT_CHARS)
     api_path: Optional[ApiPath] = None
     model: Optional[str] = Field(default=None, max_length=200)
     size: Optional[str] = Field(default=None, max_length=40)
-    quality: Optional[Literal["auto", "low", "medium", "high"]] = None
+    quality: Optional[ImageQuality] = None
 
     @field_validator("prompt")
     @classmethod
@@ -143,11 +144,11 @@ class AssistantPromptVariantsResponse(AssistantBaseResponse):
 
 
 class AssistantRecommendParamsRequest(StrictRequestModel):
-    prompt: str = Field(..., min_length=1, max_length=4000)
+    prompt: str = Field(..., min_length=1, max_length=MAX_PROMPT_CHARS)
     api_path: ApiPath
     current_model: Optional[str] = Field(default=None, max_length=200)
     current_size: Optional[str] = Field(default=None, max_length=40)
-    current_quality: Optional[Literal["auto", "low", "medium", "high"]] = None
+    current_quality: Optional[ImageQuality] = None
     current_output_format: Optional[Literal["png", "jpeg", "webp"]] = None
     current_n: Optional[int] = Field(default=None, ge=1, le=10)
 
@@ -155,7 +156,7 @@ class AssistantRecommendParamsRequest(StrictRequestModel):
 class AssistantRecommendParamsResponse(AssistantBaseResponse):
     model_name: Optional[str] = None
     size: Optional[str] = None
-    quality: Optional[Literal["auto", "low", "medium", "high"]] = None
+    quality: Optional[ImageQuality] = None
     output_format: Optional[Literal["png", "jpeg", "webp"]] = None
     n: Optional[int] = Field(default=None, ge=1, le=10)
     rationale: str = ""
@@ -175,7 +176,7 @@ class AssistantJobDiagnoseResponse(AssistantBaseResponse):
 class AssistantEditPlanRequest(StrictRequestModel):
     goal: str = Field(..., min_length=1, max_length=2000)
     source_count: int = Field(default=0, ge=0, le=16)
-    current_prompt: Optional[str] = Field(default=None, max_length=4000)
+    current_prompt: Optional[str] = Field(default=None, max_length=MAX_PROMPT_CHARS)
     target_size: Optional[str] = Field(default=None, max_length=40)
 
     @field_validator("goal")

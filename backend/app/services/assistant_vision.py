@@ -15,6 +15,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Body, File, Form, HTTPException, UploadFile
 
+from ..core.image_models import MAX_PROMPT_CHARS
 from ..api import presets
 from ..api.app_state import app
 from ..api.uploads import is_image_upload, resolve_upload_content_type
@@ -150,7 +151,7 @@ async def prompt_from_uploaded_image(
         temperature=0.2,
         runtime=runtime,
     )
-    prompt = _clamp_text(data.get("prompt"), 4000)
+    prompt = _clamp_text(data.get("prompt"), MAX_PROMPT_CHARS)
     if not prompt:
         raise HTTPException(status_code=502, detail="AI Assistant returned an empty image prompt")
     return AssistantImagePromptResponse(
@@ -240,7 +241,7 @@ def _generated_image_mime_type(image_bytes: bytes) -> str:
 
 async def optimize_uploaded_image_prompt(
     image: UploadFile = File(...),
-    prompt: str = Form(..., min_length=1, max_length=4000),
+    prompt: str = Form(..., min_length=1, max_length=MAX_PROMPT_CHARS),
     target_language: Literal["en", "zh-CN"] = Form("en"),
 ):
     normalized_prompt = prompt.strip()
@@ -343,7 +344,7 @@ async def optimize_uploaded_image_prompt(
         temperature=0.2,
         runtime=runtime,
     )
-    optimized_prompt = _clamp_text(data.get("prompt"), 4000)
+    optimized_prompt = _clamp_text(data.get("prompt"), MAX_PROMPT_CHARS)
     if not optimized_prompt:
         raise HTTPException(status_code=502, detail="AI Assistant returned an empty optimized prompt")
     comparison_summary = _clamp_text(data.get("comparison_summary"), 2000)
@@ -465,7 +466,7 @@ def _prepare_gallery_ai_metadata(
 ) -> tuple[str, str, dict[str, object]]:
     return (
         _clamp_text(description, 2000),
-        _clamp_text(prompt, 4000),
+        _clamp_text(prompt, MAX_PROMPT_CHARS),
         _normalize_gallery_analysis(analysis),
     )
 
@@ -565,7 +566,7 @@ async def _prompt_gallery_image(
         temperature=0.2,
         runtime=runtime,
     )
-    prompt = _clamp_text(data.get("prompt"), 4000)
+    prompt = _clamp_text(data.get("prompt"), MAX_PROMPT_CHARS)
     if not prompt:
         raise HTTPException(status_code=502, detail="AI Assistant returned an empty image prompt")
     return AssistantGalleryImageResponse(

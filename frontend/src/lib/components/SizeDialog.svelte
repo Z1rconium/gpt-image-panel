@@ -2,19 +2,25 @@
   import { dialogIn, dialogOut, overlayIn, overlayOut } from '$lib/motion';
   import { t } from '$lib/i18n';
   import { dialog } from '$lib/actions/dialog';
+  import { validImageSize } from '$lib/utils/imageModels';
 
   export let open = false;
   export let value = 'auto';
   export let onApply: (size: string) => void = () => {};
   export let onClose: () => void = () => {};
 
-  const presets = ['auto', '1024x1024', '1024x1536', '1536x1024', '2048x2048', '2048x3072', '3072x2048'];
+  const presets = ['auto', '1024x1024', '1024x1536', '1536x1024', '2048x2048', '2048x3072', '3072x2048', '3840x2160', '2160x3840'];
   let custom = value;
+  let error = false;
 
-  $: if (open) custom = value;
+  $: if (open) {
+    custom = value;
+    error = false;
+  }
 
   function apply(size = custom.trim()) {
-    if (!size) return;
+    error = !validImageSize(size);
+    if (error) return;
     onApply(size);
     onClose();
   }
@@ -52,6 +58,8 @@
         {/each}
       </div>
 
+      {#if error}<p role="alert" class="mt-3 text-xs text-red-600">{$t.sizeDialog.invalidSize}</p>{/if}
+      <p class="mt-3 text-xs text-stone-500">{$t.sizeDialog.experimentalSize}</p>
       <div class="mt-5 flex gap-2">
         <label for="custom-size" class="sr-only">{$t.common.size}</label>
         <input

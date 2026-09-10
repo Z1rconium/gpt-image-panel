@@ -28,6 +28,7 @@ class GalleryEntry(BaseModel):
     quality: Optional[str] = None
     output_format: Optional[str] = None
     output_compression: Optional[int] = None
+    background: Optional[str] = None
     response_format: Optional[str] = None
     n: Optional[int] = None
     api_path: Optional[str] = None
@@ -241,4 +242,3 @@ class GalleryResponse(BaseModel):
     prev_cursor: Optional[str] = None
     images: list[GalleryEntry]
     filter_options: GalleryFilterOptions = Field(default_factory=GalleryFilterOptions)
-

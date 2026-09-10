@@ -78,7 +78,7 @@ test('gallery edit choice loads compatible parameters without changing the activ
 
   await expect(page.getByRole('textbox', { name: 'Prompt', exact: true })).toHaveValue('First gallery image');
   await expect(page.getByLabel('API path')).toHaveValue('/v1/responses');
-  await expect(page.getByRole('textbox', { name: 'Model' })).toHaveValue('gpt-image-2');
+  await expect(page.locator('section.app-surface').first().getByRole('combobox', { name: 'Model', exact: true })).toHaveValue('gpt-image-2');
   const promptForm = page.locator('section.app-surface').first();
   const sizeButton = promptForm.locator('button').filter({ hasText: '1024x1024' });
   await expect(sizeButton).toBeEnabled();
@@ -479,7 +479,7 @@ test('gallery cards can reuse prompt or full generation parameters', async ({ pa
 
   await page.locator('.gallery-card').first().getByRole('button', { name: 'Use all' }).click();
   await expect(prompt).toHaveValue('First gallery image');
-  await expect(page.getByRole('textbox', { name: 'Model' })).toHaveValue('gpt-image-2');
+  await expect(page.locator('section.app-surface').first().getByRole('combobox', { name: 'Model', exact: true })).toHaveValue('gpt-image-2');
   await expect(page.getByLabel('API path')).toHaveValue('/v1/responses');
 
   const generateRequest = page.waitForRequest((request) => new URL(request.url()).pathname === '/api/generate');

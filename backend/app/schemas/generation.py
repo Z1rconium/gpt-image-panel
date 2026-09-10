@@ -3,6 +3,7 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from ..core.api_paths import DEFAULT_IMAGE_MODEL
+from ..core.image_models import MAX_PROMPT_CHARS, ImageQuality, is_image_25, validate_image_model_options
 from ..core.validators import normalize_webhook_url
 from .common import ApiPath, GenerateJobStatusValue, StrictRequestModel
 
@@ -17,13 +18,12 @@ def validate_image_size(size: str) -> str:
     except (AttributeError, ValueError):
         raise ValueError("size must be 'auto' or formatted as WIDTHxHEIGHT")
 
-    pixels = width * height
-    aspect = max(width / height, height / width)
-
-    if width % 16 != 0 or height % 16 != 0:
-        raise ValueError("size width and height must be multiples of 16")
     if width <= 0 or height <= 0 or max(width, height) > 3840:
         raise ValueError("size width and height must be positive, with max side <= 3840")
+    pixels = width * height
+    aspect = max(width / height, height / width)
+    if width % 16 != 0 or height % 16 != 0:
+        raise ValueError("size width and height must be multiples of 16")
     if aspect > 3:
         raise ValueError("size aspect ratio must not exceed 3:1")
     if pixels < 655360 or pixels > 8294400:
@@ -33,17 +33,31 @@ def validate_image_size(size: str) -> str:
 
 
 class GenerateRequest(StrictRequestModel):
-    prompt: str = Field(..., min_length=1, max_length=4000)
+    prompt: str = Field(..., min_length=1, max_length=MAX_PROMPT_CHARS)
     size: str = Field(default="auto", max_length=40)
     model: str = Field(default=DEFAULT_IMAGE_MODEL, max_length=200)
     n: int = Field(default=1, ge=1, le=10)
-    quality: Literal["auto", "low", "medium", "high"] = "auto"
+    quality: ImageQuality = "auto"
     output_format: Literal["png", "jpeg", "webp"] = "png"
     output_compression: Optional[int] = Field(default=None, ge=0, le=100)
     background: Literal["auto", "opaque", "transparent"] = "auto"
     response_format: Optional[Literal["url", "b64_json"]] = None
     webhook_url: Optional[str] = Field(default=None, max_length=2048)
     api_path: Optional[ApiPath] = None
+
+    def normalize_model_options(self, api_path: str) -> None:
+        # Call after resolving omitted model / response-format values from the preset.
+        self.model = self.model.strip()
+        validate_image_model_options(self.model, self.quality, api_path)
+        if is_image_25(self.model):
+            self.response_format = None
+
+    @field_validator("prompt")
+    @classmethod
+    def validate_prompt(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("prompt must not be empty")
+        return value
 
     @field_validator("size")
     @classmethod

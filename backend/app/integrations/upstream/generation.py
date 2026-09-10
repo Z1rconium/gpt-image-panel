@@ -201,6 +201,7 @@ async def call_image_generation_api(
     socks5_proxy: str | None = None,
 ) -> list[GalleryEntry]:
     api_path = normalize_api_path(api_path)
+    payload.normalize_model_options(api_path)
     prepared_request = await _prepare_upstream_request(
         api_url=api_url,
         api_key=api_key,
@@ -307,6 +308,7 @@ async def call_image_generation_preview_api(
 ) -> bytes:
     """Generate and validate one image without creating gallery or job records."""
     api_path = "/v1/images/generations"
+    payload.normalize_model_options(api_path)
     prepared_request = await _prepare_upstream_request(
         api_url=api_url,
         api_key=api_key,
@@ -369,6 +371,7 @@ async def call_image_edit_api(
         raise UpstreamApiError("At least one edit source image is required")
 
     api_path = "/v1/images/edits"
+    payload.normalize_model_options(api_path)
     prepared_request = await _prepare_upstream_request(
         api_url=api_url,
         api_key=api_key,

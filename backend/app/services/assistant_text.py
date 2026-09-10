@@ -12,6 +12,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Body, File, Form, HTTPException, UploadFile
 
+from ..core.image_models import MAX_PROMPT_CHARS, image_qualities
 from ..api import presets
 from ..api.app_state import app
 from ..api.uploads import is_image_upload, resolve_upload_content_type
@@ -159,7 +160,7 @@ async def rewrite_prompt(req: AssistantPromptRewriteRequest):
     if not rewritten:
         raise HTTPException(status_code=502, detail="AI Assistant returned no rewritten prompt")
     return AssistantPromptRewriteResponse(
-        rewritten_prompt=rewritten[:4000],
+        rewritten_prompt=rewritten[:MAX_PROMPT_CHARS],
         warnings=_warnings(data.get("warnings")),
         model=model,
         duration_ms=duration_ms,
@@ -230,7 +231,7 @@ async def prompt_variants(req: AssistantPromptVariantsRequest):
         variants.append(
             AssistantPromptVariant(
                 title=str(item.get("title") or f"Variant {len(variants) + 1}").strip()[:120],
-                prompt=prompt[:4000],
+                prompt=prompt[:MAX_PROMPT_CHARS],
                 angle=str(item.get("angle") or "").strip() or None,
             )
         )
@@ -246,7 +247,7 @@ async def prompt_variants(req: AssistantPromptVariantsRequest):
     )
 
 
-def _allowed_recommendation(api_path: ApiPath, data: dict[str, Any]) -> dict[str, Any]:
+def _allowed_recommendation(api_path: ApiPath, data: dict[str, Any], current_model: str | None = None) -> dict[str, Any]:
     recommendation: dict[str, Any] = {
         "model_name": str(data.get("model_name") or "").strip() or None,
         "rationale": _clamp_text(data.get("rationale"), 1200),
@@ -259,7 +260,7 @@ def _allowed_recommendation(api_path: ApiPath, data: dict[str, Any]) -> dict[str
         n = data.get("n")
         if size:
             recommendation["size"] = size
-        if quality in {"auto", "low", "medium", "high"}:
+        if quality in image_qualities(recommendation["model_name"] or current_model):
             recommendation["quality"] = quality
         if output_format in {"png", "jpeg", "webp"}:
             recommendation["output_format"] = output_format
@@ -285,7 +286,7 @@ async def recommend_generate_params(req: AssistantRecommendParamsRequest):
         schema={
             "model_name": "string|null",
             "size": "string|null",
-            "quality": "auto|low|medium|high|null",
+            "quality": "auto|low|medium|high|xhigh|max|null (xhigh/max only for GPT Image 2.5)",
             "output_format": "png|jpeg|webp|null",
             "n": "number|null",
             "rationale": "string",
@@ -294,7 +295,7 @@ async def recommend_generate_params(req: AssistantRecommendParamsRequest):
         max_tokens=500,
         temperature=0.15,
     )
-    filtered = _allowed_recommendation(req.api_path, data)
+    filtered = _allowed_recommendation(req.api_path, data, req.current_model)
     return AssistantRecommendParamsResponse(
         **filtered,
         model=model,
@@ -425,7 +426,7 @@ async def plan_edit(req: AssistantEditPlanRequest):
     except (TypeError, ValueError):
         confidence = 0.0
     return AssistantEditPlanResponse(
-        edit_prompt=str(data.get("edit_prompt") or "").strip()[:4000],
+        edit_prompt=str(data.get("edit_prompt") or "").strip()[:MAX_PROMPT_CHARS],
         source_requirements=_string_list(data.get("source_requirements")),
         suggested_size=str(data.get("suggested_size") or "").strip() or None,
         warnings=_warnings(data.get("warnings")),

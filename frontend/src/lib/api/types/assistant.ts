@@ -1,3 +1,4 @@
+import type { ImageQuality } from '$lib/utils/imageModels';
 import type { ApiPath, AssistantGalleryBatchJobStatusValue } from './common';
 
 export type PromptOptimizeRequest = {
@@ -7,7 +8,7 @@ export type PromptOptimizeRequest = {
   api_path?: ApiPath | null;
   model?: string | null;
   size?: string | null;
-  quality?: 'auto' | 'low' | 'medium' | 'high' | null;
+  quality?: ImageQuality | null;
 };
 
 export type PromptOptimizeResponse = {
@@ -29,7 +30,7 @@ export type AssistantPromptRewriteRequest = {
   api_path?: ApiPath | null;
   model?: string | null;
   size?: string | null;
-  quality?: 'auto' | 'low' | 'medium' | 'high' | null;
+  quality?: ImageQuality | null;
 };
 
 export type AssistantPromptRewriteResponse = AssistantBaseResponse & {
@@ -41,7 +42,7 @@ export type AssistantPromptCheckRequest = {
   api_path?: ApiPath | null;
   model?: string | null;
   size?: string | null;
-  quality?: 'auto' | 'low' | 'medium' | 'high' | null;
+  quality?: ImageQuality | null;
 };
 
 export type AssistantPromptIssue = {
@@ -75,7 +76,7 @@ export type AssistantRecommendParamsRequest = {
   api_path: ApiPath;
   current_model?: string | null;
   current_size?: string | null;
-  current_quality?: 'auto' | 'low' | 'medium' | 'high' | null;
+  current_quality?: ImageQuality | null;
   current_output_format?: 'png' | 'jpeg' | 'webp' | null;
   current_n?: number | null;
 };
@@ -83,7 +84,7 @@ export type AssistantRecommendParamsRequest = {
 export type AssistantRecommendParamsResponse = AssistantBaseResponse & {
   model_name?: string | null;
   size?: string | null;
-  quality?: 'auto' | 'low' | 'medium' | 'high' | null;
+  quality?: ImageQuality | null;
   output_format?: 'png' | 'jpeg' | 'webp' | null;
   n?: number | null;
   rationale: string;
