@@ -1,17 +1,20 @@
+# syntax=docker/dockerfile:1
 ARG PYTHON_BASE_IMAGE=python:3.11-slim
 ARG NODE_BASE_IMAGE=node:24-alpine
 
-FROM ${NODE_BASE_IMAGE} AS frontend-builder
+FROM --platform=$BUILDPLATFORM ${NODE_BASE_IMAGE} AS frontend-builder
 WORKDIR /frontend
 COPY frontend/package*.json ./
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci
 COPY frontend/ ./
 RUN npx svelte-kit sync && npm run build
 
 FROM ${PYTHON_BASE_IMAGE} AS python-builder
 WORKDIR /app
 COPY requirements.txt ./requirements.txt
-RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --prefix=/install -r requirements.txt
 
 FROM nginx:alpine AS nginx
 COPY --from=frontend-builder /frontend/build /usr/share/nginx/html
