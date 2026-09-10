@@ -6,11 +6,17 @@ node_modules/
 frontend/node_modules/
 frontend/.svelte-kit/
 frontend/build/
+frontend/test-results/
+frontend/playwright-report/
+.venv/
+.pytest_cache/
 data/
 images/
+test-results/
 docker-compose.yml
 Dockerfile
 README.md
 .gitignore
 *.md
 tests/
+frontend/tests/

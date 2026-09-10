@@ -7,18 +7,18 @@ WORKDIR /frontend
 COPY frontend/package*.json ./
 RUN --mount=type=cache,target=/root/.npm \
     npm ci
-COPY frontend/ ./
-RUN npx svelte-kit sync && npm run build
+COPY frontend/svelte.config.js frontend/vite.config.ts frontend/tsconfig.json frontend/tailwind.config.ts frontend/postcss.config.cjs ./
+COPY frontend/static/ ./static/
+COPY frontend/src/ ./src/
+RUN --mount=type=cache,target=/root/.npm \
+    --mount=type=cache,target=/frontend/node_modules/.vite \
+    npx svelte-kit sync && npm run build
 
 FROM ${PYTHON_BASE_IMAGE} AS python-builder
 WORKDIR /app
 COPY requirements.txt ./requirements.txt
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --prefix=/install -r requirements.txt
-
-FROM nginx:alpine AS nginx
-COPY --from=frontend-builder /frontend/build /usr/share/nginx/html
-COPY deploy/nginx.conf /etc/nginx/conf.d/default.conf
 
 FROM ${PYTHON_BASE_IMAGE} AS runtime
 

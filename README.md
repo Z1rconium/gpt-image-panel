@@ -18,7 +18,7 @@
 
   <p>
     <img alt="CI passing" src="https://img.shields.io/badge/CI-passing-2cc653?logo=github&logoColor=white" />
-    <img alt="Release v1.3.3" src="https://img.shields.io/badge/release-v1.3.3-0e8dcc" />
+    <img alt="Release v1.5.2" src="https://img.shields.io/badge/release-v1.5.2-0e8dcc" />
     <img alt="Python 3.11+" src="https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white" />
     <img alt="Node.js 24" src="https://img.shields.io/badge/Node.js-24-339933?logo=node.js&logoColor=white" />
     <img alt="FastAPI 0.115+" src="https://img.shields.io/badge/FastAPI-0.115+-009688?logo=fastapi&logoColor=white" />
@@ -67,10 +67,12 @@ This project is only a self-hosted control panel. It does not provide, proxy, re
 - Granian
 - aiohttp
 - aiohttp-socks
+- httpx
 - boto3
 - SQLite
 - Pydantic v2
 - Pillow
+- python-multipart
 - zipstream-ng
 - SvelteKit
 - TypeScript
@@ -356,7 +358,12 @@ Key backend routes:
 | `POST` | `/api/gallery/search` | Search/filter gallery images with a JSON request body. |
 | `GET/DELETE` | `/api/gallery/{image_id}` | Read or delete a gallery image. |
 | `PATCH` | `/api/gallery/{image_id}/favorite` | Favorite/unfavorite one gallery image. |
+| `POST` | `/api/gallery/{image_id}/nodeimage-upload` | Upload one gallery image to NodeImage. |
+| `POST` | `/api/gallery/batch/nodeimage-upload` | Upload a selection-token gallery batch to NodeImage as an async job. |
+| `GET` | `/api/gallery/nodeimage-upload-jobs/{job_id}`, `/api/gallery/nodeimage-upload-jobs/{job_id}/events` | Read or stream a NodeImage batch upload job. |
+| `DELETE` | `/api/gallery/nodeimage-upload-jobs/{job_id}`, `POST` `/api/gallery/nodeimage-upload-jobs/{job_id}/cancel` | Delete or cancel a NodeImage batch upload job. |
 | `POST/PATCH` | `/api/gallery/batch/*` | Selection-token, favorite, delete, and download batch actions. |
+| `POST` | `/api/gallery/thumbnails/status` | Check thumbnail presence/status for a set of gallery images. |
 | `POST` | `/api/gallery/export-jobs`, `/api/gallery/direct-export-jobs` | Create async gallery export jobs. |
 | `GET` | `/api/gallery/export-jobs/{job_id}`, `/api/gallery/direct-export-jobs/{job_id}` | Read async gallery export job status. |
 | `GET` | `/api/gallery/export-jobs/{job_id}/events`, `/api/gallery/direct-export-jobs/{job_id}/events` | SSE streams for gallery export jobs. |

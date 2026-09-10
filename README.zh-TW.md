@@ -16,7 +16,7 @@
 
   <p>
     <img alt="CI 通過" src="https://img.shields.io/badge/CI-passing-2cc653?logo=github&logoColor=white" />
-    <img alt="版本 v1.3.3" src="https://img.shields.io/badge/release-v1.3.3-0e8dcc" />
+    <img alt="版本 v1.5.2" src="https://img.shields.io/badge/release-v1.5.2-0e8dcc" />
     <img alt="Python 3.11+" src="https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white" />
     <img alt="Node.js 24" src="https://img.shields.io/badge/Node.js-24-339933?logo=node.js&logoColor=white" />
     <img alt="FastAPI 0.115+" src="https://img.shields.io/badge/FastAPI-0.115+-009688?logo=fastapi&logoColor=white" />
@@ -63,10 +63,12 @@ GPT Image Panel 是一套輕量 Web UI，可用於圖片生成、圖片編輯、
 - Granian
 - aiohttp
 - aiohttp-socks
+- httpx
 - boto3
 - SQLite
 - Pydantic v2
 - Pillow
+- python-multipart
 - zipstream-ng
 - SvelteKit
 - TypeScript
@@ -116,7 +118,7 @@ ACCESS_COOKIE_SECURE=false docker-compose up -d --force-recreate
 
 開啟 `http://127.0.0.1:9090`。
 
-此本機 HTTP 範例需要設定 `ACCESS_COOKIE_SECURE=false`；透過 HTTPS 提供服務時應保持為 `true`。預設必須設定 `ACCESS_KEY`。僅在本機測試時，清空 `ACCESS_KEY` 並設定 `ALLOW_UNAUTHENTICATED=true`，這會讓所有非 health API 都不需要驗證。
+此本機 HTTP 範例需要設定 `ACCESS_COOKIE_SECURE=false`；透過 HTTPS 提供服務時應保持為 `true`。預設必須設定 `ACCESS_KEY`。僅在本機測試時，清空 `ACCESS_KEY` 並設定 `ALLOW_UNAUTHENTICATED=true`，這會讓所有非 health API 都不需要驗證。若要為解鎖流程額外啟用 Cloudflare Turnstile 人機驗證，請在 `.env` 中設定 `TURNSTILE_ENABLED=true` 以及來自 Cloudflare 儀表板的 `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY`；驗證元件會出現在 Unlock 按鈕下方，每次使用存取密鑰登入都需要有效的 token。
 
 ### Docker
 
@@ -238,6 +240,7 @@ ALLOW_UNAUTHENTICATED=true .venv/bin/granian --interface asgi backend.app.main:a
 | 變數 | 用途 |
 | --- | --- |
 | `ACCESS_KEY` | 存取密鑰。除非清空該變數並設定 `ALLOW_UNAUTHENTICATED=true`，否則必填。 |
+| `TURNSTILE_ENABLED` / `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` | 選用的 Cloudflare Turnstile 人機驗證。啟用後，除了 `ACCESS_KEY`，解鎖還需要有效的 Turnstile token；site key 透過 `/api/access/status` 提供給登入元件。 |
 | `DEFAULT_API_URL` | 預設上游 API base URL，可包含或省略 `/v1`。 |
 | `DEFAULT_API_KEY` | 預設上游 API key。Web Settings 建議使用 `${OPENAI_API_KEY}` 之類的 env ref。 |
 | `DEFAULT_API_PATH` | `/v1/images/generations`、`/v1/responses` 或 `/v1/chat/completions`。 |
@@ -351,7 +354,12 @@ Overall Config 會將 Override 持久化至 SQLite。部分設定可熱更新；
 | `POST` | `/api/gallery/search` | 使用 JSON 要求本文搜尋/篩選 Gallery。 |
 | `GET/DELETE` | `/api/gallery/{image_id}` | 讀取或刪除 Gallery 圖片。 |
 | `PATCH` | `/api/gallery/{image_id}/favorite` | 收藏/取消收藏單張 Gallery 圖片。 |
+| `POST` | `/api/gallery/{image_id}/nodeimage-upload` | 上傳單張 Gallery 圖片至 NodeImage。 |
+| `POST` | `/api/gallery/batch/nodeimage-upload` | 將 Selection Token 選取的 Gallery 圖片批次上傳至 NodeImage，作為非同步工作。 |
+| `GET` | `/api/gallery/nodeimage-upload-jobs/{job_id}`, `/api/gallery/nodeimage-upload-jobs/{job_id}/events` | 讀取或訂閱 NodeImage 批次上傳工作。 |
+| `DELETE` | `/api/gallery/nodeimage-upload-jobs/{job_id}`, `POST` `/api/gallery/nodeimage-upload-jobs/{job_id}/cancel` | 刪除或取消 NodeImage 批次上傳工作。 |
 | `POST/PATCH` | `/api/gallery/batch/*` | Selection Token、收藏、刪除與下載等批次操作。 |
+| `POST` | `/api/gallery/thumbnails/status` | 檢查一組 Gallery 圖片的縮圖存在/狀態。 |
 | `POST` | `/api/gallery/export-jobs`, `/api/gallery/direct-export-jobs` | 建立非同步 Gallery 匯出工作。 |
 | `GET` | `/api/gallery/export-jobs/{job_id}`, `/api/gallery/direct-export-jobs/{job_id}` | 讀取非同步 Gallery 匯出工作狀態。 |
 | `GET` | `/api/gallery/export-jobs/{job_id}/events`, `/api/gallery/direct-export-jobs/{job_id}/events` | Gallery 匯出工作 SSE。 |
