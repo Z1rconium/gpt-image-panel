@@ -1,11 +1,9 @@
 <script lang="ts">
-  import { drawerIn, drawerOut, overlayIn, overlayOut } from '$lib/motion';
+  import Overlay from '$lib/components/Overlay.svelte';
   import { tick } from 'svelte';
 import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput } from '$lib/api/types/snippets';
-  import { dialog } from '$lib/actions/dialog';
   import { MAX_PROMPT_CHARS, promptLength } from '$lib/utils/imageModels';
   import { plainTextInput } from '$lib/actions/plainTextInput';
-  import { swipeClose } from '$lib/actions/swipeClose';
   import { t } from '$lib/i18n';
   import { confirmStore } from '$lib/stores/confirm';
 
@@ -134,16 +132,15 @@ import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput 
   }
 </script>
 
-{#if open}
-  <div class="mobile-drawer-root fixed inset-0 z-50" in:overlayIn out:overlayOut>
-    <button class="drawer-backdrop absolute inset-0" type="button" tabindex="-1" aria-label={$t.promptSnippets.closeLabel} on:click={closeDrawer}></button>
-    <aside
-      id="prompt-snippets-drawer"
-      class="mobile-drawer-panel overlay-panel absolute right-0 top-0 flex h-full w-full max-w-lg flex-col border-l border-stone-200 bg-white dark:border-zinc-800 dark:bg-zinc-900" in:drawerIn out:drawerOut
-      aria-labelledby="prompt-snippets-drawer-title"
-      use:dialog={{ open, onClose: closeDrawer }}
-      use:swipeClose={{ enabled: open, onClose: closeDrawer }}
-    >
+<Overlay
+  {open}
+  variant="drawer"
+  onClose={closeDrawer}
+  closeLabel={$t.promptSnippets.closeLabel}
+  labelledBy="prompt-snippets-drawer-title"
+  z={50}
+  panelId="prompt-snippets-drawer"
+>
       <div class="flex items-center justify-between border-b border-stone-200 p-5 dark:border-zinc-800">
         <div class="min-w-0">
           <h2 id="prompt-snippets-drawer-title" class="text-lg font-semibold text-stone-900 dark:text-zinc-100">{$t.promptSnippets.title}</h2>
@@ -272,6 +269,4 @@ import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput 
           </div>
         {/if}
       </div>
-    </aside>
-  </div>
-{/if}
+</Overlay>

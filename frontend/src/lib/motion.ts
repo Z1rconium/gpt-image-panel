@@ -15,7 +15,7 @@ const PANEL_EXIT_MS = 140;
 
 const DIALOG_SCALE = 0.985;
 
-function prefersReducedMotion(): boolean {
+export function prefersReducedMotion(): boolean {
   return (
     typeof window !== 'undefined' &&
     typeof window.matchMedia === 'function' &&

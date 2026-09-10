@@ -1,8 +1,12 @@
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
+import { visualizer } from 'rollup-plugin-visualizer';
 
 export default defineConfig({
-  plugins: [sveltekit()],
+  plugins: [
+    sveltekit(),
+    ...(process.env.ANALYZE ? [visualizer({ filename: 'stats.html', gzipSize: true, open: false })] : [])
+  ],
   server: {
     proxy: {
       '/api': {

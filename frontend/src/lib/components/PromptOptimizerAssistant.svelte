@@ -377,10 +377,21 @@ import type { ApiPath } from '$lib/api/types/common';
       setFloatingPosition(floatingPosition, false);
     }
 
-    window.addEventListener('resize', clampToViewport);
+    let ticking = false;
+    let rafId = 0;
+    const onResize = () => {
+      if (ticking) return;
+      ticking = true;
+      rafId = requestAnimationFrame(() => {
+        clampToViewport();
+        ticking = false;
+      });
+    };
+    window.addEventListener('resize', onResize, { passive: true });
 
     return () => {
-      window.removeEventListener('resize', clampToViewport);
+      window.removeEventListener('resize', onResize);
+      if (rafId) cancelAnimationFrame(rafId);
       disconnectTriggerObserver();
       resetPointerState();
     };

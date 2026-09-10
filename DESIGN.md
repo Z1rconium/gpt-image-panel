@@ -242,10 +242,12 @@ Motion reports something true or it does not ship. Every animation in the produc
 
 1. **Press physics.** Every raised control travels down 1px and collapses its shadow to the press inset. Recessed surfaces never move.
 2. **Overlay choreography.** The overlay root carries the backdrop fade; the panel carries only its travel, so the two never compound. Dialogs scale from \`0.985\`. Drawers are revealed from the screen edge with a \`clip-path\` wipe — a right-anchored panel must never translate outward, because its box would leave the viewport.
-3. **The exposure.** A generated result fades and scales up into the preview well while the well's inset deepens by one step. It runs once per result. This is the product's signature moment; nothing else may compete with it.
+3. **The exposure.** A generated result arrives on a single lit plane: it tilts up from a slight recess into full, flat-on light as the well's inset deepens by one step, in place of a flat fade. One directional light falls from directly above, matching the console's one overhead source everywhere else in the system — never a second light, never colour in the light. It runs once per result, in WebGL where supported and motion is not reduced; every other browser still receives the plain 380ms fade-and-scale. This is the product's signature moment; nothing else may compete with it, and nothing else may borrow its depth.
 4. **State ticks.** One-shot, never looping: the favourite star on the way in only, the jobs badge on a count change, a running job row that just changed status, and the header shadow appearing once content scrolls beneath it.
 
 **The Travel-Is-A-Token Rule.** Every translation reads from \`--lift-hover\`, \`--lift-press\`, or \`--motion-lift\`. Reduced motion sets those to \`0px\` rather than overriding \`transform\`, because \`@apply\` inlines component rules and an override can land in the wrong source order.
+
+**The One Surface, One Light Rule.** Real depth — WebGL, perspective, tilt — exists in exactly one place: the exposure. No other surface may tilt, orbit, gain a light source, or fake perspective.
 
 **The Reduced-Motion Rule.** Under \`prefers-reduced-motion: reduce\`, depth stays and travel goes to zero. Durations collapse via the tokens, and JavaScript-driven transitions check the media query directly so a leaving element never lingers.
 
@@ -307,5 +309,6 @@ The gallery card is the signature repeated object. It uses a \`12px\` bordered c
 - **Don't** use high-frequency animation, looping decoration, scroll-triggered reveals, staggered list entrances, or visually loud feedback.
 - **Don't** introduce decorative gradients, glowing accents, soft-plastic bevels, or multiple competing signal colors.
 - **Don't** add shadows to resting page sections, nest a raised surface inside a raised surface, or give a decorative element depth it has not earned.
+- **Don't** add depth, tilt, perspective, or a second light source to any surface other than the exposure.
 - **Don't** use oversized display typography, fluid font sizing, or promotional hero composition in the working interface.
 - **Don't** let mobile layouts reorder the core workflow, overflow horizontally, or shrink icon targets below \`44px\`.

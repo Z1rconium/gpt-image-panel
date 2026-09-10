@@ -32,9 +32,22 @@
     const sync = () => {
       scrolled = window.scrollY > 4;
     };
+    let ticking = false;
+    let rafId = 0;
+    const onScroll = () => {
+      if (ticking) return;
+      ticking = true;
+      rafId = requestAnimationFrame(() => {
+        sync();
+        ticking = false;
+      });
+    };
     sync();
-    window.addEventListener('scroll', sync, { passive: true });
-    return () => window.removeEventListener('scroll', sync);
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      window.removeEventListener('scroll', onScroll);
+      if (rafId) cancelAnimationFrame(rafId);
+    };
   });
 </script>
 

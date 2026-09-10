@@ -703,10 +703,28 @@ test('job drawer open baseline with 500 running rows', async ({ page }) => {
   const startedAt = await page.evaluate(() => performance.now());
   await page.getByRole('button', { name: 'Job History' }).click();
   await expect(page.getByRole('dialog', { name: 'Job History' })).toBeVisible();
-  await expect(page.getByText('history prompt 499')).toBeVisible();
+  // The running list is windowed (see the next test), so only the rows near
+  // the top render synchronously - row 0 stands in for "the drawer opened".
+  await expect(page.getByText('history prompt 0')).toBeVisible();
   const elapsedMs = await page.evaluate((start) => performance.now() - start, startedAt);
 
   expect(elapsedMs).toBeLessThan(500);
+});
+
+test('job drawer keeps a bounded render window for 500 running rows', async ({ page }) => {
+  test.skip(process.env.RUN_PERFORMANCE_TESTS !== 'true', 'set RUN_PERFORMANCE_TESTS=true to run performance baselines');
+  await loadApp(page, { runningJobs: manyJobs(500) });
+
+  await page.getByRole('button', { name: 'Job History' }).click();
+  const jobsDrawer = page.getByRole('dialog', { name: 'Job History' });
+
+  const runningScroller = jobsDrawer.locator('.mobile-drawer-scroll');
+  await expect(jobsDrawer.getByText('history prompt 0')).toBeVisible();
+  expect(await jobsDrawer.locator('article').count()).toBeLessThanOrEqual(40);
+
+  await runningScroller.evaluate((node) => node.scrollTo({ top: node.scrollHeight }));
+  await expect(jobsDrawer.getByText('history prompt 499')).toBeVisible();
+  expect(await jobsDrawer.locator('article').count()).toBeLessThanOrEqual(40);
 });
 
 test('job history keeps a bounded render window for 500 cached rows', async ({ page }) => {

@@ -1,7 +1,9 @@
 <script lang="ts">
 import type { GenerateJobImage, GenerateJobStatus } from '$lib/api/types/jobs';
+  import { onDestroy, tick } from 'svelte';
   import { t } from '$lib/i18n';
   import { displayImageSize, downloadUrl, filenameFromImageUrl, formatBeijingTime, stageLabel, statusLabel } from '$lib/utils/format';
+  import { canRunExposure, runExposure, type ExposureHandle } from '$lib/webgl/exposureScene';
 
   export let loading = false;
   export let error = '';
@@ -64,6 +66,58 @@ import type { GenerateJobImage, GenerateJobStatus } from '$lib/api/types/jobs';
     image_width: selectedImage?.image_width ?? job?.image_width ?? null,
     image_height: selectedImage?.image_height ?? job?.image_height ?? null
   });
+
+  // The exposure: DESIGN.md's one WebGL moment. Runs once per result, over
+  // the plain CSS fade+scale below, and falls back to it entirely when
+  // motion is reduced or WebGL is unavailable.
+  let previewImageEl: HTMLImageElement | null = null;
+  let exposureCanvasEl: HTMLCanvasElement | null = null;
+  let showExposureCanvas = false;
+  let exposedImageId = '';
+  let exposureHandle: ExposureHandle | null = null;
+
+  $: if (seated && selectedImage && selectedImage.image_id !== exposedImageId) {
+    exposedImageId = selectedImage.image_id;
+    void triggerExposure();
+  }
+
+  function signatureDurationMs(): number {
+    const fallback = 380;
+    if (typeof window === 'undefined') return fallback;
+    const raw = getComputedStyle(document.documentElement).getPropertyValue('--dur-signature').trim();
+    const ms = parseFloat(raw);
+    return Number.isFinite(ms) && ms > 0 ? ms : fallback;
+  }
+
+  async function triggerExposure() {
+    exposureHandle?.cancel();
+    exposureHandle = null;
+    if (!canRunExposure()) return;
+    showExposureCanvas = true;
+    await tick();
+    const canvas = exposureCanvasEl;
+    const img = previewImageEl;
+    if (!canvas || !img || !img.complete || img.naturalWidth === 0) {
+      showExposureCanvas = false;
+      return;
+    }
+    try {
+      const handle = runExposure(canvas, img, signatureDurationMs());
+      exposureHandle = handle;
+      await handle.done;
+    } catch {
+      // Gracefully fall back to CSS fade/scale
+    } finally {
+      if (exposureHandle) {
+        exposureHandle = null;
+      }
+      showExposureCanvas = false;
+    }
+  }
+
+  onDestroy(() => {
+    exposureHandle?.cancel();
+  });
 </script>
 
 <section class="app-section px-1 py-1 sm:px-0">
@@ -110,18 +164,24 @@ import type { GenerateJobImage, GenerateJobStatus } from '$lib/api/types/jobs';
           </div>
         {/if}
         <div class="flex min-h-[320px] flex-1 items-center justify-center p-3">
-          <img
-            src={selectedImageUrl}
-            alt={$t.preview.generatedAlt}
-            class={`preview-image max-h-[640px] max-w-full rounded-lg object-contain ${seated ? 'preview-image-seated' : ''}`}
-            loading="eager"
-            fetchpriority="high"
-            decoding="async"
-            width={previewWidth}
-            height={previewHeight}
-            on:load={() => (loadedPreviewSrc = selectedImageUrl)}
-            on:error={() => (loadedPreviewSrc = selectedImageUrl)}
-          />
+          <div class="preview-image-frame relative">
+            <img
+              bind:this={previewImageEl}
+              src={selectedImageUrl}
+              alt={$t.preview.generatedAlt}
+              class={`preview-image max-h-[640px] max-w-full rounded-lg object-contain ${seated ? 'preview-image-seated' : ''}`}
+              loading="eager"
+              fetchpriority="high"
+              decoding="async"
+              width={previewWidth}
+              height={previewHeight}
+              on:load={() => (loadedPreviewSrc = selectedImageUrl)}
+              on:error={() => (loadedPreviewSrc = selectedImageUrl)}
+            />
+            {#if showExposureCanvas}
+              <canvas bind:this={exposureCanvasEl} class="preview-exposure-canvas rounded-lg" aria-hidden="true"></canvas>
+            {/if}
+          </div>
         </div>
         {#if resultImages.length > 1 || (loading && resultImages.length > 0)}
           <div class="border-t border-stone-200 p-3 dark:border-zinc-800">

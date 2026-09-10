@@ -36,12 +36,15 @@ import type { GalleryEntry } from '$lib/api/types/gallery';
   const SWIPE_MIN_DISTANCE = 52;
   const SWIPE_MAX_DURATION_MS = 800;
   const SWIPE_AXIS_RATIO = 1.25;
+  const SWIPE_MAX_DRAG = 96;
   const SWIPE_IGNORE_SELECTOR = 'a, button, input, select, textarea, [role="button"], [data-swipe-ignore]';
 
   let swipePointerId: number | null = null;
   let swipeStartX = 0;
   let swipeStartY = 0;
   let swipeStartTime = 0;
+  let dragging = false;
+  let dragOffsetX = 0;
   let loadedImageSrc = '';
   let failedImageSrc = '';
 
@@ -62,11 +65,21 @@ import type { GalleryEntry } from '$lib/api/types/gallery';
     failedImageSrc = fullImageSrc;
   }
 
-  function resetSwipe() {
+  function resetSwipeTracking() {
     swipePointerId = null;
     swipeStartX = 0;
     swipeStartY = 0;
     swipeStartTime = 0;
+  }
+
+  // Ends live 1:1 tracking now, then lets the stylesheet's transition carry
+  // the offset back to rest - deferred a frame so the browser sees the
+  // transition re-enabled before the value changes, or it won't animate.
+  function snapBack() {
+    dragging = false;
+    requestAnimationFrame(() => {
+      dragOffsetX = 0;
+    });
   }
 
   function canStartSwipe(event: PointerEvent) {
@@ -86,7 +99,21 @@ import type { GalleryEntry } from '$lib/api/types/gallery';
     swipeStartX = event.clientX;
     swipeStartY = event.clientY;
     swipeStartTime = Date.now();
+    dragging = true;
+    dragOffsetX = 0;
     (event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId);
+  }
+
+  function handleSwipePointerMove(event: PointerEvent) {
+    if (swipePointerId !== event.pointerId) return;
+    const dx = event.clientX - swipeStartX;
+    const dy = event.clientY - swipeStartY;
+    if (Math.abs(dy) > Math.abs(dx) * SWIPE_AXIS_RATIO) return;
+    const towardPrevious = dx > 0;
+    const canFollow = towardPrevious ? canNavigatePrevious : canNavigateNext;
+    // Resist past an edge with no image to swipe to, like a boundary.
+    const resisted = canFollow ? dx : dx * 0.3;
+    dragOffsetX = Math.max(-SWIPE_MAX_DRAG, Math.min(SWIPE_MAX_DRAG, resisted));
   }
 
   function handleSwipePointerUp(event: PointerEvent) {
@@ -102,8 +129,30 @@ import type { GalleryEntry } from '$lib/api/types/gallery';
     if (horizontalSwipe && dx < 0 && canNavigateNext) onNavigateNext();
     else if (horizontalSwipe && dx > 0 && canNavigatePrevious) onNavigatePrevious();
 
-    (event.currentTarget as HTMLElement).releasePointerCapture?.(event.pointerId);
-    resetSwipe();
+    const el = event.currentTarget as HTMLElement | null;
+    if (el?.hasPointerCapture?.(event.pointerId)) {
+      try {
+        el.releasePointerCapture(event.pointerId);
+      } catch {
+        // Pointer capture may have already been released
+      }
+    }
+    resetSwipeTracking();
+    snapBack();
+  }
+
+  function handleSwipePointerCancel(event: PointerEvent) {
+    if (swipePointerId !== event.pointerId) return;
+    const el = event.currentTarget as HTMLElement | null;
+    if (el?.hasPointerCapture?.(event.pointerId)) {
+      try {
+        el.releasePointerCapture(event.pointerId);
+      } catch {
+        // Pointer capture may have already been released
+      }
+    }
+    resetSwipeTracking();
+    snapBack();
   }
 </script>
 
@@ -120,13 +169,18 @@ import type { GalleryEntry } from '$lib/api/types/gallery';
         role="group"
         aria-label={$t.lightbox.title}
         on:pointerdown={handleSwipePointerDown}
+        on:pointermove={handleSwipePointerMove}
         on:pointerup={handleSwipePointerUp}
-        on:pointercancel={resetSwipe}
+        on:pointercancel={handleSwipePointerCancel}
       >
         <div class="flex h-full min-h-0 w-full flex-col">
           <div class="flex min-h-0 flex-1 items-center justify-center">
             {#key fullImageSrc}
-              <div class="lightbox-image-stage">
+              <div
+                class="lightbox-image-stage"
+                class:lightbox-image-dragging={dragging}
+                style:transform={dragOffsetX ? `translateX(${dragOffsetX}px)` : ''}
+              >
                 {#if previewImageSrc}
                   <img
                     src={previewImageSrc}

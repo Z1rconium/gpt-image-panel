@@ -1,12 +1,10 @@
 <script lang="ts">
-  import { drawerIn, drawerOut, overlayIn, overlayOut } from '$lib/motion';
   import { t } from '$lib/i18n';
 import type { ApiPath, ResponseFormatDefault } from '$lib/api/types/common';
 import type { AIAssistantSettingsInput, ApiPreset, AssistantHealthResponse, OverallConfigItem, OverallConfigResponse, OverallConfigUpdateRequest, PromptOptimizerHealthResponse, PresetHealthResponse, PromptOptimizerSystemPromptResponse, R2BackupSettingsInput, R2HealthResponse, SettingsInput, SettingsResponse } from '$lib/api/types/settings';
-  import { dialog } from '$lib/actions/dialog';
-  import { swipeClose } from '$lib/actions/swipeClose';
   import { confirmStore } from '$lib/stores/confirm';
   import { RESPONSE_FORMAT_OPTIONS, normalizeResponseFormat } from '$lib/utils/promptForm';
+  import Overlay from '$lib/components/Overlay.svelte';
   import HealthResults from '$lib/components/settings/HealthResults.svelte';
   import PresetSettingsEditor from '$lib/components/settings/PresetSettingsEditor.svelte';
   import OverallConfigDialog from '$lib/components/settings/OverallConfigDialog.svelte';
@@ -588,16 +586,7 @@ import type { AIAssistantSettingsInput, ApiPreset, AssistantHealthResponse, Over
   }
 </script>
 
-{#if open}
-  <div class="mobile-drawer-root fixed inset-0 z-50" in:overlayIn out:overlayOut>
-    <button class="drawer-backdrop absolute inset-0" type="button" tabindex="-1" aria-label={$t.settings.closeLabel} on:click={requestCloseDrawer}></button>
-    <aside
-      id="settings-drawer"
-      class="mobile-drawer-panel overlay-panel absolute right-0 top-0 flex h-full w-full max-w-lg flex-col border-l border-stone-200 bg-white dark:border-zinc-800 dark:bg-zinc-900" in:drawerIn out:drawerOut
-      aria-labelledby="settings-drawer-title"
-      use:dialog={{ open, onClose: requestCloseDrawer }}
-      use:swipeClose={{ enabled: open, onClose: requestCloseDrawer }}
-    >
+<Overlay {open} variant="drawer" onClose={requestCloseDrawer} closeLabel={$t.settings.closeLabel} labelledBy="settings-drawer-title" z={50} panelId="settings-drawer">
       <div class="flex items-center justify-between border-b border-stone-200 p-5 dark:border-zinc-800">
         <div>
           <h2 id="settings-drawer-title" class="text-lg font-semibold text-stone-900 dark:text-zinc-100">{$t.settings.title}</h2>
@@ -684,32 +673,30 @@ import type { AIAssistantSettingsInput, ApiPreset, AssistantHealthResponse, Over
           </button>
         </div>
       </div>
-    </aside>
+</Overlay>
 
-    <OverallConfigDialog
-      {overallConfigOpen}
-      {overallConfigLoading}
-      {overallConfigSaving}
-      {overallConfigError}
-      {overallConfigGroups}
-      {overallConfigGroupNames}
-      {closeOverallConfigModal}
-      {saveOverallConfigModal}
-      {overallDraftValue}
-      {hasOverallDraft}
-      {setOverallDraft}
-      {resetOverallConfigItem}
-      {sourceLabel}
-    />
+<OverallConfigDialog
+  {overallConfigOpen}
+  {overallConfigLoading}
+  {overallConfigSaving}
+  {overallConfigError}
+  {overallConfigGroups}
+  {overallConfigGroupNames}
+  {closeOverallConfigModal}
+  {saveOverallConfigModal}
+  {overallDraftValue}
+  {hasOverallDraft}
+  {setOverallDraft}
+  {resetOverallConfigItem}
+  {sourceLabel}
+/>
 
-    <SystemPromptDialog
-      {systemPromptOpen}
-      {systemPromptLoading}
-      {systemPromptSaving}
-      bind:systemPromptText
-      {systemPromptError}
-      {closeSystemPromptEditor}
-      {saveSystemPrompt}
-    />
-  </div>
-{/if}
+<SystemPromptDialog
+  {systemPromptOpen}
+  {systemPromptLoading}
+  {systemPromptSaving}
+  bind:systemPromptText
+  {systemPromptError}
+  {closeSystemPromptEditor}
+  {saveSystemPrompt}
+/>

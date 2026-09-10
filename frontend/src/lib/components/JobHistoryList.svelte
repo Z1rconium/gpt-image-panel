@@ -4,6 +4,7 @@
   import { t } from '$lib/i18n';
   import { formatBeijingTime, jobFailureMessage, operationLabel, stageLabel, statusLabel } from '$lib/utils/format';
   import { isActiveJobStatus, isFailureJobStatus } from '$lib/utils/jobs';
+  import { measureItem, observeViewport } from '$lib/actions/virtualList';
 
   type MaybePromise = void | Promise<void>;
   type Props = {
@@ -117,35 +118,14 @@
     }
   }
 
-  function observeViewport(node: HTMLElement) {
-    const update = () => {
-      viewportHeight = node.clientHeight;
-    };
-    update();
-    const observer = new ResizeObserver(update);
-    observer.observe(node);
-    return {
-      destroy() {
-        observer.disconnect();
-      }
-    };
+  function handleViewportResize(height: number) {
+    viewportHeight = height;
   }
 
-  function measureItem(node: HTMLElement, jobId: string) {
-    const update = () => {
-      const nextHeight = Math.ceil(node.getBoundingClientRect().height);
-      if (nextHeight > 0 && measuredHeights[jobId] !== nextHeight) {
-        measuredHeights = { ...measuredHeights, [jobId]: nextHeight };
-      }
-    };
-    update();
-    const observer = new ResizeObserver(update);
-    observer.observe(node);
-    return {
-      destroy() {
-        observer.disconnect();
-      }
-    };
+  function handleItemMeasure(jobId: string, height: number) {
+    if (measuredHeights[jobId] !== height) {
+      measuredHeights = { ...measuredHeights, [jobId]: height };
+    }
   }
 
   function observeHistorySentinel(node: HTMLElement) {
@@ -216,7 +196,7 @@
   bind:this={scrollEl}
   class="mobile-drawer-scroll min-h-0 flex-1 overflow-y-auto p-5"
   onscroll={handleScroll}
-  use:observeViewport
+  use:observeViewport={handleViewportResize}
 >
   {#if historyLoading && historyJobs.length === 0}
     <div class="rounded-xl border border-dashed border-stone-300 bg-stone-100/80 px-4 py-10 text-center dark:border-zinc-800 dark:bg-zinc-950/35">
@@ -234,7 +214,7 @@
         {#each renderedJobs as job, renderedIndex (job.job_id)}
           <article
             class="rounded-xl border border-stone-200 bg-stone-50/80 p-4 dark:border-zinc-800 dark:bg-zinc-950/45"
-            use:measureItem={job.job_id}
+            use:measureItem={{ id: job.job_id, onMeasure: handleItemMeasure }}
             aria-posinset={renderWindow.start + renderedIndex + 1}
             aria-setsize={historyJobs.length}
           >
