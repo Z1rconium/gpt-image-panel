@@ -44,6 +44,7 @@ This project is only a self-hosted control panel. It does not provide, proxy, re
 - Web-managed Overall Config for selected runtime settings, with env/default/override sources and restart/build-only badges.
 - Prompt helper tags, reusable prompt snippets, optional server-side prompt optimizer, and an AI Assistant subsystem for prompt rewrites/checks/variants, parameter recommendations, job diagnosis, edit planning, and gallery image analysis.
 - SQLite-backed job queue with SSE progress, cancellation, retry/reuse, persisted history, stage timing metadata, and shared generation/edit concurrency limits.
+- Optional streaming partial-image preview for single-image `/v1/images/generations` and `/v1/images/edits` requests, delivered over SSE as the upstream generates. Job history shows per-job token usage and an estimated USD cost whenever the upstream reports `usage` for a model with a configured rate.
 - Local gallery with cursor pagination, search/filtering, favorites, lightbox navigation, selection-token batch actions, ZIP import/export, thumbnails, byte-size metadata, and async export/import jobs.
 - Optional Cloudflare R2 gallery backup sync; local SQLite/images remain the source of truth.
 - Access-key gate, IP/Host allowlists, trusted proxy-header support, CSRF origin checks, CSP nonce injection, version checks, and optional JSON/Prometheus metrics.
@@ -302,7 +303,7 @@ Use `/v1/images/generations` for generation. Uploading reference images or selec
 - 2.5 always returns Base64. The panel omits `response_format`, including values inherited from older presets, saves the image, and exposes its local image URL. Existing models and gateway modes keep their prior response-format behavior.
 - This integration accepts up to 16 PNG/JPEG/WebP edit inputs, each smaller than 50 MB and subject to the configured upload limits. Convert other formats before editing. Requests for 1–10 outputs use the existing queue, one upstream image per unit.
 
-GPT Image 2.5 is supported through the Images API here. The existing Responses gateway format, Chat Completions, masks and partial-image streaming are not part of this integration. Model access depends on the upstream account. Higher quality settings can consume more tokens; equal token prices do not imply equal per-image costs between Flare and Sunburst.
+GPT Image 2.5 is supported through the Images API here, including streaming preview (see below). The existing Responses gateway format, Chat Completions, and masks are not part of this integration. Model access depends on the upstream account. Higher quality settings can consume more tokens; equal token prices do not imply equal per-image costs between Flare and Sunburst.
 
 API rules checked on 2026-09-10: [image generation guide](https://developers.openai.com/api/docs/guides/image-generation), [generation reference](https://developers.openai.com/api/reference/resources/images/methods/generate), [edit reference](https://developers.openai.com/api/reference/resources/images/methods/edit).
 
@@ -316,6 +317,13 @@ API rules checked on 2026-09-10: [image generation guide](https://developers.ope
 | `/v1/images/edits` | Used by the Edits flow; sends multipart source images and supported edit params. |
 
 For `/v1/responses` and `/v1/chat/completions`, size/quality/format/compression/quantity controls are disabled because those paths do not share the same parameter contract.
+
+## Streaming Preview & Cost Estimation
+
+- Streaming preview is opt-in per request (the "Streaming preview" toggle in the generation form), applies only to `/v1/images/generations` and `/v1/images/edits`, and only with a quantity of 1 — each requested image is queued as a separate unit, so streaming and batching don't compose. Choose 1–3 preview frames; more frames mean more output tokens from the upstream and a somewhat higher cost for the same final image.
+- If a compatible upstream advertises OpenAI-style support but rejects the `stream`/`partial_images` parameters, the job fails with a clear error asking you to disable streaming and retry — it never silently falls back to a second, non-streaming request, since that could double-bill the generation.
+- Partial images are held only in server memory, one slot per running unit holding just the latest frame, bounded by `PREVIEW_CACHE_MAX_ENTRY_MB`/`PREVIEW_CACHE_MAX_ENTRIES` (see `.env.example`); they are never written to SQLite or the gallery. A client that reconnects mid-job gets whatever frame is still cached, or waits for the next one — a restarted or different worker process has nothing to replay.
+- **Estimated cost is not a bill.** It is only computed from the `usage` object the upstream actually returns; when usage is missing, or the model has no configured price, the UI shows the reason (e.g. "no pricing configured for this model") instead of `$0.00`. The builtin rate table only covers `gpt-image-1`, taken from OpenAI's published Images API pricing — third-party "OpenAI-compatible" upstreams almost never match that pricing. Override or add per-model rates with `IMAGE_COST_RATES_JSON` in `.env.example`.
 
 ## API Overview
 

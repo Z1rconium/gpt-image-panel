@@ -40,6 +40,7 @@ GPT Image Panel 是一个轻量级 Web UI，用于图像生成、图像编辑、
 - Web 管理的 Overall Config，显示 env/default/override 来源，以及需要重启或只影响构建的配置标记。
 - 提示词助手、提示词片段、可选服务端提示词优化器，以及用于提示词改写/检查/变体、参数推荐、任务诊断、编辑规划和 Gallery 图片分析的 AI Assistant 子系统。
 - SQLite 任务队列：SSE 进度、取消、重试/复用、历史记录、阶段耗时、生成/编辑共享并发限制。
+- 可选的流式阶段性图片预览，适用于数量为 1 的 `/v1/images/generations` 和 `/v1/images/edits` 请求，通过 SSE 在上游生成过程中推送。任务历史会展示每个任务的 token 用量,并在上游返回 usage 且该模型已配置费率时显示估算美元费用。
 - 本地 Gallery：游标分页、搜索/筛选、收藏、Lightbox、selection token 批量操作、ZIP 导入导出、缩略图、大小统计、异步导出/导入任务。
 - 可选 Cloudflare R2 Gallery 备份同步；本地 SQLite 和图片文件仍是唯一源数据。
 - 访问密钥、IP/Host 白名单、可信反向代理头、CSRF 检查、CSP nonce、版本检查、可选 JSON/Prometheus metrics。
@@ -298,7 +299,7 @@ Overall Config 会把 override 持久化到 SQLite。部分配置可热更新；
 - 2.5 自动返回 Base64。面板省略 `response_format`，包括旧预设继承的值，保存图片后提供本地图片 URL；旧模型和网关模式保持原有返回格式行为。
 - 本次接入支持最多 16 张 PNG/JPEG/WebP 编辑输入，单张小于 50 MB，并受应用上传限制约束；其他格式请先转换。1–10 张输出沿用现有队列，每个执行单元请求一张图片。
 
-本次仅接入 Images API，不增加官方 Responses 图像工具、蒙版或分片图片流式预览。上游账号需要具备模型访问权限；更高质量可能使用更多 token，两个变体的相同 token 单价不代表每张图片费用相同。
+本次通过 Images API 接入，包含流式预览（见下文）；不增加官方 Responses 图像工具或蒙版。上游账号需要具备模型访问权限；更高质量可能使用更多 token，两个变体的相同 token 单价不代表每张图片费用相同。
 
 规范核对日期：2026-09-10。[官方指南](https://developers.openai.com/api/docs/guides/image-generation) · [生成接口](https://developers.openai.com/api/reference/resources/images/methods/generate) · [编辑接口](https://developers.openai.com/api/reference/resources/images/methods/edit)。
 
@@ -312,6 +313,13 @@ Overall Config 会把 override 持久化到 SQLite。部分配置可热更新；
 | `/v1/images/edits` | Edits 流程使用，发送 multipart 源图和支持的编辑参数。 |
 
 使用 `/v1/responses` 和 `/v1/chat/completions` 时，尺寸、质量、格式、压缩率、数量控件会禁用，因为这些路径的参数契约不同。
+
+## 流式预览与费用估算
+
+- 流式预览需要在生成表单中主动开启（"流式预览"开关），仅适用于 `/v1/images/generations` 和 `/v1/images/edits`，且数量必须为 1——每张请求图片都会作为独立执行单元排队，因此流式预览无法与批量生成组合使用。可选择 1–3 个预览帧；帧数越多，上游消耗的输出 token 越多，最终图片的费用也会相应略高。
+- 如果兼容服务声称支持 OpenAI 但拒绝 `stream`/`partial_images` 参数，任务会以明确的错误结束，提示您关闭流式预览后重试——不会自动降级为非流式请求重新发起，因为这可能导致重复计费。
+- 阶段性预览图片只保存在服务端内存中，每个执行单元仅保留最新一帧，大小受 `PREVIEW_CACHE_MAX_ENTRY_MB`/`PREVIEW_CACHE_MAX_ENTRIES`（见 `.env.example`）限制，不会写入 SQLite 或 Gallery。任务进行中重连的客户端会收到当前缓存的预览帧，或等待下一帧；进程重启或切换到其他 worker 后不会有可重放的缓存。
+- **费用估算不是账单。** 只有当上游实际返回 `usage` 时才会计算，缺少 usage 或该模型未配置费率时,界面会显示具体原因（例如"未配置该模型的费率"），而不是显示 `$0.00`。内置费率仅覆盖 `gpt-image-1`，取自 OpenAI 官方 Images API 定价；第三方"OpenAI 兼容"上游的实际定价通常并不相同。可通过 `.env.example` 中的 `IMAGE_COST_RATES_JSON` 覆盖或新增按模型的费率。
 
 ## API 概览
 

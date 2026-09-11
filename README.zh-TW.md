@@ -40,6 +40,7 @@ GPT Image Panel 是一套輕量 Web UI，可用於圖片生成、圖片編輯、
 - 可由網頁管理的 Overall Config，顯示 env/default/override 來源，以及需要重新啟動或僅影響建置的設定標記。
 - 提示詞輔助標籤、可重複使用的提示詞片段、選用的伺服器端提示詞最佳化器，以及 AI Assistant 子系統，可進行提示詞改寫/檢查/變體、參數建議、工作診斷、編輯規劃與 Gallery 圖片分析。
 - SQLite 工作佇列：SSE 進度、取消、重試/沿用、持久化歷史、階段耗時資訊，以及生成/編輯共用的並行限制。
+- 選用的串流階段性圖片預覽，適用於數量為 1 的 `/v1/images/generations` 與 `/v1/images/edits` 請求，透過 SSE 在上游生成過程中推送。工作歷史會顯示每個工作的 token 用量，並在上游回傳 usage 且該模型已設定費率時顯示估算美元費用。
 - 本機 Gallery：游標分頁、搜尋/篩選、收藏、燈箱導覽、selection token 批次操作、ZIP 匯入/匯出、縮圖、位元組大小資訊，以及非同步匯入/匯出工作。
 - 選用的 Cloudflare R2 Gallery 備份同步；本機 SQLite 與圖片檔案仍是唯一真實來源。
 - 存取密鑰、IP/Host 允許清單、可信任 Proxy Header、CSRF Origin 檢查、CSP nonce、版本檢查，以及選用的 JSON/Prometheus 指標。
@@ -298,7 +299,7 @@ Overall Config 會將 Override 持久化至 SQLite。部分設定可熱更新；
 - 2.5 自動回傳 Base64。面板省略 `response_format`，包括舊預設繼承的值，儲存圖片後提供本地圖片 URL；舊模型和閘道模式保持原有回傳格式行為。
 - 本次整合支援最多 16 張 PNG/JPEG/WebP 編輯輸入，單張小於 50 MB，並受應用程式上傳限制約束；其他格式請先轉換。1–10 張輸出沿用現有佇列，每個執行單元請求一張圖片。
 
-本次僅整合 Images API，不增加官方 Responses 圖像工具、遮罩或分片圖片串流預覽。上游帳號需要具備模型存取權限；更高品質可能使用更多 token，兩個變體的相同 token 單價不代表每張圖片費用相同。
+本次透過 Images API 整合，包含串流預覽（見下文）；不增加官方 Responses 圖像工具或遮罩。上游帳號需要具備模型存取權限；更高品質可能使用更多 token，兩個變體的相同 token 單價不代表每張圖片費用相同。
 
 規範核對日期：2026-09-10。[官方指南](https://developers.openai.com/api/docs/guides/image-generation) · [生成介面](https://developers.openai.com/api/reference/resources/images/methods/generate) · [編輯介面](https://developers.openai.com/api/reference/resources/images/methods/edit)。
 
@@ -312,6 +313,13 @@ Overall Config 會將 Override 持久化至 SQLite。部分設定可熱更新；
 | `/v1/images/edits` | 供 Edits 流程使用，傳送 Multipart 來源圖片與支援的編輯參數。 |
 
 使用 `/v1/responses` 與 `/v1/chat/completions` 時，尺寸、品質、格式、壓縮率與數量控制項會停用，因為這些路徑的參數契約不同。
+
+## 串流預覽與費用估算
+
+- 串流預覽需在生成表單中主動開啟（「串流預覽」開關），僅適用於 `/v1/images/generations` 與 `/v1/images/edits`，且數量必須為 1——每張請求圖片都會作為獨立執行單元排隊，因此串流預覽無法與批次生成組合使用。可選擇 1–3 個預覽畫面；畫面數越多，上游消耗的輸出 token 越多，最終圖片的費用也會略高。
+- 若相容服務聲稱支援 OpenAI 卻拒絕 `stream`/`partial_images` 參數，工作會以明確錯誤結束，提示您關閉串流預覽後重試——不會自動降級為非串流請求重新發起，因為這可能導致重複計費。
+- 階段性預覽圖片僅保存在伺服器記憶體中，每個執行單元只保留最新一幀，大小受 `PREVIEW_CACHE_MAX_ENTRY_MB`/`PREVIEW_CACHE_MAX_ENTRIES`（見 `.env.example`）限制，不會寫入 SQLite 或 Gallery。工作進行中重新連線的客戶端會收到目前快取的預覽畫面，或等待下一幀；行程重新啟動或切換到其他 worker 後不會有可重播的快取。
+- **費用估算並非帳單。** 僅在上游實際回傳 `usage` 時才會計算；缺少 usage 或該模型未設定費率時，介面會顯示具體原因（例如「未設定該模型的費率」），而非顯示 `$0.00`。內建費率僅涵蓋 `gpt-image-1`，取自 OpenAI 官方 Images API 定價；第三方「OpenAI 相容」上游的實際定價通常並不相同。可透過 `.env.example` 中的 `IMAGE_COST_RATES_JSON` 覆寫或新增各模型的費率。
 
 ## API 概覽
 

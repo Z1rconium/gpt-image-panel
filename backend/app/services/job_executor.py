@@ -433,6 +433,7 @@ async def run_claimed_image_unit(unit: dict, worker_id: str):
                 "partial_images": getattr(req, "partial_images", 2),
                 "preview": on_preview,
             }
+            metrics.increment("image_job.streaming_requested")
 
         with use_job_stage_timer(stage_timer), use_usage_sink(usage_sink):
             if operation == "edit":
