@@ -58,7 +58,9 @@ export function jobToPromptForm(job: GenerateJobStatus, fallbackModel = DEFAULT_
     background: normalizeBackground(job.background),
     outputCompression: job.output_compression === null || job.output_compression === undefined ? '' : String(job.output_compression),
     quantity: clampQuantity(job.n),
-    responseFormat: normalizeJobResponseFormat(job.response_format)
+    responseFormat: normalizeJobResponseFormat(job.response_format),
+    stream: Boolean(job.streaming),
+    partialImages: job.partial_images ?? initialPromptFormState.partialImages
   };
 }
 
@@ -77,7 +79,9 @@ export function galleryEntryToPromptForm(
     background: normalizeBackground(image.background),
     outputCompression: image.output_compression === null || image.output_compression === undefined ? '' : String(image.output_compression),
     quantity: clampQuantity(image.n),
-    responseFormat: normalizeJobResponseFormat(image.response_format)
+    responseFormat: normalizeJobResponseFormat(image.response_format),
+    stream: initialPromptFormState.stream,
+    partialImages: initialPromptFormState.partialImages
   };
 }
 
@@ -97,7 +101,9 @@ export function galleryEntryToEditForm(
     background: normalizeBackground(image.background),
     outputCompression: image.output_compression === null || image.output_compression === undefined ? '' : String(image.output_compression),
     quantity: clampQuantity(image.n),
-    responseFormat: normalizeJobResponseFormat(image.response_format)
+    responseFormat: normalizeJobResponseFormat(image.response_format),
+    stream: initialPromptFormState.stream,
+    partialImages: initialPromptFormState.partialImages
   };
 }
 

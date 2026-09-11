@@ -11,6 +11,7 @@ import type { GenerateJobImage, GenerateJobStatus } from '$lib/api/types/jobs';
   export let imageUrl = '';
   export let filename = '';
   export let prompt = '';
+  export let streamingPreviewDataUrl = '';
   export let onRegenerate: () => void = () => {};
   export let onClear: () => void = () => {};
 
@@ -220,6 +221,28 @@ import type { GenerateJobImage, GenerateJobStatus } from '$lib/api/types/jobs';
             </div>
           </div>
         {/if}
+      </div>
+    {:else if loading && streamingPreviewDataUrl}
+      <div class="flex h-full w-full flex-col">
+        <div class="flex min-w-0 items-center gap-3 border-b border-stone-200 bg-white/80 px-4 py-3 dark:border-zinc-800 dark:bg-zinc-900/80" role="status" aria-live="polite" aria-atomic="true">
+          <span class="spinner shrink-0"></span>
+          <div class="min-w-0 flex-1">
+            <p class="truncate text-sm font-semibold text-stone-900 dark:text-zinc-100">{$t.preview.streamingPreviewLabel}</p>
+            <p class="mt-0.5 text-xs text-stone-500 dark:text-zinc-400">{stageLabel(job, $t.stages) || $t.preview.working}</p>
+          </div>
+        </div>
+        <div class="flex min-h-[320px] flex-1 items-center justify-center p-3">
+          <div class="preview-image-frame relative">
+            <img
+              src={streamingPreviewDataUrl}
+              alt={$t.preview.streamingPreviewAlt}
+              class="preview-image max-h-[640px] max-w-full rounded-lg object-contain opacity-90"
+              loading="eager"
+              decoding="async"
+            />
+            <span class="absolute left-2 top-2 rounded bg-black/60 px-2 py-1 text-xs font-medium text-white">{$t.preview.streamingPreviewBadge}</span>
+          </div>
+        </div>
       </div>
     {:else if loading}
       <div class="flex max-w-sm flex-col items-center px-6 text-center" role="status" aria-live="polite" aria-atomic="true">

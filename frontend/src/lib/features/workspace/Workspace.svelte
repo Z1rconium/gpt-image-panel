@@ -458,7 +458,7 @@ import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput 
   }
 
   function trackJob(jobId: string) {
-    jobsStore.trackJob(jobId, async (job) => updatePreviewFromJob(job), previewStore.setError);
+    jobsStore.trackJob(jobId, async (job) => updatePreviewFromJob(job), previewStore.setError, previewStore.applyPreviewEvent);
   }
 
   function normalizeFormQuantityForSubmit() {
@@ -1304,6 +1304,7 @@ import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput 
     imageUrl={$previewStore.imageUrl}
     filename={$previewStore.filename}
     prompt={$previewStore.prompt}
+    streamingPreviewDataUrl={$previewStore.streamingPreviewDataUrl}
     onRegenerate={regenerate}
     onClear={clearPreview}
   />

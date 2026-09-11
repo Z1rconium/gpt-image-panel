@@ -12,5 +12,7 @@ export type GenerateRequestBody = {
   background?: 'auto' | 'opaque' | 'transparent';
   response_format?: 'url' | 'b64_json' | null;
   api_path?: ApiPath | null;
+  stream?: boolean;
+  partial_images?: number;
 };
 

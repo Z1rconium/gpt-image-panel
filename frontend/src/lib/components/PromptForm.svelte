@@ -40,6 +40,21 @@
       : '0-100';
   $: optimizeDisabled = loading || optimizing || !optimizerEnabled || !form.prompt.trim();
 
+  $: streamUnavailableReason = Number(form.quantity) > 1
+    ? $t.promptForm.streamRequiresSingleImage
+    : !hasEditSource && form.apiPath !== '/v1/images/generations'
+      ? $t.promptForm.streamUnsupportedPath
+      : '';
+  $: streamDisabled = loading || Boolean(streamUnavailableReason);
+  // Computed inline (not from streamDisabled) to avoid a reactive dependency
+  // cycle through `form`: streamDisabled already depends on form.
+  $: if (
+    form.stream &&
+    (loading || Number(form.quantity) > 1 || (!hasEditSource && form.apiPath !== '/v1/images/generations'))
+  ) {
+    form = { ...form, stream: false };
+  }
+
   function handleQuantityInput() {
     form = { ...form, quantity: sanitizeQuantityInput(form.quantity) };
   }
@@ -213,6 +228,29 @@
             </select>
           </label>
         </div>
+
+        <div class="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-stone-200/60 pt-3 dark:border-zinc-800/60">
+          <label class="mobile-touch-target flex items-center gap-2 text-xs font-medium text-stone-600 dark:text-zinc-400">
+            <input type="checkbox" class="h-3.5 w-3.5 accent-emerald-500" bind:checked={form.stream} disabled={streamDisabled} />
+            {$t.promptForm.streamToggle}
+          </label>
+          {#if form.stream && !streamDisabled}
+            <select
+              bind:value={form.partialImages}
+              aria-label={$t.promptForm.streamPartialImages}
+              class="control-focus form-select !bg-white text-xs focus:border-emerald-500 dark:!bg-zinc-900"
+            >
+              <option value={1}>1</option>
+              <option value={2}>2</option>
+              <option value={3}>3</option>
+            </select>
+          {/if}
+        </div>
+        {#if streamUnavailableReason}
+          <p class="mt-1 text-xs text-stone-500 dark:text-zinc-500">{streamUnavailableReason}</p>
+        {:else if form.stream}
+          <p class="mt-1 text-xs text-stone-500 dark:text-zinc-500">{$t.promptForm.streamCostNote}</p>
+        {/if}
       </div>
     </div>
   </div>

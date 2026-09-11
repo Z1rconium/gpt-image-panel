@@ -278,7 +278,12 @@ const en = {
     generate: 'Generate',
     submitShortcut: 'Ctrl/⌘ + Enter to submit',
     editSourcePreview: 'Edit Source Preview',
-    closeEditPreview: 'Close edit image preview'
+    closeEditPreview: 'Close edit image preview',
+    streamToggle: 'Streaming preview',
+    streamPartialImages: 'Preview frames',
+    streamRequiresSingleImage: 'Streaming preview requires a quantity of 1',
+    streamUnsupportedPath: 'Streaming preview requires the Images API, not Responses or Chat Completions',
+    streamCostNote: 'Preview frames add extra output tokens; the final cost reflects actual usage'
   },
   promptOptimizerAssistant: {
     title: 'Quick optimize',
@@ -368,7 +373,10 @@ const en = {
     selectResult: (index: number) => `Select result ${index}`,
     resultThumbAlt: (index: number) => `Generated result ${index}`,
     noPreview: 'No preview yet',
-    noPreviewHint: 'Generate or edit an image to show the result.'
+    noPreviewHint: 'Generate or edit an image to show the result.',
+    streamingPreviewLabel: 'Streaming preview',
+    streamingPreviewAlt: 'Streaming partial preview',
+    streamingPreviewBadge: 'Preview'
   },
   gallery: {
     title: 'Gallery',

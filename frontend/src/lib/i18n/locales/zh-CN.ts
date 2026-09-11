@@ -280,7 +280,12 @@ const zh: Translation = {
     generate: '生成',
     submitShortcut: 'Ctrl/⌘ + Enter 提交',
     editSourcePreview: '编辑源预览',
-    closeEditPreview: '关闭编辑图片预览'
+    closeEditPreview: '关闭编辑图片预览',
+    streamToggle: '流式预览',
+    streamPartialImages: '预览帧数',
+    streamRequiresSingleImage: '流式预览要求数量为 1',
+    streamUnsupportedPath: '流式预览仅支持 Images API,不支持 Responses 或 Chat Completions',
+    streamCostNote: '预览帧会增加额外的输出 token;最终费用以实际用量为准'
   },
   promptOptimizerAssistant: {
     title: '快速优化',
@@ -370,7 +375,10 @@ const zh: Translation = {
     selectResult: (index) => `选择结果 ${index}`,
     resultThumbAlt: (index) => `生成结果 ${index}`,
     noPreview: '暂无预览',
-    noPreviewHint: '生成或编辑一张图片后会在这里显示结果。'
+    noPreviewHint: '生成或编辑一张图片后会在这里显示结果。',
+    streamingPreviewLabel: '流式预览',
+    streamingPreviewAlt: '流式阶段性预览',
+    streamingPreviewBadge: '预览'
   },
   gallery: {
     title: '图库',

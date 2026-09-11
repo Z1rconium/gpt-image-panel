@@ -4,7 +4,7 @@ import { t } from '$lib/i18n';
 import { MAX_EDIT_SOURCE_IMAGES, editSourceCount, editSourceStore, type EditSourceState } from '$lib/stores/editSource';
 import type { ApiPath, ResponseFormatDefault } from '$lib/api/types/common';
 import type { GenerateRequestBody } from '$lib/api/types/generation';
-import type { GenerateJobResponse, GenerateJobStatus } from '$lib/api/types/jobs';
+import type { GeneratePreviewEvent, GenerateJobResponse, GenerateJobStatus } from '$lib/api/types/jobs';
 import { MAX_PROMPT_CHARS, imageQualities, isImage25, promptLength, validImageSize } from '$lib/utils/imageModels';
 
 export type PreviewState = {
@@ -14,6 +14,8 @@ export type PreviewState = {
   imageUrl: string;
   filename: string;
   prompt: string;
+  streamingPreviewDataUrl: string;
+  streamingPreviewSequence: number;
 };
 
 export type PromptFormState = {
@@ -27,6 +29,8 @@ export type PromptFormState = {
   outputCompression: string;
   quantity: number | string;
   responseFormat: ResponseFormatDefault;
+  stream: boolean;
+  partialImages: number;
 };
 
 export const DEFAULT_QUANTITY = 1;
@@ -37,7 +41,9 @@ const initialPreviewState: PreviewState = {
   job: null,
   imageUrl: '',
   filename: '',
-  prompt: ''
+  prompt: '',
+  streamingPreviewDataUrl: '',
+  streamingPreviewSequence: 0
 };
 
 export const DEFAULT_PROMPT_MODEL = 'gpt-image-2';
@@ -52,7 +58,9 @@ export const initialPromptFormState: PromptFormState = {
   background: 'auto',
   outputCompression: '',
   quantity: DEFAULT_QUANTITY,
-  responseFormat: 'url'
+  responseFormat: 'url',
+  stream: false,
+  partialImages: 2
 };
 
 function buildRequestBody(form: PromptFormState): GenerateRequestBody {
@@ -79,6 +87,11 @@ function buildRequestBody(form: PromptFormState): GenerateRequestBody {
     body.output_compression = null;
   }
 
+  if (form.stream && quantity === 1) {
+    body.stream = true;
+    body.partial_images = Math.min(Math.max(Math.round(form.partialImages) || 2, 1), 3);
+  }
+
   return body;
 }
 
@@ -89,6 +102,8 @@ function submissionError(body: GenerateRequestBody, edit = false): string {
   if (isImage25(body.model) && !edit && body.api_path !== '/v1/images/generations') return messages.promptForm.image25Endpoint;
   if (!imageQualities(body.model).includes(body.quality)) return messages.promptForm.qualityReset;
   if ((edit || body.api_path === '/v1/images/generations') && !validImageSize(body.size)) return messages.sizeDialog.invalidSize;
+  if (body.stream && body.n > 1) return messages.promptForm.streamRequiresSingleImage;
+  if (body.stream && !edit && body.api_path !== '/v1/images/generations') return messages.promptForm.streamUnsupportedPath;
   return '';
 }
 
@@ -113,6 +128,17 @@ function createPreviewStore() {
   function clearPreview(closeActiveJobSource?: () => void) {
     closeActiveJobSource?.();
     set(initialPreviewState);
+  }
+
+  function applyPreviewEvent(event: { job_id: string; sequence: number; data_url: string }) {
+    update((current) => {
+      if (!current.job || current.job.job_id !== event.job_id) return current;
+      // The final image always wins, and out-of-order/duplicate frames
+      // (possible across an SSE reconnect) are dropped via the sequence.
+      if (current.imageUrl) return current;
+      if (event.sequence <= current.streamingPreviewSequence) return current;
+      return { ...current, streamingPreviewDataUrl: event.data_url, streamingPreviewSequence: event.sequence };
+    });
   }
 
   async function generateImage(
@@ -220,7 +246,9 @@ function createPreviewStore() {
       outputFormat: lastRequest.output_format,
       background: (lastRequest.background as PromptFormState['background']) ?? 'auto',
       outputCompression: lastRequest.output_compression === null || lastRequest.output_compression === undefined ? '' : String(lastRequest.output_compression),
-      responseFormat: lastRequest.response_format || ''
+      responseFormat: lastRequest.response_format || '',
+      stream: Boolean(lastRequest.stream),
+      partialImages: lastRequest.partial_images ?? initialPromptFormState.partialImages
     });
     if (lastAction === 'edit') edit();
     else generate();
@@ -235,6 +263,7 @@ function createPreviewStore() {
     setPreview,
     setError,
     clearPreview,
+    applyPreviewEvent,
     generateImage,
     editImage,
     regenerate,

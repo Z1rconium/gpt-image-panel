@@ -36,6 +36,15 @@ export type GenerateJobImage = {
   image_height?: number | null;
 };
 
+export type GeneratePreviewEvent = {
+  job_id: string;
+  unit_index: number;
+  partial_image_index: number;
+  sequence: number;
+  mime_type: string;
+  data_url: string;
+};
+
 export type GenerateJobStatus = GenerateJobResponse & {
   id?: string | null;
   image_id?: string | null;
@@ -65,6 +74,8 @@ export type GenerateJobStatus = GenerateJobResponse & {
   stage_timings?: Record<string, number>;
   usage?: UsageSummary | null;
   cost?: CostEstimate | null;
+  streaming?: boolean | null;
+  partial_images?: number | null;
   error?: string | null;
 };
 

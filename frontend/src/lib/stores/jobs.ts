@@ -4,7 +4,7 @@ import { openJsonEventSource } from '$lib/api/events';
 import { t } from '$lib/i18n';
 import { filenameFromImageUrl, jobFailureMessage } from '$lib/utils/format';
 import { isActiveJobStatus } from '$lib/utils/jobs';
-import type { GenerateJobResponse, GenerateJobStatus } from '$lib/api/types/jobs';
+import type { GeneratePreviewEvent, GenerateJobResponse, GenerateJobStatus } from '$lib/api/types/jobs';
 import type { PreviewState } from '$lib/stores/preview';
 
 export type JobsState = {
@@ -136,6 +136,7 @@ function createJobsStore() {
   let trackedJobId: string | null = null;
   let trackedJobUpdate: ((job: GenerateJobStatus) => Promise<void>) | null = null;
   let trackedJobError: ((message: string) => void) | null = null;
+  let trackedJobPreview: ((event: GeneratePreviewEvent) => void) | null = null;
   let trackedJobGeneration = 0;
   let historyRequestSeq = 0;
 
@@ -343,37 +344,46 @@ function createJobsStore() {
   function trackJob(
     jobId: string,
     updatePreviewFromJob: (job: GenerateJobStatus) => Promise<void>,
-    setPreviewError: (message: string) => void
+    setPreviewError: (message: string) => void,
+    onPreview?: (event: GeneratePreviewEvent) => void
   ) {
     if (!jobId) return;
     closeActiveJobSource();
     trackedJobId = jobId;
     trackedJobUpdate = updatePreviewFromJob;
     trackedJobError = setPreviewError;
+    trackedJobPreview = onPreview || null;
     const generation = trackedJobGeneration;
-    const source = openJsonEventSource<GenerateJobStatus>(`/api/generate/${encodeURIComponent(jobId)}/events`, {
-      onEvent: ({ data }) => {
-        if (
-          activeJobSource !== source ||
-          trackedJobId !== jobId ||
-          trackedJobGeneration !== generation ||
-          data.job_id !== jobId
-        ) return;
-        activeJobFeedHealthy = true;
-        clearActiveJobPollingTimer();
-        void applyTrackedJob(data);
+    const source = openJsonEventSource<GenerateJobStatus | GeneratePreviewEvent>(
+      `/api/generate/${encodeURIComponent(jobId)}/events`,
+      {
+        onEvent: ({ event, data }) => {
+          if (activeJobSource !== source || trackedJobId !== jobId || trackedJobGeneration !== generation) return;
+          if (event === 'preview') {
+            const previewEvent = data as GeneratePreviewEvent;
+            if (previewEvent.job_id !== jobId) return;
+            trackedJobPreview?.(previewEvent);
+            return;
+          }
+          const jobData = data as GenerateJobStatus;
+          if (jobData.job_id !== jobId) return;
+          activeJobFeedHealthy = true;
+          clearActiveJobPollingTimer();
+          void applyTrackedJob(jobData);
+        },
+        onNetworkError: () => {
+          if (activeJobSource !== source || trackedJobId !== jobId || trackedJobGeneration !== generation) return;
+          activeJobFeedHealthy = false;
+          startTrackedJobPolling();
+        },
+        onError: () => {
+          if (activeJobSource !== source || trackedJobId !== jobId || trackedJobGeneration !== generation) return;
+          closeActiveJobEventSource();
+          startTrackedJobPolling();
+        }
       },
-      onNetworkError: () => {
-        if (activeJobSource !== source || trackedJobId !== jobId || trackedJobGeneration !== generation) return;
-        activeJobFeedHealthy = false;
-        startTrackedJobPolling();
-      },
-      onError: () => {
-        if (activeJobSource !== source || trackedJobId !== jobId || trackedJobGeneration !== generation) return;
-        closeActiveJobEventSource();
-        startTrackedJobPolling();
-      }
-    }, ['job']);
+      ['job', 'preview']
+    );
     activeJobSource = source;
   }
 
@@ -448,6 +458,8 @@ function createJobsStore() {
       imageUrl: '',
       filename: '',
       prompt: currentPrompt,
+      streamingPreviewDataUrl: '',
+      streamingPreviewSequence: 0,
       job: {
         job_id: '',
         status: 'queued',
@@ -467,7 +479,11 @@ function createJobsStore() {
       job,
       imageUrl: image || preview.imageUrl,
       filename: primaryImage?.filename || (image ? filenameFromImageUrl(image) : preview.filename),
-      prompt: job.prompt || preview.prompt
+      prompt: job.prompt || preview.prompt,
+      // The final image always wins over a streamed partial; once it lands,
+      // drop the streaming preview so PreviewPanel switches to the real image.
+      streamingPreviewDataUrl: image ? '' : preview.streamingPreviewDataUrl,
+      streamingPreviewSequence: image ? 0 : preview.streamingPreviewSequence
     };
   }
 
@@ -489,6 +505,7 @@ function createJobsStore() {
     trackedJobId = null;
     trackedJobUpdate = null;
     trackedJobError = null;
+    trackedJobPreview = null;
   }
 
   function cleanup() {
