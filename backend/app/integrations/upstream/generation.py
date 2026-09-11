@@ -32,6 +32,9 @@ from ...schemas.generation import EditRequest, GenerateRequest
 from ..session_pool import TIMEOUT_PROBE, TIMEOUT_UPSTREAM, get_pool
 
 ProgressCallback = Callable[[str, str], None]
+# Called with (partial_image_index, mime_type, image_bytes) as each streamed
+# partial image arrives. Never called for non-streaming requests.
+PreviewCallback = Callable[[int, str, bytes], None]
 logger = logging.getLogger(__name__)
 
 
@@ -191,6 +194,95 @@ async def save_gallery_entries_from_upstream_data(
     return entries
 
 
+async def consume_streaming_image_response(
+    resp: aiohttp.ClientResponse,
+    api_path: str,
+    progress: ProgressCallback | None,
+    preview: "PreviewCallback | None",
+) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+    """Parse a `stream=true` image generation/edit response.
+
+    Forwards each partial image to `preview` as it arrives, using a bounded
+    SSE parser so a slow or malicious upstream can't grow memory unbounded.
+    Returns the final image (in the same `data` array shape a non-streaming
+    response uses) plus usage, taken from the upstream's `*.completed` event.
+    """
+    status = resp.status
+    content_type = resp.headers.get("Content-Type", "")
+    if status >= 400:
+        max_response_bytes = config.MAX_UPSTREAM_JSON_MB * 1024 * 1024
+        error_text = await read_limited_text_response(
+            resp, max_response_bytes, label="Upstream stream error"
+        )
+        is_json_response = is_json_content_type(content_type) or looks_like_json_body(error_text)
+        raise_upstream_error(status, error_text, is_json_response, api_path)
+
+    if "text/event-stream" not in content_type:
+        raise UpstreamApiError(
+            "Upstream did not return a streaming response for stream=true. "
+            "Disable streaming preview for this request and try again."
+        )
+
+    if progress:
+        progress("received_api_response", "Receiving streamed upstream response")
+
+    final_data: list[dict[str, Any]] | None = None
+    raw_usage: dict[str, Any] | None = None
+    next_partial_index = 0
+    max_total_bytes = config.STREAMING_MAX_TOTAL_MB * 1024 * 1024
+    max_frame_bytes = config.STREAMING_MAX_FRAME_MB * 1024 * 1024
+
+    async for event in iter_bounded_sse_json_events(
+        resp,
+        max_total_bytes=max_total_bytes,
+        max_frame_bytes=max_frame_bytes,
+        label="Upstream image stream",
+    ):
+        if not isinstance(event, dict):
+            continue
+        event_type = str(event.get("type") or "")
+        if event_type.endswith(".partial_image"):
+            b64_json = event.get("b64_json")
+            if not b64_json:
+                continue
+            try:
+                partial_index = int(event.get("partial_image_index"))
+            except (TypeError, ValueError):
+                partial_index = next_partial_index
+            next_partial_index = partial_index + 1
+            if preview is not None:
+                try:
+                    image_bytes = base64.b64decode(str(b64_json))
+                except ValueError:
+                    continue
+                mime_type = f"image/{str(event.get('output_format') or 'png').lower()}"
+                if progress:
+                    progress(
+                        "streaming_preview",
+                        f"Received partial preview {partial_index + 1}",
+                    )
+                preview(partial_index, mime_type, image_bytes)
+        elif event_type.endswith(".completed"):
+            b64_json = event.get("b64_json")
+            if b64_json:
+                final_data = [{"b64_json": b64_json}]
+            usage = event.get("usage")
+            if isinstance(usage, dict):
+                raw_usage = usage
+        elif event_type.endswith(".failed") or event_type == "error":
+            message = event.get("error") or event.get("message") or "Upstream reported a streaming failure"
+            if isinstance(message, dict):
+                message = message.get("message") or "Upstream reported a streaming failure"
+            raise UpstreamApiError(str(message))
+
+    if final_data is None:
+        raise UpstreamApiError(
+            "Streaming upstream response ended without a completed image event"
+        )
+
+    return final_data, raw_usage
+
+
 async def call_image_generation_api(
     api_url: str,
     api_key: str,
@@ -199,9 +291,14 @@ async def call_image_generation_api(
     api_preset_name: str | None = None,
     progress: ProgressCallback | None = None,
     socks5_proxy: str | None = None,
+    *,
+    stream: bool = False,
+    partial_images: int = 2,
+    preview: "PreviewCallback | None" = None,
 ) -> list[GalleryEntry]:
     api_path = normalize_api_path(api_path)
     payload.normalize_model_options(api_path)
+    use_streaming = bool(stream) and api_path == "/v1/images/generations"
     prepared_request = await _prepare_upstream_request(
         api_url=api_url,
         api_key=api_key,
@@ -224,6 +321,9 @@ async def call_image_generation_api(
         if progress:
             progress("building_generation_payload", "Building image generation payload")
         request_data = _build_image_params(payload)
+        if use_streaming:
+            request_data["stream"] = True
+            request_data["partial_images"] = max(1, min(3, int(partial_images or 2)))
 
     format_info = get_output_format_info(payload.output_format)
     gallery_metadata = build_gallery_metadata(payload, api_path, api_preset_name)
@@ -247,7 +347,13 @@ async def call_image_generation_api(
             async with prepared_request.post(
                 json=request_data,
             ) as resp:
-                if api_path == CHAT_COMPLETIONS_API_PATH:
+                if use_streaming:
+                    data, raw_usage = await consume_streaming_image_response(
+                        resp, api_path, progress, preview
+                    )
+                    record_upstream_usage(raw_usage)
+                    response_text = ""
+                elif api_path == CHAT_COMPLETIONS_API_PATH:
                     result, response_text = (
                         await parse_upstream_chat_completion_response(
                             resp, api_path, progress
@@ -258,29 +364,30 @@ async def call_image_generation_api(
                         resp, api_path, progress
                     )
 
-        raw_usage = result.get("usage") if isinstance(result, dict) else None
-        if raw_usage is None and isinstance(result, dict) and "_sse_events" in result:
-            raw_usage = extract_usage_from_sse_events(result.get("_sse_events") or [])
-        record_upstream_usage(raw_usage)
+        if not use_streaming:
+            raw_usage = result.get("usage") if isinstance(result, dict) else None
+            if raw_usage is None and isinstance(result, dict) and "_sse_events" in result:
+                raw_usage = extract_usage_from_sse_events(result.get("_sse_events") or [])
+            record_upstream_usage(raw_usage)
 
-        if api_path == RESPONSES_API_PATH:
-            if progress:
-                progress(
-                    "extracting_response_image_output",
-                    "Extracting image_generation_call output",
-                )
-            data = extract_response_image_results(result)
-        elif api_path == CHAT_COMPLETIONS_API_PATH:
-            if progress:
-                progress(
-                    "extracting_chat_completion_image_output",
-                    "Extracting Chat Completions image output",
-                )
-            data = extract_chat_completion_image_results(result)
-        else:
-            if progress:
-                progress("extracting_generation_data", "Extracting image data array")
-            data = result.get("data", [])
+            if api_path == RESPONSES_API_PATH:
+                if progress:
+                    progress(
+                        "extracting_response_image_output",
+                        "Extracting image_generation_call output",
+                    )
+                data = extract_response_image_results(result)
+            elif api_path == CHAT_COMPLETIONS_API_PATH:
+                if progress:
+                    progress(
+                        "extracting_chat_completion_image_output",
+                        "Extracting Chat Completions image output",
+                    )
+                data = extract_chat_completion_image_results(result)
+            else:
+                if progress:
+                    progress("extracting_generation_data", "Extracting image data array")
+                data = result.get("data", [])
         data = validate_upstream_image_data(data, payload.n)
         if not data:
             raise UpstreamApiError(
@@ -289,7 +396,8 @@ async def call_image_generation_api(
 
         response_preview = response_text[:200]
         del response_text
-        del result
+        if not use_streaming:
+            del result
         return await save_gallery_entries_from_upstream_data(
             download_session=download_session,
             data=data,
@@ -371,10 +479,15 @@ async def call_image_edit_api(
     api_preset_name: str | None = None,
     progress: ProgressCallback | None = None,
     socks5_proxy: str | None = None,
+    *,
+    stream: bool = False,
+    partial_images: int = 2,
+    preview: "PreviewCallback | None" = None,
 ) -> list[GalleryEntry]:
     if not image_sources:
         raise UpstreamApiError("At least one edit source image is required")
 
+    use_streaming = bool(stream)
     api_path = "/v1/images/edits"
     payload.normalize_model_options(api_path)
     prepared_request = await _prepare_upstream_request(
@@ -405,6 +518,9 @@ async def call_image_edit_api(
             )
         for key, value in _build_image_params(payload).items():
             form.add_field(key, str(value))
+        if use_streaming:
+            form.add_field("stream", "true")
+            form.add_field("partial_images", str(max(1, min(3, int(partial_images or 2)))))
 
         pool = get_pool()
         memory_lease = upstream_memory_lease(
@@ -422,21 +538,30 @@ async def call_image_edit_api(
             async with prepared_request.post(
                 data=form,
             ) as resp:
-                result, response_text = await parse_upstream_json_response(
-                    resp, api_path, progress
-                )
+                if use_streaming:
+                    data, raw_usage = await consume_streaming_image_response(
+                        resp, api_path, progress, preview
+                    )
+                    record_upstream_usage(raw_usage)
+                    response_text = ""
+                else:
+                    result, response_text = await parse_upstream_json_response(
+                        resp, api_path, progress
+                    )
+                    record_upstream_usage(result.get("usage") if isinstance(result, dict) else None)
 
-        record_upstream_usage(result.get("usage") if isinstance(result, dict) else None)
-
-        if progress:
-            progress("extracting_edit_data", "Extracting edited image data array")
-        data = validate_upstream_image_data(result.get("data", []), payload.n)
+        if not use_streaming:
+            if progress:
+                progress("extracting_edit_data", "Extracting edited image data array")
+            data = result.get("data", [])
+        data = validate_upstream_image_data(data, payload.n)
         if not data:
             raise UpstreamApiError(f"No image data in upstream response: {response_text[:200]}")
 
         response_preview = response_text[:200]
         del response_text
-        del result
+        if not use_streaming:
+            del result
         download_session = pool.get(timeout_kind=TIMEOUT_UPSTREAM)
         return await save_gallery_entries_from_upstream_data(
             download_session=download_session,

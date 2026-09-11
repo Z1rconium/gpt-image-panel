@@ -147,6 +147,8 @@ GENERATE_JOB_COLUMNS = (
     "image_height",
     "usage_json",
     "cost_json",
+    "streaming",
+    "partial_images",
     "error",
     "webhook_url",
 )
@@ -225,6 +227,8 @@ INTEGER_GENERATE_JOB_COLUMNS = {
     "failure_count",
     "image_width",
     "image_height",
+    "streaming",
+    "partial_images",
 }
 SETTINGS_ACTIVE_PRESET_KEY = "active_preset_id"
 UPSTREAM_SOCKS5_PROXY_KEY = "upstream_socks5_proxy"
@@ -1937,6 +1941,14 @@ def _migration_generate_job_usage_cost_columns(conn: sqlite3.Connection):
         conn.execute("ALTER TABLE image_job_units ADD COLUMN cost_json TEXT")
 
 
+def _migration_generate_job_streaming_columns(conn: sqlite3.Connection):
+    jobs_columns = _table_columns(conn, "generate_jobs")
+    if "streaming" not in jobs_columns:
+        conn.execute("ALTER TABLE generate_jobs ADD COLUMN streaming INTEGER")
+    if "partial_images" not in jobs_columns:
+        conn.execute("ALTER TABLE generate_jobs ADD COLUMN partial_images INTEGER")
+
+
 SCHEMA_MIGRATIONS = (
     (1, "baseline_legacy_schema", _migration_baseline_legacy_schema),
     (2, "gallery_filter_options", _migration_gallery_filter_options),
@@ -1955,6 +1967,7 @@ SCHEMA_MIGRATIONS = (
     (15, "generate_job_counts", _migration_generate_job_counts),
     (16, "background_column", _migration_background_column),
     (17, "generate_job_usage_cost_columns", _migration_generate_job_usage_cost_columns),
+    (18, "generate_job_streaming_columns", _migration_generate_job_streaming_columns),
 )
 
 
@@ -2704,6 +2717,8 @@ def _generate_job_from_row(row: sqlite3.Row) -> dict[str, Any]:
             job["cost"] = json.loads(cost_json)
         except json.JSONDecodeError:
             pass
+    if "streaming" in job:
+        job["streaming"] = bool(job["streaming"])
     if job.get("image_id"):
         job["id"] = job["image_id"]
     if not job.get("images") and job.get("image_id") and job.get("image_url"):

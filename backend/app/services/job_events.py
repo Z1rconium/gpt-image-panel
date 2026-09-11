@@ -15,6 +15,7 @@ from ..api.app_state import (
 from ..core import settings as config
 from ..core import validators as ssrf
 from ..core.constants import ACTIVE_GENERATE_JOB_STATUSES
+from ..core.observability import metrics
 from ..core.utils import utc_now
 from ..repositories.image_jobs import (
     get_generate_job,
@@ -42,6 +43,58 @@ def get_jobs_subscribers() -> set[asyncio.Queue]:
         subscribers = set()
         app.state.generate_jobs_subscribers = subscribers
     return subscribers
+
+
+def get_generate_job_preview_cache() -> dict[tuple[str, int], dict]:
+    """In-memory, per-process only: one slot per (job_id, unit_index) holding
+    the most recent partial-image preview. Never persisted to SQLite - a
+    reconnecting client either gets this cached frame or waits for the next
+    one; a restarted/other worker process has nothing to replay, which is an
+    accepted tradeoff for keeping base64 image data out of shared storage."""
+    cache = getattr(app.state, "generate_job_preview_cache", None)
+    if not isinstance(cache, dict):
+        cache = {}
+        app.state.generate_job_preview_cache = cache
+    return cache
+
+
+def publish_generate_job_preview(job_id: str, payload: dict) -> None:
+    """Publish a streamed partial-image preview to subscribers of this one
+    job's SSE stream only - never to the jobs-list feed."""
+    try:
+        unit_index = int(payload.get("unit_index") or 0)
+    except (TypeError, ValueError):
+        unit_index = 0
+
+    data_url = str(payload.get("data_url") or "")
+    if len(data_url.encode("utf-8")) > config.PREVIEW_CACHE_MAX_ENTRY_MB * 1024 * 1024:
+        metrics.increment("image_job.streaming_preview_dropped")
+        return
+
+    cache = get_generate_job_preview_cache()
+    key = (job_id, unit_index)
+    cache[key] = payload
+    while len(cache) > config.PREVIEW_CACHE_MAX_ENTRIES:
+        oldest_key = next(iter(cache))
+        if oldest_key == key:
+            break
+        cache.pop(oldest_key, None)
+    metrics.increment("image_job.streaming_preview_received")
+
+    event = {"event": "preview", "data": payload}
+    for queue in list(get_job_subscribers().get(job_id, set())):
+        publish_queue(queue, event)
+
+
+def get_cached_generate_job_previews(job_id: str) -> list[dict]:
+    cache = get_generate_job_preview_cache()
+    return [payload for (cached_job_id, _unit_index), payload in cache.items() if cached_job_id == job_id]
+
+
+def clear_generate_job_preview_cache(job_id: str) -> None:
+    cache = get_generate_job_preview_cache()
+    for key in [key for key in cache if key[0] == job_id]:
+        cache.pop(key, None)
 
 
 def serialize_sse_event(event: str, data: dict | list) -> str:
@@ -285,6 +338,7 @@ def store_generate_job(job_id: str, updates: dict, *, persist: bool = True) -> d
     else:
         app.state.generate_jobs.pop(job_id, None)
         app.state.generate_job_last_persist_at.pop(job_id, None)
+        clear_generate_job_preview_cache(job_id)
     if should_persist_generate_job(job_id, job, persist):
         upsert_generate_job(job)
     is_terminal = status not in ACTIVE_GENERATE_JOB_STATUSES
@@ -324,6 +378,7 @@ async def store_generate_job_async(
     else:
         app.state.generate_jobs.pop(job_id, None)
         app.state.generate_job_last_persist_at.pop(job_id, None)
+        clear_generate_job_preview_cache(job_id)
 
     if should_persist_generate_job(job_id, job, persist):
         await run_db_operation(

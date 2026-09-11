@@ -1,6 +1,7 @@
 """Claimed image unit execution and parent-job aggregation."""
 
 import asyncio
+import base64
 import logging
 import time
 from datetime import datetime
@@ -31,7 +32,11 @@ from ..repositories.image_jobs import (
     update_image_job_unit_progress,
 )
 from . import image_cost
-from .job_events import publish_generate_job, store_generate_job_async
+from .job_events import (
+    publish_generate_job,
+    publish_generate_job_preview,
+    store_generate_job_async,
+)
 from .blocking import run_db_operation
 from .job_queue import (
     cleanup_parent_edit_sources,
@@ -401,6 +406,34 @@ async def run_claimed_image_unit(unit: dict, worker_id: str):
         if int(parent.get("n") or 1) > 1:
             await aggregate_parent_image_job(parent_job_id, force_publish=True)
         metrics.increment(f"image_jobs.{operation}.started")
+
+        stream_kwargs: dict = {}
+        if getattr(req, "stream", False):
+            preview_sequence = 0
+            unit_index = int(unit.get("unit_index") or 0)
+
+            def on_preview(partial_image_index: int, mime_type: str, image_bytes: bytes) -> None:
+                nonlocal preview_sequence
+                preview_sequence += 1
+                data_url = f"data:{mime_type};base64,{base64.b64encode(image_bytes).decode('ascii')}"
+                publish_generate_job_preview(
+                    parent_job_id,
+                    {
+                        "job_id": parent_job_id,
+                        "unit_index": unit_index,
+                        "partial_image_index": partial_image_index,
+                        "sequence": preview_sequence,
+                        "mime_type": mime_type,
+                        "data_url": data_url,
+                    },
+                )
+
+            stream_kwargs = {
+                "stream": True,
+                "partial_images": getattr(req, "partial_images", 2),
+                "preview": on_preview,
+            }
+
         with use_job_stage_timer(stage_timer), use_usage_sink(usage_sink):
             if operation == "edit":
                 image_sources = [
@@ -419,6 +452,7 @@ async def run_claimed_image_unit(unit: dict, worker_id: str):
                     api_preset_name,
                     progress,
                     socks5_proxy=socks5_proxy,
+                    **stream_kwargs,
                 )
             else:
                 entries = await proxy.call_image_generation_api(
@@ -429,6 +463,7 @@ async def run_claimed_image_unit(unit: dict, worker_id: str):
                     api_preset_name,
                     progress,
                     socks5_proxy=socks5_proxy,
+                    **stream_kwargs,
                 )
             if not entries:
                 raise proxy.UpstreamApiError("No image data in upstream response")

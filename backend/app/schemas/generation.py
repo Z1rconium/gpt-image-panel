@@ -44,6 +44,8 @@ class GenerateRequest(StrictRequestModel):
     response_format: Optional[Literal["url", "b64_json"]] = None
     webhook_url: Optional[str] = Field(default=None, max_length=2048)
     api_path: Optional[ApiPath] = None
+    stream: bool = False
+    partial_images: int = Field(default=2, ge=1, le=3)
 
     def normalize_model_options(self, api_path: str) -> None:
         # Call after resolving omitted model / response-format values from the preset.
@@ -79,6 +81,12 @@ class GenerateRequest(StrictRequestModel):
         if self.background == "transparent" and self.output_format == "jpeg":
             self.output_format = "png"
             self.output_compression = None
+        return self
+
+    @model_validator(mode="after")
+    def validate_streaming_options(self) -> "GenerateRequest":
+        if self.stream and self.n > 1:
+            raise ValueError("stream=true requires n=1; the image queue runs each n as a separate request")
         return self
 
 
@@ -122,6 +130,15 @@ class GenerateJobImage(BaseModel):
     image_height: Optional[int] = None
 
 
+class GeneratePreviewEvent(BaseModel):
+    job_id: str
+    unit_index: int = 0
+    partial_image_index: int = 0
+    sequence: int = 0
+    mime_type: str = "image/png"
+    data_url: str
+
+
 class GenerateJobStatus(GenerateJobResponse):
     id: Optional[str] = None
     image_id: Optional[str] = None
@@ -151,4 +168,6 @@ class GenerateJobStatus(GenerateJobResponse):
     stage_timings: dict[str, float] = Field(default_factory=dict)
     usage: Optional[UsageSummary] = None
     cost: Optional[CostEstimate] = None
+    streaming: Optional[bool] = None
+    partial_images: Optional[int] = None
     error: Optional[str] = None

@@ -6,7 +6,7 @@ import logging
 import os
 import re
 import tempfile
-from collections.abc import Callable, Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
 from pathlib import Path
 from typing import Any, Protocol
 from urllib.parse import urljoin, urlsplit
@@ -179,6 +179,68 @@ async def spool_limited_response(
         path.unlink(missing_ok=True)
         raise UpstreamApiError(f"{label} is not valid {encoding} text") from e
     return path, preview_text, encoding
+
+
+def _decode_sse_frame(frame_bytes: bytes, encoding: str, label: str) -> Any | None:
+    try:
+        frame_text = frame_bytes.decode(encoding)
+    except (LookupError, UnicodeDecodeError) as e:
+        raise UpstreamApiError(f"{label} is not valid {encoding} text") from e
+
+    data_lines = [line[5:].strip() for line in frame_text.split("\n") if line.startswith("data:")]
+    if not data_lines:
+        return None
+    data = "\n".join(data_lines).strip()
+    if not data or data == "[DONE]":
+        return None
+    try:
+        return json.loads(data)
+    except json.JSONDecodeError as e:
+        raise UpstreamApiError(f"{label} contains malformed SSE JSON: {data[:200]}") from e
+
+
+async def iter_bounded_sse_json_events(
+    response: aiohttp.ClientResponse,
+    *,
+    max_total_bytes: int,
+    max_frame_bytes: int,
+    label: str = "Upstream stream",
+) -> AsyncIterator[Any]:
+    """Incrementally parse a `text/event-stream` response into JSON event
+    payloads without ever buffering the whole response in memory.
+
+    Enforces a total-stream byte cap (`max_total_bytes`) and a per-frame byte
+    cap (`max_frame_bytes`, one SSE "data:" block) so a runaway or malicious
+    upstream can't exhaust worker memory.
+    """
+    total = 0
+    encoding = get_response_charset(response)
+    pending = b""
+    async for chunk in response.content.iter_chunked(UPSTREAM_RESPONSE_CHUNK_SIZE):
+        total += len(chunk)
+        if total > max_total_bytes:
+            raise UpstreamApiError(f"{label} exceeded max size ({max_total_bytes} bytes)")
+        pending += chunk.replace(b"\r\n", b"\n")
+
+        while True:
+            idx = pending.find(b"\n\n")
+            if idx == -1:
+                if len(pending) > max_frame_bytes:
+                    raise UpstreamApiError(f"{label} frame exceeded max size ({max_frame_bytes} bytes)")
+                break
+            frame_bytes, pending = pending[:idx], pending[idx + 2 :]
+            if len(frame_bytes) > max_frame_bytes:
+                raise UpstreamApiError(f"{label} frame exceeded max size ({max_frame_bytes} bytes)")
+            event = _decode_sse_frame(frame_bytes, encoding, label)
+            if event is not None:
+                yield event
+
+    if pending.strip():
+        if len(pending) > max_frame_bytes:
+            raise UpstreamApiError(f"{label} frame exceeded max size ({max_frame_bytes} bytes)")
+        event = _decode_sse_frame(pending, encoding, label)
+        if event is not None:
+            yield event
 
 
 def _load_json_file(path: Path, encoding: str) -> Any:

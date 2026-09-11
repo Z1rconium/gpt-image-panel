@@ -193,6 +193,8 @@ def build_pending_job(
         "image_units": max(1, int(image_units or 1)),
         "api_path": api_path,
         "api_preset_name": api_preset_name,
+        "streaming": bool(getattr(req, "stream", False)),
+        "partial_images": getattr(req, "partial_images", None) if getattr(req, "stream", False) else None,
     }
 
 
@@ -366,6 +368,15 @@ async def queue_image_job(
                 raise HTTPException(status_code=422, detail="GPT Image 2.5 edit inputs must be PNG, JPEG or WebP; convert this image before editing")
             if int(source.get("byte_size") or 0) >= 50 * 1024 * 1024:
                 raise HTTPException(status_code=422, detail="GPT Image 2.5 edit inputs must be smaller than 50 MB")
+
+    if getattr(req, "stream", False) and resolved_api_path not in {
+        "/v1/images/generations",
+        "/v1/images/edits",
+    }:
+        raise HTTPException(
+            status_code=422,
+            detail="Streaming preview requires /v1/images/generations or /v1/images/edits",
+        )
 
     if not api_url:
         raise HTTPException(

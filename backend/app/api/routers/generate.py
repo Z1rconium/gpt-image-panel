@@ -8,6 +8,7 @@ from fastapi.responses import StreamingResponse
 
 from ..app_state import app
 from ...services.job_events import (
+    get_cached_generate_job_previews,
     get_job_subscribers,
     get_jobs_subscribers,
     publish_queue,
@@ -347,6 +348,12 @@ async def stream_generate_job(job_id: str, request: Request):
             if current.get("status") not in ACTIVE_GENERATE_JOB_STATUSES:
                 return
 
+            # Reconnect replay: send whatever partial-image preview is still
+            # cached for each unit so a client that briefly dropped doesn't
+            # have to wait for the next streamed frame to see one.
+            for cached_preview in get_cached_generate_job_previews(job_id):
+                yield serialize_sse_event("preview", cached_preview)
+
             while True:
                 if await request.is_disconnected():
                     break
@@ -375,6 +382,12 @@ async def stream_generate_job(job_id: str, request: Request):
                     continue
                 if event.get("event") == "_missing":
                     break
+                if event.get("event") == "preview":
+                    preview_payload = event.get("data")
+                    if isinstance(preview_payload, dict):
+                        last_sent = time.monotonic()
+                        yield serialize_sse_event("preview", preview_payload)
+                    continue
                 if event.get("event") != "job":
                     continue
                 current = event.get("data")

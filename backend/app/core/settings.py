@@ -172,6 +172,19 @@ MAX_SSE_SUBSCRIBERS_GLOBAL = max(1, int(os.getenv("MAX_SSE_SUBSCRIBERS_GLOBAL", 
 MAX_SSE_SUBSCRIBERS_PER_IP = max(1, int(os.getenv("MAX_SSE_SUBSCRIBERS_PER_IP", "10")))
 SSE_CONNECTION_TTL_SECONDS = max(60, int(os.getenv("SSE_CONNECTION_TTL_SECONDS", "3600")))
 
+# ── Streaming partial-image preview ──────────────────────────────
+# Bounds for the upstream `text/event-stream` response when stream=true.
+STREAMING_MAX_FRAME_MB = max(1, int(os.getenv("STREAMING_MAX_FRAME_MB", "8")))
+STREAMING_MAX_TOTAL_MB = max(
+    STREAMING_MAX_FRAME_MB,
+    int(os.getenv("STREAMING_MAX_TOTAL_MB", "64")),
+)
+# In-memory preview cache: one slot per (job_id, unit_index), holding only the
+# most recent partial image. Bounds are defensive backstops, not expected to
+# bind in normal operation.
+PREVIEW_CACHE_MAX_ENTRY_MB = max(1, int(os.getenv("PREVIEW_CACHE_MAX_ENTRY_MB", "8")))
+PREVIEW_CACHE_MAX_ENTRIES = max(1, int(os.getenv("PREVIEW_CACHE_MAX_ENTRIES", "500")))
+
 # ── Prompt optimizer ────────────────────────────────────────────
 PROMPT_OPTIMIZER_ENABLED = env_flag("PROMPT_OPTIMIZER_ENABLED")
 PROMPT_OPTIMIZER_API_URL = os.getenv("PROMPT_OPTIMIZER_API_URL", "").strip()

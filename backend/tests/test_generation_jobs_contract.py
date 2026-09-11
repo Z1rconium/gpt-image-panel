@@ -1808,3 +1808,150 @@ def test_background_transparent_with_jpeg_forces_png(tmp_path):
     assert payload.output_format == "png"
     assert payload.output_compression is None
     assert payload.background == "transparent"
+
+
+def test_stream_with_n_greater_than_one_rejected_with_422(client):
+    resp = client.post(
+        "/api/generate",
+        json={"prompt": "two streamed", "model": "gpt-image-2", "n": 2, "stream": True},
+    )
+    assert resp.status_code == 422
+
+
+def test_stream_partial_images_out_of_range_rejected_with_422(client):
+    resp = client.post(
+        "/api/generate",
+        json={"prompt": "bad partial count", "model": "gpt-image-2", "stream": True, "partial_images": 5},
+    )
+    assert resp.status_code == 422
+
+
+def test_stream_unsupported_api_path_rejected_with_422(client):
+    resp = client.post(
+        "/api/generate",
+        json={
+            "prompt": "responses streaming",
+            "model": "gpt-image-2",
+            "stream": True,
+            "api_path": "/v1/responses",
+        },
+    )
+    assert resp.status_code == 422
+
+
+def test_streaming_generation_job_delivers_previews_and_completes(client, monkeypatch):
+    captured: dict = {"preview_calls": []}
+
+    async def fake_generation_api(
+        api_url,
+        api_key,
+        api_path,
+        payload,
+        api_preset_name=None,
+        progress=None,
+        socks5_proxy=None,
+        *,
+        stream: bool = False,
+        partial_images: int = 2,
+        preview=None,
+    ):
+        captured["stream"] = stream
+        captured["partial_images"] = partial_images
+        assert preview is not None
+        preview(0, "image/png", PNG_BYTES)
+        preview(1, "image/png", PNG_BYTES)
+        captured["preview_calls"].append("ran")
+
+        image_id = image_files.generate_image_id()
+        entry = await gallery_mutations.add_to_gallery_async(
+            image_bytes=PNG_BYTES,
+            image_id=image_id,
+            prompt=payload.prompt,
+            size=payload.size,
+            filename=f"{image_id}.png",
+            metadata={
+                "model": payload.model,
+                "quality": payload.quality,
+                "output_format": payload.output_format,
+                "output_compression": payload.output_compression,
+                "response_format": payload.response_format,
+                "n": payload.n,
+                "api_path": api_path,
+                "api_preset_name": api_preset_name,
+            },
+        )
+        return [entry]
+
+    monkeypatch.setattr(backend_main.proxy, "call_image_generation_api", fake_generation_api)
+
+    resp = client.post(
+        "/api/generate",
+        json={
+            "prompt": "streamed cube",
+            "model": "gpt-image-2",
+            "n": 1,
+            "stream": True,
+            "partial_images": 2,
+        },
+    )
+    assert resp.status_code == 202
+    job_id = resp.json()["job_id"]
+
+    job = _wait_for_job(client, job_id)
+    assert job["status"] == "success"
+    assert job["streaming"] is True
+    assert job["partial_images"] == 2
+    assert captured["stream"] is True
+    assert captured["partial_images"] == 2
+    assert captured["preview_calls"] == ["ran"]
+
+    # Cache is cleared once the job reaches a terminal state.
+    assert job_events.get_cached_generate_job_previews(job_id) == []
+
+
+def test_job_preview_publish_pushes_to_subscriber_and_caches_latest(client):
+    queue = asyncio.Queue()
+    subscribers = job_events.get_job_subscribers().setdefault("preview-unit-job", set())
+    subscribers.add(queue)
+    try:
+        job_events.publish_generate_job_preview(
+            "preview-unit-job",
+            {
+                "job_id": "preview-unit-job",
+                "unit_index": 0,
+                "partial_image_index": 0,
+                "sequence": 1,
+                "mime_type": "image/png",
+                "data_url": "data:image/png;base64,AAAA",
+            },
+        )
+        event = queue.get_nowait()
+    finally:
+        subscribers.discard(queue)
+        job_events.get_job_subscribers().pop("preview-unit-job", None)
+
+    assert event["event"] == "preview"
+    assert event["data"]["sequence"] == 1
+
+    cached = job_events.get_cached_generate_job_previews("preview-unit-job")
+    assert len(cached) == 1
+    assert cached[0]["data_url"] == "data:image/png;base64,AAAA"
+
+    job_events.clear_generate_job_preview_cache("preview-unit-job")
+    assert job_events.get_cached_generate_job_previews("preview-unit-job") == []
+
+
+def test_job_preview_oversized_entry_is_dropped_not_cached(client, monkeypatch):
+    monkeypatch.setattr(config, "PREVIEW_CACHE_MAX_ENTRY_MB", 0)
+    job_events.publish_generate_job_preview(
+        "oversized-preview-job",
+        {
+            "job_id": "oversized-preview-job",
+            "unit_index": 0,
+            "partial_image_index": 0,
+            "sequence": 1,
+            "mime_type": "image/png",
+            "data_url": "data:image/png;base64," + "A" * 1024,
+        },
+    )
+    assert job_events.get_cached_generate_job_previews("oversized-preview-job") == []

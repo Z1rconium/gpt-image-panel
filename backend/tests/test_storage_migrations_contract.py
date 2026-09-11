@@ -424,6 +424,42 @@ def test_generate_job_usage_cost_migration_adds_columns_idempotently():
         )
 
 
+def test_generate_job_streaming_columns_migration_adds_columns_idempotently():
+    with sqlite3.connect(":memory:") as conn:
+        conn.row_factory = sqlite3.Row
+        conn.execute(
+            """
+            CREATE TABLE generate_jobs (
+                job_id TEXT PRIMARY KEY,
+                status TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO generate_jobs (job_id, status, created_at, updated_at)
+            VALUES ('legacy-job', 'success', '2026-01-01T00:00:00Z', '2026-01-01T00:00:01Z')
+            """
+        )
+
+        db_repo._migration_generate_job_streaming_columns(conn)
+        columns = db_repo._table_columns(conn, "generate_jobs")
+        row = conn.execute(
+            "SELECT streaming, partial_images FROM generate_jobs WHERE job_id = 'legacy-job'"
+        ).fetchone()
+
+        assert {"streaming", "partial_images"}.issubset(columns)
+        assert row["streaming"] is None
+        assert row["partial_images"] is None
+
+        db_repo._migration_generate_job_streaming_columns(conn)
+        assert {"streaming", "partial_images"}.issubset(
+            db_repo._table_columns(conn, "generate_jobs")
+        )
+
+
 def test_schema_migrations_upgrade_legacy_gallery_schema(tmp_path):
     _configure_runtime(tmp_path)
     db_path = Path(config.DATABASE_FILE)
