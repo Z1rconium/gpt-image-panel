@@ -109,6 +109,18 @@ def parse_sse_events(response_text: str) -> list[dict[str, Any]]:
     return events
 
 
+def extract_usage_from_sse_events(events: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Chat Completions streams only attach `usage` to the final chunk (and only
+    when the client opted into it), so scan from the end for the first hit."""
+    for event in reversed(events):
+        if not isinstance(event, dict):
+            continue
+        usage = event.get("usage")
+        if isinstance(usage, dict) and usage:
+            return usage
+    return None
+
+
 def is_json_content_type(content_type: str) -> bool:
     media_type = content_type.split(";", 1)[0].strip().lower()
     return media_type == "application/json" or media_type.endswith("+json")

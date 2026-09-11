@@ -1,6 +1,7 @@
 """Image generation and edit job queue persistence."""
 
 from .db import *
+from ..services import image_cost
 
 
 def upsert_generate_job(job: dict[str, Any]) -> dict[str, Any]:
@@ -486,6 +487,8 @@ def complete_image_job_unit(
     stage_timings: dict[str, float],
     duration: str,
     completed_at: str,
+    usage: dict[str, Any] | None = None,
+    cost: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     _ensure_database()
     now = utc_now()
@@ -499,6 +502,8 @@ def complete_image_job_unit(
                     message = 'Image unit completed',
                     result_json = ?,
                     stage_timings_json = ?,
+                    usage_json = ?,
+                    cost_json = ?,
                     duration = ?,
                     completed_at = ?,
                     updated_at = ?,
@@ -508,6 +513,8 @@ def complete_image_job_unit(
                 (
                     json.dumps(result, ensure_ascii=False, sort_keys=True),
                     json.dumps(stage_timings, ensure_ascii=False, sort_keys=True),
+                    json.dumps(usage, ensure_ascii=False, sort_keys=True) if usage is not None else None,
+                    json.dumps(cost, ensure_ascii=False, sort_keys=True) if cost is not None else None,
                     duration,
                     completed_at,
                     now,
@@ -535,6 +542,8 @@ def fail_image_job_unit(
     stage_timings: dict[str, float] | None = None,
     duration: str | None = None,
     completed_at: str | None = None,
+    usage: dict[str, Any] | None = None,
+    cost: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     _ensure_database()
     now = utc_now()
@@ -548,6 +557,8 @@ def fail_image_job_unit(
                     message = ?,
                     error = ?,
                     stage_timings_json = ?,
+                    usage_json = COALESCE(?, usage_json),
+                    cost_json = COALESCE(?, cost_json),
                     duration = ?,
                     completed_at = ?,
                     updated_at = ?,
@@ -560,6 +571,8 @@ def fail_image_job_unit(
                     _sanitize_persisted_job_text(message),
                     _sanitize_persisted_job_text(error),
                     json.dumps(stage_timings or {}, ensure_ascii=False, sort_keys=True),
+                    json.dumps(usage, ensure_ascii=False, sort_keys=True) if usage is not None else None,
+                    json.dumps(cost, ensure_ascii=False, sort_keys=True) if cost is not None else None,
                     duration,
                     completed_at or now,
                     now,
@@ -633,6 +646,11 @@ def aggregate_image_job_units(parent_job_id: str) -> dict[str, Any]:
             except (TypeError, ValueError):
                 continue
 
+    # Usage reflects what upstream actually billed, so it's summed across every
+    # unit that reported it, including failed ones (see fail_image_job_unit).
+    usage = image_cost.sum_usage([unit.get("usage") for unit in units])
+    cost = image_cost.sum_costs([unit.get("cost") for unit in units])
+
     return {
         "total": total,
         "completed": completed,
@@ -647,6 +665,8 @@ def aggregate_image_job_units(parent_job_id: str) -> dict[str, Any]:
         "images": images,
         "failures": failures,
         "stage_timings": stage_timings,
+        "usage": usage,
+        "cost": cost,
         "units": units,
     }
 

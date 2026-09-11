@@ -18,7 +18,7 @@ from ...core.api_paths import (
     build_upstream_url,
     normalize_api_path,
 )
-from ...core.observability import observe_job_stage
+from ...core.observability import observe_job_stage, record_upstream_usage
 from ...core import validators as ssrf
 from ...repositories.gallery.mutations import add_to_gallery_async
 from ...repositories.image_files import (
@@ -258,6 +258,11 @@ async def call_image_generation_api(
                         resp, api_path, progress
                     )
 
+        raw_usage = result.get("usage") if isinstance(result, dict) else None
+        if raw_usage is None and isinstance(result, dict) and "_sse_events" in result:
+            raw_usage = extract_usage_from_sse_events(result.get("_sse_events") or [])
+        record_upstream_usage(raw_usage)
+
         if api_path == RESPONSES_API_PATH:
             if progress:
                 progress(
@@ -420,6 +425,8 @@ async def call_image_edit_api(
                 result, response_text = await parse_upstream_json_response(
                     resp, api_path, progress
                 )
+
+        record_upstream_usage(result.get("usage") if isinstance(result, dict) else None)
 
         if progress:
             progress("extracting_edit_data", "Extracting edited image data array")

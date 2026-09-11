@@ -145,6 +145,8 @@ GENERATE_JOB_COLUMNS = (
     "images_json",
     "image_width",
     "image_height",
+    "usage_json",
+    "cost_json",
     "error",
     "webhook_url",
 )
@@ -161,6 +163,8 @@ IMAGE_JOB_UNIT_COLUMNS = (
     "error",
     "result_json",
     "stage_timings_json",
+    "usage_json",
+    "cost_json",
     "duration",
     "created_at",
     "started_at",
@@ -1919,6 +1923,20 @@ def _migration_background_column(conn: sqlite3.Connection):
         conn.execute("ALTER TABLE generate_jobs ADD COLUMN background TEXT")
 
 
+def _migration_generate_job_usage_cost_columns(conn: sqlite3.Connection):
+    jobs_columns = _table_columns(conn, "generate_jobs")
+    if "usage_json" not in jobs_columns:
+        conn.execute("ALTER TABLE generate_jobs ADD COLUMN usage_json TEXT")
+    if "cost_json" not in jobs_columns:
+        conn.execute("ALTER TABLE generate_jobs ADD COLUMN cost_json TEXT")
+
+    unit_columns = _table_columns(conn, "image_job_units")
+    if "usage_json" not in unit_columns:
+        conn.execute("ALTER TABLE image_job_units ADD COLUMN usage_json TEXT")
+    if "cost_json" not in unit_columns:
+        conn.execute("ALTER TABLE image_job_units ADD COLUMN cost_json TEXT")
+
+
 SCHEMA_MIGRATIONS = (
     (1, "baseline_legacy_schema", _migration_baseline_legacy_schema),
     (2, "gallery_filter_options", _migration_gallery_filter_options),
@@ -1936,6 +1954,7 @@ SCHEMA_MIGRATIONS = (
     (14, "gallery_ai_metadata_schema", _migration_gallery_ai_metadata_schema),
     (15, "generate_job_counts", _migration_generate_job_counts),
     (16, "background_column", _migration_background_column),
+    (17, "generate_job_usage_cost_columns", _migration_generate_job_usage_cost_columns),
 )
 
 
@@ -2571,6 +2590,28 @@ def _normalize_generate_job(job: dict[str, Any]) -> dict[str, Any]:
                 except TypeError:
                     continue
             continue
+        if column in {"usage_json", "cost_json"}:
+            value = job.get(column)
+            if value is None:
+                value = job.get(column[: -len("_json")])
+            if value is None:
+                continue
+            if isinstance(value, str):
+                try:
+                    json.loads(value)
+                except json.JSONDecodeError:
+                    continue
+                normalized[column] = value
+            else:
+                try:
+                    normalized[column] = json.dumps(
+                        value,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    )
+                except TypeError:
+                    continue
+            continue
         value = job.get(column)
         if value is None:
             continue
@@ -2651,6 +2692,18 @@ def _generate_job_from_row(row: sqlite3.Row) -> dict[str, Any]:
             job["images"] = json.loads(images_json)
         except json.JSONDecodeError:
             job["images"] = []
+    usage_json = job.pop("usage_json", None)
+    if usage_json:
+        try:
+            job["usage"] = json.loads(usage_json)
+        except json.JSONDecodeError:
+            pass
+    cost_json = job.pop("cost_json", None)
+    if cost_json:
+        try:
+            job["cost"] = json.loads(cost_json)
+        except json.JSONDecodeError:
+            pass
     if job.get("image_id"):
         job["id"] = job["image_id"]
     if not job.get("images") and job.get("image_id") and job.get("image_url"):
@@ -2705,6 +2758,18 @@ def _image_job_unit_from_row(row: sqlite3.Row) -> dict[str, Any]:
     unit["edit_sources"] = _json_loads_list(unit.pop("edit_sources_json", None))
     unit["result"] = _json_loads_dict(unit.pop("result_json", None))
     unit["stage_timings"] = _json_loads_dict(unit.pop("stage_timings_json", None))
+    usage_json = unit.pop("usage_json", None)
+    if usage_json:
+        try:
+            unit["usage"] = json.loads(usage_json)
+        except json.JSONDecodeError:
+            pass
+    cost_json = unit.pop("cost_json", None)
+    if cost_json:
+        try:
+            unit["cost"] = json.loads(cost_json)
+        except json.JSONDecodeError:
+            pass
     return unit
 
 
@@ -2715,6 +2780,8 @@ def _image_job_unit_values(unit: dict[str, Any]) -> tuple[Any, ...]:
         ("edit_sources", "edit_sources_json"),
         ("result", "result_json"),
         ("stage_timings", "stage_timings_json"),
+        ("usage", "usage_json"),
+        ("cost", "cost_json"),
     ):
         if json_key not in normalized and source_key in normalized:
             normalized[json_key] = json.dumps(

@@ -1,5 +1,6 @@
 from datetime import datetime
 
+from backend.app.core.observability import record_upstream_usage
 from backend.tests.support.contract import *  # noqa: F403
 
 def test_generate_and_sse_contract(client):
@@ -558,6 +559,85 @@ def test_job_stage_timings_and_optional_metrics(client):
     assert prometheus_resp.status_code == 200
     assert prometheus_resp.headers["content-type"].startswith("text/plain")
     assert "gpt_image_panel_image_jobs_generation_failure_ratio" in prometheus_resp.text
+
+
+def test_generate_job_reports_usage_and_cost_when_upstream_provides_it(client, monkeypatch):
+    async def fake_generation_api(
+        api_url,
+        api_key,
+        api_path,
+        payload,
+        api_preset_name=None,
+        progress=None,
+        socks5_proxy=None,
+    ):
+        record_upstream_usage(
+            {
+                "input_tokens_details": {"text_tokens": 50, "image_tokens": 0},
+                "output_tokens_details": {"image_tokens": 1_000_000},
+            }
+        )
+        image_id = image_files.generate_image_id()
+        entry = await gallery_mutations.add_to_gallery_async(
+            image_bytes=PNG_BYTES,
+            image_id=image_id,
+            prompt=payload.prompt,
+            size=payload.size,
+            filename=f"{image_id}.png",
+            metadata={
+                "model": payload.model,
+                "quality": payload.quality,
+                "output_format": payload.output_format,
+                "output_compression": payload.output_compression,
+                "response_format": payload.response_format,
+                "n": payload.n,
+                "api_path": api_path,
+                "api_preset_name": api_preset_name,
+            },
+        )
+        return [entry]
+
+    monkeypatch.setattr(backend_main.proxy, "call_image_generation_api", fake_generation_api)
+
+    resp = client.post(
+        "/api/generate",
+        json={
+            "prompt": "priced job",
+            "size": "1024x1024",
+            "model": "gpt-image-1",
+            "n": 1,
+            "quality": "auto",
+            "output_format": "png",
+        },
+    )
+    assert resp.status_code == 202
+    job = _wait_for_job(client, resp.json()["job_id"])
+    assert job["status"] == "success"
+    assert job["usage"]["text_input_tokens"] == 50
+    assert job["usage"]["image_output_tokens"] == 1_000_000
+    assert job["cost"]["complete"] is True
+    assert job["cost"]["rate_source"] == "builtin"
+    assert job["cost"]["estimated_cost_usd"] == pytest.approx(50 * 5.0 / 1_000_000 + 40.0)
+
+
+def test_generate_job_usage_is_null_when_upstream_omits_it(client):
+    resp = client.post(
+        "/api/generate",
+        json={
+            "prompt": "unpriced job",
+            "size": "1024x1024",
+            "model": "gpt-image-2",
+            "n": 1,
+            "quality": "auto",
+            "output_format": "png",
+        },
+    )
+    assert resp.status_code == 202
+    job = _wait_for_job(client, resp.json()["job_id"])
+    assert job["status"] == "success"
+    assert job.get("usage") is None
+    assert job["cost"]["complete"] is False
+    assert job["cost"]["estimated_cost_usd"] is None
 
 
 def test_metrics_snapshot_uses_cached_runtime_without_writes(monkeypatch):

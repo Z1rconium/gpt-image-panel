@@ -94,6 +94,26 @@ class GenerateJobResponse(BaseModel):
     operation: Optional[Literal["generation", "edit"]] = None
 
 
+class UsageSummary(BaseModel):
+    raw: dict = Field(default_factory=dict)
+    input_tokens: Optional[int] = None
+    output_tokens: Optional[int] = None
+    text_input_tokens: Optional[int] = None
+    image_input_tokens: Optional[int] = None
+    image_output_tokens: Optional[int] = None
+    total_tokens: Optional[int] = None
+    available: bool = True
+
+
+class CostEstimate(BaseModel):
+    currency: str = "USD"
+    estimated_cost_usd: Optional[float] = None
+    rate_source: str = "unknown"
+    pricing_model: Optional[str] = None
+    complete: bool = False
+    reason: Optional[str] = None
+
+
 class GenerateJobImage(BaseModel):
     image_id: str
     image_url: str
@@ -129,4 +149,6 @@ class GenerateJobStatus(GenerateJobResponse):
     api_preset_name: Optional[str] = None
     duration: Optional[str] = None
     stage_timings: dict[str, float] = Field(default_factory=dict)
+    usage: Optional[UsageSummary] = None
+    cost: Optional[CostEstimate] = None
     error: Optional[str] = None

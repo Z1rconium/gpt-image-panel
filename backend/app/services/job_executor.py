@@ -13,7 +13,13 @@ from ..api.presets import (
 )
 from ..core import settings as config
 from ..core import validators as ssrf
-from ..core.observability import JobStageTimer, metrics, use_job_stage_timer
+from ..core.observability import (
+    JobStageTimer,
+    UsageSink,
+    metrics,
+    use_job_stage_timer,
+    use_usage_sink,
+)
 from ..core.utils import beijing_now, utc_now
 from ..integrations.upstream import generation as proxy
 from ..repositories.gallery.mutations import update_gallery_entry
@@ -24,6 +30,7 @@ from ..repositories.image_jobs import (
     get_generate_job_with_unit_aggregate,
     update_image_job_unit_progress,
 )
+from . import image_cost
 from .job_events import publish_generate_job, store_generate_job_async
 from .blocking import run_db_operation
 from .job_queue import (
@@ -103,6 +110,10 @@ async def aggregate_parent_image_job(
         "success_count": success_count,
         "failure_count": failure_count,
     }
+    usage_cost_update = {
+        "usage": aggregate.get("usage"),
+        "cost": aggregate.get("cost"),
+    }
 
     if aggregate.get("all_terminal"):
         images = aggregate.get("images") or []
@@ -145,6 +156,7 @@ async def aggregate_parent_image_job(
                 "completed_at": completed_at,
                 **terminal_update,
                 **count_update,
+                **usage_cost_update,
             }
             if failures:
                 update["error"] = summarize_unit_failures(failures, total, operation)
@@ -163,6 +175,7 @@ async def aggregate_parent_image_job(
                 "error": cancel_message,
                 **terminal_update,
                 **count_update,
+                **usage_cost_update,
             }
         else:
             failures = failures or aggregate.get("units") or []
@@ -182,6 +195,7 @@ async def aggregate_parent_image_job(
                 "stage_timings": aggregate.get("stage_timings") or {},
                 **terminal_update,
                 **count_update,
+                **usage_cost_update,
             }
         job = await store_generate_job_async(parent_job_id, update)
         await run_db_operation(
@@ -219,6 +233,7 @@ async def aggregate_parent_image_job(
                 "image_width": first_image.get("image_width"),
                 "image_height": first_image.get("image_height"),
                 **count_update,
+                **usage_cost_update,
             },
             persist=force_publish,
         )
@@ -275,6 +290,7 @@ async def run_claimed_image_unit(unit: dict, worker_id: str):
     parent_job_id = str(unit["parent_job_id"])
     operation = str(unit.get("operation") or "generation")
     stage_timer = JobStageTimer()
+    usage_sink = UsageSink()
     started_at = time.monotonic()
     parent = await run_db_operation(
         get_generate_job,
@@ -385,7 +401,7 @@ async def run_claimed_image_unit(unit: dict, worker_id: str):
         if int(parent.get("n") or 1) > 1:
             await aggregate_parent_image_job(parent_job_id, force_publish=True)
         metrics.increment(f"image_jobs.{operation}.started")
-        with use_job_stage_timer(stage_timer):
+        with use_job_stage_timer(stage_timer), use_usage_sink(usage_sink):
             if operation == "edit":
                 image_sources = [
                     edit_source_from_payload(source)
@@ -443,9 +459,15 @@ async def run_claimed_image_unit(unit: dict, worker_id: str):
         kick_thumbnail_dispatcher()
         result_images = [gallery_entry_job_result(entry) for entry in updated_entries]
         stage_timings = stage_timer.snapshot()
+        usage = image_cost.normalize_usage(usage_sink.raw_usage)
+        cost = image_cost.estimate_image_cost(req.model, usage)
         metrics.increment(f"image_jobs.{operation}.succeeded")
         metrics.observe_ms("image_job.duration", duration_seconds * 1000)
         metrics.observe_job_stage_timings(stage_timings)
+        if usage is None:
+            metrics.increment("image_job.usage_missing")
+        if not cost.get("complete"):
+            metrics.increment("image_job.cost_unknown_rate")
         if await parent_was_cancelled():
             await run_db_operation(
                 fail_image_job_unit,
@@ -457,6 +479,8 @@ async def run_claimed_image_unit(unit: dict, worker_id: str):
                 stage_timings=stage_timings,
                 duration=duration,
                 completed_at=utc_now(),
+                usage=usage,
+                cost=cost,
                 metric_name="cancel_completed_image_job_unit",
             )
             return
@@ -467,11 +491,15 @@ async def run_claimed_image_unit(unit: dict, worker_id: str):
             stage_timings=stage_timings,
             duration=duration,
             completed_at=completed_at,
+            usage=usage,
+            cost=cost,
             metric_name="complete_image_job_unit",
         )
     except asyncio.CancelledError:
         duration_seconds = time.monotonic() - started_at
         stage_timings = stage_timer.snapshot()
+        usage = image_cost.normalize_usage(usage_sink.raw_usage)
+        cost = image_cost.estimate_image_cost(req.model, usage) if usage else None
         metrics.increment(f"image_jobs.{operation}.cancelled")
         await run_db_operation(
             fail_image_job_unit,
@@ -483,6 +511,8 @@ async def run_claimed_image_unit(unit: dict, worker_id: str):
             stage_timings=stage_timings,
             duration=f"{duration_seconds:.2f}s",
             completed_at=utc_now(),
+            usage=usage,
+            cost=cost,
             metric_name="cancel_image_job_unit",
         )
     except Exception as error:
@@ -492,6 +522,8 @@ async def run_claimed_image_unit(unit: dict, worker_id: str):
         )
         duration_seconds = time.monotonic() - started_at
         stage_timings = stage_timer.snapshot()
+        usage = image_cost.normalize_usage(usage_sink.raw_usage)
+        cost = image_cost.estimate_image_cost(req.model, usage) if usage else None
         cancelled = await parent_was_cancelled()
         if not cancelled:
             metrics.increment(f"image_jobs.{operation}.failed")
@@ -518,6 +550,8 @@ async def run_claimed_image_unit(unit: dict, worker_id: str):
             stage_timings=stage_timings,
             duration=f"{duration_seconds:.2f}s",
             completed_at=utc_now(),
+            usage=usage,
+            cost=cost,
             metric_name="fail_image_job_unit",
         )
     finally:

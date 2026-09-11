@@ -62,6 +62,39 @@ def observe_job_stage(stage: str) -> Iterator[None]:
         record_job_stage_timing(stage, (time.perf_counter() - started_at) * 1000)
 
 
+_current_usage_sink: ContextVar["UsageSink | None"] = ContextVar(
+    "current_usage_sink",
+    default=None,
+)
+
+
+@dataclass
+class UsageSink:
+    """Carries the raw `usage` object parsed from an upstream response out of the
+    deep upstream-transport call stack without changing call signatures there."""
+
+    raw_usage: dict[str, Any] | None = None
+
+    def record(self, raw_usage: dict[str, Any] | None) -> None:
+        if isinstance(raw_usage, dict) and raw_usage:
+            self.raw_usage = raw_usage
+
+
+@contextmanager
+def use_usage_sink(sink: "UsageSink") -> Iterator["UsageSink"]:
+    token = _current_usage_sink.set(sink)
+    try:
+        yield sink
+    finally:
+        _current_usage_sink.reset(token)
+
+
+def record_upstream_usage(raw_usage: dict[str, Any] | None) -> None:
+    sink = _current_usage_sink.get()
+    if sink is not None:
+        sink.record(raw_usage)
+
+
 class MetricsStore:
     def __init__(self, max_samples: int = 2048):
         self.max_samples = max(100, int(max_samples))

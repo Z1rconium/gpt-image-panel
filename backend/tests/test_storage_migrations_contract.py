@@ -376,6 +376,54 @@ def test_background_column_migration_adds_column_idempotently():
         assert "background" in db_repo._table_columns(conn, "generate_jobs")
 
 
+def test_generate_job_usage_cost_migration_adds_columns_idempotently():
+    with sqlite3.connect(":memory:") as conn:
+        conn.row_factory = sqlite3.Row
+        conn.execute(
+            """
+            CREATE TABLE generate_jobs (
+                job_id TEXT PRIMARY KEY,
+                status TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE image_job_units (
+                unit_id TEXT PRIMARY KEY,
+                parent_job_id TEXT NOT NULL,
+                status TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO generate_jobs (job_id, status, created_at, updated_at)
+            VALUES ('legacy-job', 'success', '2026-01-01T00:00:00Z', '2026-01-01T00:00:01Z')
+            """
+        )
+
+        db_repo._migration_generate_job_usage_cost_columns(conn)
+        jobs_columns = db_repo._table_columns(conn, "generate_jobs")
+        units_columns = db_repo._table_columns(conn, "image_job_units")
+        row = conn.execute(
+            "SELECT usage_json, cost_json FROM generate_jobs WHERE job_id = 'legacy-job'"
+        ).fetchone()
+
+        assert {"usage_json", "cost_json"}.issubset(jobs_columns)
+        assert {"usage_json", "cost_json"}.issubset(units_columns)
+        assert row["usage_json"] is None
+        assert row["cost_json"] is None
+
+        # Calling again on an already-migrated database must not raise.
+        db_repo._migration_generate_job_usage_cost_columns(conn)
+        assert {"usage_json", "cost_json"}.issubset(
+            db_repo._table_columns(conn, "generate_jobs")
+        )
+
+
 def test_schema_migrations_upgrade_legacy_gallery_schema(tmp_path):
     _configure_runtime(tmp_path)
     db_path = Path(config.DATABASE_FILE)

@@ -24,6 +24,7 @@ from ..repositories.gallery.mutations import (
 )
 from ..repositories.settings import sync_overall_config_env_values
 from ..repositories.thumbnail_jobs import cleanup_auxiliary_state
+from ..services.image_cost import configured_model_count
 
 
 logger = logging.getLogger(__name__)
@@ -144,6 +145,10 @@ async def lifespan(app: FastAPI):
             raise
 
     logger.info("Image jobs resume through SQLite unit leases")
+    logger.info(
+        "Image cost estimation: %s model(s) have a configured pricing rate",
+        configured_model_count(),
+    )
     if run_startup_maintenance:
         try:
             removed_gallery_entries = sync_gallery_with_image_files()
