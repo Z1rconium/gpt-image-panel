@@ -215,7 +215,19 @@ const en = {
     aiLikelyCauses: 'Likely causes',
     aiRecommendedActions: 'Recommended actions',
     retryUnavailable: 'Running jobs cannot be retried yet.',
-    cancelSelected: 'Cancel Selected'
+    cancelSelected: 'Cancel Selected',
+    costDetails: 'Usage & cost',
+    costTextInput: 'Text input tokens',
+    costImageInput: 'Image input tokens',
+    costImageOutput: 'Image output tokens',
+    costTotalTokens: 'Total tokens',
+    costEstimated: 'Estimated cost',
+    costPartialEstimated: 'Estimated cost (partial)',
+    costUnavailableUsage: 'Upstream did not report usage for this job.',
+    costUnavailableRate: 'Cost unavailable: no pricing configured for this model.',
+    historySummaryTokens: 'Total tokens (loaded)',
+    historySummaryCost: 'Total estimated cost (loaded)',
+    historySummaryPriced: 'priced'
   },
   promptForm: {
     customModel: 'Custom model / snapshot',

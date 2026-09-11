@@ -2,7 +2,15 @@
   import type { AssistantJobDiagnoseResponse } from '$lib/api/types/assistant';
   import type { GenerateJobStatus } from '$lib/api/types/jobs';
   import { t } from '$lib/i18n';
-  import { formatBeijingTime, jobFailureMessage, operationLabel, stageLabel, statusLabel } from '$lib/utils/format';
+  import {
+    formatBeijingTime,
+    formatTokenCount,
+    formatUsdCost,
+    jobFailureMessage,
+    operationLabel,
+    stageLabel,
+    statusLabel
+  } from '$lib/utils/format';
   import { isActiveJobStatus, isFailureJobStatus } from '$lib/utils/jobs';
   import { measureItem, observeViewport } from '$lib/actions/virtualList';
   import { buildOffsets, computeRenderWindow, computeSpacers } from '$lib/virtualization/window';
@@ -47,6 +55,7 @@
   let viewportHeight = $state(0);
   let measuredHeights = $state<Record<string, number>>({});
   let expandedErrorIds = $state(new Set<string>());
+  let expandedCostIds = $state(new Set<string>());
   let loadMoreRequest = false;
   let previousResetKey = '';
 
@@ -74,6 +83,7 @@
     scrollTop = 0;
     measuredHeights = {};
     expandedErrorIds = new Set<string>();
+    expandedCostIds = new Set<string>();
     if (scrollEl) scrollEl.scrollTop = 0;
   });
 
@@ -81,6 +91,8 @@
     const currentIds = new Set(historyJobs.map((job) => job.job_id));
     const nextIds = new Set([...expandedErrorIds].filter((jobId) => currentIds.has(jobId)));
     if (nextIds.size !== expandedErrorIds.size) expandedErrorIds = nextIds;
+    const nextCostIds = new Set([...expandedCostIds].filter((jobId) => currentIds.has(jobId)));
+    if (nextCostIds.size !== expandedCostIds.size) expandedCostIds = nextCostIds;
   });
 
   $effect(() => {
@@ -181,6 +193,34 @@
     else nextIds.add(jobId);
     expandedErrorIds = nextIds;
   }
+
+  function hasCostInfo(job: GenerateJobStatus) {
+    return Boolean(job.usage || job.cost);
+  }
+
+  function isCostExpanded(jobId: string) {
+    return expandedCostIds.has(jobId);
+  }
+
+  function toggleCost(jobId: string) {
+    const nextIds = new Set(expandedCostIds);
+    if (nextIds.has(jobId)) nextIds.delete(jobId);
+    else nextIds.add(jobId);
+    expandedCostIds = nextIds;
+  }
+
+  function costSummaryText(job: GenerateJobStatus) {
+    const parts: string[] = [];
+    const totalTokens = job.usage?.total_tokens;
+    if (typeof totalTokens === 'number' && Number.isFinite(totalTokens)) {
+      parts.push(formatTokenCount(totalTokens));
+    }
+    const costValue = job.cost?.estimated_cost_usd;
+    if (typeof costValue === 'number' && Number.isFinite(costValue)) {
+      parts.push(formatUsdCost(costValue));
+    }
+    return parts.join(' · ');
+  }
 </script>
 
 <div
@@ -233,6 +273,57 @@
                 <span>{$t.common.duration}: {job.duration}</span>
               {/if}
             </div>
+            {#if hasCostInfo(job)}
+              <div class="mt-3">
+                <button
+                  type="button"
+                  class="control-focus rounded-lg border border-stone-300 px-3 py-2 text-xs text-stone-600 hover:bg-stone-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                  aria-expanded={isCostExpanded(job.job_id)}
+                  onclick={() => toggleCost(job.job_id)}
+                >
+                  {costSummaryText(job) ? `${$t.jobs.costDetails}: ${costSummaryText(job)}` : $t.jobs.costDetails}
+                </button>
+                <div
+                  class:hidden={!isCostExpanded(job.job_id)}
+                  class="mt-2 rounded-lg border border-stone-200 bg-stone-100/70 px-3 py-2 text-xs leading-relaxed text-stone-700 dark:border-zinc-800 dark:bg-zinc-950/40 dark:text-zinc-300"
+                  aria-hidden={!isCostExpanded(job.job_id)}
+                >
+                  {#if job.usage}
+                    <div class="grid grid-cols-2 gap-x-4 gap-y-1">
+                      {#if job.usage.text_input_tokens !== null && job.usage.text_input_tokens !== undefined}
+                        <span>{$t.jobs.costTextInput}</span><span>{formatTokenCount(job.usage.text_input_tokens)}</span>
+                      {/if}
+                      {#if job.usage.image_input_tokens !== null && job.usage.image_input_tokens !== undefined}
+                        <span>{$t.jobs.costImageInput}</span><span>{formatTokenCount(job.usage.image_input_tokens)}</span>
+                      {/if}
+                      {#if job.usage.image_output_tokens !== null && job.usage.image_output_tokens !== undefined}
+                        <span>{$t.jobs.costImageOutput}</span><span>{formatTokenCount(job.usage.image_output_tokens)}</span>
+                      {/if}
+                      {#if job.usage.total_tokens !== null && job.usage.total_tokens !== undefined}
+                        <span class="font-medium">{$t.jobs.costTotalTokens}</span><span class="font-medium">{formatTokenCount(job.usage.total_tokens)}</span>
+                      {/if}
+                    </div>
+                  {:else}
+                    <p>{$t.jobs.costUnavailableUsage}</p>
+                  {/if}
+                  {#if job.cost}
+                    <div class="mt-2 border-t border-stone-200 pt-2 dark:border-zinc-800">
+                      {#if job.cost.estimated_cost_usd !== null && job.cost.estimated_cost_usd !== undefined}
+                        <div class="flex items-center justify-between">
+                          <span>{job.cost.complete ? $t.jobs.costEstimated : $t.jobs.costPartialEstimated}</span>
+                          <span class="font-medium">{formatUsdCost(job.cost.estimated_cost_usd)}</span>
+                        </div>
+                        {#if !job.cost.complete && job.cost.reason}
+                          <p class="mt-1 text-stone-500 dark:text-zinc-500">{job.cost.reason}</p>
+                        {/if}
+                      {:else}
+                        <p>{job.cost.reason || $t.jobs.costUnavailableRate}</p>
+                      {/if}
+                    </div>
+                  {/if}
+                </div>
+              </div>
+            {/if}
             {#if jobErrorMessage(job, $t.messages.jobFailed)}
               <div class="mt-3">
                 <button

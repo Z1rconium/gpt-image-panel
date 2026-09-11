@@ -6,6 +6,7 @@
   import JobHistoryList from '$lib/components/JobHistoryList.svelte';
   import RunningJobsList from '$lib/components/RunningJobsList.svelte';
   import { t } from '$lib/i18n';
+  import { formatTokenCount, formatUsdCost } from '$lib/utils/format';
 
   type JobsTab = 'running' | 'history';
   type MaybePromise = void | Promise<void>;
@@ -125,6 +126,33 @@
     void onHistoryFailedOnlyChange(failedOnly);
   }
 
+  // Summed only across the currently loaded page of history, not the whole
+  // archive, and only jobs with a complete cost estimate contribute a dollar
+  // figure (an incomplete one would misrepresent the total as too low).
+  const historyCostSummary = $derived.by(() => {
+    let totalTokens = 0;
+    let hasTokens = false;
+    let totalCost = 0;
+    let pricedCount = 0;
+    for (const job of historyJobs) {
+      if (typeof job.usage?.total_tokens === 'number' && Number.isFinite(job.usage.total_tokens)) {
+        totalTokens += job.usage.total_tokens;
+        hasTokens = true;
+      }
+      if (job.cost?.complete && typeof job.cost.estimated_cost_usd === 'number') {
+        totalCost += job.cost.estimated_cost_usd;
+        pricedCount += 1;
+      }
+    }
+    if (!hasTokens && pricedCount === 0) return null;
+    return {
+      totalTokens: hasTokens ? totalTokens : null,
+      totalCost: pricedCount > 0 ? totalCost : null,
+      pricedCount,
+      totalJobs: historyJobs.length
+    };
+  });
+
 </script>
 
 <Overlay
@@ -189,6 +217,21 @@
       {#if internalActiveTab === 'running'}
         <RunningJobsList {jobs} {selectedIds} {settledJobIds} {onToggle} />
       {:else}
+        {#if historyCostSummary}
+          <div class="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-stone-200 px-5 py-2 text-xs text-stone-500 dark:border-zinc-800 dark:text-zinc-500">
+            {#if historyCostSummary.totalTokens !== null}
+              <span>{$t.jobs.historySummaryTokens}: {formatTokenCount(historyCostSummary.totalTokens)}</span>
+            {/if}
+            {#if historyCostSummary.totalCost !== null}
+              <span>
+                {$t.jobs.historySummaryCost}: {formatUsdCost(historyCostSummary.totalCost)}
+                {#if historyCostSummary.pricedCount < historyCostSummary.totalJobs}
+                  ({historyCostSummary.pricedCount}/{historyCostSummary.totalJobs} {$t.jobs.historySummaryPriced})
+                {/if}
+              </span>
+            {/if}
+          </div>
+        {/if}
         <JobHistoryList
           {historyJobs}
           {historyLoading}

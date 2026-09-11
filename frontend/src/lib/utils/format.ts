@@ -118,6 +118,18 @@ export function operationLabel(operation: string | null | undefined, labels?: Re
   return labels?.[operation] || operation;
 }
 
+export function formatTokenCount(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return '';
+  return new Intl.NumberFormat().format(value);
+}
+
+export function formatUsdCost(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return '';
+  const abs = Math.abs(value);
+  const decimals = abs === 0 ? 2 : abs < 0.01 ? 6 : abs < 1 ? 4 : 2;
+  return `$${value.toFixed(decimals)}`;
+}
+
 export async function copyText(text: string) {
   if (!text) return;
   if (navigator.clipboard?.writeText) {

@@ -217,7 +217,19 @@ const zh: Translation = {
     aiLikelyCauses: '可能原因',
     aiRecommendedActions: '建议操作',
     retryUnavailable: '运行中的任务暂不能重试。',
-    cancelSelected: '取消所选任务'
+    cancelSelected: '取消所选任务',
+    costDetails: '用量与费用',
+    costTextInput: '文本输入 token',
+    costImageInput: '图片输入 token',
+    costImageOutput: '图片输出 token',
+    costTotalTokens: 'token 总量',
+    costEstimated: '估算费用',
+    costPartialEstimated: '估算费用（部分）',
+    costUnavailableUsage: '上游未返回该任务的用量数据。',
+    costUnavailableRate: '费用不可用：未配置该模型的费率。',
+    historySummaryTokens: 'token 总量（已加载）',
+    historySummaryCost: '估算费用总计（已加载）',
+    historySummaryPriced: '已计价'
   },
   promptForm: {
     customModel: '自定义模型 / 日期快照',

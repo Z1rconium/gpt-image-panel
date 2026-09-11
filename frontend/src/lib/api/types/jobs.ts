@@ -1,5 +1,25 @@
 import type { GenerateJobStatusValue } from './common';
 
+export type UsageSummary = {
+  raw?: Record<string, unknown>;
+  input_tokens?: number | null;
+  output_tokens?: number | null;
+  text_input_tokens?: number | null;
+  image_input_tokens?: number | null;
+  image_output_tokens?: number | null;
+  total_tokens?: number | null;
+  available?: boolean;
+};
+
+export type CostEstimate = {
+  currency?: string;
+  estimated_cost_usd?: number | null;
+  rate_source?: string;
+  pricing_model?: string | null;
+  complete?: boolean;
+  reason?: string | null;
+};
+
 export type GenerateJobResponse = {
   job_id: string;
   status: GenerateJobStatusValue;
@@ -43,6 +63,8 @@ export type GenerateJobStatus = GenerateJobResponse & {
   api_preset_name?: string | null;
   duration?: string | null;
   stage_timings?: Record<string, number>;
+  usage?: UsageSummary | null;
+  cost?: CostEstimate | null;
   error?: string | null;
 };
 
