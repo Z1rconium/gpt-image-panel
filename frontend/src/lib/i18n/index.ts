@@ -41,6 +41,12 @@ let requestedLanguage = initialLanguage;
 
 export const language = writable<Language>(initialLanguage);
 export const t = writable<Translation>(initialLanguage === DEFAULT_LANGUAGE ? en : emptyTranslation);
+/**
+ * Gates the first paint only. Once the initial locale has resolved this stays
+ * true for the life of the session, so switching languages keeps the workspace
+ * mounted (drafts, edit sources, focus, SSE) while the new text loads and is
+ * swapped in atomically.
+ */
 export const i18nReady = writable(initialLanguage === DEFAULT_LANGUAGE);
 
 export async function setLanguage(nextLanguage: Language): Promise<void> {
@@ -53,7 +59,6 @@ export async function setLanguage(nextLanguage: Language): Promise<void> {
     i18nReady.set(true);
     return;
   }
-  i18nReady.set(false);
   try {
     const translation = await loadTranslation(nextLanguage);
     if (loadId !== latestLoad) return;

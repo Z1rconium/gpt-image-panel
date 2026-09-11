@@ -47,6 +47,14 @@ import type { GalleryEntry } from '$lib/api/types/gallery';
   let dragOffsetX = 0;
   let loadedImageSrc = '';
   let failedImageSrc = '';
+  // Fit-to-window keeps object-fit parity with the gallery; actual size renders
+  // the image at 1:1 and lets a drag pan it within the media well.
+  let zoomActual = false;
+  let panX = 0;
+  let panY = 0;
+  let panStartX = 0;
+  let panStartY = 0;
+  let panPointerId: number | null = null;
 
   $: aiLoading = Boolean(image && aiLoadingImageId === image.id);
   $: fullImageSrc = image ? imageUrl(image.filename, image.image_url) : '';
@@ -55,6 +63,23 @@ import type { GalleryEntry } from '$lib/api/types/gallery';
     : '';
   $: fullImageLoaded = Boolean(fullImageSrc && loadedImageSrc === fullImageSrc);
   $: fullImageFailed = Boolean(fullImageSrc && failedImageSrc === fullImageSrc);
+  $: stageTransform = zoomActual
+    ? `translate(${panX}px, ${panY}px)`
+    : dragOffsetX
+      ? `translateX(${dragOffsetX}px)`
+      : '';
+
+  $: if (fullImageSrc) {
+    zoomActual = false;
+    panX = 0;
+    panY = 0;
+  }
+
+  function setZoomActual(next: boolean) {
+    zoomActual = next;
+    panX = 0;
+    panY = 0;
+  }
 
   function handleFullImageLoad() {
     loadedImageSrc = fullImageSrc;
@@ -93,7 +118,23 @@ import type { GalleryEntry } from '$lib/api/types/gallery';
     );
   }
 
+  function canStartPan(event: PointerEvent) {
+    const target = event.target;
+    return event.isPrimary && !(target instanceof Element && target.closest(SWIPE_IGNORE_SELECTOR));
+  }
+
   function handleSwipePointerDown(event: PointerEvent) {
+    if (zoomActual) {
+      if (!canStartPan(event)) return;
+      panPointerId = event.pointerId;
+      panStartX = panX;
+      panStartY = panY;
+      swipeStartX = event.clientX;
+      swipeStartY = event.clientY;
+      dragging = true;
+      (event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId);
+      return;
+    }
     if (!canStartSwipe(event)) return;
     swipePointerId = event.pointerId;
     swipeStartX = event.clientX;
@@ -105,6 +146,11 @@ import type { GalleryEntry } from '$lib/api/types/gallery';
   }
 
   function handleSwipePointerMove(event: PointerEvent) {
+    if (panPointerId === event.pointerId) {
+      panX = panStartX + (event.clientX - swipeStartX);
+      panY = panStartY + (event.clientY - swipeStartY);
+      return;
+    }
     if (swipePointerId !== event.pointerId) return;
     const dx = event.clientX - swipeStartX;
     const dy = event.clientY - swipeStartY;
@@ -116,7 +162,24 @@ import type { GalleryEntry } from '$lib/api/types/gallery';
     dragOffsetX = Math.max(-SWIPE_MAX_DRAG, Math.min(SWIPE_MAX_DRAG, resisted));
   }
 
+  function releasePointer(event: PointerEvent) {
+    const el = event.currentTarget as HTMLElement | null;
+    if (el?.hasPointerCapture?.(event.pointerId)) {
+      try {
+        el.releasePointerCapture(event.pointerId);
+      } catch {
+        // Pointer capture may have already been released
+      }
+    }
+  }
+
   function handleSwipePointerUp(event: PointerEvent) {
+    if (panPointerId === event.pointerId) {
+      panPointerId = null;
+      dragging = false;
+      releasePointer(event);
+      return;
+    }
     if (swipePointerId !== event.pointerId) return;
 
     const dx = event.clientX - swipeStartX;
@@ -129,28 +192,20 @@ import type { GalleryEntry } from '$lib/api/types/gallery';
     if (horizontalSwipe && dx < 0 && canNavigateNext) onNavigateNext();
     else if (horizontalSwipe && dx > 0 && canNavigatePrevious) onNavigatePrevious();
 
-    const el = event.currentTarget as HTMLElement | null;
-    if (el?.hasPointerCapture?.(event.pointerId)) {
-      try {
-        el.releasePointerCapture(event.pointerId);
-      } catch {
-        // Pointer capture may have already been released
-      }
-    }
+    releasePointer(event);
     resetSwipeTracking();
     snapBack();
   }
 
   function handleSwipePointerCancel(event: PointerEvent) {
-    if (swipePointerId !== event.pointerId) return;
-    const el = event.currentTarget as HTMLElement | null;
-    if (el?.hasPointerCapture?.(event.pointerId)) {
-      try {
-        el.releasePointerCapture(event.pointerId);
-      } catch {
-        // Pointer capture may have already been released
-      }
+    if (panPointerId === event.pointerId) {
+      panPointerId = null;
+      dragging = false;
+      releasePointer(event);
+      return;
     }
+    if (swipePointerId !== event.pointerId) return;
+    releasePointer(event);
     resetSwipeTracking();
     snapBack();
   }
@@ -173,13 +228,38 @@ import type { GalleryEntry } from '$lib/api/types/gallery';
         on:pointerup={handleSwipePointerUp}
         on:pointercancel={handleSwipePointerCancel}
       >
+        {#if fullImageLoaded}
+          <div class="lightbox-zoom-controls">
+            <button
+              type="button"
+              class="mobile-touch-target control-focus"
+              aria-label={$t.lightbox.zoomFit}
+              title={$t.lightbox.zoomFit}
+              aria-pressed={!zoomActual}
+              on:click={() => setZoomActual(false)}
+            >
+              Fit
+            </button>
+            <button
+              type="button"
+              class="mobile-touch-target control-focus"
+              aria-label={$t.lightbox.zoomActual}
+              title={$t.lightbox.zoomActual}
+              aria-pressed={zoomActual}
+              on:click={() => setZoomActual(true)}
+            >
+              1:1
+            </button>
+          </div>
+        {/if}
         <div class="flex h-full min-h-0 w-full flex-col">
           <div class="flex min-h-0 flex-1 items-center justify-center">
             {#key fullImageSrc}
               <div
                 class="lightbox-image-stage"
                 class:lightbox-image-dragging={dragging}
-                style:transform={dragOffsetX ? `translateX(${dragOffsetX}px)` : ''}
+                class:lightbox-image-zoomed={zoomActual}
+                style:transform={stageTransform || null}
               >
                 {#if previewImageSrc}
                   <img

@@ -264,6 +264,7 @@ const en = {
     planningEdit: 'Planning...',
     edits: 'Edits',
     generate: 'Generate',
+    submitShortcut: 'Ctrl/⌘ + Enter to submit',
     editSourcePreview: 'Edit Source Preview',
     closeEditPreview: 'Close edit image preview'
   },
@@ -475,7 +476,10 @@ const en = {
     aiPrompt: 'Prompt',
     aiAnalyze: 'Analyze',
     aiDescription: 'AI description',
-    aiPromptResult: 'AI prompt'
+    aiPromptResult: 'AI prompt',
+    zoomFit: 'Fit to window',
+    zoomActual: 'Actual size (100%)',
+    zoomReset: 'Reset zoom'
   },
   confirm: {
     closeLabel: 'Close confirmation',

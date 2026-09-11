@@ -9,10 +9,12 @@ type PrefetchPage = (page: number) => Promise<GalleryResponse | null>;
 
 export function createLightboxPrefetch(prefetchPage: PrefetchPage) {
   const prefetchedImageUrls = new Set<string>();
-  let pendingPrefetch: ReturnType<typeof setTimeout> | number | null = null;
+  let generation = 0;
+  let cancelScheduled: (() => void) | null = null;
 
-  function prefetchImage(image: GalleryEntry | null | undefined) {
+  function prefetchImage(image: GalleryEntry | null | undefined, expectedGeneration = generation) {
     if (!image || typeof window === 'undefined' || !canPrefetchLargeMedia()) return;
+    if (expectedGeneration !== generation) return;
     const url = imageUrl(image.filename, image.image_url);
     if (prefetchedImageUrls.has(url)) return;
     prefetchedImageUrls.add(url);
@@ -27,13 +29,20 @@ export function createLightboxPrefetch(prefetchPage: PrefetchPage) {
   }
 
   function clear() {
-    if (pendingPrefetch === null || typeof window === 'undefined') return;
-    if (typeof pendingPrefetch === 'number' && 'cancelIdleCallback' in window) {
-      window.cancelIdleCallback(pendingPrefetch);
-    } else {
-      window.clearTimeout(pendingPrefetch as ReturnType<typeof setTimeout>);
+    generation += 1;
+    cancelScheduled?.();
+    cancelScheduled = null;
+  }
+
+  function schedule(runPrefetch: () => void, delayMs: number) {
+    if (typeof window === 'undefined') return;
+    if (typeof window.requestIdleCallback === 'function') {
+      const handle = window.requestIdleCallback(runPrefetch, { timeout: delayMs * 2 });
+      cancelScheduled = () => window.cancelIdleCallback(handle);
+      return;
     }
-    pendingPrefetch = null;
+    const handle = window.setTimeout(runPrefetch, delayMs);
+    cancelScheduled = () => window.clearTimeout(handle);
   }
 
   function prefetchNeighbors(image: GalleryEntry | null, gallery: GalleryResponse | null) {
@@ -45,16 +54,13 @@ export function createLightboxPrefetch(prefetchPage: PrefetchPage) {
     if (currentIndex < gallery.images.length - 2 || !gallery.has_next) return;
 
     clear();
-    const runPrefetch = () => {
-      pendingPrefetch = null;
+    const expectedGeneration = generation;
+    schedule(() => {
+      cancelScheduled = null;
       void prefetchPage(gallery.page + 1).then((nextGallery) => {
-        prefetchImage(nextGallery?.images[0]);
+        prefetchImage(nextGallery?.images[0], expectedGeneration);
       });
-    };
-    pendingPrefetch =
-      typeof window.requestIdleCallback === 'function'
-        ? window.requestIdleCallback(runPrefetch, { timeout: 1500 })
-        : window.setTimeout(runPrefetch, 250);
+    }, 250);
   }
 
   return { clear, prefetchNeighbors };

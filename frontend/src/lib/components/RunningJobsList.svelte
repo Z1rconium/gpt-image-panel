@@ -3,6 +3,7 @@
   import { t } from '$lib/i18n';
   import { operationLabel, stageLabel, statusLabel } from '$lib/utils/format';
   import { measureItem, observeViewport } from '$lib/actions/virtualList';
+  import { buildOffsets, computeRenderWindow, computeSpacers } from '$lib/virtualization/window';
 
   type Props = {
     jobs?: GenerateJobStatus[];
@@ -22,30 +23,21 @@
   let measuredHeights = $state<Record<string, number>>({});
 
   const layout = $derived.by(() => {
-    const offsets = new Array<number>(jobs.length + 1);
-    offsets[0] = 0;
-    for (let index = 0; index < jobs.length; index += 1) {
-      const height = measuredHeights[jobs[index].job_id] || ESTIMATED_ITEM_HEIGHT;
-      offsets[index + 1] = offsets[index] + height + (index < jobs.length - 1 ? ITEM_GAP : 0);
-    }
+    const offsets = buildOffsets(
+      jobs.map((job) => job.job_id),
+      measuredHeights,
+      ESTIMATED_ITEM_HEIGHT,
+      ITEM_GAP
+    );
     return { offsets, totalHeight: offsets[jobs.length] || 0 };
   });
-  const renderWindow = $derived.by(() => {
-    if (!jobs.length) return { start: 0, end: 0 };
-    const rangeStart = Math.max(0, scrollTop - OVERSCAN_PX);
-    const rangeEnd = scrollTop + Math.max(viewportHeight, ESTIMATED_ITEM_HEIGHT) + OVERSCAN_PX;
-    let start = 0;
-    while (start < jobs.length - 1 && layout.offsets[start + 1] < rangeStart) start += 1;
-    let end = start + 1;
-    while (end < jobs.length && layout.offsets[end] < rangeEnd) end += 1;
-    return { start, end: Math.min(jobs.length, end + 1) };
-  });
-  const renderedJobs = $derived(jobs.slice(renderWindow.start, renderWindow.end));
-  const topSpacerHeight = $derived(layout.offsets[renderWindow.start] || 0);
-  const renderedHeight = $derived(
-    (layout.offsets[renderWindow.end] || 0) - topSpacerHeight - (renderWindow.end < jobs.length ? ITEM_GAP : 0)
+  const renderWindow = $derived(
+    computeRenderWindow(layout.offsets, jobs.length, scrollTop, viewportHeight, ESTIMATED_ITEM_HEIGHT, OVERSCAN_PX)
   );
-  const bottomSpacerHeight = $derived(Math.max(0, layout.totalHeight - topSpacerHeight - renderedHeight));
+  const renderedJobs = $derived(jobs.slice(renderWindow.start, renderWindow.end));
+  const spacers = $derived(computeSpacers(layout.offsets, jobs.length, renderWindow, ITEM_GAP));
+  const topSpacerHeight = $derived(spacers.top);
+  const bottomSpacerHeight = $derived(spacers.bottom);
 
   function handleViewportResize(height: number) {
     viewportHeight = height;

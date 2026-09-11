@@ -44,6 +44,13 @@
     form = { ...form, quantity: sanitizeQuantityInput(form.quantity) };
   }
 
+  function handlePromptKeydown(event: KeyboardEvent) {
+    if (event.key !== 'Enter' || event.isComposing || event.repeat) return;
+    if (!(event.ctrlKey || event.metaKey)) return;
+    event.preventDefault();
+    if (!loading) onSubmit();
+  }
+
   function clampCompression() {
     if (form.outputCompression === '') return;
     form = { ...form, outputCompression: String(Math.min(Math.max(Number(form.outputCompression) || 0, 0), 100)) };
@@ -91,6 +98,7 @@
           placeholder={$t.promptForm.placeholder}
           class="ui-field h-full min-h-[13rem] flex-1 resize-y px-4 py-3 pb-8 leading-6 lg:resize-none"
           use:plainTextInput
+          on:keydown={handlePromptKeydown}
         ></textarea>
         <div class="pointer-events-none absolute bottom-3 right-4 text-xs text-stone-500 dark:text-zinc-500">{promptLen}/{MAX_PROMPT_CHARS}</div>
       </div>
@@ -227,18 +235,21 @@
       {/if}
     </div>
 
-    <div class="flex items-center gap-2">
-      <button
-        type="button"
-        disabled={loading || editPlanning || !editPlannerEnabled || !form.prompt.trim()}
-        class="ui-button-secondary px-4"
-        on:click={onPlanEdit}
-      >
-        {editPlanning ? $t.promptForm.planningEdit : $t.promptForm.planEdit}
-      </button>
-      <button type="button" disabled={loading} class="ui-button-primary px-5 font-semibold" on:click={onSubmit}>
-        {hasEditSource ? $t.promptForm.edits : $t.promptForm.generate}
-      </button>
+    <div class="flex flex-col items-end gap-1">
+      <div class="flex items-center gap-2">
+        <button
+          type="button"
+          disabled={loading || editPlanning || !editPlannerEnabled || !form.prompt.trim()}
+          class="ui-button-secondary px-4"
+          on:click={onPlanEdit}
+        >
+          {editPlanning ? $t.promptForm.planningEdit : $t.promptForm.planEdit}
+        </button>
+        <button type="button" disabled={loading} class="ui-button-primary px-5 font-semibold" on:click={onSubmit}>
+          {hasEditSource ? $t.promptForm.edits : $t.promptForm.generate}
+        </button>
+      </div>
+      <p class="text-[11px] text-stone-400 dark:text-zinc-500">{$t.promptForm.submitShortcut}</p>
     </div>
   </div>
 </section>

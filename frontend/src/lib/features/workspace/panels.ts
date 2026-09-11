@@ -29,3 +29,16 @@ export const lightboxPanel = lazyPanels.lightbox;
 export const sizePanel = lazyPanels.size;
 export const editPreviewPanel = lazyPanels.editPreview;
 export const optimizerPanel = lazyPanels.optimizer;
+
+// Not a modal panel, but the assistant is below the fold and heavy enough that
+// it should not sit in the homepage dependency graph.
+export const aiAssistantPanel = createLazyComponent(() => import('$lib/components/AiAssistantPanel.svelte'));
+
+// Demand-loaded dialogs: they only render after the user opens them (or after
+// a background prefetch), so they stay out of the homepage graph.
+export const nodeImageResultPanel = createLazyComponent(() => import('$lib/components/NodeImageResultDialog.svelte'));
+export const editGalleryDialogPanel = createLazyComponent(() => import('$lib/components/EditGalleryDialog.svelte'));
+
+// The gallery grid sits below the fold; defer its (icon- and branch-heavy)
+// module until after the first paint.
+export const galleryGridPanel = createLazyComponent(() => import('$lib/components/GalleryGrid.svelte'));

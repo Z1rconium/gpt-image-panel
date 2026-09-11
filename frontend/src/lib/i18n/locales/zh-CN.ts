@@ -266,6 +266,7 @@ const zh: Translation = {
     planningEdit: '规划中...',
     edits: '编辑',
     generate: '生成',
+    submitShortcut: 'Ctrl/⌘ + Enter 提交',
     editSourcePreview: '编辑源预览',
     closeEditPreview: '关闭编辑图片预览'
   },
@@ -477,7 +478,10 @@ const zh: Translation = {
     aiPrompt: '反推',
     aiAnalyze: '分析',
     aiDescription: 'AI 描述',
-    aiPromptResult: 'AI 反推提示词'
+    aiPromptResult: 'AI 反推提示词',
+    zoomFit: '适应窗口',
+    zoomActual: '实际大小 (100%)',
+    zoomReset: '重置缩放'
   },
   confirm: {
     closeLabel: '关闭确认',

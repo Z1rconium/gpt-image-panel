@@ -99,6 +99,37 @@ test('a failed Chinese locale load falls back to English', async ({ page }) => {
   await expect.poll(() => page.evaluate(() => localStorage.getItem('gpt-image-panel-language'))).toBe('en');
 });
 
+test('switching language keeps the workspace mounted, draft, and focus', async ({ page }) => {
+  await loadApp(page, { language: 'en' });
+
+  const prompt = page.locator('#prompt');
+  await prompt.fill('draft kept across language switch');
+  await prompt.evaluate((node) => {
+    (node as HTMLElement).dataset.persistTag = 'kept';
+  });
+
+  let releaseChinese: () => void = () => {};
+  const chineseGate = new Promise<void>((resolve) => {
+    releaseChinese = resolve;
+  });
+  await page.route('**/src/lib/i18n/locales/zh-CN.ts*', async (route) => {
+    await chineseGate;
+    await route.continue();
+  });
+
+  await page.getByRole('button', { name: 'Switch to Simplified Chinese' }).click();
+
+  // The workspace is not torn down while the new locale loads.
+  await expect(page.locator('[aria-busy="true"]')).toHaveCount(0);
+  await expect(prompt).toHaveValue('draft kept across language switch');
+  await expect(prompt).toHaveAttribute('data-persist-tag', 'kept');
+
+  releaseChinese();
+  await expect(page.getByRole('heading', { name: '提示词', exact: true })).toBeVisible();
+  await expect(prompt).toHaveValue('draft kept across language switch');
+  await expect(prompt).toHaveAttribute('data-persist-tag', 'kept');
+});
+
 test('the first render stays textless until the selected locale is ready', async ({ page }) => {
   await mockApi(page, { language: 'zh-CN' });
 

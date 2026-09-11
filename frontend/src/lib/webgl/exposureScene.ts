@@ -12,24 +12,36 @@ import type { OGLRenderingContext, Program, Texture } from 'ogl';
 const VERTEX_SHADER = /* glsl */ `
   precision highp float;
   attribute vec3 position;
+  attribute vec3 normal;
   attribute vec2 uv;
   uniform mat4 modelViewMatrix;
   uniform mat4 projectionMatrix;
+  uniform mat3 normalMatrix;
   varying vec2 vUv;
+  varying vec3 vNormal;
   void main() {
     vUv = uv;
+    vNormal = normalize(normalMatrix * normal);
     gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
   }
 `;
 
+// The plane's normal rotates with the mesh, so lighting follows the reveal
+// instead of a flat multiplier. Light comes from above and slightly toward
+// the viewer; oriented lighting is normalized against the flat pose so the
+// final frame keeps the image's original colour and alpha.
 const FRAGMENT_SHADER = /* glsl */ `
   precision highp float;
   uniform sampler2D tMap;
   uniform float uLight;
   varying vec2 vUv;
+  varying vec3 vNormal;
   void main() {
+    vec3 lightDir = normalize(vec3(0.0, 1.0, 0.28));
     vec4 tex = texture2D(tMap, vUv);
-    gl_FragColor = vec4(tex.rgb * uLight, tex.a);
+    float oriented = max(dot(normalize(vNormal), lightDir), 0.0) / lightDir.z;
+    float exposure = clamp(uLight * oriented, 0.0, 1.0);
+    gl_FragColor = vec4(tex.rgb * exposure, tex.a);
   }
 `;
 
@@ -39,6 +51,7 @@ const START_LIGHT = 0.4;
 const FADE_IN_MS = 120;
 const CAMERA_FOV_DEG = 35;
 const CAMERA_DISTANCE = 5;
+const OGL_READY_TIMEOUT_MS = 1200;
 
 /** cubic-bezier(0.2, 0, 0, 1) - the --ease-std token, evaluated in JS. */
 const EASE_STANDARD = cubicBezierEasing(0.2, 0, 0, 1);
@@ -78,42 +91,137 @@ export type ExposureHandle = {
   cancel: () => void;
 };
 
+type ExposureResources = {
+  gl: OGLRenderingContext | null;
+  geometry: { remove: () => void } | null;
+  texture: Texture | null;
+  program: Program | null;
+};
+
 /**
  * Renders the exposure once into `canvas`, texturing a lit plane with
  * `image` (already loaded). Resolves after `durationMs`. Safe to call again
  * on the same canvas for a later result - each call builds its own
  * program/texture and disposes them on completion.
+ *
+ * Every exit path (normal completion, cancel, initialization failure, context
+ * loss, zero size, unmount) funnels through the idempotent settle(), so `done`
+ * always resolves and every owned GPU object and listener is released exactly
+ * once.
  */
 export function runExposure(canvas: HTMLCanvasElement, image: HTMLImageElement, durationMs: number): ExposureHandle {
+  let settled = false;
   let cancelled = false;
   let rafId = 0;
   let contextLost = false;
+  let resolveDone: () => void = () => {};
+  const done = new Promise<void>((resolve) => {
+    resolveDone = resolve;
+  });
+
+  const resources: ExposureResources = { gl: null, geometry: null, texture: null, program: null };
+
+  function dispose() {
+    const { gl, geometry, texture, program } = resources;
+    if (gl && !contextLost) {
+      try {
+        geometry?.remove();
+      } catch {
+        // The context may already be gone; releasing what we can is best effort.
+      }
+      try {
+        program?.remove();
+      } catch {
+        // Same as above.
+      }
+      if (texture?.texture) {
+        try {
+          gl.deleteTexture(texture.texture);
+        } catch {
+          // Same as above.
+        }
+      }
+      gl.getExtension('WEBGL_lose_context')?.loseContext();
+    }
+    resources.gl = null;
+    resources.geometry = null;
+    resources.texture = null;
+    resources.program = null;
+  }
+
+  /** Idempotent: resolves done, cancels the pending frame, and frees all resources. */
+  function settle() {
+    if (settled) return;
+    settled = true;
+    if (rafId) {
+      cancelAnimationFrame(rafId);
+      rafId = 0;
+    }
+    canvas.removeEventListener('webglcontextlost', onContextLost);
+    if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVisibilityChange);
+    dispose();
+    canvas.style.opacity = '';
+    resolveDone();
+  }
 
   const onContextLost = (event: Event) => {
     event.preventDefault();
     contextLost = true;
     cancelled = true;
+    settle();
   };
   canvas.addEventListener('webglcontextlost', onContextLost, { once: true });
 
-  const done = (async () => {
+  // A hidden tab should not keep rendering; finish as a static result instead.
+  const onVisibilityChange = () => {
+    if (document.visibilityState === 'hidden') {
+      cancelled = true;
+      settle();
+    }
+  };
+  if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onVisibilityChange);
+
+  void (async () => {
     const width = canvas.clientWidth;
     const height = canvas.clientHeight;
-    if (cancelled || !width || !height) return;
-
-    let gl: OGLRenderingContext | null = null;
-    let texture: Texture | null = null;
-    let program: Program | null = null;
+    if (cancelled || settled || !width || !height) {
+      settle();
+      return;
+    }
 
     try {
-      const { Renderer, Camera, Transform, Mesh, Program, Texture, Plane } = await import('ogl');
-      if (cancelled) return;
+      const modulePromise = import('$lib/webgl/oglAdapter');
+      const ready = await Promise.race([
+        modulePromise,
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), OGL_READY_TIMEOUT_MS))
+      ]);
+      if (!ready) {
+        // The 3D module never arrived in time; fall back to the CSS reveal.
+        settle();
+        return;
+      }
+      if (cancelled || settled) {
+        settle();
+        return;
+      }
+      const { Renderer, Camera, Transform, Mesh, Program, Texture, Plane } = ready;
 
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
       const renderer = new Renderer({ canvas, alpha: true, antialias: true, depth: false, dpr });
-      gl = renderer.gl;
-      if (!gl) return;
+      const gl = renderer.gl;
+      if (!gl) {
+        settle();
+        return;
+      }
+      resources.gl = gl;
       renderer.setSize(width, height);
+
+      // Never upload an image larger than the GPU can hold as a texture.
+      const maxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE) as number;
+      if (image.naturalWidth > maxTextureSize || image.naturalHeight > maxTextureSize) {
+        settle();
+        return;
+      }
 
       const camera = new Camera(gl, { fov: CAMERA_FOV_DEG, aspect: width / height, near: 0.1, far: 100 });
       camera.position.z = CAMERA_DISTANCE;
@@ -124,8 +232,8 @@ export function runExposure(canvas: HTMLCanvasElement, image: HTMLImageElement, 
 
       const scene = new Transform();
       const geometry = new Plane(gl, { width: visibleWidth, height: visibleHeight });
-      texture = new Texture(gl, { image, generateMipmaps: false, minFilter: gl.LINEAR, flipY: true });
-      program = new Program(gl, {
+      const texture = new Texture(gl, { image, generateMipmaps: false, minFilter: gl.LINEAR, flipY: true });
+      const program = new Program(gl, {
         vertex: VERTEX_SHADER,
         fragment: FRAGMENT_SHADER,
         uniforms: { tMap: { value: texture }, uLight: { value: START_LIGHT } },
@@ -133,13 +241,18 @@ export function runExposure(canvas: HTMLCanvasElement, image: HTMLImageElement, 
         depthWrite: false,
         cullFace: false
       });
+      resources.geometry = geometry;
+      resources.texture = texture;
+      resources.program = program;
+
       const mesh = new Mesh(gl, { geometry, program });
       mesh.setParent(scene);
 
       await new Promise<void>((resolve) => {
         const start = performance.now();
         const tick = (now: number) => {
-          if (cancelled) {
+          rafId = 0;
+          if (cancelled || settled) {
             resolve();
             return;
           }
@@ -150,9 +263,7 @@ export function runExposure(canvas: HTMLCanvasElement, image: HTMLImageElement, 
           mesh.rotation.x = START_TILT_RAD * (1 - eased);
           const scale = START_SCALE + (1 - START_SCALE) * eased;
           mesh.scale.set(scale, scale, 1);
-          if (program) {
-            program.uniforms.uLight.value = START_LIGHT + (1 - START_LIGHT) * eased;
-          }
+          program.uniforms.uLight.value = START_LIGHT + (1 - START_LIGHT) * eased;
           canvas.style.opacity = String(Math.min(1, elapsed / FADE_IN_MS));
 
           renderer.render({ scene, camera });
@@ -168,13 +279,7 @@ export function runExposure(canvas: HTMLCanvasElement, image: HTMLImageElement, 
     } catch {
       // Gracefully exit and allow plain CSS transition fallback
     } finally {
-      if (gl && !contextLost) {
-        if (texture?.texture) gl.deleteTexture(texture.texture);
-        if (program?.program) gl.deleteProgram(program.program);
-        gl.getExtension('WEBGL_lose_context')?.loseContext();
-      }
-      canvas.style.opacity = '';
-      canvas.removeEventListener('webglcontextlost', onContextLost);
+      settle();
     }
   })();
 
@@ -182,7 +287,7 @@ export function runExposure(canvas: HTMLCanvasElement, image: HTMLImageElement, 
     done,
     cancel() {
       cancelled = true;
-      if (rafId) cancelAnimationFrame(rafId);
+      settle();
     }
   };
 }

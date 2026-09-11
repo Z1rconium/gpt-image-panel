@@ -17,6 +17,7 @@ import type { GenerateJobImage, GenerateJobStatus } from '$lib/api/types/jobs';
   let activeJobId = '';
   let selectedImageId = '';
   let loadedPreviewSrc = '';
+  let failedPreviewSrc = '';
 
   function normalizePreviewImages(currentJob: GenerateJobStatus | null, fallbackUrl: string, fallbackFilename: string): GenerateJobImage[] {
     const jobImages = currentJob?.images?.filter((image) => image.image_url || image.filename) || [];
@@ -59,8 +60,9 @@ import type { GenerateJobImage, GenerateJobStatus } from '$lib/api/types/jobs';
   $: selectedImageIndex = selectedImage ? resultImages.findIndex((image) => image.image_id === selectedImage.image_id) : -1;
   $: previewWidth = selectedImage?.image_width || job?.image_width || undefined;
   $: previewHeight = selectedImage?.image_height || job?.image_height || undefined;
-  // The result seats into the well once it has actually arrived.
-  $: seated = Boolean(selectedImageUrl) && loadedPreviewSrc === selectedImageUrl;
+  // The result seats into the well once it has actually arrived and decoded.
+  $: seated = Boolean(selectedImageUrl) && loadedPreviewSrc === selectedImageUrl && failedPreviewSrc !== selectedImageUrl;
+  $: previewFailed = Boolean(selectedImageUrl) && failedPreviewSrc === selectedImageUrl;
   $: previewSize = displayImageSize({
     size: job?.size || null,
     image_width: selectedImage?.image_width ?? job?.image_width ?? null,
@@ -73,12 +75,14 @@ import type { GenerateJobImage, GenerateJobStatus } from '$lib/api/types/jobs';
   let previewImageEl: HTMLImageElement | null = null;
   let exposureCanvasEl: HTMLCanvasElement | null = null;
   let showExposureCanvas = false;
-  let exposedImageId = '';
+  let exposedKey = '';
+  let exposureRunId = 0;
   let exposureHandle: ExposureHandle | null = null;
 
-  $: if (seated && selectedImage && selectedImage.image_id !== exposedImageId) {
-    exposedImageId = selectedImage.image_id;
-    void triggerExposure();
+  $: activeExposureKey = seated && selectedImage ? `${job?.job_id || ''}::${selectedImage.image_id}` : '';
+  $: if (activeExposureKey && activeExposureKey !== exposedKey) {
+    exposedKey = activeExposureKey;
+    void triggerExposure(activeExposureKey);
   }
 
   function signatureDurationMs(): number {
@@ -89,34 +93,38 @@ import type { GenerateJobImage, GenerateJobStatus } from '$lib/api/types/jobs';
     return Number.isFinite(ms) && ms > 0 ? ms : fallback;
   }
 
-  async function triggerExposure() {
+  async function triggerExposure(key: string) {
+    const runId = ++exposureRunId;
     exposureHandle?.cancel();
     exposureHandle = null;
+    showExposureCanvas = false;
     if (!canRunExposure()) return;
     showExposureCanvas = true;
     await tick();
+    if (runId !== exposureRunId) return;
     const canvas = exposureCanvasEl;
     const img = previewImageEl;
     if (!canvas || !img || !img.complete || img.naturalWidth === 0) {
-      showExposureCanvas = false;
+      if (runId === exposureRunId) showExposureCanvas = false;
       return;
     }
+    const handle = runExposure(canvas, img, signatureDurationMs());
+    exposureHandle = handle;
     try {
-      const handle = runExposure(canvas, img, signatureDurationMs());
-      exposureHandle = handle;
       await handle.done;
-    } catch {
-      // Gracefully fall back to CSS fade/scale
     } finally {
-      if (exposureHandle) {
+      // Only the latest run may clear the shared handle/canvas flags.
+      if (runId === exposureRunId) {
         exposureHandle = null;
+        showExposureCanvas = false;
       }
-      showExposureCanvas = false;
     }
   }
 
   onDestroy(() => {
+    exposureRunId += 1;
     exposureHandle?.cancel();
+    exposureHandle = null;
   });
 </script>
 
@@ -175,11 +183,19 @@ import type { GenerateJobImage, GenerateJobStatus } from '$lib/api/types/jobs';
               decoding="async"
               width={previewWidth}
               height={previewHeight}
-              on:load={() => (loadedPreviewSrc = selectedImageUrl)}
-              on:error={() => (loadedPreviewSrc = selectedImageUrl)}
+              on:load={() => {
+                loadedPreviewSrc = selectedImageUrl;
+                failedPreviewSrc = '';
+              }}
+              on:error={() => {
+                failedPreviewSrc = selectedImageUrl;
+              }}
             />
             {#if showExposureCanvas}
               <canvas bind:this={exposureCanvasEl} class="preview-exposure-canvas rounded-lg" aria-hidden="true"></canvas>
+            {/if}
+            {#if previewFailed}
+              <div class="preview-image-error" role="status">{$t.lightbox.originalLoadFailed}</div>
             {/if}
           </div>
         </div>

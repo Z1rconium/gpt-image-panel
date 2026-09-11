@@ -242,7 +242,7 @@ Motion reports something true or it does not ship. Every animation in the produc
 
 1. **Press physics.** Every raised control travels down 1px and collapses its shadow to the press inset. Recessed surfaces never move.
 2. **Overlay choreography.** The overlay root carries the backdrop fade; the panel carries only its travel, so the two never compound. Dialogs scale from \`0.985\`. Drawers are revealed from the screen edge with a \`clip-path\` wipe — a right-anchored panel must never translate outward, because its box would leave the viewport.
-3. **The exposure.** A generated result arrives on a single lit plane: it tilts up from a slight recess into full, flat-on light as the well's inset deepens by one step, in place of a flat fade. One directional light falls from directly above, matching the console's one overhead source everywhere else in the system — never a second light, never colour in the light. It runs once per result, in WebGL where supported and motion is not reduced; every other browser still receives the plain 380ms fade-and-scale. This is the product's signature moment; nothing else may compete with it, and nothing else may borrow its depth.
+3. **The exposure.** A generated result arrives on a single lit plane: it tilts up from a slight recess into full, flat-on light as the well's inset deepens by one step, in place of a flat fade. One directional light falls from directly above, matching the console's one overhead source everywhere else in the system — never a second light, never colour in the light. The plane's orientation participates in that lighting: the tilted pose sits in shade and the flat pose is normalized back to full so the final frame keeps the image's original colour and alpha. It runs once per result, in WebGL where supported and motion is not reduced; every other browser still receives the plain 380ms fade-and-scale. This is the product's signature moment; nothing else may compete with it, and nothing else may borrow its depth.
 4. **State ticks.** One-shot, never looping: the favourite star on the way in only, the jobs badge on a count change, a running job row that just changed status, and the header shadow appearing once content scrolls beneath it.
 
 **The Travel-Is-A-Token Rule.** Every translation reads from \`--lift-hover\`, \`--lift-press\`, or \`--motion-lift\`. Reduced motion sets those to \`0px\` rather than overriding \`transform\`, because \`@apply\` inlines component rules and an override can land in the wrong source order.
@@ -250,6 +250,12 @@ Motion reports something true or it does not ship. Every animation in the produc
 **The One Surface, One Light Rule.** Real depth — WebGL, perspective, tilt — exists in exactly one place: the exposure. No other surface may tilt, orbit, gain a light source, or fake perspective.
 
 **The Reduced-Motion Rule.** Under \`prefers-reduced-motion: reduce\`, depth stays and travel goes to zero. Durations collapse via the tokens, and JavaScript-driven transitions check the media query directly so a leaving element never lingers.
+
+### Interaction Rules
+
+- **Prompt submit.** The primary action can be triggered with \`Ctrl/⌘ + Enter\`; plain \`Enter\` still inserts a newline. IME composition and key repeat never submit, and a discoverable hint sits beside the action.
+- **Lightbox zoom.** The lightbox opens fit-to-window. A \`1:1\` control switches to actual size, where a pointer drag pans the image; returning to fit resets the pan. Zoom resets whenever the displayed image changes. Horizontal swipe-to-navigate is only active in fit mode — a zoomed image owns the gesture for panning.
+- **Background work.** Low-priority prefetch and the exposure stop when the tab is hidden, and prefetch waits for the first critical content to load before spending bandwidth on optional chunks.
 
 ## 6. Components
 

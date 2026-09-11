@@ -2,13 +2,9 @@
   import { onMount } from 'svelte';
   import AccessGate from '$lib/components/AccessGate.svelte';
   import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
-  import EditGalleryDialog from '$lib/components/EditGalleryDialog.svelte';
   import EditSourcePicker from '$lib/components/EditSourcePicker.svelte';
-  import GalleryGrid from '$lib/components/GalleryGrid.svelte';
-  import NodeImageResultDialog from '$lib/components/NodeImageResultDialog.svelte';
   import Header from '$lib/components/Header.svelte';
   import PreviewPanel from '$lib/components/PreviewPanel.svelte';
-  import AiAssistantPanel from '$lib/components/AiAssistantPanel.svelte';
   import PromptForm from '$lib/components/PromptForm.svelte';
   import ToastHost from '$lib/components/ToastHost.svelte';
   import { apiFetch } from '$lib/api/client';
@@ -37,18 +33,21 @@ import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput 
   import { canPrefetchNonCritical } from '$lib/utils/network';
   import { buildPromptOptimizeRequest } from '$lib/utils/promptOptimizer';
   import {
+    aiAssistantPanel,
+    editGalleryDialogPanel,
     editPreviewPanel,
+    galleryGridPanel,
     imagePromptPanel,
     jobsPanel,
-    lazyPanels,
     lightboxPanel,
+    nodeImageResultPanel,
     optimizerPanel,
     settingsPanel,
     sizePanel,
-    snippetsPanel,
-    type LazyPanel
+    snippetsPanel
   } from '$lib/features/workspace/panels';
   import { createLightboxController } from '$lib/features/workspace/lightbox';
+  import { createPanelController } from '$lib/features/workspace/panelController';
   import { installWorkspaceLifecycle } from '$lib/features/workspace/lifecycle';
   import { waitForGalleryAnalysis } from '$lib/features/workspace/gallery';
   import {
@@ -81,11 +80,8 @@ import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput 
   let jobDiagnoses: Record<string, AssistantJobDiagnoseResponse> = {};
   let lastActivePresetApiPath: ApiPath = initialPromptFormState.apiPath;
   let optimizingPrompt = false;
-  let loadingPanel: LazyPanel | null = null;
-  let lazyLoadSequence = 0;
   let gallerySuccessRefreshTimer: ReturnType<typeof setTimeout> | null = null;
   const handledTerminalJobIds = new Set<string>();
-  const panelFocusTargets: Partial<Record<LazyPanel, HTMLElement>> = {};
   $: hasEditSource = editSourceCount($editSourceStore) > 0;
   $: editSources = [
     ...($editSourceStore.selectedGalleryImageId
@@ -200,55 +196,16 @@ import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput 
     showToast(errorMessage(error, fallback), 'error');
   }
 
-  async function ensurePanel(panel: LazyPanel, showLoading = true, onRetry?: () => void) {
-    const sequence = ++lazyLoadSequence;
-    if (showLoading) loadingPanel = panel;
-    try {
-      await lazyPanels[panel].load();
-      return true;
-    } catch {
-      const reloadRequired = lazyPanels[panel].retryRequiresReload();
-      lazyPanels[panel].reset();
-      showToast($t.common.loadFeatureFailed, 'error', {
-        actionLabel: $t.common.retry,
-        onAction: reloadRequired
-          ? () => window.location.reload()
-          : onRetry || (() => void ensurePanel(panel))
-      });
-      return false;
-    } finally {
-      if (sequence === lazyLoadSequence && loadingPanel === panel) loadingPanel = null;
-    }
-  }
-
-  function prefetchPanel(panel: LazyPanel) {
-    if (!canPrefetchNonCritical()) return;
-    void lazyPanels[panel].prefetch();
-  }
-
-  function rememberPanelFocus(panel: LazyPanel) {
-    if (panelFocusTargets[panel] || typeof document === 'undefined') return;
-    const active = document.activeElement;
-    if (active instanceof HTMLElement) panelFocusTargets[panel] = active;
-  }
-
-  function restorePanelFocus(panel: LazyPanel) {
-    const target = panelFocusTargets[panel];
-    delete panelFocusTargets[panel];
-    queueMicrotask(() => {
-      if (target?.isConnected) target.focus();
-    });
-  }
-
-  async function openUiPanel<K extends keyof typeof $uiStore>(panel: LazyPanel, key: K) {
-    rememberPanelFocus(panel);
-    if (await ensurePanel(panel, true, () => void openUiPanel(panel, key))) setUi(key, true as (typeof $uiStore)[K]);
-  }
-
-  function closeUiPanel<K extends keyof typeof $uiStore>(panel: LazyPanel, key: K) {
-    setUi(key, false as (typeof $uiStore)[K]);
-    restorePanelFocus(panel);
-  }
+  const {
+    loadingPanel,
+    ensurePanel,
+    prefetchPanel,
+    rememberPanelFocus,
+    restorePanelFocus,
+    openPanel: openUiPanel,
+    closePanel: closeUiPanel,
+    reset: resetPanels
+  } = createPanelController(showToast);
 
   function syncAfterGalleryMutation(mode: 'replace' | 'push' = 'replace', debounceMs = 0) {
     urlSync.schedule(mode, debounceMs);
@@ -787,6 +744,7 @@ import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput 
   }
 
   function openGalleryEditDialog(image: GalleryEntry) {
+    void editGalleryDialogPanel.prefetch();
     galleryEditImage = image;
     galleryEditDialogOpen = true;
   }
@@ -934,10 +892,12 @@ import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput 
   }
 
   function uploadGalleryImageToNodeImage(image: GalleryEntry) {
+    void nodeImageResultPanel.prefetch();
     void galleryStore.uploadToNodeImage(image, showToast);
   }
 
   function batchUploadGalleryToNodeImage() {
+    void nodeImageResultPanel.prefetch();
     void galleryStore.batchUploadToNodeImage(showToast);
   }
 
@@ -1077,6 +1037,10 @@ import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput 
     const initialData = loadAuthenticatedData();
     void initialData.catch(() => undefined);
     void accessStore.checkAccess(() => initialData);
+    // Loaded in its own chunk right after hydration so it stays out of the
+    // homepage dependency graph without leaving a long-lived gap.
+    void aiAssistantPanel.prefetch();
+    void galleryGridPanel.prefetch();
 
     const popstate = () => {
       void applyUrlStateToApp();
@@ -1144,6 +1108,7 @@ import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput 
         previewStore.cleanup();
         uiStore.cleanup();
         lightboxController.destroy();
+        resetPanels();
         optimizingPrompt = false;
       }
     });
@@ -1185,7 +1150,9 @@ import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput 
 />
 
 <ConfirmDialog request={$confirmStore.request} />
-<NodeImageResultDialog />
+{#if $nodeImageResultPanel.component}
+  <svelte:component this={$nodeImageResultPanel.component} />
+{/if}
 
 {#if $imagePromptPanel.component}
   <svelte:component
@@ -1310,22 +1277,25 @@ import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput 
     />
   </PromptForm>
 
-  <AiAssistantPanel
-    enabled={aiAssistantAvailable}
-    optimizerEnabled={optimizerAvailable}
-    currentPrompt={form.prompt}
-    apiPath={form.apiPath}
-    model={form.model}
-    size={form.size}
-    quality={form.quality}
-    outputFormat={form.outputFormat}
-    quantity={normalizeSubmissionQuantity(form.quantity)}
-    loading={$assistantStore.promptLoading || $assistantStore.paramsLoading}
-    onApplyPrompt={applyAssistantPrompt}
-    onInsertPrompt={insertAssistantPrompt}
-    onSaveSnippet={saveAssistantSnippet}
-    onApplyParams={applyAssistantParams}
-  />
+  {#if $aiAssistantPanel.component}
+    <svelte:component
+      this={$aiAssistantPanel.component}
+      enabled={aiAssistantAvailable}
+      optimizerEnabled={optimizerAvailable}
+      currentPrompt={form.prompt}
+      apiPath={form.apiPath}
+      model={form.model}
+      size={form.size}
+      quality={form.quality}
+      outputFormat={form.outputFormat}
+      quantity={normalizeSubmissionQuantity(form.quantity)}
+      loading={$assistantStore.promptLoading || $assistantStore.paramsLoading}
+      onApplyPrompt={applyAssistantPrompt}
+      onInsertPrompt={insertAssistantPrompt}
+      onSaveSnippet={saveAssistantSnippet}
+      onApplyParams={applyAssistantParams}
+    />
+  {/if}
 
   <PreviewPanel
     loading={$previewStore.loading}
@@ -1338,43 +1308,46 @@ import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput 
     onClear={clearPreview}
   />
 
-  <GalleryGrid
-    gallery={$galleryStore.gallery}
-    filters={$galleryStore.filters}
-    loading={$galleryStore.loading}
-    operationStatus={$galleryActivityStore.operationStatus}
-    canSyncR2={r2BackupAvailable}
-    canNodeImageUpload={nodeImageAvailable}
-    onFilter={setGalleryFilter}
-    onResetFilters={resetGalleryFilters}
-    onPage={loadGalleryPage}
-    onLoadStats={loadGalleryStats}
-    onFavorite={toggleFavorite}
-    onDelete={deleteImage}
-    onDeleteAll={deleteAllImages}
-    onImport={importArchive}
-    onExport={exportArchive}
-    onSync={syncGallery}
-    onOpen={openLightbox}
-    onEdit={openGalleryEditDialog}
-    onUsePrompt={useGalleryPrompt}
-    onUseAll={useGalleryParams}
-    onNodeImageUpload={uploadGalleryImageToNodeImage}
-    selectionMode={$galleryStore.selectionMode}
-    selectedIds={$galleryStore.selectedIds}
-    selectionTokenCount={$galleryStore.selectionToken?.count || 0}
-    onSelectionMode={galleryStore.setSelectionMode}
-    onToggleSelection={galleryStore.toggleSelection}
-    onSelectPage={galleryStore.selectPage}
-    onSelectFiltered={galleryStore.selectFiltered}
-    onClearSelection={galleryStore.clearSelection}
-    onBatchDelete={batchDeleteGallery}
-    onBatchFavorite={batchFavoriteGallery}
-    onBatchDownload={() => galleryStore.batchDownload(showToast)}
-    onBatchNodeImageUpload={batchUploadGalleryToNodeImage}
-    canAiAnalyze={aiAssistantAvailable}
-    onBatchAiAnalyze={batchAnalyzeGallery}
-  />
+  {#if $galleryGridPanel.component}
+    <svelte:component
+      this={$galleryGridPanel.component}
+      gallery={$galleryStore.gallery}
+      filters={$galleryStore.filters}
+      loading={$galleryStore.loading}
+      operationStatus={$galleryActivityStore.operationStatus}
+      canSyncR2={r2BackupAvailable}
+      canNodeImageUpload={nodeImageAvailable}
+      onFilter={setGalleryFilter}
+      onResetFilters={resetGalleryFilters}
+      onPage={loadGalleryPage}
+      onLoadStats={loadGalleryStats}
+      onFavorite={toggleFavorite}
+      onDelete={deleteImage}
+      onDeleteAll={deleteAllImages}
+      onImport={importArchive}
+      onExport={exportArchive}
+      onSync={syncGallery}
+      onOpen={openLightbox}
+      onEdit={openGalleryEditDialog}
+      onUsePrompt={useGalleryPrompt}
+      onUseAll={useGalleryParams}
+      onNodeImageUpload={uploadGalleryImageToNodeImage}
+      selectionMode={$galleryStore.selectionMode}
+      selectedIds={$galleryStore.selectedIds}
+      selectionTokenCount={$galleryStore.selectionToken?.count || 0}
+      onSelectionMode={galleryStore.setSelectionMode}
+      onToggleSelection={galleryStore.toggleSelection}
+      onSelectPage={galleryStore.selectPage}
+      onSelectFiltered={galleryStore.selectFiltered}
+      onClearSelection={galleryStore.clearSelection}
+      onBatchDelete={batchDeleteGallery}
+      onBatchFavorite={batchFavoriteGallery}
+      onBatchDownload={() => galleryStore.batchDownload(showToast)}
+      onBatchNodeImageUpload={batchUploadGalleryToNodeImage}
+      canAiAnalyze={aiAssistantAvailable}
+      onBatchAiAnalyze={batchAnalyzeGallery}
+    />
+  {/if}
 </main>
 
 {#if $optimizerPanel.component}
@@ -1426,18 +1399,21 @@ import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput 
 />
 {/if}
 
-<EditGalleryDialog
-  open={galleryEditDialogOpen}
-  image={galleryEditImage}
-  onChoose={applyGalleryEditChoice}
-  onClose={closeGalleryEditDialog}
-/>
+{#if $editGalleryDialogPanel.component}
+  <svelte:component
+    this={$editGalleryDialogPanel.component}
+    open={galleryEditDialogOpen}
+    image={galleryEditImage}
+    onChoose={applyGalleryEditChoice}
+    onClose={closeGalleryEditDialog}
+  />
+{/if}
 
 {#if $sizePanel.component}
   <svelte:component this={$sizePanel.component} open={$uiStore.sizeDialogOpen} value={form.size} onApply={(nextSize: string) => (form = { ...form, size: nextSize })} onClose={() => closeUiPanel('size', 'sizeDialogOpen')} />
 {/if}
 
-{#if loadingPanel}
+{#if $loadingPanel}
   <div class="lazy-panel-status" role="status" aria-live="polite">
     <span class="spinner" aria-hidden="true"></span>
     <span>{$t.common.loadingFeature}</span>

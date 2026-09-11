@@ -45,8 +45,19 @@
   export let onBatchAiAnalyze: () => void = () => {};
 
   const skeletonCards = Array.from({ length: 6 });
+  // The first row is visible on load, so it is fetched eagerly; only the very
+  // first thumbnail is marked high priority. Everything after the first row is
+  // lazy with the browser's default priority.
   const EAGER_THUMB_COUNT = 3;
   const THUMBNAIL_PLACEHOLDER_SRC = 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=';
+
+  function thumbnailLoading(index: number): 'eager' | 'lazy' {
+    return index < EAGER_THUMB_COUNT ? 'eager' : 'lazy';
+  }
+
+  function thumbnailFetchPriority(index: number): 'high' | 'auto' {
+    return index === 0 ? 'high' : 'auto';
+  }
 
   let importInput: HTMLInputElement;
   let failedThumbnailUrls = new Map<string, string>();
@@ -298,8 +309,8 @@
                   src={galleryImageSrc(image)}
                   alt={image.prompt}
                   class="gallery-image preview-empty h-full w-full object-cover"
-                  loading={index < EAGER_THUMB_COUNT ? 'eager' : 'lazy'}
-                  fetchpriority={index < EAGER_THUMB_COUNT ? 'high' : 'low'}
+                  loading={thumbnailLoading(index)}
+                  fetchpriority={thumbnailFetchPriority(index)}
                   decoding="async"
                   width={image.image_width || undefined}
                   height={image.image_height || undefined}

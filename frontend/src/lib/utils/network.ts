@@ -12,7 +12,13 @@ function connectionInfo() {
   return (navigator as NavigatorWithConnection).connection || null;
 }
 
+/** Background work must stop while the tab is hidden so it never competes with the visible page. */
+export function isPageVisible(): boolean {
+  return typeof document === 'undefined' || document.visibilityState !== 'hidden';
+}
+
 export function canPrefetchNonCritical() {
+  if (!isPageVisible()) return false;
   const connection = connectionInfo();
   if (!connection) return true;
   if (connection.saveData) return false;
@@ -20,6 +26,7 @@ export function canPrefetchNonCritical() {
 }
 
 export function canPrefetchLargeMedia() {
+  if (!isPageVisible()) return false;
   const connection = connectionInfo();
   if (!connection) return true;
   if (connection.saveData) return false;

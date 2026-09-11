@@ -5,6 +5,7 @@
   import { formatBeijingTime, jobFailureMessage, operationLabel, stageLabel, statusLabel } from '$lib/utils/format';
   import { isActiveJobStatus, isFailureJobStatus } from '$lib/utils/jobs';
   import { measureItem, observeViewport } from '$lib/actions/virtualList';
+  import { buildOffsets, computeRenderWindow, computeSpacers } from '$lib/virtualization/window';
 
   type MaybePromise = void | Promise<void>;
   type Props = {
@@ -51,31 +52,21 @@
 
   const resetKey = $derived(`${historyFailedOnly}:${historyJobs[0]?.job_id || ''}`);
   const layout = $derived.by(() => {
-    const offsets = new Array<number>(historyJobs.length + 1);
-    offsets[0] = 0;
-    for (let index = 0; index < historyJobs.length; index += 1) {
-      const job = historyJobs[index];
-      const height = measuredHeights[job.job_id] || ESTIMATED_ITEM_HEIGHT;
-      offsets[index + 1] = offsets[index] + height + (index < historyJobs.length - 1 ? ITEM_GAP : 0);
-    }
+    const offsets = buildOffsets(
+      historyJobs.map((job) => job.job_id),
+      measuredHeights,
+      ESTIMATED_ITEM_HEIGHT,
+      ITEM_GAP
+    );
     return { offsets, totalHeight: offsets[historyJobs.length] || 0 };
   });
-  const renderWindow = $derived.by(() => {
-    if (!historyJobs.length) return { start: 0, end: 0 };
-    const rangeStart = Math.max(0, scrollTop - OVERSCAN_PX);
-    const rangeEnd = scrollTop + Math.max(viewportHeight, ESTIMATED_ITEM_HEIGHT) + OVERSCAN_PX;
-    let start = 0;
-    while (start < historyJobs.length - 1 && layout.offsets[start + 1] < rangeStart) start += 1;
-    let end = start + 1;
-    while (end < historyJobs.length && layout.offsets[end] < rangeEnd) end += 1;
-    return { start, end: Math.min(historyJobs.length, end + 1) };
-  });
-  const renderedJobs = $derived(historyJobs.slice(renderWindow.start, renderWindow.end));
-  const topSpacerHeight = $derived(layout.offsets[renderWindow.start] || 0);
-  const renderedHeight = $derived(
-    (layout.offsets[renderWindow.end] || 0) - topSpacerHeight - (renderWindow.end < historyJobs.length ? ITEM_GAP : 0)
+  const renderWindow = $derived(
+    computeRenderWindow(layout.offsets, historyJobs.length, scrollTop, viewportHeight, ESTIMATED_ITEM_HEIGHT, OVERSCAN_PX)
   );
-  const bottomSpacerHeight = $derived(Math.max(0, layout.totalHeight - topSpacerHeight - renderedHeight));
+  const renderedJobs = $derived(historyJobs.slice(renderWindow.start, renderWindow.end));
+  const spacers = $derived(computeSpacers(layout.offsets, historyJobs.length, renderWindow, ITEM_GAP));
+  const topSpacerHeight = $derived(spacers.top);
+  const bottomSpacerHeight = $derived(spacers.bottom);
 
   $effect(() => {
     if (resetKey === previousResetKey) return;

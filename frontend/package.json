@@ -8,8 +8,12 @@
     "build:analyze": "ANALYZE=true vite build",
     "preview": "vite preview --host 127.0.0.1 --port 4173",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "check:bundle": "node scripts/bundle-budget.mjs",
+    "test:unit": "vitest run",
+    "test:unit:watch": "vitest",
     "test:e2e": "playwright test",
-    "test:e2e:perf": "RUN_PERFORMANCE_TESTS=true playwright test"
+    "test:e2e:perf": "RUN_PERFORMANCE_TESTS=true playwright test",
+    "test:perf:production": "playwright test --config playwright.perf.config.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0",
@@ -25,7 +29,8 @@
     "svelte-check": "^4.3.1",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.9.2",
-    "vite": "^6.4.3"
+    "vite": "^6.4.3",
+    "vitest": "^2.1.9"
   },
   "overrides": {
     "cookie": "0.7.2"

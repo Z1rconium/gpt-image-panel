@@ -4,42 +4,22 @@ import type { ApiPath, ResponseFormatDefault } from '$lib/api/types/common';
 import type { AIAssistantSettingsInput, ApiPreset, AssistantHealthResponse, OverallConfigItem, OverallConfigResponse, OverallConfigUpdateRequest, PromptOptimizerHealthResponse, PresetHealthResponse, PromptOptimizerSystemPromptResponse, R2BackupSettingsInput, R2HealthResponse, SettingsInput, SettingsResponse } from '$lib/api/types/settings';
   import { confirmStore } from '$lib/stores/confirm';
   import { RESPONSE_FORMAT_OPTIONS, normalizeResponseFormat } from '$lib/utils/promptForm';
+  import {
+    MASKED_API_KEY_VALUE,
+    aiAssistantPayload,
+    buildSettingsPayload,
+    hasSettingsChanges,
+    promptOptimizerTimeoutValue,
+    r2BackupPayload,
+    r2SyncIntervalHoursValue,
+    secretDraftValue,
+    type SettingsDraft
+  } from '$lib/features/settings/draft';
   import Overlay from '$lib/components/Overlay.svelte';
   import HealthResults from '$lib/components/settings/HealthResults.svelte';
   import PresetSettingsEditor from '$lib/components/settings/PresetSettingsEditor.svelte';
   import OverallConfigDialog from '$lib/components/settings/OverallConfigDialog.svelte';
   import SystemPromptDialog from '$lib/components/settings/SystemPromptDialog.svelte';
-
-  const MASKED_API_KEY_VALUE = '********';
-
-  type SettingsDraft = {
-    activePresetId: string;
-    presetName: string;
-    apiUrl: string;
-    defaultModel: string;
-    defaultResponseFormat: ResponseFormatDefault;
-    apiKey: string;
-    apiPath: ApiPath;
-    upstreamSocks5Proxy: string;
-    webhookUrl: string;
-    promptOptimizerEnabled: boolean;
-    promptOptimizerApiUrl: string;
-    promptOptimizerModel: string;
-    promptOptimizerTimeoutSeconds: number;
-    promptOptimizerApiKey: string;
-    aiAssistantEnabled: boolean;
-    aiAssistantVisionModel: string;
-    r2BackupEnabled: boolean;
-    r2EndpointUrl: string;
-    r2BucketName: string;
-    r2Region: string;
-    r2KeyPrefix: string;
-    r2SyncIntervalHours: number;
-    r2AccessKeyId: string;
-    r2SecretAccessKey: string;
-    nodeImageEnabled: boolean;
-    nodeImageApiKey: string;
-  };
 
   export let open = false;
   export let settings: SettingsResponse | null = null;
@@ -205,36 +185,35 @@ import type { AIAssistantSettingsInput, ApiPreset, AssistantHealthResponse, Over
     {} as Record<string, OverallConfigItem[]>
   );
   $: overallConfigGroupNames = Object.keys(overallConfigGroups);
-  $: settingsDirty =
-    Boolean(settings && activePreset) &&
-    hasSettingsChanges({
-      activePresetId,
-      presetName,
-      apiUrl,
-      defaultModel,
-      defaultResponseFormat,
-      apiKey,
-      apiPath,
-      upstreamSocks5Proxy,
-      webhookUrl,
-      promptOptimizerEnabled,
-      promptOptimizerApiUrl,
-      promptOptimizerModel,
-      promptOptimizerTimeoutSeconds: promptOptimizerTimeoutValue(promptOptimizerTimeoutSeconds),
-      promptOptimizerApiKey,
-      aiAssistantEnabled,
-      aiAssistantVisionModel,
-      r2BackupEnabled,
-      r2EndpointUrl,
-      r2BucketName,
-      r2Region,
-      r2KeyPrefix,
-      r2SyncIntervalHours: r2SyncIntervalHoursValue(r2SyncIntervalHours),
-      r2AccessKeyId,
-      r2SecretAccessKey,
-      nodeImageEnabled,
-      nodeImageApiKey
-    });
+  $: settingsDraft = {
+    activePresetId,
+    presetName,
+    apiUrl,
+    defaultModel,
+    defaultResponseFormat,
+    apiKey,
+    apiPath,
+    upstreamSocks5Proxy,
+    webhookUrl,
+    promptOptimizerEnabled,
+    promptOptimizerApiUrl,
+    promptOptimizerModel,
+    promptOptimizerTimeoutSeconds: promptOptimizerTimeoutValue(promptOptimizerTimeoutSeconds),
+    promptOptimizerApiKey,
+    aiAssistantEnabled,
+    aiAssistantVisionModel,
+    r2BackupEnabled,
+    r2EndpointUrl,
+    r2BucketName,
+    r2Region,
+    r2KeyPrefix,
+    r2SyncIntervalHours: r2SyncIntervalHoursValue(r2SyncIntervalHours),
+    r2AccessKeyId,
+    r2SecretAccessKey,
+    nodeImageEnabled,
+    nodeImageApiKey
+  } satisfies SettingsDraft;
+  $: settingsDirty = Boolean(settings && activePreset) && hasSettingsChanges(settingsDraft, settings, activePreset);
   $: systemPromptDirty = systemPromptOpen && !systemPromptLoading && systemPromptText !== systemPromptInitialText;
   $: overallConfigDirty = overallConfigItems.some((item) => {
     if (overallConfigClears[item.name]) return item.has_override;
@@ -246,56 +225,8 @@ import type { AIAssistantSettingsInput, ApiPreset, AssistantHealthResponse, Over
     promptOptimizerTimeoutSeconds = promptOptimizerTimeoutValue(promptOptimizerTimeoutSeconds);
   }
 
-  function promptOptimizerTimeoutValue(value: number | string = promptOptimizerTimeoutSeconds) {
-    const parsed = Number.parseInt(String(value), 10);
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : 60;
-  }
-
-  function aiAssistantPayload(): AIAssistantSettingsInput {
-    return {
-      enabled: aiAssistantEnabled,
-      vision_model: aiAssistantVisionModel.trim()
-    };
-  }
-
   function normalizeR2SyncIntervalHours() {
     r2SyncIntervalHours = r2SyncIntervalHoursValue(r2SyncIntervalHours);
-  }
-
-  function r2SyncIntervalHoursValue(value: number | string = r2SyncIntervalHours) {
-    const parsed = Number(value);
-    return Number.isInteger(parsed) && parsed >= 0 ? parsed : 0;
-  }
-
-  function r2BackupPayload(): R2BackupSettingsInput {
-    return {
-      enabled: r2BackupEnabled,
-      endpoint_url: r2EndpointUrl.trim(),
-      bucket_name: r2BucketName.trim(),
-      region: r2Region.trim() || 'auto',
-      key_prefix: r2KeyPrefix.trim(),
-      sync_interval_hours: r2SyncIntervalHoursValue(),
-      access_key_id: r2AccessKeyId.trim() === MASKED_API_KEY_VALUE ? null : r2AccessKeyId.trim(),
-      secret_access_key: r2SecretAccessKey.trim() === MASKED_API_KEY_VALUE ? null : r2SecretAccessKey.trim()
-    };
-  }
-
-  function secretDraftValue(
-    source: 'empty' | 'stored' | 'env' | 'registry' | undefined,
-    hasSecret: boolean | undefined,
-    envVar: string | null | undefined,
-    secretId: string | null | undefined
-  ) {
-    if (source === 'env' && envVar) return `\${${envVar}}`;
-    if (source === 'registry' && secretId) return secretId;
-    return hasSecret ? MASKED_API_KEY_VALUE : '';
-  }
-
-  function nodeImagePayload() {
-    return {
-      enabled: nodeImageEnabled,
-      api_key: nodeImageApiKey.trim() === MASKED_API_KEY_VALUE ? null : nodeImageApiKey.trim()
-    };
   }
 
   function closePromptOptimizerHealth() {
@@ -310,69 +241,6 @@ import type { AIAssistantSettingsInput, ApiPreset, AssistantHealthResponse, Over
     onClearPresetHealth();
   }
 
-  function hasSettingsChanges(draft: SettingsDraft) {
-    const proxyValue = draft.upstreamSocks5Proxy.trim();
-    const currentProxyMask = settings?.upstream_socks5_proxy_masked || '';
-    const webhookValue = draft.webhookUrl.trim();
-    const currentWebhookMask = settings?.webhook_url_masked || '';
-
-    return (
-      draft.activePresetId !== (settings?.active_preset_id || '') ||
-      draft.presetName !== (activePreset?.name || '') ||
-      draft.apiUrl !== (activePreset?.api_url || settings?.api_url || '') ||
-      draft.defaultModel !== (activePreset?.default_model || settings?.default_model || 'gpt-image-2') ||
-      draft.defaultResponseFormat !== normalizeResponseFormat(activePreset?.default_response_format ?? settings?.default_response_format, 'url') ||
-      draft.apiKey !==
-        (activePreset?.api_key_source === 'env' && activePreset.api_key_env_var
-          ? `\${${activePreset.api_key_env_var}}`
-          : activePreset?.has_api_key || settings?.has_api_key
-            ? MASKED_API_KEY_VALUE
-            : '') ||
-      draft.apiPath !== (activePreset?.api_path || settings?.api_path || '/v1/images/generations') ||
-      proxyValue !== currentProxyMask ||
-      webhookValue !== currentWebhookMask ||
-      draft.promptOptimizerEnabled !== Boolean(settings?.prompt_optimizer?.enabled) ||
-      draft.promptOptimizerApiUrl !== (settings?.prompt_optimizer?.api_url || '') ||
-      draft.promptOptimizerModel !== (settings?.prompt_optimizer?.model || 'gpt-4o-mini') ||
-      draft.promptOptimizerTimeoutSeconds !== (settings?.prompt_optimizer?.timeout_seconds || 60) ||
-      draft.promptOptimizerApiKey !==
-        (settings?.prompt_optimizer?.api_key_source === 'env' && settings.prompt_optimizer.api_key_env_var
-          ? `\${${settings.prompt_optimizer.api_key_env_var}}`
-          : settings?.prompt_optimizer?.has_api_key
-            ? MASKED_API_KEY_VALUE
-            : '') ||
-      draft.aiAssistantEnabled !== Boolean(settings?.ai_assistant?.enabled) ||
-      draft.aiAssistantVisionModel !==
-        (settings?.ai_assistant?.vision_model || settings?.prompt_optimizer?.model || 'gpt-4o-mini') ||
-      draft.r2BackupEnabled !== Boolean(settings?.r2_backup?.enabled) ||
-      draft.r2EndpointUrl !== (settings?.r2_backup?.endpoint_url || '') ||
-      draft.r2BucketName !== (settings?.r2_backup?.bucket_name || '') ||
-      draft.r2Region !== (settings?.r2_backup?.region || 'auto') ||
-      draft.r2KeyPrefix !== (settings?.r2_backup?.key_prefix || 'gallery/') ||
-      draft.r2SyncIntervalHours !== (settings?.r2_backup?.sync_interval_hours ?? 0) ||
-      draft.r2AccessKeyId !==
-        (settings?.r2_backup?.access_key_id_source === 'env' && settings.r2_backup.access_key_id_env_var
-          ? `\${${settings.r2_backup.access_key_id_env_var}}`
-          : settings?.r2_backup?.has_access_key_id
-            ? MASKED_API_KEY_VALUE
-            : '') ||
-      draft.r2SecretAccessKey !==
-        (settings?.r2_backup?.secret_access_key_source === 'env' && settings.r2_backup.secret_access_key_env_var
-          ? `\${${settings.r2_backup.secret_access_key_env_var}}`
-          : settings?.r2_backup?.has_secret_access_key
-            ? MASKED_API_KEY_VALUE
-            : '') ||
-      draft.nodeImageEnabled !== Boolean(settings?.nodeimage?.enabled) ||
-      draft.nodeImageApiKey !==
-        secretDraftValue(
-          settings?.nodeimage?.api_key_source,
-          settings?.nodeimage?.has_api_key,
-          settings?.nodeimage?.api_key_env_var,
-          settings?.nodeimage?.api_key_secret_id
-        )
-    );
-  }
-
   async function confirmDiscardChanges() {
     return confirmStore.confirm({
       title: $t.confirm.unsavedChangesTitle,
@@ -385,31 +253,7 @@ import type { AIAssistantSettingsInput, ApiPreset, AssistantHealthResponse, Over
   }
 
   async function save() {
-    const proxyValue = upstreamSocks5Proxy.trim();
-    const currentProxyMask = settings?.upstream_socks5_proxy_masked || '';
-    const webhookValue = webhookUrl.trim();
-    const currentWebhookMask = settings?.webhook_url_masked || '';
-    await onSave({
-      active_preset_id: activePresetId,
-      preset_name: presetName.trim(),
-      api_url: apiUrl.trim(),
-      default_model: defaultModel.trim(),
-      default_response_format: defaultResponseFormat,
-      api_key: apiKey.trim() === MASKED_API_KEY_VALUE ? null : apiKey.trim(),
-      api_path: apiPath,
-      upstream_socks5_proxy: proxyValue === currentProxyMask ? null : proxyValue,
-      webhook_url: webhookValue === currentWebhookMask ? null : webhookValue,
-      prompt_optimizer: {
-        enabled: promptOptimizerEnabled,
-        api_url: promptOptimizerApiUrl.trim(),
-        model: promptOptimizerModel.trim(),
-        timeout_seconds: promptOptimizerTimeoutValue(),
-        api_key: promptOptimizerApiKey.trim() === MASKED_API_KEY_VALUE ? null : promptOptimizerApiKey.trim()
-      },
-      ai_assistant: aiAssistantPayload(),
-      r2_backup: r2BackupPayload(),
-      nodeimage: nodeImagePayload()
-    });
+    await onSave(buildSettingsPayload(settingsDraft, settings));
   }
 
   function keyLabel(preset: ApiPreset) {
@@ -435,7 +279,7 @@ import type { AIAssistantSettingsInput, ApiPreset, AssistantHealthResponse, Over
   }
 
   async function checkR2Health() {
-    await onR2HealthCheck(r2BackupPayload());
+    await onR2HealthCheck(r2BackupPayload(settingsDraft));
   }
 
   async function checkPromptOptimizerHealth() {
@@ -443,7 +287,7 @@ import type { AIAssistantSettingsInput, ApiPreset, AssistantHealthResponse, Over
   }
 
   async function checkAiAssistantHealth() {
-    await onAiAssistantHealthCheck(aiAssistantPayload());
+    await onAiAssistantHealthCheck(aiAssistantPayload(settingsDraft));
   }
 
   async function openSystemPromptEditor() {
