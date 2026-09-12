@@ -153,6 +153,19 @@ IMPORT_UPLOADS_PER_IP_PER_MINUTE = max(
 MAX_ACTIVE_GENERATE_JOBS = max(1, int(os.getenv("MAX_ACTIVE_GENERATE_JOBS", "2")))
 MAX_QUEUED_GENERATE_JOBS = max(0, int(os.getenv("MAX_QUEUED_GENERATE_JOBS", "20")))
 IMAGE_JOB_UNIT_LEASE_SECONDS = max(30, int(os.getenv("IMAGE_JOB_UNIT_LEASE_SECONDS", "120")))
+# Lease renewal cadence. Defaults to lease/3 and is clamped below lease/2 so the
+# renewal loop can always extend the lease before it can expire.
+_image_job_unit_renew_default = max(5.0, IMAGE_JOB_UNIT_LEASE_SECONDS / 3)
+IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS = float(
+    os.getenv("IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS", str(_image_job_unit_renew_default))
+)
+if IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS < 5.0:
+    IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS = min(5.0, IMAGE_JOB_UNIT_LEASE_SECONDS / 4)
+if IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS >= IMAGE_JOB_UNIT_LEASE_SECONDS / 2:
+    IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS = IMAGE_JOB_UNIT_LEASE_SECONDS / 4
+# How many times an image unit may be claimed (each claim increments attempts)
+# before an exhausted lease is interrupted instead of retried forever.
+IMAGE_JOB_UNIT_MAX_ATTEMPTS = max(1, int(os.getenv("IMAGE_JOB_UNIT_MAX_ATTEMPTS", "2")))
 IMAGE_JOB_UNIT_POLL_INTERVAL_SECONDS = max(
     0.1,
     float(os.getenv("IMAGE_JOB_UNIT_POLL_INTERVAL_SECONDS", "0.35")),

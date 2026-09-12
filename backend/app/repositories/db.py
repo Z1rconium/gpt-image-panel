@@ -177,6 +177,8 @@ IMAGE_JOB_UNIT_COLUMNS = (
     "api_preset_id",
     "api_preset_name",
     "api_path",
+    "claim_token",
+    "attempts",
 )
 GALLERY_JOB_COLUMNS = (
     "job_id",
@@ -1330,6 +1332,8 @@ def _ensure_database():
                     api_preset_id TEXT,
                     api_preset_name TEXT,
                     api_path TEXT,
+                    claim_token TEXT,
+                    attempts INTEGER NOT NULL DEFAULT 0,
                     UNIQUE(parent_job_id, unit_index)
                 );
 
@@ -1340,8 +1344,9 @@ def _ensure_database():
                 CREATE INDEX IF NOT EXISTS idx_image_job_units_claim_running_expired
                     ON image_job_units(claim_expires_at, created_at, unit_index)
                     WHERE status = 'running' AND claim_expires_at IS NOT NULL;
+                DROP INDEX IF EXISTS idx_image_job_units_running_count;
                 CREATE INDEX IF NOT EXISTS idx_image_job_units_running_count
-                    ON image_job_units(status)
+                    ON image_job_units(claim_expires_at)
                     WHERE status = 'running';
                 CREATE INDEX IF NOT EXISTS idx_image_job_units_parent
                     ON image_job_units(parent_job_id, unit_index);
@@ -1949,6 +1954,24 @@ def _migration_generate_job_streaming_columns(conn: sqlite3.Connection):
         conn.execute("ALTER TABLE generate_jobs ADD COLUMN partial_images INTEGER")
 
 
+def _migration_image_job_unit_lease_fencing(conn: sqlite3.Connection):
+    unit_columns = _table_columns(conn, "image_job_units")
+    if "claim_token" not in unit_columns:
+        conn.execute("ALTER TABLE image_job_units ADD COLUMN claim_token TEXT")
+    if "attempts" not in unit_columns:
+        conn.execute(
+            "ALTER TABLE image_job_units ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0"
+        )
+    conn.execute("DROP INDEX IF EXISTS idx_image_job_units_running_count")
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_image_job_units_running_count
+            ON image_job_units(claim_expires_at)
+            WHERE status = 'running'
+        """
+    )
+
+
 SCHEMA_MIGRATIONS = (
     (1, "baseline_legacy_schema", _migration_baseline_legacy_schema),
     (2, "gallery_filter_options", _migration_gallery_filter_options),
@@ -1968,6 +1991,7 @@ SCHEMA_MIGRATIONS = (
     (16, "background_column", _migration_background_column),
     (17, "generate_job_usage_cost_columns", _migration_generate_job_usage_cost_columns),
     (18, "generate_job_streaming_columns", _migration_generate_job_streaming_columns),
+    (19, "image_job_unit_lease_fencing", _migration_image_job_unit_lease_fencing),
 )
 
 

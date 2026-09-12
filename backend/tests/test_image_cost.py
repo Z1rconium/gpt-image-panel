@@ -198,11 +198,13 @@ def test_unit_usage_and_cost_persist_and_aggregate_to_parent(tmp_path):
     )
 
     unit_a = image_jobs_repo.claim_next_image_job_unit(
-        worker_id="w1", lease_expires_at="2026-01-01T00:05:00Z", now="2026-01-01T00:00:00Z",
+        worker_id="w1", claim_token="token-a",
+        lease_expires_at="2026-01-01T00:05:00Z", now="2026-01-01T00:00:00Z",
         running_limit=2,
     )
     unit_b = image_jobs_repo.claim_next_image_job_unit(
-        worker_id="w1", lease_expires_at="2026-01-01T00:05:00Z", now="2026-01-01T00:00:00Z",
+        worker_id="w1", claim_token="token-b",
+        lease_expires_at="2026-01-01T00:05:00Z", now="2026-01-01T00:00:00Z",
         running_limit=2,
     )
 
@@ -210,6 +212,7 @@ def test_unit_usage_and_cost_persist_and_aggregate_to_parent(tmp_path):
     cost_a = image_cost.estimate_image_cost("gpt-image-1", usage_a)
     image_jobs_repo.complete_image_job_unit(
         unit_a["unit_id"],
+        claim_token=unit_a["claim_token"],
         result={"images": [{"image_id": "img-a"}]},
         stage_timings={},
         duration="1.00s",
@@ -223,6 +226,7 @@ def test_unit_usage_and_cost_persist_and_aggregate_to_parent(tmp_path):
     cost_b = image_cost.estimate_image_cost("gpt-image-1", usage_b)
     image_jobs_repo.fail_image_job_unit(
         unit_b["unit_id"],
+        claim_token=unit_b["claim_token"],
         status="error",
         stage="generation_failed",
         message="download failed",

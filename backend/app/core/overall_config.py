@@ -138,6 +138,9 @@ OVERALL_CONFIG_REGISTRY: tuple[OverallConfigSpec, ...] = (
     _spec("IMPORT_MAX_COMPRESSION_RATIO", "float", "20", "Limits", "Max import per-file and aggregate compression ratio.", min_value=1),
     _spec("MAX_ACTIVE_GENERATE_JOBS", "int", "2", "Job Queue / SSE", "Concurrent generation/edit jobs.", restart_required=True, min_value=1),
     _spec("MAX_QUEUED_GENERATE_JOBS", "int", "20", "Job Queue / SSE", "Additional queued jobs before 429.", restart_required=True, min_value=0),
+    _spec("IMAGE_JOB_UNIT_LEASE_SECONDS", "int", "120", "Job Queue / SSE", "SQLite claim lease for a running image unit before another worker may retry it; crash-detection latency, not the max upstream duration.", restart_required=True, min_value=30),
+    _spec("IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS", "float", "40", "Job Queue / SSE", "How often the executing worker renews an image unit lease; must be below lease/2.", restart_required=True, min_value=5),
+    _spec("IMAGE_JOB_UNIT_MAX_ATTEMPTS", "int", "2", "Job Queue / SSE", "Max claim attempts for one image unit before an expired lease is marked interrupted.", restart_required=True, min_value=1),
     _spec("MAX_PENDING_EDIT_SOURCE_MB", "int", "200", "Job Queue / SSE", "SQLite global pending edit source byte cap.", min_value=0),
     _spec("MAX_SSE_SUBSCRIBERS_GLOBAL", "int", "200", "Job Queue / SSE", "Global active SSE subscriber cap across Granian workers via SQLite slot leases.", min_value=1),
     _spec("MAX_SSE_SUBSCRIBERS_PER_IP", "int", "10", "Job Queue / SSE", "Per-IP active SSE subscriber cap.", min_value=1),
@@ -327,6 +330,20 @@ def apply_rows_to_config(
 
         security._trusted_proxy_networks = None
     except Exception:
+        pass
+
+    # Cross-field guard: the image-unit lease renewal cadence must stay below
+    # half the lease so a running unit can always renew before expiry.
+    try:
+        lease = float(getattr(config, "IMAGE_JOB_UNIT_LEASE_SECONDS", 120))
+        renew = float(getattr(config, "IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS", 0) or 0)
+        if lease > 0 and (renew <= 0 or renew >= lease / 2):
+            setattr(
+                config,
+                "IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS",
+                max(1.0, lease / 4),
+            )
+    except (TypeError, ValueError):
         pass
 
 

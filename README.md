@@ -258,8 +258,11 @@ Most runtime options live in `.env.example`. API presets, prompt optimizer, R2 b
 | `IMAGE_CPU_CONCURRENCY` / `FILE_IO_CONCURRENCY` | Bounded full-image decode and blocking file-I/O concurrency per process. |
 | `IMAGE_JOB_PROGRESS_PERSIST_INTERVAL_SECONDS` | Minimum interval for coalesced image-unit progress writes. |
 | `RUNTIME_METRICS_REFRESH_SECONDS` / `EVENT_LOOP_LAG_SAMPLE_SECONDS` | Background coordination snapshot and event-loop lag sampling intervals. |
-| `MAX_ACTIVE_GENERATE_JOBS` | Global running generation/edit image-unit limit. |
+| `MAX_ACTIVE_GENERATE_JOBS` | Global running generation/edit image-unit limit. Expired leases from crashed or unreachable workers do not count against it, so a dead worker cannot deadlock the queue; with healthy workers the effective limit stays at this value. |
 | `MAX_QUEUED_GENERATE_JOBS` | Queue capacity before new jobs return `429`. |
+| `IMAGE_JOB_UNIT_LEASE_SECONDS` | SQLite claim lease for a running image unit. Crash-detection latency only — the executing worker renews the lease while upstream is in flight, so slow upstreams no longer lose their ownership. The upstream duration cap is still governed by the client timeout in `session_pool`. |
+| `IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS` | Cadence at which the executing worker extends an image-unit lease. Must stay below `lease/2` (defaults to `lease/3`); clamps to `lease/4` if misconfigured. A renewal that fails with a SQLite error is retried every 5s while the lease is still valid; only a renewal rejected by fencing (the unit was re-claimed or cancelled) aborts the in-flight upstream call immediately, so cancelling a job now stops its upstream request within one renewal interval. |
+| `IMAGE_JOB_UNIT_MAX_ATTEMPTS` | Max claim attempts per image unit. A unit whose lease expires after its final attempt is marked `interrupted` instead of retried forever. |
 | `MAX_PENDING_EDIT_SOURCE_MB` | Global pending edit-source byte reservation cap. |
 | `MAX_SSE_SUBSCRIBERS_GLOBAL` / `MAX_SSE_SUBSCRIBERS_PER_IP` / `SSE_CONNECTION_TTL_SECONDS` | SSE slot limits and max connection lifetime. |
 | `IMAGES_DIR` | Saved image directory. |

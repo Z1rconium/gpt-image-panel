@@ -85,6 +85,7 @@ def test_storage_claim_prefers_expired_running_unit_over_queued_unit(tmp_path):
 
     first = image_jobs_repo.claim_next_image_job_unit(
         worker_id="worker-a",
+        claim_token="token-a",
         lease_expires_at="2099-01-01T00:00:00+00:00",
         now="2026-01-01T00:00:00+00:00",
         running_limit=2,
@@ -94,6 +95,7 @@ def test_storage_claim_prefers_expired_running_unit_over_queued_unit(tmp_path):
 
     image_jobs_repo.update_image_job_unit_progress(
         str(first["unit_id"]),
+        claim_token=str(first["claim_token"]),
         stage="waiting_for_api",
         message="expired lease",
         claim_expires_at="2026-01-01T00:00:01+00:00",
@@ -101,6 +103,7 @@ def test_storage_claim_prefers_expired_running_unit_over_queued_unit(tmp_path):
 
     reclaimed = image_jobs_repo.claim_next_image_job_unit(
         worker_id="worker-b",
+        claim_token="token-b",
         lease_expires_at="2099-01-01T00:00:00+00:00",
         now="2026-01-01T00:00:02+00:00",
         running_limit=2,

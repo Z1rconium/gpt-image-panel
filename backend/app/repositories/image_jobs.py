@@ -227,6 +227,7 @@ def _build_image_job_units(
             "api_preset_id": api_preset_id,
             "api_preset_name": api_preset_name,
             "api_path": api_path,
+            "attempts": 0,
         }
         for index in range(max(1, int(image_units or 1)))
     ]
@@ -385,13 +386,23 @@ def get_image_job_unit(unit_id: str) -> dict[str, Any] | None:
 def claim_next_image_job_unit(
     *,
     worker_id: str,
+    claim_token: str,
     lease_expires_at: str,
     now: str,
     running_limit: int,
+    max_attempts: int | None = None,
 ) -> dict[str, Any] | None:
     _ensure_database()
+    if max_attempts is None:
+        max_attempts = getattr(config, "IMAGE_JOB_UNIT_MAX_ATTEMPTS", 2)
+    max_attempts = max(1, int(max_attempts or 1))
     with _connect() as conn:
         with _transaction(conn):
+            # `running_count` only counts leases that have not expired. A unit
+            # whose owner crashed or stopped renewing must not keep consuming a
+            # concurrency slot, otherwise the queue can deadlock. The cost is
+            # that concurrency can briefly exceed `running_limit` by the number
+            # of not-yet-reclaimed expired units.
             row = conn.execute(
                 f"""
                 WITH
@@ -399,6 +410,8 @@ def claim_next_image_job_unit(
                         SELECT COUNT(*)
                         FROM image_job_units
                         WHERE status = 'running'
+                            AND claim_expires_at IS NOT NULL
+                            AND claim_expires_at > ?
                     ),
                     expired_candidate(unit_id, priority) AS (
                         SELECT unit_id, 0
@@ -406,6 +419,7 @@ def claim_next_image_job_unit(
                         WHERE status = 'running'
                             AND claim_expires_at IS NOT NULL
                             AND claim_expires_at <= ?
+                            AND attempts < ?
                         ORDER BY claim_expires_at ASC, created_at ASC, unit_index ASC
                         LIMIT 1
                     ),
@@ -426,6 +440,8 @@ def claim_next_image_job_unit(
                 UPDATE image_job_units
                 SET status = 'running',
                     claimed_by = ?,
+                    claim_token = ?,
+                    attempts = attempts + 1,
                     claim_expires_at = ?,
                     stage = COALESCE(NULLIF(stage, 'queued'), stage),
                     message = COALESCE(message, 'Running image unit'),
@@ -437,19 +453,114 @@ def claim_next_image_job_unit(
                 """,
                 (
                     now,
+                    now,
+                    max_attempts,
                     worker_id,
+                    claim_token,
                     lease_expires_at,
                     now,
                     now,
                     max(1, int(running_limit or 1)),
                 ),
             ).fetchone()
-    return _image_job_unit_from_row(row) if row else None
+    if row is not None:
+        reclaimed_unit = _image_job_unit_from_row(row)
+        if int(reclaimed_unit.get("attempts") or 0) > 1:
+            metrics.increment("image_jobs.unit_reclaimed")
+        return reclaimed_unit
+    return None
+
+
+def renew_image_job_unit_lease(
+    unit_id: str,
+    claim_token: str,
+    claim_expires_at: str,
+) -> bool:
+    """Extend a running unit's lease if this process still owns it.
+
+    Returns False when the unit was re-claimed by another token (or already
+    reached a terminal state), meaning the caller's lease was lost. Does not
+    touch `updated_at` so progress SSE edges are not flooded by heartbeats.
+    """
+    _ensure_database()
+    with _connect() as conn:
+        with _transaction(conn):
+            cursor = conn.execute(
+                """
+                UPDATE image_job_units
+                SET claim_expires_at = ?
+                WHERE unit_id = ?
+                    AND status = 'running'
+                    AND claim_token = ?
+                """,
+                (claim_expires_at, unit_id, claim_token),
+            )
+            return cursor.rowcount == 1
+
+
+def expire_exhausted_image_job_units(
+    now: str,
+    max_attempts: int,
+) -> list[dict[str, Any]]:
+    """Terminate running units whose lease expired after their final attempt.
+
+    Returns the affected unit rows (with `parent_job_id`) so the caller can
+    re-aggregate their parent jobs.
+    """
+    _ensure_database()
+    max_attempts = max(1, int(max_attempts or 1))
+    with _connect() as conn:
+        with _transaction(conn):
+            rows = conn.execute(
+                f"""
+                SELECT {", ".join(IMAGE_JOB_UNIT_COLUMNS)}
+                FROM image_job_units
+                WHERE status = 'running'
+                    AND claim_expires_at IS NOT NULL
+                    AND claim_expires_at <= ?
+                    AND attempts >= ?
+                ORDER BY claim_expires_at ASC, created_at ASC, unit_index ASC
+                """,
+                (now, max_attempts),
+            ).fetchall()
+            if not rows:
+                return []
+            unit_ids = [str(row["unit_id"]) for row in rows]
+            placeholders = ", ".join("?" for _ in unit_ids)
+            conn.execute(
+                f"""
+                UPDATE image_job_units
+                SET status = 'interrupted',
+                    stage = 'interrupted',
+                    message = 'Unit lease expired after repeated attempts',
+                    error = 'Unit lease expired after multiple attempts',
+                    claimed_by = NULL,
+                    claim_token = NULL,
+                    claim_expires_at = NULL,
+                    completed_at = ?,
+                    updated_at = ?
+                WHERE unit_id IN ({placeholders})
+                """,
+                (now, now, *unit_ids),
+            )
+            updated_rows = conn.execute(
+                f"""
+                SELECT {", ".join(IMAGE_JOB_UNIT_COLUMNS)}
+                FROM image_job_units
+                WHERE unit_id IN ({placeholders})
+                """,
+                tuple(unit_ids),
+            ).fetchall()
+    affected = [_image_job_unit_from_row(row) for row in updated_rows]
+    if affected:
+        metrics.increment("image_jobs.unit_exhausted", len(affected))
+    return affected
 
 
 def update_image_job_unit_progress(
     unit_id: str,
     *,
+    claim_token: str,
     stage: str,
     message: str,
     claim_expires_at: str | None = None,
@@ -458,17 +569,19 @@ def update_image_job_unit_progress(
     now = utc_now()
     with _connect() as conn:
         with _transaction(conn):
-            conn.execute(
+            cursor = conn.execute(
                 """
                 UPDATE image_job_units
                 SET stage = ?,
                     message = ?,
                     claim_expires_at = COALESCE(?, claim_expires_at),
                     updated_at = ?
-                WHERE unit_id = ? AND status = 'running'
+                WHERE unit_id = ? AND status = 'running' AND claim_token = ?
                 """,
-                (stage, message, claim_expires_at, now, unit_id),
+                (stage, message, claim_expires_at, now, unit_id, claim_token),
             )
+            if cursor.rowcount == 0:
+                return None
             row = conn.execute(
                 f"""
                 SELECT {", ".join(IMAGE_JOB_UNIT_COLUMNS)}
@@ -483,6 +596,7 @@ def update_image_job_unit_progress(
 def complete_image_job_unit(
     unit_id: str,
     *,
+    claim_token: str,
     result: dict[str, Any],
     stage_timings: dict[str, float],
     duration: str,
@@ -494,7 +608,7 @@ def complete_image_job_unit(
     now = utc_now()
     with _connect() as conn:
         with _transaction(conn):
-            conn.execute(
+            cursor = conn.execute(
                 """
                 UPDATE image_job_units
                 SET status = 'success',
@@ -507,8 +621,10 @@ def complete_image_job_unit(
                     duration = ?,
                     completed_at = ?,
                     updated_at = ?,
+                    claimed_by = NULL,
+                    claim_token = NULL,
                     claim_expires_at = NULL
-                WHERE unit_id = ?
+                WHERE unit_id = ? AND status = 'running' AND claim_token = ?
                 """,
                 (
                     json.dumps(result, ensure_ascii=False, sort_keys=True),
@@ -519,8 +635,11 @@ def complete_image_job_unit(
                     completed_at,
                     now,
                     unit_id,
+                    claim_token,
                 ),
             )
+            if cursor.rowcount == 0:
+                return None
             row = conn.execute(
                 f"""
                 SELECT {", ".join(IMAGE_JOB_UNIT_COLUMNS)}
@@ -535,6 +654,7 @@ def complete_image_job_unit(
 def fail_image_job_unit(
     unit_id: str,
     *,
+    claim_token: str,
     status: str,
     stage: str,
     message: str,
@@ -549,7 +669,7 @@ def fail_image_job_unit(
     now = utc_now()
     with _connect() as conn:
         with _transaction(conn):
-            conn.execute(
+            cursor = conn.execute(
                 """
                 UPDATE image_job_units
                 SET status = ?,
@@ -562,8 +682,10 @@ def fail_image_job_unit(
                     duration = ?,
                     completed_at = ?,
                     updated_at = ?,
+                    claimed_by = NULL,
+                    claim_token = NULL,
                     claim_expires_at = NULL
-                WHERE unit_id = ?
+                WHERE unit_id = ? AND status = 'running' AND claim_token = ?
                 """,
                 (
                     status,
@@ -577,8 +699,11 @@ def fail_image_job_unit(
                     completed_at or now,
                     now,
                     unit_id,
+                    claim_token,
                 ),
             )
+            if cursor.rowcount == 0:
+                return None
             row = conn.execute(
                 f"""
                 SELECT {", ".join(IMAGE_JOB_UNIT_COLUMNS)}
@@ -602,6 +727,8 @@ def cancel_image_job_units(parent_job_id: str) -> int:
                     stage = 'cancelled',
                     message = 'Generation job cancelled',
                     error = 'Generation job cancelled',
+                    claimed_by = NULL,
+                    claim_token = NULL,
                     completed_at = ?,
                     updated_at = ?,
                     claim_expires_at = NULL
