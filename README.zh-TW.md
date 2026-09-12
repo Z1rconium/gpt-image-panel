@@ -16,7 +16,7 @@
 
   <p>
     <img alt="CI 通過" src="https://img.shields.io/badge/CI-passing-2cc653?logo=github&logoColor=white" />
-    <img alt="版本 v1.5.2" src="https://img.shields.io/badge/release-v1.5.2-0e8dcc" />
+    <img alt="版本 v1.5.3" src="https://img.shields.io/badge/release-v1.5.3-0e8dcc" />
     <img alt="Python 3.11+" src="https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white" />
     <img alt="Node.js 24" src="https://img.shields.io/badge/Node.js-24-339933?logo=node.js&logoColor=white" />
     <img alt="FastAPI 0.115+" src="https://img.shields.io/badge/FastAPI-0.115+-009688?logo=fastapi&logoColor=white" />
