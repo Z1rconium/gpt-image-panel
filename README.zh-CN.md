@@ -138,7 +138,7 @@ Docker Hub 慢或不可访问时：
 
 ```bash
 docker build \
-  --build-arg PYTHON_BASE_IMAGE=docker.m.daocloud.io/library/python:3.11-slim \
+  --build-arg PYTHON_BASE_IMAGE=docker.m.daocloud.io/library/python:3.12-slim \
   --build-arg NODE_BASE_IMAGE=docker.m.daocloud.io/library/node:24-alpine \
   -t gpt-image-panel .
 ```

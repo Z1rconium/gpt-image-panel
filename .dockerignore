@@ -20,3 +20,7 @@ README.md
 *.md
 tests/
 frontend/tests/
+# Not part of the runtime image; keeps test edits from invalidating the backend layer.
+backend/tests/
+backend/requirements-dev.txt
+frontend/playwright.config.*

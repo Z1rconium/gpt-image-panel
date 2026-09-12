@@ -1,2 +1,4 @@
 -r ../requirements.txt
+# `--reload` for `npm run backend:dev`; the production image installs granian[uvloop] only.
+granian[reload]>=1.7.0
 pytest>=8.0.0

@@ -106,6 +106,7 @@ Dockerfile
 docker-compose.yml
 .env.example
 requirements.txt
+requirements.lock
 backend/requirements-dev.txt
 package.json
 ```
@@ -142,10 +143,12 @@ If Docker Hub is slow or blocked:
 
 ```bash
 docker build \
-  --build-arg PYTHON_BASE_IMAGE=docker.m.daocloud.io/library/python:3.11-slim \
+  --build-arg PYTHON_BASE_IMAGE=docker.m.daocloud.io/library/python:3.12-slim \
   --build-arg NODE_BASE_IMAGE=docker.m.daocloud.io/library/node:24-alpine \
   -t gpt-image-panel .
 ```
+
+The image installs Python dependencies from the hashed `requirements.lock` (generated from `requirements.txt` with `uv pip compile`), so every build and both architectures get identical versions.
 
 ### Caddy Reverse Proxy
 
