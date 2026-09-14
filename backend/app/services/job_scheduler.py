@@ -12,6 +12,7 @@ from ..repositories.coordination import mark_worker_heartbeat
 from ..repositories.image_jobs import (
     claim_next_image_job_unit,
     expire_exhausted_image_job_units,
+    has_claimable_image_job_unit,
 )
 from .claim_loop import run_claim_loop
 from .job_executor import (
@@ -92,10 +93,24 @@ async def run_image_unit_dispatcher(worker_id: str):
             running_limit=config.MAX_ACTIVE_GENERATE_JOBS,
             max_attempts=config.IMAGE_JOB_UNIT_MAX_ATTEMPTS,
             metric_name="claim_image_job_unit",
+            critical=True,
         )
 
     async def run_unit(unit: dict):
         await run_claimed_image_unit(unit, worker_id)
+
+    async def has_claimable_unit() -> bool:
+        try:
+            return await run_db_operation(
+                has_claimable_image_job_unit,
+                utc_now(),
+                config.IMAGE_JOB_UNIT_MAX_ATTEMPTS,
+                metric_name="precheck_image_job_unit",
+                retry_busy=False,
+            )
+        except Exception:
+            # Fail open: a broken precheck must never stall the dispatcher.
+            return True
 
     async def before_cycle(active_tasks: set[asyncio.Task]):
         await heartbeat_if_needed(active_tasks)
@@ -123,6 +138,8 @@ async def run_image_unit_dispatcher(worker_id: str):
         max_backoff=IMAGE_DISPATCHER_MAX_IDLE_BACKOFF_SECONDS,
         kick_event=get_image_unit_dispatcher_kick_event(),
         claim_miss_fn=lambda: metrics.increment("image_jobs.claim_miss"),
+        claim_precheck_fn=has_claimable_unit,
+        claim_precheck_metric="image_jobs.claim_precheck_skipped",
         before_cycle=before_cycle,
         after_claims=after_claims,
         sleep_interval_fn=sleep_interval,

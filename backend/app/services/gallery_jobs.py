@@ -49,6 +49,7 @@ from ..repositories.coordination import (
     delete_gallery_job,
     get_gallery_job,
     get_gallery_jobs_updated_at_edges,
+    has_claimable_gallery_job,
     list_gallery_job_ids_with_files,
     release_background_lease,
     release_import_upload_reservation,
@@ -1940,6 +1941,17 @@ async def _run_gallery_job_dispatcher(kind: str, worker_id: str, running_limit: 
     async def run_gallery_job(job: dict):
         await runner(job)
 
+    async def has_claimable_gallery() -> bool:
+        try:
+            return await asyncio.to_thread(
+                has_claimable_gallery_job,
+                kind=kind,
+                now=utc_now(),
+            )
+        except Exception:
+            # Fail open: a broken precheck must never stall the dispatcher.
+            return True
+
     await run_claim_loop(
         claim_fn=claim_gallery_job,
         run_fn=run_gallery_job,
@@ -1947,6 +1959,8 @@ async def _run_gallery_job_dispatcher(kind: str, worker_id: str, running_limit: 
         idle_interval=GALLERY_JOB_DISPATCH_INTERVAL_SECONDS,
         max_backoff=GALLERY_JOB_DISPATCH_MAX_IDLE_BACKOFF_SECONDS,
         claim_miss_fn=lambda: metrics.increment(f"gallery.{kind}.claim_miss"),
+        claim_precheck_fn=has_claimable_gallery,
+        claim_precheck_metric=f"gallery.{kind}.claim_precheck_skipped",
         logger=logger,
         error_message=f"Gallery {kind} dispatcher error",
         task_name=f"gallery {kind} job",

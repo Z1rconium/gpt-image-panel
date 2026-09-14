@@ -27,6 +27,7 @@ from ..repositories.gallery.mutations import update_gallery_entry
 from ..repositories.image_jobs import (
     complete_image_job_unit,
     fail_image_job_unit,
+    finalize_parent_job_from_units,
     get_generate_job,
     get_generate_job_with_unit_aggregate,
     renew_image_job_unit_lease,
@@ -36,6 +37,7 @@ from . import image_cost
 from .job_events import (
     publish_generate_job,
     publish_generate_job_preview,
+    publish_generate_job_row_async,
     store_generate_job_async,
 )
 from .blocking import run_db_operation
@@ -104,25 +106,24 @@ def _aggregate_image_job_duration(units: list[dict]) -> str | None:
     return max(durations, default=None, key=lambda item: item[0])[1] if durations else None
 
 
-async def aggregate_parent_image_job(
-    parent_job_id: str,
+def derive_parent_update(
+    parent: dict,
+    aggregate: dict,
     *,
-    force_publish: bool = False,
+    operation: str,
 ) -> dict | None:
-    parent, aggregate = await run_db_operation(
-        get_generate_job_with_unit_aggregate,
-        parent_job_id,
-        metric_name="aggregate_parent_image_job",
-    )
-    if not parent:
-        return None
+    """Pure mapping from unit aggregate to the parent job update.
+
+    Kept side-effect free so the terminal decision can be re-evaluated inside
+    the repository write transaction (`finalize_parent_job_from_units`) and
+    unit-tested in isolation.
+    """
     total = int(aggregate.get("total") or parent.get("n") or 1)
     completed = int(aggregate.get("completed") or 0)
     success_count = int(aggregate.get("success_count") or 0)
     failure_count = int(aggregate.get("failure_count") or 0)
     running_count = int(aggregate.get("running_count") or 0)
     queued_count = int(aggregate.get("queued_count") or 0)
-    operation = str(parent.get("operation") or "generation")
     count_update = {
         "completed_count": completed,
         "success_count": success_count,
@@ -178,13 +179,14 @@ async def aggregate_parent_image_job(
             }
             if failures:
                 update["error"] = summarize_unit_failures(failures, total, operation)
-        elif aggregate.get("all_cancelled"):
+            return update
+        if aggregate.get("all_cancelled"):
             cancel_message = (
                 "Image edit job cancelled"
                 if operation == "edit"
                 else "Generation job cancelled"
             )
-            update = {
+            return {
                 "status": "cancelled",
                 "stage": "cancelled",
                 "message": cancel_message,
@@ -195,27 +197,95 @@ async def aggregate_parent_image_job(
                 **count_update,
                 **usage_cost_update,
             }
-        else:
-            failures = failures or aggregate.get("units") or []
-            status = (
-                "upstream_error"
-                if failures and all(unit.get("status") == "upstream_error" for unit in failures)
-                else "error"
+        failures = failures or aggregate.get("units") or []
+        status = (
+            "upstream_error"
+            if failures and all(unit.get("status") == "upstream_error" for unit in failures)
+            else "error"
+        )
+        error_message = summarize_unit_failures(failures, total, operation)
+        return {
+            "status": status,
+            "stage": "generation_failed" if operation == "generation" else "edit_failed",
+            "message": error_message,
+            "operation": operation,
+            "completed_at": completed_at,
+            "error": error_message,
+            "stage_timings": aggregate.get("stage_timings") or {},
+            **terminal_update,
+            **count_update,
+            **usage_cost_update,
+        }
+
+    if running_count > 0 or completed > 0:
+        stage = "waiting_for_api"
+        images = aggregate.get("images") or []
+        first_image = images[0] if images else {}
+        message = (
+            f"Editing images ({completed}/{total} completed)"
+            if operation == "edit"
+            else f"Generating images ({completed}/{total} completed)"
+        )
+        return {
+            "status": "running",
+            "stage": stage,
+            "message": message,
+            "operation": operation,
+            "started_at": parent.get("started_at") or utc_now(),
+            "image_id": first_image.get("image_id"),
+            "image_url": first_image.get("image_url"),
+            "images": images,
+            "image_width": first_image.get("image_width"),
+            "image_height": first_image.get("image_height"),
+            **count_update,
+            **usage_cost_update,
+        }
+
+    if queued_count > 0:
+        return {
+            "status": "queued",
+            "stage": "queued",
+            "message": parent.get("message") or "Queued image generation",
+            "operation": operation,
+            **count_update,
+        }
+    return None
+
+
+async def aggregate_parent_image_job(
+    parent_job_id: str,
+    *,
+    force_publish: bool = False,
+) -> dict | None:
+    parent, aggregate = await run_db_operation(
+        get_generate_job_with_unit_aggregate,
+        parent_job_id,
+        metric_name="aggregate_parent_image_job",
+    )
+    if not parent:
+        return None
+    operation = str(parent.get("operation") or "generation")
+
+    if aggregate.get("all_terminal"):
+        # Unit states only move forward, so a job observed as all-terminal here
+        # is still all-terminal when re-derived inside the transaction.
+        def derive(parent_row: dict, aggregate_row: dict) -> dict | None:
+            return derive_parent_update(
+                parent_row,
+                aggregate_row,
+                operation=str(parent_row.get("operation") or operation),
             )
-            error_message = summarize_unit_failures(failures, total, operation)
-            update = {
-                "status": status,
-                "stage": "generation_failed" if operation == "generation" else "edit_failed",
-                "message": error_message,
-                "operation": operation,
-                "completed_at": completed_at,
-                "error": error_message,
-                "stage_timings": aggregate.get("stage_timings") or {},
-                **terminal_update,
-                **count_update,
-                **usage_cost_update,
-            }
-        job = await store_generate_job_async(parent_job_id, update)
+
+        row, written = await run_db_operation(
+            finalize_parent_job_from_units,
+            parent_job_id,
+            derive=derive,
+            metric_name="finalize_parent_image_job",
+            critical=True,
+        )
+        if not row:
+            return None
+        job = await publish_generate_job_row_async(row, dispatch_webhook=written)
         await run_db_operation(
             trim_generate_jobs,
             metric_name="trim_generate_jobs",
@@ -228,47 +298,14 @@ async def aggregate_parent_image_job(
             )
         return job
 
-    if running_count > 0 or completed > 0:
-        stage = "waiting_for_api"
-        images = aggregate.get("images") or []
-        first_image = images[0] if images else {}
-        message = (
-            f"Editing images ({completed}/{total} completed)"
-            if operation == "edit"
-            else f"Generating images ({completed}/{total} completed)"
-        )
-        return await store_generate_job_async(
-            parent_job_id,
-            {
-                "status": "running",
-                "stage": stage,
-                "message": message,
-                "operation": operation,
-                "started_at": parent.get("started_at") or utc_now(),
-                "image_id": first_image.get("image_id"),
-                "image_url": first_image.get("image_url"),
-                "images": images,
-                "image_width": first_image.get("image_width"),
-                "image_height": first_image.get("image_height"),
-                **count_update,
-                **usage_cost_update,
-            },
-            persist=force_publish,
-        )
-
-    if queued_count > 0:
-        return await store_generate_job_async(
-            parent_job_id,
-            {
-                "status": "queued",
-                "stage": "queued",
-                "message": parent.get("message") or "Queued image generation",
-                "operation": operation,
-                **count_update,
-            },
-            persist=force_publish,
-        )
-    return parent
+    update = derive_parent_update(parent, aggregate, operation=operation)
+    if update is None:
+        return parent
+    return await store_generate_job_async(
+        parent_job_id,
+        update,
+        persist=force_publish,
+    )
 
 
 def set_generate_job_progress(
@@ -420,6 +457,7 @@ async def run_claimed_image_unit(unit: dict, worker_id: str):
                     claim_token=claim_token,
                     claim_expires_at=image_unit_lease_expires_at(),
                     metric_name="renew_image_job_unit_lease",
+                    critical=True,
                 )
             except asyncio.CancelledError:
                 raise
@@ -719,6 +757,7 @@ async def run_claimed_image_unit(unit: dict, worker_id: str):
                 usage=usage,
                 cost=cost,
                 metric_name="cancel_completed_image_job_unit",
+                critical=True,
             )
             return
         if (
@@ -733,6 +772,7 @@ async def run_claimed_image_unit(unit: dict, worker_id: str):
                 usage=usage,
                 cost=cost,
                 metric_name="complete_image_job_unit",
+                critical=True,
             )
             is None
         ):
@@ -762,6 +802,7 @@ async def run_claimed_image_unit(unit: dict, worker_id: str):
             usage=usage,
             cost=cost,
             metric_name="cancel_image_job_unit",
+            critical=True,
         )
     except UnitLeaseLostError:
         logger.warning(
@@ -820,6 +861,7 @@ async def run_claimed_image_unit(unit: dict, worker_id: str):
             usage=usage,
             cost=cost,
             metric_name="fail_image_job_unit",
+            critical=True,
         )
     finally:
         await abort_upstream()
@@ -829,5 +871,16 @@ async def run_claimed_image_unit(unit: dict, worker_id: str):
             elif not lease_task.cancelled():
                 lease_task.exception()
         await flush_progress_updates()
-        if not lease_lost.is_set():
+        if lease_lost.is_set():
+            # Ownership moved elsewhere, so this worker must not derive or write
+            # a parent update. Still refresh the local cache from storage so a
+            # cross-worker cancellation cannot leave a `running` ghost behind.
+            row = await run_db_operation(
+                get_generate_job,
+                parent_job_id,
+                metric_name="refresh_lost_lease_parent",
+            )
+            if row is not None:
+                await publish_generate_job_row_async(row, dispatch_webhook=False)
+        else:
             await aggregate_parent_image_job(parent_job_id, force_publish=True)

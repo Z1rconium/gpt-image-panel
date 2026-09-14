@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from backend.app.core.observability import record_upstream_usage
+from backend.app.core.utils import utc_now
 from backend.tests.support.contract import *  # noqa: F403
 
 def test_generate_and_sse_contract(client):
@@ -1417,7 +1418,7 @@ def test_running_progress_persists_only_terminal_states(tmp_path, monkeypatch):
     _configure_runtime(tmp_path)
     upserted: list[dict] = []
     real_enqueue = image_jobs_repo.enqueue_image_job
-    real_upsert = image_jobs_repo.upsert_generate_job
+    real_upsert = image_jobs_repo.upsert_generate_job_guarded
 
     def tracking_enqueue(**kwargs):
         upserted.append(kwargs["parent_job"].copy())
@@ -1452,20 +1453,24 @@ def test_running_progress_persists_only_terminal_states(tmp_path, monkeypatch):
         return [entry]
 
     monkeypatch.setattr(job_queue, "enqueue_image_job", tracking_enqueue)
-    monkeypatch.setattr(job_events, "upsert_generate_job", tracking_upsert)
+    monkeypatch.setattr(job_events, "upsert_generate_job_guarded", tracking_upsert)
     monkeypatch.setattr(backend_main.proxy, "call_image_generation_api", noisy_generation_api)
 
     with _test_client() as client:
         resp = client.post("/api/generate", json={"prompt": "noisy", "model": "gpt-image-2"})
         assert resp.status_code == 202
-        job = _wait_for_job(client, resp.json()["job_id"])
+        job_id = resp.json()["job_id"]
+        job = _wait_for_job(client, job_id)
 
     assert job["status"] == "success"
     assert [item["status"] for item in upserted].count("queued") == 1
-    assert [item["status"] for item in upserted].count("success") == 1
     running_upserts = [item for item in upserted if item["status"] == "running"]
     assert len(running_upserts) <= 2
     assert any(item.get("stage") == "starting_generation" for item in running_upserts)
+    # Terminal writes now go through the guarded single-transaction finalize
+    # path, never the throttled running-state upsert.
+    assert [item["status"] for item in upserted].count("success") == 0
+    assert image_jobs_repo.get_generate_job(job_id)["status"] == "success"
 
 
 def test_generate_jobs_list_broadcast_debounces_without_db_reads(client, monkeypatch):
@@ -1955,3 +1960,253 @@ def test_job_preview_oversized_entry_is_dropped_not_cached(client, monkeypatch):
         },
     )
     assert job_events.get_cached_generate_job_previews("oversized-preview-job") == []
+
+
+# ── Phase 2: parent terminal guards and memory-cache demotion (D3/D4) ─────────
+
+
+def test_parent_terminal_state_never_regresses(tmp_path):
+    _configure_runtime(tmp_path)
+    image_jobs_repo.enqueue_image_job(
+        parent_job={
+            "job_id": "regress-parent",
+            "status": "queued",
+            "operation": "generation",
+        },
+        operation="generation",
+        request={"prompt": "regress", "n": 1},
+        image_units=1,
+        api_preset_id="default",
+        api_preset_name="Default",
+        api_path="/v1/images/generations",
+        max_active_generate_jobs=2,
+        max_queued_generate_jobs=2,
+        max_pending_edit_source_bytes=1024 * 1024,
+    )
+
+    def success_derive(_parent, _aggregate):
+        return {
+            "status": "success",
+            "stage": "completed",
+            "message": "done",
+            "completed_at": utc_now(),
+        }
+
+    row, written = image_jobs_repo.finalize_parent_job_from_units(
+        "regress-parent", derive=success_derive
+    )
+    assert written is True
+    assert row["status"] == "success"
+
+    def running_derive(_parent, _aggregate):
+        return {"status": "running", "stage": "waiting_for_api", "message": "late"}
+
+    row_again, written_again = image_jobs_repo.finalize_parent_job_from_units(
+        "regress-parent", derive=running_derive
+    )
+    assert written_again is False
+    assert row_again["status"] == "success"
+    stored = image_jobs_repo.get_generate_job("regress-parent")
+    assert stored["status"] == "success"
+    assert stored["stage"] == "completed"
+
+    # A throttled running-state write must not revive the terminal row either.
+    image_jobs_repo.upsert_generate_job(
+        {
+            "job_id": "regress-parent",
+            "status": "running",
+            "stage": "waiting_for_api",
+        }
+    )
+    assert image_jobs_repo.get_generate_job("regress-parent")["status"] == "success"
+    counters = metrics.snapshot()["counters"]
+    assert counters.get("image_jobs.parent_write_skipped_terminal", 0) >= 1
+
+
+def test_multi_unit_concurrent_completion_keeps_success(tmp_path, monkeypatch):
+    _configure_runtime(tmp_path)
+    dispatch_calls: list[str] = []
+
+    async def tracking_dispatch(job):
+        dispatch_calls.append(job["job_id"])
+
+    monkeypatch.setattr(job_events, "dispatch_job_webhook_async", tracking_dispatch)
+
+    barrier = threading.Barrier(2, timeout=5)
+
+    async def concurrent_generation_api(
+        api_url,
+        api_key,
+        api_path,
+        payload,
+        api_preset_name=None,
+        progress=None,
+        socks5_proxy=None,
+    ):
+        await asyncio.to_thread(barrier.wait)
+        return [await _add_generated_gallery_entry(payload, api_path, api_preset_name)]
+
+    monkeypatch.setattr(
+        backend_main.proxy, "call_image_generation_api", concurrent_generation_api
+    )
+
+    with _test_client() as client:
+        resp = client.post(
+            "/api/generate",
+            json={"prompt": "concurrent", "model": "gpt-image-2", "n": 2},
+        )
+        assert resp.status_code == 202
+        job_id = resp.json()["job_id"]
+        job = _wait_for_job(client, job_id)
+
+    assert job["status"] == "success"
+    assert job["completed_count"] == 2
+    persisted = image_jobs_repo.get_generate_job(job_id)
+    assert persisted["status"] == "success"
+    assert persisted["completed_count"] == 2
+    # Only the transaction that actually wrote the terminal row dispatches.
+    assert dispatch_calls == [job_id]
+
+
+def test_cancel_after_success_returns_409_and_keeps_result(tmp_path):
+    _configure_runtime(tmp_path)
+    image_jobs_repo.upsert_generate_job(
+        {
+            "job_id": "finished-job",
+            "status": "success",
+            "stage": "completed",
+            "operation": "generation",
+            "prompt": "finished",
+            "image_id": "image-1",
+            "image_url": "/api/image/image-1.png",
+            "images": [
+                {
+                    "image_id": "image-1",
+                    "image_url": "/api/image/image-1.png",
+                    "filename": "image-1.png",
+                }
+            ],
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "updated_at": "2026-01-01T00:00:05+00:00",
+        }
+    )
+
+    with _test_client() as client:
+        # A non-executing worker's stale copy must not revive the job.
+        backend_main.app.state.generate_jobs["finished-job"] = {
+            "job_id": "finished-job",
+            "status": "running",
+            "stage": "waiting_for_api",
+            "operation": "generation",
+            "updated_at": "2026-01-01T00:00:04+00:00",
+        }
+        resp = client.delete("/api/generate/finished-job")
+        assert resp.status_code == 409
+        assert "finished-job" not in backend_main.app.state.generate_jobs
+
+    stored = image_jobs_repo.get_generate_job("finished-job")
+    assert stored["status"] == "success"
+    assert stored["image_id"] == "image-1"
+    assert [image["image_id"] for image in stored["images"]] == ["image-1"]
+
+
+def test_get_job_prefers_storage_over_stale_memory(tmp_path):
+    _configure_runtime(tmp_path)
+    image_jobs_repo.upsert_generate_job(
+        {
+            "job_id": "stale-memory-job",
+            "status": "success",
+            "stage": "completed",
+            "operation": "generation",
+            "prompt": "stale memory",
+            "image_id": "image-2",
+            "image_url": "/api/image/image-2.png",
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "updated_at": "2026-01-01T00:00:05+00:00",
+        }
+    )
+
+    with _test_client() as client:
+        backend_main.app.state.generate_jobs["stale-memory-job"] = {
+            "job_id": "stale-memory-job",
+            "status": "queued",
+            "stage": "queued",
+            "operation": "generation",
+            "updated_at": "2026-01-01T00:00:01+00:00",
+        }
+
+        resp = client.get("/api/generate/stale-memory-job")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "success"
+        assert "stale-memory-job" not in backend_main.app.state.generate_jobs
+
+        events = client.get("/api/generate/stale-memory-job/events")
+        assert events.status_code == 200
+        assert '"status":"success"' in events.text
+        assert '"status":"queued"' not in events.text
+
+
+def test_resolve_view_does_not_create_memory_for_storage_only_job(tmp_path):
+    _configure_runtime(tmp_path)
+    image_jobs_repo.upsert_generate_job(
+        {
+            "job_id": "storage-only-job",
+            "status": "running",
+            "stage": "waiting_for_api",
+            "operation": "generation",
+            "prompt": "storage only",
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "updated_at": "2026-01-01T00:00:05+00:00",
+        }
+    )
+
+    with _test_client() as client:
+        # Startup reconcile may have loaded it; drop the cache to model a
+        # non-executing worker that only knows the job from storage.
+        backend_main.app.state.generate_jobs.pop("storage-only-job", None)
+        job_events.get_generate_job_seen_at().pop("storage-only-job", None)
+        assert "storage-only-job" not in backend_main.app.state.generate_jobs
+
+        resp = client.get("/api/generate/storage-only-job")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "running"
+        # A decision read must not cache a storage-only job on this worker,
+        # otherwise the copy leaks when another worker finishes the job (R2).
+        assert "storage-only-job" not in backend_main.app.state.generate_jobs
+
+
+def test_stale_memory_reconcile_drops_terminal_ghost(tmp_path):
+    _configure_runtime(tmp_path)
+    image_jobs_repo.upsert_generate_job(
+        {
+            "job_id": "ghost-job",
+            "status": "cancelled",
+            "stage": "cancelled",
+            "operation": "generation",
+            "prompt": "ghost",
+            "completed_at": "2026-01-01T00:00:06+00:00",
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "updated_at": "2026-01-01T00:00:06+00:00",
+        }
+    )
+
+    with _test_client() as client:
+        backend_main.app.state.generate_jobs["ghost-job"] = {
+            "job_id": "ghost-job",
+            "status": "running",
+            "stage": "waiting_for_api",
+            "operation": "generation",
+            "updated_at": "2026-01-01T00:00:01+00:00",
+        }
+        job_events.get_generate_job_seen_at()["ghost-job"] = (
+            time.monotonic() - 2 * app_state.GENERATE_JOB_PERSIST_INTERVAL_SECONDS - 5
+        )
+        assert job_events.has_stale_generate_job_memory() is True
+
+        reconciled = client.portal.call(
+            job_events.reconcile_stale_generate_job_memory
+        )
+        assert reconciled is True
+        assert "ghost-job" not in backend_main.app.state.generate_jobs
+        counters = metrics.snapshot()["counters"]
+        assert counters.get("image_jobs.stale_memory_reconciled", 0) >= 1

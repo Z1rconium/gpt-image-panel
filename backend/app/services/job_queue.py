@@ -43,6 +43,7 @@ from .job_events import (
     get_job_subscribers,
     get_jobs_subscribers,
     publish_generate_job,
+    remember_generate_job_memory,
     store_generate_job,
     validate_job_webhook_url,
 )
@@ -432,7 +433,7 @@ async def queue_image_job(
     except Exception:
         raise
 
-    app.state.generate_jobs[job_id] = stored_job
+    remember_generate_job_memory(job_id, stored_job)
     app.state.generate_job_last_persist_at.pop(job_id, None)
     metrics.increment(f"image_jobs.{operation}.queued")
     publish_generate_job(stored_job, list_debounce=False, list_reconcile=True)

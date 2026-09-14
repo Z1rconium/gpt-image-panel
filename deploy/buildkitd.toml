@@ -1,0 +1,44 @@
+# BuildKit daemon config for the gpt-image-linux-builder buildx nodes.
+# Applied by deploy/buildx-builder.sh (docker buildx create --buildkitd-config).
+#
+# Declaring any [[worker.oci.gcpolicy]] replaces BuildKit's built-in policy
+# set (cmd/buildkitd/config/gcpolicy.go DefaultGCPolicy), so all four default
+# rules are restated here. Only rule 1 differs from the defaults.
+
+[worker.oci]
+  gc = true
+
+  # Rule 1: volatile records (local build contexts, git checkouts and, most
+  # importantly, RUN --mount=type=cache directories such as /root/.cache/pip
+  # and /root/.npm). BuildKit's default caps this rule at 512MB of *total*
+  # cache usage, which a warm multi-arch layer cache always exceeds, so every
+  # cache mount unused for 48h was evicted at the next GC and pip/npm had to
+  # re-download everything on the following release. Raise the cap well above
+  # the warm cache size and keep the mounts for two weeks so releases spaced
+  # days apart still hit them.
+  [[worker.oci.gcpolicy]]
+    filters = ["type==source.local", "type==exec.cachemount", "type==source.git.checkout"]
+    keepDuration = "336h"
+    maxUsedSpace = "20GB"
+
+  # Rules 2-4 are BuildKit's defaults (reservedSpace = min(10%, 10GB),
+  # maxUsedSpace = min(60%, 100GB), minFreeSpace = 20% of the disk).
+  # Rule 2: drop anything unused for 60 days.
+  [[worker.oci.gcpolicy]]
+    keepDuration = "1440h"
+    reservedSpace = "10GB"
+    maxUsedSpace = "100GB"
+    minFreeSpace = "20%"
+
+  # Rule 3: keep the unshared build cache under the cap.
+  [[worker.oci.gcpolicy]]
+    reservedSpace = "10GB"
+    maxUsedSpace = "100GB"
+    minFreeSpace = "20%"
+
+  # Rule 4: if the rules above were insufficient, prune internal data as well.
+  [[worker.oci.gcpolicy]]
+    all = true
+    reservedSpace = "10GB"
+    maxUsedSpace = "100GB"
+    minFreeSpace = "20%"

@@ -1,30 +1,52 @@
 """Image generation and edit job queue persistence."""
 
+from collections.abc import Callable
+
 from .db import *
 from ..services import image_cost
 
 
-def upsert_generate_job(job: dict[str, Any]) -> dict[str, Any]:
+def upsert_generate_job_guarded(job: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+    """Upsert a generate job, refusing to overwrite an existing terminal row.
+
+    Returns `(normalized_job, wrote)`. `wrote` is False when the stored row is
+    already terminal and the incoming update was rejected by the status guard.
+    Callers use this to avoid reviving a finished job in their in-memory cache.
+    """
     _ensure_database()
     normalized = _normalize_generate_job(job)
 
     with _connect() as conn:
         with _transaction(conn):
-            _upsert_generate_job_on_conn(conn, normalized)
+            cursor = _upsert_generate_job_on_conn(conn, normalized)
+            wrote = cursor.rowcount > 0
+    if not wrote:
+        metrics.increment("image_jobs.parent_write_skipped_terminal")
+    return normalized, wrote
+
+
+def upsert_generate_job(job: dict[str, Any]) -> dict[str, Any]:
+    normalized, _wrote = upsert_generate_job_guarded(job)
     return normalized
 
 
 def get_generate_job(job_id: str) -> dict[str, Any] | None:
     _ensure_database()
     with _connect() as conn:
-        row = conn.execute(
-            f"""
-            SELECT {", ".join(GENERATE_JOB_COLUMNS)}
-            FROM generate_jobs
-            WHERE job_id = ?
-            """,
-            (job_id,),
-        ).fetchone()
+        return _get_generate_job_on_conn(conn, job_id)
+
+
+def _get_generate_job_on_conn(
+    conn: sqlite3.Connection, job_id: str
+) -> dict[str, Any] | None:
+    row = conn.execute(
+        f"""
+        SELECT {", ".join(GENERATE_JOB_COLUMNS)}
+        FROM generate_jobs
+        WHERE job_id = ?
+        """,
+        (job_id,),
+    ).fetchone()
     if not row:
         return None
     return _generate_job_from_row(row)
@@ -383,6 +405,51 @@ def get_image_job_unit(unit_id: str) -> dict[str, Any] | None:
     return _image_job_unit_from_row(row) if row else None
 
 
+def has_claimable_image_job_unit(
+    now: str,
+    max_attempts: int | None = None,
+) -> bool:
+    """Read-only precheck used to skip an empty claim write transaction.
+
+    Mirrors the `claim_next_image_job_unit` candidate predicate using the
+    partial claim indexes; never takes a write lock.
+    """
+    _ensure_database()
+    if max_attempts is None:
+        max_attempts = getattr(config, "IMAGE_JOB_UNIT_MAX_ATTEMPTS", 2)
+    max_attempts = max(1, int(max_attempts or 1))
+    with _connect() as conn:
+        row = conn.execute(
+            """
+            WITH
+                expired_candidate(unit_id) AS (
+                    SELECT unit_id
+                    FROM image_job_units
+                    WHERE status = 'running'
+                        AND claim_expires_at IS NOT NULL
+                        AND claim_expires_at <= ?
+                        AND attempts < ?
+                    LIMIT 1
+                ),
+                queued_candidate(unit_id) AS (
+                    SELECT unit_id
+                    FROM image_job_units
+                    WHERE status = 'queued'
+                    LIMIT 1
+                )
+            SELECT 1
+            FROM (
+                SELECT unit_id FROM expired_candidate
+                UNION ALL
+                SELECT unit_id FROM queued_candidate
+            )
+            LIMIT 1
+            """,
+            (now, max_attempts),
+        ).fetchone()
+    return row is not None
+
+
 def claim_next_image_job_unit(
     *,
     worker_id: str,
@@ -720,37 +787,49 @@ def cancel_image_job_units(parent_job_id: str) -> int:
     now = utc_now()
     with _connect() as conn:
         with _transaction(conn):
-            cursor = conn.execute(
-                """
-                UPDATE image_job_units
-                SET status = 'cancelled',
-                    stage = 'cancelled',
-                    message = 'Generation job cancelled',
-                    error = 'Generation job cancelled',
-                    claimed_by = NULL,
-                    claim_token = NULL,
-                    completed_at = ?,
-                    updated_at = ?,
-                    claim_expires_at = NULL
-                WHERE parent_job_id = ? AND status IN ('queued', 'running')
-                """,
-                (now, now, parent_job_id),
-            )
-            return cursor.rowcount
+            return _cancel_image_job_units_on_conn(conn, parent_job_id, now)
+
+
+def _cancel_image_job_units_on_conn(
+    conn: sqlite3.Connection, parent_job_id: str, now: str
+) -> int:
+    cursor = conn.execute(
+        """
+        UPDATE image_job_units
+        SET status = 'cancelled',
+            stage = 'cancelled',
+            message = 'Generation job cancelled',
+            error = 'Generation job cancelled',
+            claimed_by = NULL,
+            claim_token = NULL,
+            completed_at = ?,
+            updated_at = ?,
+            claim_expires_at = NULL
+        WHERE parent_job_id = ? AND status IN ('queued', 'running')
+        """,
+        (now, now, parent_job_id),
+    )
+    return cursor.rowcount
 
 
 def aggregate_image_job_units(parent_job_id: str) -> dict[str, Any]:
     _ensure_database()
     with _connect() as conn:
-        rows = conn.execute(
-            f"""
-            SELECT {", ".join(IMAGE_JOB_UNIT_COLUMNS)}
-            FROM image_job_units
-            WHERE parent_job_id = ?
-            ORDER BY unit_index ASC
-            """,
-            (parent_job_id,),
-        ).fetchall()
+        return _aggregate_image_job_units_on_conn(conn, parent_job_id)
+
+
+def _aggregate_image_job_units_on_conn(
+    conn: sqlite3.Connection, parent_job_id: str
+) -> dict[str, Any]:
+    rows = conn.execute(
+        f"""
+        SELECT {", ".join(IMAGE_JOB_UNIT_COLUMNS)}
+        FROM image_job_units
+        WHERE parent_job_id = ?
+        ORDER BY unit_index ASC
+        """,
+        (parent_job_id,),
+    ).fetchall()
     units = [_image_job_unit_from_row(row) for row in rows]
     total = len(units)
     terminal_statuses = {"success", "error", "upstream_error", "cancelled", "interrupted"}
@@ -805,6 +884,143 @@ def get_generate_job_with_unit_aggregate(
     _ensure_database()
     with _connect():
         return get_generate_job(parent_job_id), aggregate_image_job_units(parent_job_id)
+
+
+def _update_generate_job_on_conn(
+    conn: sqlite3.Connection, merged: dict[str, Any]
+) -> dict[str, Any] | None:
+    """Guarded parent update: only active rows may be written.
+
+    `merged` is a full parent snapshot (existing row fields plus the changes).
+    Only columns present in the normalized snapshot are written, so unrelated
+    NULL columns are not clobbered.
+    """
+    normalized = _normalize_generate_job(merged)
+    columns = [
+        column
+        for column in GENERATE_JOB_COLUMNS
+        if column != "job_id" and column in normalized
+    ]
+    set_sql = ", ".join(f"{column} = ?" for column in columns)
+    active_statuses = tuple(sorted(ACTIVE_GENERATE_JOB_STATUSES))
+    active_placeholders = ", ".join("?" for _ in active_statuses)
+    conn.execute(
+        f"""
+        UPDATE generate_jobs
+        SET {set_sql}
+        WHERE job_id = ? AND status IN ({active_placeholders})
+        """,
+        (
+            *[normalized[column] for column in columns],
+            normalized["job_id"],
+            *active_statuses,
+        ),
+    )
+    return _get_generate_job_on_conn(conn, normalized["job_id"])
+
+
+def finalize_parent_job_from_units(
+    parent_job_id: str,
+    *,
+    derive: Callable[[dict[str, Any], dict[str, Any]], dict[str, Any] | None],
+) -> tuple[dict[str, Any] | None, bool]:
+    """Derive and write a parent update inside one write transaction.
+
+    The parent job status is a pure function of its unit rows: `derive` is
+    called with a consistent `(parent, aggregate)` read and its result is
+    applied only while the parent is still active. This closes the
+    read-compute-write race where a late aggregation could otherwise revert a
+    terminal parent back to `running` (defect D3).
+    """
+    _ensure_database()
+    with _connect() as conn:
+        with _transaction(conn):
+            current = _get_generate_job_on_conn(conn, parent_job_id)
+            if current is None:
+                return None, False
+            if current.get("status") not in ACTIVE_GENERATE_JOB_STATUSES:
+                metrics.increment("image_jobs.parent_write_skipped_terminal")
+                return current, False
+
+            aggregate = _aggregate_image_job_units_on_conn(conn, parent_job_id)
+            update = derive(current, aggregate)
+            if not update:
+                return current, False
+
+            merged = {**current, **update, "updated_at": utc_now()}
+            row = _update_generate_job_on_conn(conn, merged)
+            if merged.get("status") not in ACTIVE_GENERATE_JOB_STATUSES:
+                conn.execute(
+                    "DELETE FROM edit_source_reservations WHERE job_id = ?",
+                    (parent_job_id,),
+                )
+    return row, True
+
+
+def transition_generate_job_to_terminal(
+    job_id: str, updates: dict[str, Any]
+) -> tuple[dict[str, Any] | None, bool]:
+    """Merge `updates` onto the stored parent row and terminalize it.
+
+    Returns `(row, written)`. `written` is False when the job is missing or
+    already terminal, in which case the stored terminal row is returned
+    unchanged so callers never overwrite a finished job (defect D3).
+    """
+    _ensure_database()
+    with _connect() as conn:
+        with _transaction(conn):
+            current = _get_generate_job_on_conn(conn, job_id)
+            if current is None:
+                return None, False
+            if current.get("status") not in ACTIVE_GENERATE_JOB_STATUSES:
+                metrics.increment("image_jobs.parent_write_skipped_terminal")
+                return current, False
+
+            merged = {**current, **updates, "updated_at": utc_now()}
+            row = _update_generate_job_on_conn(conn, merged)
+            conn.execute(
+                "DELETE FROM edit_source_reservations WHERE job_id = ?",
+                (job_id,),
+            )
+    return row, True
+
+
+def cancel_generate_job_tx(
+    job_id: str, message: str
+) -> tuple[dict[str, Any] | None, bool]:
+    """Cancel a parent job and its units atomically.
+
+    Returns `(row, cancelled)`. When the job is missing the row is None; when
+    it is already terminal `cancelled` is False and the stored terminal row is
+    returned untouched, which the router maps to HTTP 409 (defect D3).
+    """
+    _ensure_database()
+    now = utc_now()
+    with _connect() as conn:
+        with _transaction(conn):
+            current = _get_generate_job_on_conn(conn, job_id)
+            if current is None:
+                return None, False
+            if current.get("status") not in ACTIVE_GENERATE_JOB_STATUSES:
+                metrics.increment("image_jobs.parent_write_skipped_terminal")
+                return current, False
+
+            _cancel_image_job_units_on_conn(conn, job_id, now)
+            merged = {
+                **current,
+                "status": "cancelled",
+                "stage": "cancelled",
+                "message": message,
+                "error": message,
+                "completed_at": now,
+                "updated_at": now,
+            }
+            row = _update_generate_job_on_conn(conn, merged)
+            conn.execute(
+                "DELETE FROM edit_source_reservations WHERE job_id = ?",
+                (job_id,),
+            )
+    return row, True
 
 
 def _get_generate_job_rows_on_conn(
@@ -969,12 +1185,13 @@ def mark_active_generate_jobs_interrupted() -> int:
 def trim_generate_jobs(max_jobs: int):
     _ensure_database()
     with _connect() as conn:
+        # Read-only precheck: avoid taking the write lock on every call when
+        # the table is already under the retention limit.
+        row = conn.execute("SELECT COUNT(*) FROM generate_jobs").fetchone()
+        total = int(row[0]) if row else 0
+        if total <= max_jobs:
+            return
         with _transaction(conn):
-            row = conn.execute("SELECT COUNT(*) FROM generate_jobs").fetchone()
-            total = int(row[0]) if row else 0
-            if total <= max_jobs:
-                return
-
             removable_count = total - max_jobs
             rows = conn.execute(
                 """

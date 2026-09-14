@@ -511,55 +511,69 @@ def sync_gallery_with_image_files() -> int:
     _ensure_database()
     with _storage_lock:
         image_filenames = _scan_image_files()
-        removed_count = 0
+
+        # Read-only scan: collect stale rows without holding the write lock.
+        # Each SELECT is its own implicit read transaction, so WAL readers never
+        # block concurrent writers while a large library is scanned.
+        stale_rows: list[sqlite3.Row] = []
         with _connect() as conn:
-            with _transaction(conn):
-                last_id = ""
-                filter_option_deltas: dict[tuple[str, str], int] = {}
-                while True:
-                    rows = conn.execute(
-                        """
-                        SELECT id, filename, model, api_preset_name, size
-                        FROM gallery_entries
-                        WHERE id > ?
-                        ORDER BY id
-                        LIMIT ?
-                        """,
-                        (last_id, GALLERY_SYNC_BATCH_SIZE),
-                    ).fetchall()
-                    if not rows:
-                        break
+            last_id = ""
+            while True:
+                rows = conn.execute(
+                    """
+                    SELECT id, filename, model, api_preset_name, size
+                    FROM gallery_entries
+                    WHERE id > ?
+                    ORDER BY id
+                    LIMIT ?
+                    """,
+                    (last_id, GALLERY_SYNC_BATCH_SIZE),
+                ).fetchall()
+                if not rows:
+                    break
 
-                    last_id = str(rows[-1]["id"])
-                    stale_ids = [
-                        row["id"]
-                        for row in rows
-                        if row["filename"] and row["filename"] not in image_filenames
-                    ]
-                    if not stale_ids:
-                        continue
+                last_id = str(rows[-1]["id"])
+                stale_rows.extend(
+                    row
+                    for row in rows
+                    if row["filename"] and row["filename"] not in image_filenames
+                )
 
+        if not stale_rows:
+            return 0
+
+        # Delete in bounded write transactions so the write lock is held per
+        # batch instead of for the whole scan. Each batch applies its own
+        # filter-option deltas atomically; the gallery version bump (which
+        # invalidates page/count caches) happens once in the final batch.
+        removed_count = 0
+        batch_size = max(1, int(GALLERY_SYNC_BATCH_SIZE))
+        for start in range(0, len(stale_rows), batch_size):
+            batch = stale_rows[start : start + batch_size]
+            is_last_batch = start + batch_size >= len(stale_rows)
+            filter_option_deltas: dict[tuple[str, str], int] = {}
+            with _connect() as conn:
+                with _transaction(conn):
                     conn.executemany(
                         "DELETE FROM gallery_entries WHERE id = ?",
-                        [(entry_id,) for entry_id in stale_ids],
+                        [(row["id"],) for row in batch],
                     )
-                    for row in rows:
-                        if row["id"] in stale_ids:
-                            _add_gallery_filter_option_deltas(
-                                filter_option_deltas,
-                                row,
-                                -1,
-                            )
-                    removed_count += len(stale_ids)
-
-                if removed_count:
+                    for row in batch:
+                        _add_gallery_filter_option_deltas(
+                            filter_option_deltas,
+                            row,
+                            -1,
+                        )
                     _apply_gallery_filter_option_deltas_on_conn(
                         conn,
                         filter_option_deltas,
                     )
-                    _invalidate_gallery_query_caches_on_conn(conn)
-                    _clear_verified_thumbnails()
-                return removed_count
+                    if is_last_batch:
+                        _invalidate_gallery_query_caches_on_conn(conn)
+            removed_count += len(batch)
+
+        _clear_verified_thumbnails()
+        return removed_count
 
 
 def _delete_gallery_entries_by_ids(

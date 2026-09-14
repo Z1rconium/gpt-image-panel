@@ -23,6 +23,7 @@ from ..repositories.coordination import (
     acquire_background_slot,
     claim_next_gallery_job,
     get_gallery_job,
+    has_claimable_gallery_job,
     release_background_slot,
     renew_gallery_job_lease,
     reserve_gallery_job_capacity,
@@ -516,6 +517,17 @@ async def run_ai_analyze_dispatcher(worker_id: str) -> None:
     async def run_ai_analyze_job(job: dict[str, Any]):
         await _run_ai_analyze_job(job)
 
+    async def has_claimable() -> bool:
+        try:
+            return await asyncio.to_thread(
+                has_claimable_gallery_job,
+                kind=AI_ANALYZE_JOB_KIND,
+                now=utc_now(),
+            )
+        except Exception:
+            # Fail open: a broken precheck must never stall the dispatcher.
+            return True
+
     await run_claim_loop(
         claim_fn=claim_ai_analyze_job,
         run_fn=run_ai_analyze_job,
@@ -523,6 +535,8 @@ async def run_ai_analyze_dispatcher(worker_id: str) -> None:
         idle_interval=AI_ANALYZE_DISPATCH_INTERVAL_SECONDS,
         max_backoff=AI_ANALYZE_DISPATCH_MAX_IDLE_BACKOFF_SECONDS,
         kick_event=get_ai_analyze_dispatcher_kick_event(),
+        claim_precheck_fn=has_claimable,
+        claim_precheck_metric="gallery.ai_analyze.claim_precheck_skipped",
         logger=logger,
         error_message="Gallery AI analysis dispatcher error",
         task_name="gallery AI analysis job",

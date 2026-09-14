@@ -249,8 +249,33 @@ def persist_api_settings():
     )
 
 
+def begin_api_settings_write() -> None:
+    """Mark an in-memory API-settings update as in flight.
+
+    While a settings write is applying its new values and persisting them,
+    concurrent `load_api_settings` calls must not repopulate `app.state` from
+    the pre-commit database row, or they would revert the update.
+    """
+    app.state.api_settings_write_generation = (
+        int(getattr(app.state, "api_settings_write_generation", 0)) + 1
+    )
+    app.state.api_settings_write_pending = True
+
+
+def end_api_settings_write() -> None:
+    app.state.api_settings_write_pending = False
+
+
 def load_api_settings():
+    if bool(getattr(app.state, "api_settings_write_pending", False)):
+        return
+    generation = int(getattr(app.state, "api_settings_write_generation", 0))
     data = load_settings()
+    if (
+        generation != int(getattr(app.state, "api_settings_write_generation", 0))
+        or bool(getattr(app.state, "api_settings_write_pending", False))
+    ):
+        return
     presets = data["presets"]
     app.state.api_presets = presets
     app.state.active_preset_id = data["active_preset_id"]

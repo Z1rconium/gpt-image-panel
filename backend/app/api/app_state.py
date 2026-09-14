@@ -146,6 +146,14 @@ async def lifespan(app: FastAPI):
 
     logger.info("Image jobs resume through SQLite unit leases")
     logger.info(
+        "SQLite DB executor: workers=%s critical_busy_timeout_ms=%s "
+        "critical_retry_attempts=%s slow_txn_warn_ms=%s",
+        config.DB_EXECUTOR_WORKERS,
+        config.SQLITE_CRITICAL_BUSY_TIMEOUT_MS,
+        config.SQLITE_CRITICAL_BUSY_RETRY_ATTEMPTS,
+        config.SQLITE_SLOW_TXN_WARN_MS,
+    )
+    logger.info(
         "Image cost estimation: %s model(s) have a configured pricing rate",
         configured_model_count(),
     )

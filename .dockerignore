@@ -15,6 +15,9 @@ images/
 test-results/
 docker-compose.yml
 Dockerfile
+docker-bake.hcl
+.github/
+deploy/
 README.md
 .gitignore
 *.md

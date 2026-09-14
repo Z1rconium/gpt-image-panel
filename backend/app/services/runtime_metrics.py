@@ -67,6 +67,10 @@ async def refresh_runtime_metrics_once(worker_id: str) -> None:
     app.state.runtime_coordination_metrics = runtime
     app.state.runtime_resource_gauges = _resource_gauges()
 
+    from .job_events import reconcile_stale_generate_job_memory
+
+    await reconcile_stale_generate_job_memory()
+
 
 async def run_runtime_metrics_refresher(worker_id: str) -> None:
     while True:

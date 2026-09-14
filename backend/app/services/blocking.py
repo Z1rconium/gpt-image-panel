@@ -126,19 +126,34 @@ async def run_db_operation(
     *args: Any,
     metric_name: str | None = None,
     retry_busy: bool = True,
+    critical: bool = False,
     **kwargs: Any,
 ) -> T:
-    """Run one repository operation with a short lock timeout and jittered retry."""
+    """Run one repository operation with a short lock timeout and jittered retry.
+
+    ``critical`` selects the larger critical busy budget used by claim, lease
+    renewal, terminal unit writes, parent finalization and cancellation. Those
+    paths must not silently lose a write to a transient lock; polling reads keep
+    the short budget because timing out just skips a cycle.
+    """
 
     from ..repositories import db as db_repo
 
     label = metric_name or getattr(callback, "__name__", "operation")
+    if critical:
+        busy_timeout_ms = config.SQLITE_CRITICAL_BUSY_TIMEOUT_MS
+        attempts = (
+            config.SQLITE_CRITICAL_BUSY_RETRY_ATTEMPTS if retry_busy else 0
+        )
+    else:
+        busy_timeout_ms = config.SQLITE_BUSY_TIMEOUT_MS
+        attempts = config.SQLITE_BUSY_RETRY_ATTEMPTS if retry_busy else 0
 
     def invoke() -> T:
-        with db_repo.persistent_connection_scope(config.SQLITE_BUSY_TIMEOUT_MS):
-            return callback(*args, **kwargs)
+        with db_repo.metric_name_scope(label):
+            with db_repo.persistent_connection_scope(busy_timeout_ms):
+                return callback(*args, **kwargs)
 
-    attempts = config.SQLITE_BUSY_RETRY_ATTEMPTS if retry_busy else 0
     for attempt in range(attempts + 1):
         try:
             return await _db_executor.run(invoke, metric_name=f"db.{label}")
@@ -156,6 +171,7 @@ def run_db_operation_in_current_thread(
     *args: Any,
     metric_name: str | None = None,
     retry_busy: bool = True,
+    critical: bool = False,
     **kwargs: Any,
 ) -> T:
     """Run one repository operation in the current worker thread.
@@ -167,12 +183,20 @@ def run_db_operation_in_current_thread(
     from ..repositories import db as db_repo
 
     label = metric_name or getattr(callback, "__name__", "operation")
-    attempts = config.SQLITE_BUSY_RETRY_ATTEMPTS if retry_busy else 0
+    if critical:
+        busy_timeout_ms = config.SQLITE_CRITICAL_BUSY_TIMEOUT_MS
+        attempts = (
+            config.SQLITE_CRITICAL_BUSY_RETRY_ATTEMPTS if retry_busy else 0
+        )
+    else:
+        busy_timeout_ms = config.SQLITE_BUSY_TIMEOUT_MS
+        attempts = config.SQLITE_BUSY_RETRY_ATTEMPTS if retry_busy else 0
     for attempt in range(attempts + 1):
         started_at = time.perf_counter()
         try:
-            with db_repo.busy_timeout_scope(config.SQLITE_BUSY_TIMEOUT_MS):
-                return callback(*args, **kwargs)
+            with db_repo.metric_name_scope(label):
+                with db_repo.busy_timeout_scope(busy_timeout_ms):
+                    return callback(*args, **kwargs)
         except BaseException as error:
             if not _is_sqlite_busy(error) or attempt >= attempts:
                 raise

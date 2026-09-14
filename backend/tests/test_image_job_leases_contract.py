@@ -724,3 +724,96 @@ def test_renew_interval_clamps_when_misconfigured(monkeypatch):
 
     monkeypatch.setattr(config, "IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS", 0.0)
     assert job_executor.image_unit_lease_renew_interval() == 7.5
+
+
+def test_lease_loss_pops_terminal_parent_memory(client, monkeypatch):
+    """A cross-worker cancel fenced a worker's progress; its finally must drop
+    the stale `running` parent memory copy instead of leaving a ghost (R1)."""
+    monkeypatch.setattr(config, "IMAGE_JOB_UNIT_LEASE_SECONDS", 30)
+    monkeypatch.setattr(config, "IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS", 0.2)
+
+    state = {"started": False, "cancelled": False}
+
+    async def slow_generation_api(
+        api_url,
+        api_key,
+        api_path,
+        payload,
+        api_preset_name=None,
+        progress=None,
+        socks5_proxy=None,
+        **kwargs,
+    ):
+        if progress:
+            progress("waiting_for_api", "Waiting for upstream")
+        state["started"] = True
+        try:
+            await asyncio.sleep(30)
+        except asyncio.CancelledError:
+            state["cancelled"] = True
+            raise
+        return []
+
+    monkeypatch.setattr(
+        backend_main.proxy, "call_image_generation_api", slow_generation_api
+    )
+    lease_lost_before = metrics.snapshot()["counters"].get("image_jobs.lease_lost", 0)
+
+    async def scenario() -> tuple[str, dict | None]:
+        parent, units = image_jobs_repo.enqueue_image_job(
+            parent_job={
+                "job_id": "lost-memory-parent",
+                "status": "queued",
+                "operation": "generation",
+            },
+            operation="generation",
+            request={"prompt": "lost", "n": 1},
+            image_units=1,
+            api_preset_id="default",
+            api_preset_name="Default",
+            api_path="/v1/images/generations",
+            max_active_generate_jobs=2,
+            max_queued_generate_jobs=2,
+            max_pending_edit_source_bytes=1024 * 1024,
+        )
+        parent_id = str(parent["job_id"])
+        backend_main.app.state.generate_jobs[parent_id] = {
+            "job_id": parent_id,
+            "status": "running",
+            "stage": "waiting_for_api",
+            "operation": "generation",
+            "updated_at": utc_now(),
+        }
+        claimed = image_jobs_repo.claim_next_image_job_unit(
+            worker_id="worker-a",
+            claim_token="lost-token",
+            lease_expires_at="2099-01-01T00:00:00+00:00",
+            now=utc_now(),
+            running_limit=2,
+        )
+        assert claimed is not None
+
+        task = asyncio.create_task(
+            job_executor.run_claimed_image_unit(dict(claimed), "worker-a")
+        )
+        for _ in range(200):
+            if state["started"]:
+                break
+            await asyncio.sleep(0.05)
+        assert state["started"] is True
+
+        row, cancelled = image_jobs_repo.cancel_generate_job_tx(
+            parent_id, "Generation job cancelled"
+        )
+        assert row is not None and cancelled is True
+
+        await asyncio.wait_for(task, timeout=10)
+        return parent_id, backend_main.app.state.generate_jobs.get(parent_id)
+
+    parent_id, memory = client.portal.call(scenario)
+
+    assert state["cancelled"] is True
+    assert memory is None
+    assert image_jobs_repo.get_generate_job(parent_id)["status"] == "cancelled"
+    lease_lost_after = metrics.snapshot()["counters"].get("image_jobs.lease_lost", 0)
+    assert lease_lost_after == lease_lost_before + 1

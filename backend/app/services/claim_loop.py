@@ -8,6 +8,8 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from ..core.observability import metrics
+
 NumberProvider = int | float | Callable[[], int | float]
 Hook = Callable[..., Any]
 
@@ -88,6 +90,8 @@ async def run_claim_loop(
     max_backoff: NumberProvider,
     kick_event: asyncio.Event | None = None,
     claim_miss_fn: Callable[[], Any] | None = None,
+    claim_precheck_fn: Callable[[], Awaitable[bool]] | None = None,
+    claim_precheck_metric: str | None = None,
     before_cycle: Hook | None = None,
     after_claims: Hook | None = None,
     sleep_interval_fn: Callable[[set[asyncio.Task], float], float] | None = None,
@@ -96,11 +100,18 @@ async def run_claim_loop(
     error_message: str = "Claim-loop dispatcher error",
     task_name: str = "claimed job",
 ) -> None:
-    """Run a reusable claim -> task -> idle-backoff dispatcher loop."""
+    """Run a reusable claim -> task -> idle-backoff dispatcher loop.
+
+    When ``claim_precheck_fn`` is provided, an idle cycle consults it before
+    taking a write lock and skips ``claim_fn`` entirely if it reports no
+    claimable work. A dispatcher kick still forces one claim attempt so writes
+    that arrive between prechecks are never missed.
+    """
 
     log = logger or logging.getLogger(__name__)
     active_tasks: set[asyncio.Task] = set()
     idle_delay = max(0.0, _resolve_number(idle_interval))
+    force_claim = False
 
     try:
         while True:
@@ -115,6 +126,12 @@ async def run_claim_loop(
                 limit = max(1, int(_resolve_number(running_limit)))
                 claimed_count = 0
                 while len(active_tasks) < limit:
+                    if not force_claim and claim_precheck_fn is not None:
+                        if not await claim_precheck_fn():
+                            if claim_precheck_metric:
+                                metrics.increment(claim_precheck_metric)
+                            break
+                    force_claim = False
                     claimed = await claim_fn()
                     if not claimed:
                         break
@@ -143,6 +160,7 @@ async def run_claim_loop(
                 )
                 if kicked:
                     idle_delay = max(0.0, _resolve_number(idle_interval))
+                    force_claim = True
             except asyncio.CancelledError:
                 raise
             except Exception:

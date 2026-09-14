@@ -12,7 +12,9 @@ from ..presets import (
     apply_nodeimage_settings,
     apply_upstream_socks5_proxy,
     apply_webhook_url,
+    begin_api_settings_write,
     build_settings_response,
+    end_api_settings_write,
     get_active_preset,
     get_api_key_env_var,
     get_api_presets,
@@ -276,42 +278,46 @@ async def update_settings(req: SettingsRequest):
     if not preset:
         raise HTTPException(status_code=404, detail="Preset not found")
 
-    preset["name"] = (req.preset_name or preset.get("name") or "Untitled preset").strip()
-    previous_api_url = str(preset.get("api_url") or "")
-    next_api_url = req.api_url.rstrip("/")
-    if preset.get("api_key") and not secrets.same_origin(previous_api_url, next_api_url):
-        preset["api_key"] = ""
-    preset["api_url"] = next_api_url
-    if req.api_key is not None:
-        preset["api_key"] = req.api_key.strip()
-    preset["api_path"] = normalize_api_path(req.api_path)
-    if req.default_model is not None:
-        preset["default_model"] = normalize_default_model(
-            req.default_model,
-            preset["api_path"],
-        )
-    if req.default_response_format is not None:
-        preset["default_response_format"] = normalize_default_response_format(
-            req.default_response_format
-        )
-    if req.upstream_socks5_proxy is not None:
-        current_proxy = get_upstream_socks5_proxy(raw=True)
-        requested_proxy = req.upstream_socks5_proxy.strip()
-        if current_proxy and requested_proxy == mask_socks5_proxy_url(current_proxy):
-            app.state.upstream_socks5_proxy = current_proxy
-        else:
-            apply_upstream_socks5_proxy(requested_proxy)
-    if req.webhook_url is not None:
-        current_webhook_url = get_webhook_url(raw=True)
-        requested_webhook_url = req.webhook_url.strip()
-        if current_webhook_url and requested_webhook_url == mask_webhook_url(current_webhook_url):
-            app.state.webhook_url = current_webhook_url
-        else:
-            apply_webhook_url(requested_webhook_url)
-        _validate_webhook_security()
-    _validate_preset_secret_binding(preset)
-    apply_api_preset(preset)
-    await asyncio.to_thread(persist_api_settings)
+    begin_api_settings_write()
+    try:
+        preset["name"] = (req.preset_name or preset.get("name") or "Untitled preset").strip()
+        previous_api_url = str(preset.get("api_url") or "")
+        next_api_url = req.api_url.rstrip("/")
+        if preset.get("api_key") and not secrets.same_origin(previous_api_url, next_api_url):
+            preset["api_key"] = ""
+        preset["api_url"] = next_api_url
+        if req.api_key is not None:
+            preset["api_key"] = req.api_key.strip()
+        preset["api_path"] = normalize_api_path(req.api_path)
+        if req.default_model is not None:
+            preset["default_model"] = normalize_default_model(
+                req.default_model,
+                preset["api_path"],
+            )
+        if req.default_response_format is not None:
+            preset["default_response_format"] = normalize_default_response_format(
+                req.default_response_format
+            )
+        if req.upstream_socks5_proxy is not None:
+            current_proxy = get_upstream_socks5_proxy(raw=True)
+            requested_proxy = req.upstream_socks5_proxy.strip()
+            if current_proxy and requested_proxy == mask_socks5_proxy_url(current_proxy):
+                app.state.upstream_socks5_proxy = current_proxy
+            else:
+                apply_upstream_socks5_proxy(requested_proxy)
+        if req.webhook_url is not None:
+            current_webhook_url = get_webhook_url(raw=True)
+            requested_webhook_url = req.webhook_url.strip()
+            if current_webhook_url and requested_webhook_url == mask_webhook_url(current_webhook_url):
+                app.state.webhook_url = current_webhook_url
+            else:
+                apply_webhook_url(requested_webhook_url)
+            _validate_webhook_security()
+        _validate_preset_secret_binding(preset)
+        apply_api_preset(preset)
+        await asyncio.to_thread(persist_api_settings)
+    finally:
+        end_api_settings_write()
     if req.prompt_optimizer is not None:
         from ..presets import (
             apply_prompt_optimizer_settings,
@@ -430,9 +436,13 @@ async def create_settings_preset(req: PresetCreateRequest):
         if req.default_response_format is not None
         else source.get("default_response_format")
     )
-    presets.append(preset)
-    apply_api_preset(preset)
-    await asyncio.to_thread(persist_api_settings)
+    begin_api_settings_write()
+    try:
+        presets.append(preset)
+        apply_api_preset(preset)
+        await asyncio.to_thread(persist_api_settings)
+    finally:
+        end_api_settings_write()
     return await asyncio.to_thread(build_settings_response)
 
 
@@ -443,8 +453,12 @@ async def activate_settings_preset(preset_id: str):
     if not preset:
         raise HTTPException(status_code=404, detail="Preset not found")
 
-    apply_api_preset(preset)
-    await asyncio.to_thread(persist_api_settings)
+    begin_api_settings_write()
+    try:
+        apply_api_preset(preset)
+        await asyncio.to_thread(persist_api_settings)
+    finally:
+        end_api_settings_write()
     return await asyncio.to_thread(build_settings_response)
 
 
@@ -462,16 +476,20 @@ async def delete_settings_preset(preset_id: str):
     if delete_index is None:
         raise HTTPException(status_code=404, detail="Preset not found")
 
-    active_preset_id = getattr(app.state, "active_preset_id", presets[0]["id"])
-    presets.pop(delete_index)
-    app.state.api_presets = presets
-    if not any(preset["id"] == active_preset_id for preset in presets):
-        fallback = presets[min(delete_index, len(presets) - 1)]
-        apply_api_preset(fallback)
-    else:
-        app.state.active_preset_id = active_preset_id
+    begin_api_settings_write()
+    try:
+        active_preset_id = getattr(app.state, "active_preset_id", presets[0]["id"])
+        presets.pop(delete_index)
+        app.state.api_presets = presets
+        if not any(preset["id"] == active_preset_id for preset in presets):
+            fallback = presets[min(delete_index, len(presets) - 1)]
+            apply_api_preset(fallback)
+        else:
+            app.state.active_preset_id = active_preset_id
 
-    await asyncio.to_thread(persist_api_settings)
+        await asyncio.to_thread(persist_api_settings)
+    finally:
+        end_api_settings_write()
 
     return await asyncio.to_thread(build_settings_response)
 

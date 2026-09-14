@@ -111,17 +111,41 @@ UPSTREAM_MEMORY_BUDGET_MB = max(
 MAX_IMAGE_PIXELS = max(1, int(os.getenv("MAX_IMAGE_PIXELS", "100000000")))
 IMAGE_CPU_CONCURRENCY = max(1, int(os.getenv("IMAGE_CPU_CONCURRENCY", "2")))
 FILE_IO_CONCURRENCY = max(1, int(os.getenv("FILE_IO_CONCURRENCY", "4")))
-DB_EXECUTOR_WORKERS = max(1, int(os.getenv("DB_EXECUTOR_WORKERS", "4")))
+_max_active_generate_jobs_default = max(
+    1, int(os.getenv("MAX_ACTIVE_GENERATE_JOBS", "2"))
+)
+# The DB executor runs short polling reads and the occasional critical write
+# (claim/renew/complete/fail/finalize/cancel). A critical write can occupy one
+# worker for up to the critical busy budget, so size the pool from generation
+# concurrency rather than a fixed constant.
+_default_db_executor_workers = max(4, _max_active_generate_jobs_default // 2 + 2)
+DB_EXECUTOR_WORKERS = max(
+    1, int(os.getenv("DB_EXECUTOR_WORKERS", str(_default_db_executor_workers)))
+)
 SQLITE_BUSY_TIMEOUT_MS = max(10, int(os.getenv("SQLITE_BUSY_TIMEOUT_MS", "250")))
 SQLITE_BUSY_RETRY_ATTEMPTS = max(0, int(os.getenv("SQLITE_BUSY_RETRY_ATTEMPTS", "5")))
 SQLITE_BUSY_RETRY_BASE_MS = max(1, int(os.getenv("SQLITE_BUSY_RETRY_BASE_MS", "20")))
+# Critical write paths use a much larger busy budget than polling reads: losing
+# a terminal write strands a unit in `running` (D1/D2), so a 2s lock wait with
+# jittered retries is preferable to giving up after the ~2s polling budget.
+SQLITE_CRITICAL_BUSY_TIMEOUT_MS = max(
+    10, int(os.getenv("SQLITE_CRITICAL_BUSY_TIMEOUT_MS", "2000"))
+)
+SQLITE_CRITICAL_BUSY_RETRY_ATTEMPTS = max(
+    0, int(os.getenv("SQLITE_CRITICAL_BUSY_RETRY_ATTEMPTS", "6"))
+)
+# Write transactions held longer than this are logged with their call label.
+SQLITE_SLOW_TXN_WARN_MS = max(1, int(os.getenv("SQLITE_SLOW_TXN_WARN_MS", "500")))
 IMAGE_JOB_PROGRESS_PERSIST_INTERVAL_SECONDS = max(
     0.1,
     float(os.getenv("IMAGE_JOB_PROGRESS_PERSIST_INTERVAL_SECONDS", "1")),
 )
 RUNTIME_METRICS_REFRESH_SECONDS = max(
     5.0,
-    float(os.getenv("RUNTIME_METRICS_REFRESH_SECONDS", "15")),
+    # Also drives the stale in-memory generate-job reconcile (job_events.py);
+    # keep this <= 2 * GENERATE_JOB_PERSIST_INTERVAL_SECONDS (10s) so that
+    # window is checked at least once per staleness period.
+    float(os.getenv("RUNTIME_METRICS_REFRESH_SECONDS", "10")),
 )
 EVENT_LOOP_LAG_SAMPLE_SECONDS = max(
     0.1,

@@ -11,10 +11,11 @@ from ...services.job_events import (
     get_cached_generate_job_previews,
     get_job_subscribers,
     get_jobs_subscribers,
+    publish_generate_job_row_async,
     publish_queue,
     reconcile_active_generate_jobs,
+    resolve_generate_job_view,
     serialize_sse_event,
-    store_generate_job_async,
 )
 from ...services.blocking import run_db_operation
 from ...services.job_queue import (
@@ -28,10 +29,9 @@ from ...core import settings as config
 from ...core.api_paths import normalize_api_path
 from ...core.constants import ACTIVE_GENERATE_JOB_STATUSES, ERROR_GENERATE_JOB_STATUSES
 from ...core.observability import metrics
-from ...core.utils import utc_now
 from ...repositories.image_jobs import (
     aggregate_image_job_units,
-    cancel_image_job_units,
+    cancel_generate_job_tx,
     clear_generate_job_history as clear_persisted_generate_job_history,
     get_generate_job as get_persisted_generate_job,
     get_generate_jobs_list_updated_at_edge,
@@ -302,9 +302,7 @@ async def clear_generate_job_history():
 
 @router.get("/api/generate/{job_id}", response_model=GenerateJobStatus)
 async def get_generate_job(job_id: str):
-    job = getattr(app.state, "generate_jobs", {}).get(job_id) or await run_db_operation(
-        get_persisted_generate_job, job_id, metric_name="get_generate_job"
-    )
+    job = await resolve_generate_job_view(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Generation job not found")
     return GenerateJobStatus(**job)
@@ -312,9 +310,7 @@ async def get_generate_job(job_id: str):
 
 @router.get("/api/generate/{job_id}/events")
 async def stream_generate_job(job_id: str, request: Request):
-    job = getattr(app.state, "generate_jobs", {}).get(job_id) or await run_db_operation(
-        get_persisted_generate_job, job_id, metric_name="get_generate_job"
-    )
+    job = await resolve_generate_job_view(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Generation job not found")
 
@@ -333,13 +329,7 @@ async def stream_generate_job(job_id: str, request: Request):
         subscribers.add(queue)
         _start_generate_job_sse_poller()
         try:
-            current = getattr(app.state, "generate_jobs", {}).get(job_id)
-            if not current:
-                current = await run_db_operation(
-                    get_persisted_generate_job,
-                    job_id,
-                    metric_name="stream_generate_job",
-                )
+            current = await resolve_generate_job_view(job_id)
             if not current:
                 return
             last_payload = json_payload_key(current)
@@ -419,9 +409,7 @@ async def stream_generate_job(job_id: str, request: Request):
 
 @router.delete("/api/generate/{job_id}", response_model=MessageResponse)
 async def cancel_generate_job(job_id: str):
-    job = getattr(app.state, "generate_jobs", {}).get(job_id) or await run_db_operation(
-        get_persisted_generate_job, job_id, metric_name="get_generate_job_for_cancel"
-    )
+    job = await resolve_generate_job_view(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Generation job not found")
     if job.get("status") not in {"queued", "running"}:
@@ -437,22 +425,18 @@ async def cancel_generate_job(job_id: str):
         if job.get("operation") == "edit"
         else "Generation job cancelled"
     )
-    await store_generate_job_async(
+    row, cancelled = await run_db_operation(
+        cancel_generate_job_tx,
         job_id,
-        {
-            "status": "cancelled",
-            "stage": "cancelled",
-            "message": cancel_message,
-            "operation": job.get("operation"),
-            "completed_at": utc_now(),
-            "error": cancel_message,
-        },
+        cancel_message,
+        metric_name="cancel_generate_job",
+        critical=True,
     )
-    await run_db_operation(
-        cancel_image_job_units,
-        job_id,
-        metric_name="cancel_image_job_units",
-    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Generation job not found")
+    if not cancelled:
+        raise HTTPException(status_code=409, detail="Generation job already finished")
+    await publish_generate_job_row_async(row, dispatch_webhook=True)
     await run_db_operation(trim_generate_jobs, metric_name="trim_generate_jobs")
 
     if job.get("operation") == "edit":

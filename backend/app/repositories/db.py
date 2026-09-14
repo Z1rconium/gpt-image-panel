@@ -13,6 +13,7 @@ import time
 import uuid
 from collections import OrderedDict
 from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -68,6 +69,14 @@ from .thumbnails import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Call label of the repository operation currently running on this thread, set
+# by `run_db_operation` so slow write transactions can be attributed to a
+# caller without threading the label through every repository signature.
+_current_db_metric: ContextVar[str | None] = ContextVar(
+    "current_db_metric",
+    default=None,
+)
 
 
 class ImageJobQueueFullError(RuntimeError):
@@ -1043,14 +1052,50 @@ def close_database_connections():
 
 
 @contextmanager
+def metric_name_scope(name: str | None) -> Iterator[None]:
+    """Tag repository work on this thread for slow-transaction logging."""
+    token = _current_db_metric.set(name)
+    try:
+        yield
+    finally:
+        _current_db_metric.reset(token)
+
+
+def current_db_metric() -> str | None:
+    return _current_db_metric.get()
+
+
+@contextmanager
 def _transaction(conn: sqlite3.Connection) -> Iterator[None]:
+    begin_started_at = time.perf_counter()
     try:
         conn.execute("BEGIN IMMEDIATE")
     except sqlite3.OperationalError as e:
+        metrics.observe_ms(
+            "sqlite.write_lock_wait_ms",
+            (time.perf_counter() - begin_started_at) * 1000,
+        )
         message = str(e).lower()
         if "locked" in message or "busy" in message:
             metrics.increment("sqlite.busy")
         raise
+    metrics.observe_ms(
+        "sqlite.write_lock_wait_ms",
+        (time.perf_counter() - begin_started_at) * 1000,
+    )
+    label = _current_db_metric.get()
+
+    def _observe_hold() -> float:
+        hold_ms = (time.perf_counter() - begin_started_at) * 1000
+        metrics.observe_ms("sqlite.write_txn_hold_ms", hold_ms)
+        if hold_ms >= config.SQLITE_SLOW_TXN_WARN_MS:
+            logger.warning(
+                "Slow SQLite write transaction: held %.1fms (label=%s)",
+                hold_ms,
+                label or "-",
+            )
+        return hold_ms
+
     try:
         yield
     except Exception as e:
@@ -1059,9 +1104,12 @@ def _transaction(conn: sqlite3.Connection) -> Iterator[None]:
             if "locked" in message or "busy" in message:
                 metrics.increment("sqlite.busy")
         conn.rollback()
+        _observe_hold()
         raise
     else:
         conn.commit()
+        metrics.increment("sqlite.write_txn")
+        _observe_hold()
 
 
 def _table_exists(conn: sqlite3.Connection, table: str) -> bool:
@@ -2684,7 +2732,16 @@ def _generate_job_values(job: dict[str, Any]) -> tuple[Any, ...]:
     return tuple(job.get(column) for column in GENERATE_JOB_COLUMNS)
 
 
-def _upsert_generate_job_on_conn(conn: sqlite3.Connection, job: dict[str, Any]) -> None:
+def _upsert_generate_job_on_conn(
+    conn: sqlite3.Connection, job: dict[str, Any]
+) -> sqlite3.Cursor:
+    """Insert or merge a generate job.
+
+    Existing terminal rows are never overwritten: the `ON CONFLICT ... WHERE`
+    guard makes the parent job a write-once terminal record. A brand-new job
+    (insert) is always accepted. The returned cursor's `rowcount` is 0 when an
+    active update was rejected because the stored row is already terminal.
+    """
     columns_sql = ", ".join(GENERATE_JOB_COLUMNS)
     placeholders_sql = ", ".join("?" for _ in GENERATE_JOB_COLUMNS)
     updates_sql = ", ".join(
@@ -2696,19 +2753,23 @@ def _upsert_generate_job_on_conn(conn: sqlite3.Connection, job: dict[str, Any]) 
         for column in GENERATE_JOB_COLUMNS
         if column != "job_id"
     )
-    conn.execute(
+    active_statuses = tuple(sorted(ACTIVE_GENERATE_JOB_STATUSES))
+    active_placeholders = ", ".join("?" for _ in active_statuses)
+    cursor = conn.execute(
         f"""
         INSERT INTO generate_jobs ({columns_sql})
         VALUES ({placeholders_sql})
         ON CONFLICT(job_id) DO UPDATE SET {updates_sql}
+        WHERE generate_jobs.status IN ({active_placeholders})
         """,
-        _generate_job_values(job),
+        (*_generate_job_values(job), *active_statuses),
     )
     if job.get("status") not in ACTIVE_GENERATE_JOB_STATUSES:
         conn.execute(
             "DELETE FROM edit_source_reservations WHERE job_id = ?",
             (job["job_id"],),
         )
+    return cursor
 
 
 def _generate_job_from_row(row: sqlite3.Row) -> dict[str, Any]:

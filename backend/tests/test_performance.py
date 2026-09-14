@@ -1,16 +1,20 @@
+import multiprocessing
 import os
 import statistics
 import time
+from collections import Counter
 from pathlib import Path
 
 import pytest
 
 from backend.app.core import settings as config
 from backend.app.core.observability import metrics
+from backend.app.core.utils import utc_now
 from backend.app.repositories import db as db_repo
 from backend.app.repositories import image_jobs as image_jobs_repo
 from backend.app.repositories.gallery import mutations as gallery_mutations
 from backend.app.repositories.gallery import queries as gallery_queries
+from backend.app.services import blocking
 
 
 pytestmark = pytest.mark.skipif(
@@ -312,3 +316,146 @@ def test_job_history_query_baseline(tmp_path, record_property):
     record_property("job_history_500_rows_p50_ms", round(p50, 2))
     record_property("job_history_500_rows_p95_ms", round(p95, 2))
     assert p95 < 200
+
+
+def _multiprocess_dispatch_worker(
+    tmp_path_str: str,
+    worker_index: int,
+    result_queue,
+) -> None:
+    """Spawn-safe dispatcher: claim/complete every unit until the queue drains.
+
+    Each claim and its completion use the critical write budget, so the only
+    way to observe a lost write is a genuine coordination bug rather than a
+    transient busy timeout. Runs in a fresh interpreter, so it reconfigures the
+    runtime from `tmp_path_str` instead of inheriting parent mutations.
+    """
+    import asyncio
+
+    _configure_runtime(Path(tmp_path_str))
+    worker_id = f"perf-worker-{worker_index}"
+
+    async def dispatch_loop() -> None:
+        while True:
+            unit = await blocking.run_db_operation(
+                image_jobs_repo.claim_next_image_job_unit,
+                worker_id=worker_id,
+                claim_token=f"{worker_id}:{utc_now()}",
+                lease_expires_at="2099-01-01T00:00:00+00:00",
+                now=utc_now(),
+                running_limit=10_000,
+                max_attempts=2,
+                metric_name="perf_claim_image_job_unit",
+                critical=True,
+            )
+            if unit is None:
+                break
+            unit_id = str(unit["unit_id"])
+            result_queue.put(("claim", unit_id))
+            await blocking.run_db_operation(
+                image_jobs_repo.complete_image_job_unit,
+                unit_id,
+                claim_token=str(unit["claim_token"]),
+                result={"images": []},
+                stage_timings={},
+                duration="0.00s",
+                completed_at=utc_now(),
+                metric_name="perf_complete_image_job_unit",
+                critical=True,
+            )
+
+    asyncio.run(dispatch_loop())
+    snapshot = metrics.snapshot()
+    result_queue.put(("metrics", snapshot["counters"], snapshot["timings_ms"]))
+
+
+def test_multiprocess_image_unit_claim_no_duplicates(tmp_path, record_property):
+    """Two spawned processes share one SQLite file; no unit may be claimed twice
+    and the write-lock wait must stay inside the critical busy budget."""
+    _configure_runtime(tmp_path)
+    unit_count = 60
+    image_jobs_repo.enqueue_image_job(
+        parent_job={"job_id": "perf-multiprocess-parent", "status": "queued"},
+        operation="generation",
+        request={"prompt": "perf multiprocess", "n": unit_count},
+        image_units=unit_count,
+        api_preset_id="default",
+        api_preset_name="Default",
+        api_path="/v1/images/generations",
+        max_active_generate_jobs=10_000,
+        max_queued_generate_jobs=10_000,
+        max_pending_edit_source_bytes=1024 * 1024,
+    )
+    db_repo.close_database_connections()
+
+    ctx = multiprocessing.get_context("spawn")
+    result_queue = ctx.Queue()
+    processes = [
+        ctx.Process(
+            target=_multiprocess_dispatch_worker,
+            args=(str(tmp_path), index, result_queue),
+            name=f"perf-dispatch-{index}",
+        )
+        for index in range(2)
+    ]
+    claims: list[str] = []
+    counters: Counter = Counter()
+    metrics_payloads: list[dict] = []
+    try:
+        for process in processes:
+            process.start()
+        for process in processes:
+            process.join(timeout=120)
+            assert process.exitcode == 0
+
+        for _ in processes:
+            while True:
+                item = result_queue.get(timeout=30)
+                if item[0] == "claim":
+                    claims.append(item[1])
+                elif item[0] == "metrics":
+                    counters.update(item[1])
+                    metrics_payloads.append(item[2])
+                    break
+    finally:
+        for process in processes:
+            if process.is_alive():
+                process.terminate()
+        result_queue.close()
+
+    claim_counts = Counter(claims)
+    assert len(claims) == unit_count
+    assert [count for count in claim_counts.values() if count != 1] == []
+
+    with db_repo._connect() as conn:
+        completed = conn.execute(
+            "SELECT COUNT(*) FROM image_job_units WHERE status = 'success'"
+        ).fetchone()[0]
+        retried = conn.execute(
+            "SELECT COUNT(*) FROM image_job_units WHERE attempts > 1"
+        ).fetchone()[0]
+    assert completed == unit_count
+    assert retried == 0
+
+    lock_wait_p95 = max(
+        (
+            payload.get("sqlite.write_lock_wait_ms", {}).get("p95", 0.0)
+            for payload in metrics_payloads
+        ),
+        default=0.0,
+    )
+    hold_p95 = max(
+        (
+            payload.get("sqlite.write_txn_hold_ms", {}).get("p95", 0.0)
+            for payload in metrics_payloads
+        ),
+        default=0.0,
+    )
+    busy_retries = int(counters.get("sqlite.busy_retries", 0))
+    record_property("multiprocess_busy_retries", busy_retries)
+    record_property("multiprocess_write_lock_wait_p95_ms", round(lock_wait_p95, 2))
+    record_property("multiprocess_write_txn_hold_p95_ms", round(hold_p95, 2))
+
+    assert busy_retries <= unit_count
+    assert lock_wait_p95 < config.SQLITE_CRITICAL_BUSY_TIMEOUT_MS
+    assert hold_p95 < config.SQLITE_CRITICAL_BUSY_TIMEOUT_MS

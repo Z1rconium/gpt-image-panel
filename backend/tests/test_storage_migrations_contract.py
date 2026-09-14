@@ -517,3 +517,73 @@ def test_schema_migrations_upgrade_legacy_gallery_schema(tmp_path):
     assert {"default_model", "default_response_format"}.issubset(preset_columns)
     assert row["favorite"] == 0
     assert row["sort_seq"] is not None
+
+
+def test_legacy_null_token_units_are_claimable_and_expire(tmp_path):
+    """Rows upgraded from the pre-fencing schema (claim_token IS NULL) must be
+    recoverable: retried once while under the attempts cap, interrupted once
+    the cap is reached."""
+    _configure_runtime(tmp_path)
+    parent, units = image_jobs_repo.enqueue_image_job(
+        parent_job={"job_id": "legacy-lease-parent", "status": "queued"},
+        operation="generation",
+        request={"prompt": "legacy lease", "n": 2},
+        image_units=2,
+        api_preset_id="default",
+        api_preset_name="Default",
+        api_path="/v1/images/generations",
+        max_active_generate_jobs=2,
+        max_queued_generate_jobs=2,
+        max_pending_edit_source_bytes=1024 * 1024,
+    )
+    claimable_id = str(units[0]["unit_id"])
+    exhausted_id = str(units[1]["unit_id"])
+
+    with db_repo._connect() as conn:
+        with db_repo._transaction(conn):
+            conn.execute(
+                """
+                UPDATE image_job_units
+                SET status = 'running',
+                    claimed_by = 'legacy-worker',
+                    claim_token = NULL,
+                    attempts = 0,
+                    claim_expires_at = '2026-01-01T00:00:00+00:00'
+                WHERE unit_id = ?
+                """,
+                (claimable_id,),
+            )
+            conn.execute(
+                """
+                UPDATE image_job_units
+                SET status = 'running',
+                    claimed_by = 'legacy-worker',
+                    claim_token = NULL,
+                    attempts = 2,
+                    claim_expires_at = '2026-01-01T00:00:00+00:00'
+                WHERE unit_id = ?
+                """,
+                (exhausted_id,),
+            )
+
+    reclaimed = image_jobs_repo.claim_next_image_job_unit(
+        worker_id="worker-new",
+        claim_token="token-new",
+        lease_expires_at="2099-01-01T00:00:00+00:00",
+        now="2026-01-01T00:00:01+00:00",
+        running_limit=2,
+        max_attempts=2,
+    )
+    assert reclaimed is not None
+    assert str(reclaimed["unit_id"]) == claimable_id
+    assert reclaimed["claim_token"] == "token-new"
+    assert reclaimed["attempts"] == 1
+
+    exhausted = image_jobs_repo.expire_exhausted_image_job_units(
+        "2026-01-01T00:00:02+00:00", max_attempts=2
+    )
+    assert [str(unit["unit_id"]) for unit in exhausted] == [exhausted_id]
+    assert exhausted[0]["status"] == "interrupted"
+    assert exhausted[0]["stage"] == "interrupted"
+    assert exhausted[0].get("claim_token") is None
+    assert str(exhausted[0]["parent_job_id"]) == parent["job_id"]

@@ -699,6 +699,34 @@ def reserve_gallery_job_capacity(
     return normalized | {"payload": _json_loads_dict(normalized.get("payload_json"))}
 
 
+def has_claimable_gallery_job(
+    *,
+    kind: str,
+    now: str,
+) -> bool:
+    """Read-only precheck used to skip an empty gallery claim transaction."""
+    _ensure_database()
+    with _connect() as conn:
+        row = conn.execute(
+            """
+            SELECT 1
+            FROM gallery_jobs
+            WHERE kind = ?
+                AND (
+                    status = 'queued'
+                    OR (
+                        status = 'running'
+                        AND lease_expires_at IS NOT NULL
+                        AND lease_expires_at <= ?
+                    )
+                )
+            LIMIT 1
+            """,
+            (kind, now),
+        ).fetchone()
+    return row is not None
+
+
 def claim_next_gallery_job(
     *,
     kind: str,

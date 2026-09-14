@@ -30,6 +30,7 @@ from ..repositories.thumbnail_jobs import (
     complete_thumbnail_job,
     fail_thumbnail_job,
     generate_thumbnail_for_image,
+    has_claimable_thumbnail_job,
 )
 from .claim_loop import run_claim_loop
 from .gallery_common import (
@@ -123,6 +124,13 @@ async def run_thumbnail_dispatcher(worker_id: str) -> None:
                 error="thumbnail generation returned no file",
             )
 
+    async def has_claimable() -> bool:
+        try:
+            return await asyncio.to_thread(has_claimable_thumbnail_job, now=utc_now())
+        except Exception:
+            # Fail open: a broken precheck must never stall the dispatcher.
+            return True
+
     await run_claim_loop(
         claim_fn=claim_thumbnail_job,
         run_fn=run_thumbnail_job,
@@ -130,6 +138,8 @@ async def run_thumbnail_dispatcher(worker_id: str) -> None:
         idle_interval=THUMBNAIL_DISPATCH_INTERVAL_SECONDS,
         max_backoff=THUMBNAIL_DISPATCH_MAX_IDLE_BACKOFF_SECONDS,
         kick_event=get_thumbnail_dispatcher_kick_event(),
+        claim_precheck_fn=has_claimable,
+        claim_precheck_metric="thumbnail.claim_precheck_skipped",
         logger=logger,
         error_message="Thumbnail dispatcher error",
         task_name="thumbnail job",

@@ -154,6 +154,24 @@ def get_pending_thumbnail_job_count() -> int:
     return int(row[0] or 0) if row else 0
 
 
+def has_claimable_thumbnail_job(*, now: str | None = None) -> bool:
+    """Read-only precheck used to skip an empty thumbnail claim transaction."""
+    _ensure_database()
+    current_time = now or utc_now()
+    with _connect() as conn:
+        row = conn.execute(
+            """
+            SELECT 1
+            FROM thumbnail_jobs
+            WHERE status = 'queued'
+                OR (status = 'running' AND lease_expires_at <= ?)
+            LIMIT 1
+            """,
+            (current_time,),
+        ).fetchone()
+    return row is not None
+
+
 def claim_next_thumbnail_job(
     *,
     owner: str,

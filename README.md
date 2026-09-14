@@ -257,7 +257,7 @@ Most runtime options live in `.env.example`. API presets, prompt optimizer, R2 b
 | `APP_VERSION` / `GITHUB_REPO` / `ENABLE_VERSION_CHECK` | UI/API version reporting and latest-release checks. |
 | `VERSION_CHECK_CACHE_SECONDS` | Per-process cache TTL for successful latest-release checks. |
 | `MAX_UPSTREAM_IMAGE_BYTES_PER_TASK_MB` / `UPSTREAM_MEMORY_BUDGET_MB` | Per-task decoded-image cap and process-local weighted upstream-memory admission budget. |
-| `DB_EXECUTOR_WORKERS` / `SQLITE_BUSY_*` | Dedicated SQLite executor size and short-timeout jittered retry controls. |
+| `DB_EXECUTOR_WORKERS` / `SQLITE_BUSY_*` / `SQLITE_CRITICAL_BUSY_*` / `SQLITE_SLOW_TXN_WARN_MS` | Dedicated SQLite executor size and jittered retry controls. `DB_EXECUTOR_WORKERS` defaults to `max(4, MAX_ACTIVE_GENERATE_JOBS // 2 + 2)`. Polling reads use the short `SQLITE_BUSY_*` budget; claim, lease renewal, terminal unit writes, parent finalization and cancellation use the larger `SQLITE_CRITICAL_BUSY_*` budget so a transient lock cannot strand a running unit. Write transactions held longer than `SQLITE_SLOW_TXN_WARN_MS` are logged with their call label. |
 | `IMAGE_CPU_CONCURRENCY` / `FILE_IO_CONCURRENCY` | Bounded full-image decode and blocking file-I/O concurrency per process. |
 | `IMAGE_JOB_PROGRESS_PERSIST_INTERVAL_SECONDS` | Minimum interval for coalesced image-unit progress writes. |
 | `RUNTIME_METRICS_REFRESH_SECONDS` / `EVENT_LOOP_LAG_SAMPLE_SECONDS` | Background coordination snapshot and event-loop lag sampling intervals. |
@@ -284,6 +284,17 @@ Most runtime options live in `.env.example`. API presets, prompt optimizer, R2 b
 Secret fields prefer `${ENV_VAR_NAME}` references. Literal secrets stored in SQLite require `ALLOW_PLAINTEXT_SECRETS=true`.
 
 Overall Config persists overrides in SQLite. Some settings are hot-reloaded; restart-required and build-only settings are marked in the UI and should still be changed through `.env`/Compose for reproducible deployments.
+
+### SQLite write-lock and lease metrics
+
+With `ENABLE_METRICS=true`, `/api/metrics` exposes the diagnostics used to size SQLite coordination:
+
+- `sqlite.write_txn` — successful write transactions. On an idle process this should track the heartbeat and runtime-snapshot cadence, not per-second claim work; a flat rate confirms the idle claim prechecks (`image_jobs.claim_precheck_skipped` and the `gallery.*` / `thumbnail.*` variants) are skipping empty `BEGIN IMMEDIATE` cycles.
+- `sqlite.write_lock_wait_ms` / `sqlite.write_txn_hold_ms` — `BEGIN IMMEDIATE` wait and full transaction hold (p50/p95/p99/max). Watch the p95 as `MAX_ACTIVE_GENERATE_JOBS x GRANIAN_WORKERS` grows; super-linear growth means contention scales faster than concurrency.
+- `sqlite.busy` / `sqlite.busy_retries` — failed `BEGIN IMMEDIATE` attempts and retries. Critical writes consume the larger `SQLITE_CRITICAL_BUSY_*` budget before surfacing here.
+- `image_jobs.lease_renewed` / `image_jobs.lease_lost` / `image_jobs.lease_renew_retry` — image-unit lease health. `lease_lost` should stay at zero; a non-zero rate means a unit was re-claimed or cancelled mid-flight (repeat-billing risk).
+- `image_jobs.unit_reclaimed` / `image_jobs.unit_exhausted` — expired leases that were retried or marked `interrupted` after `IMAGE_JOB_UNIT_MAX_ATTEMPTS`.
+- `image_jobs.parent_write_skipped_terminal` — parent updates rejected because the job was already terminal (guards against state regression).
 
 ## Usage
 
