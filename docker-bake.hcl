@@ -63,7 +63,7 @@ target "release" {
   platforms = ["linux/amd64", "linux/arm64"]
   tags      = ["${IMAGE}:${TAG}"]
   cache-to = equal(EXPORT_CACHE, "true") ? [
-    "type=registry,ref=${CACHE_IMAGE},mode=max,compression=zstd,oci-mediatypes=true,image-manifest=true",
+    "type=registry,ref=${CACHE_IMAGE},mode=max,compression=zstd,oci-mediatypes=true,image-manifest=true,ignore-error=true",
   ] : []
 }
 
@@ -79,7 +79,7 @@ target "release-platform" {
   platforms = ["linux/${arch}"]
   output    = ["type=image,name=${IMAGE},push-by-digest=true,name-canonical=true,push=true"]
   cache-to = equal(EXPORT_CACHE, "true") ? [
-    "type=registry,ref=${CACHE_IMAGE}:${arch},mode=max,compression=zstd,oci-mediatypes=true,image-manifest=true",
+    "type=registry,ref=${CACHE_IMAGE}:${arch},mode=max,compression=zstd,oci-mediatypes=true,image-manifest=true,ignore-error=true",
   ] : []
 }
 

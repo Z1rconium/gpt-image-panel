@@ -29,7 +29,9 @@ jobs:
   build:
     name: Build ${{ matrix.arch }}
     strategy:
-      fail-fast: true
+      # Let both native builds report their own failure; cancelling the other
+      # architecture hides the actionable CI error and leaves no digest.
+      fail-fast: false
       matrix:
         include:
           - arch: amd64
@@ -66,7 +68,7 @@ jobs:
           TAG: ${{ steps.release.outputs.tag }}
           VCS_REF: ${{ github.sha }}
         run: |
-          docker buildx bake --metadata-file "$RUNNER_TEMP/bake-metadata.json" \
+          docker buildx bake --progress=plain --metadata-file "$RUNNER_TEMP/bake-metadata.json" \
             "release-${{ matrix.arch }}"
 
       - name: Export digest
