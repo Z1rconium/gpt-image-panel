@@ -754,6 +754,14 @@ html.dark .gallery-loading-overlay {
     var(--app-lightbox-bg);
 }
 
+/* 1:1 viewport: the well clips in Fit mode, but the natural-size original scrolls here. */
+.lightbox-image-viewport-zoomed {
+  overflow: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-x pan-y;
+  scrollbar-width: thin;
+}
+
 .lightbox-zoom-controls {
   position: absolute;
   top: 12px;
@@ -783,20 +791,28 @@ html.dark .gallery-loading-overlay {
   color: #a7f3d0;
 }
 
-/* 1:1 view renders the original at its natural size and lets a drag pan it. */
-.lightbox-image-zoomed {
+/* 1:1 view renders the original at natural size; the viewport scrolls to reach it.
+   `flex: 0 0 auto` keeps the stage at the image's natural size instead of letting it
+   shrink to the viewport, and `margin: auto` centers it when it fits and pins it to
+   the start edge when it overflows, so no part is stranded outside the scrollable area. */
+.lightbox-image-stage.lightbox-image-zoomed {
   display: flex;
   align-items: center;
   justify-content: center;
+  flex: 0 0 auto;
+  width: max-content;
+  height: max-content;
+  margin: auto;
   cursor: grab;
 }
 
-.lightbox-image-zoomed.lightbox-image-dragging {
+.lightbox-image-stage.lightbox-image-zoomed.lightbox-image-dragging {
   cursor: grabbing;
 }
 
-.lightbox-image-zoomed .lightbox-img {
+.lightbox-image-stage.lightbox-image-zoomed .lightbox-img {
   position: static;
+  flex: none;
   width: auto;
   height: auto;
   max-width: none;
@@ -804,7 +820,7 @@ html.dark .gallery-loading-overlay {
   object-fit: none;
 }
 
-.lightbox-image-zoomed .lightbox-preview-img {
+.lightbox-image-stage.lightbox-image-zoomed .lightbox-preview-img {
   display: none;
 }
 

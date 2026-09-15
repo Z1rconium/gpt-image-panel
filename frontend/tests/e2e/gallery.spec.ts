@@ -456,6 +456,55 @@ test('lightbox shows a ready thumbnail until the original image loads', async ({
   await expect(lightbox.locator('.lightbox-img')).toHaveCSS('opacity', '1');
 });
 
+test('lightbox 1:1 view scrolls the overflowing original instead of clipping it', async ({ page }) => {
+  await loadApp(page);
+
+  await page.getByRole('img', { name: 'First gallery image' }).click();
+  const lightbox = page.getByRole('dialog', { name: 'Image Details' });
+  await expect(lightbox).toBeVisible();
+
+  await lightbox.getByRole('button', { name: 'Actual size (100%)' }).click();
+
+  // The mocked original is 1x1 px, so force a large render to exercise overflow.
+  await page.addStyleTag({
+    content: '.lightbox-image-zoomed .lightbox-img { width: 1800px !important; height: 2400px !important; }'
+  });
+
+  const viewport = lightbox.locator('.lightbox-image-viewport-zoomed');
+  await expect(viewport).toHaveCSS('overflow-y', 'auto');
+
+  const maxScroll = await viewport.evaluate((element) => ({
+    left: element.scrollWidth - element.clientWidth,
+    top: element.scrollHeight - element.clientHeight
+  }));
+  expect(maxScroll.left).toBeGreaterThan(0);
+  expect(maxScroll.top).toBeGreaterThan(0);
+
+  // The start edge must be reachable, not stranded by centered flex overflow.
+  expect(await viewport.evaluate((element) => [element.scrollLeft, element.scrollTop])).toEqual([0, 0]);
+  const startEdges = await viewport.evaluate((element) => {
+    const image = element.querySelector('.lightbox-img') as HTMLElement;
+    const imageRect = image.getBoundingClientRect();
+    const viewportRect = element.getBoundingClientRect();
+    return [Math.round(imageRect.left - viewportRect.left), Math.round(imageRect.top - viewportRect.top)];
+  });
+  expect(startEdges).toEqual([0, 0]);
+
+  // And the far corner scrolls all the way into view.
+  await viewport.evaluate((element) => element.scrollTo(element.scrollWidth, element.scrollHeight));
+  expect(await viewport.evaluate((element) => [element.scrollLeft, element.scrollTop])).toEqual([
+    maxScroll.left,
+    maxScroll.top
+  ]);
+  const endEdges = await viewport.evaluate((element) => {
+    const image = element.querySelector('.lightbox-img') as HTMLElement;
+    const imageRect = image.getBoundingClientRect();
+    const viewportRect = element.getBoundingClientRect();
+    return [Math.round(imageRect.right - viewportRect.right), Math.round(imageRect.bottom - viewportRect.bottom)];
+  });
+  expect(endEdges).toEqual([0, 0]);
+});
+
 test('lightbox keeps describe, analyze, and stored AI metadata without reverse prompt action', async ({ page }) => {
   await loadApp(page);
 

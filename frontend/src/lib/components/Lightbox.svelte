@@ -48,13 +48,14 @@ import type { GalleryEntry } from '$lib/api/types/gallery';
   let loadedImageSrc = '';
   let failedImageSrc = '';
   // Fit-to-window keeps object-fit parity with the gallery; actual size renders
-  // the image at 1:1 and lets a drag pan it within the media well.
+  // the original at 1:1 inside a scroll viewport.
   let zoomActual = false;
-  let panX = 0;
-  let panY = 0;
+  let zoomViewport: HTMLDivElement | null = null;
+  let panPointerId: number | null = null;
   let panStartX = 0;
   let panStartY = 0;
-  let panPointerId: number | null = null;
+  let panStartScrollLeft = 0;
+  let panStartScrollTop = 0;
 
   $: aiLoading = Boolean(image && aiLoadingImageId === image.id);
   $: fullImageSrc = image ? imageUrl(image.filename, image.image_url) : '';
@@ -63,22 +64,16 @@ import type { GalleryEntry } from '$lib/api/types/gallery';
     : '';
   $: fullImageLoaded = Boolean(fullImageSrc && loadedImageSrc === fullImageSrc);
   $: fullImageFailed = Boolean(fullImageSrc && failedImageSrc === fullImageSrc);
-  $: stageTransform = zoomActual
-    ? `translate(${panX}px, ${panY}px)`
-    : dragOffsetX
-      ? `translateX(${dragOffsetX}px)`
-      : '';
+  $: stageTransform = !zoomActual && dragOffsetX ? `translateX(${dragOffsetX}px)` : '';
 
   $: if (fullImageSrc) {
     zoomActual = false;
-    panX = 0;
-    panY = 0;
   }
 
   function setZoomActual(next: boolean) {
     zoomActual = next;
-    panX = 0;
-    panY = 0;
+    // Deferred a frame so the viewport is scrollable again before it is rewound.
+    if (next) requestAnimationFrame(() => zoomViewport?.scrollTo({ top: 0, left: 0 }));
   }
 
   function handleFullImageLoad() {
@@ -118,19 +113,25 @@ import type { GalleryEntry } from '$lib/api/types/gallery';
     );
   }
 
+  // Mouse drag pans the 1:1 original through scroll offsets, so it composes with
+  // native wheel, trackpad, and touch scrolling instead of fighting it.
   function canStartPan(event: PointerEvent) {
     const target = event.target;
-    return event.isPrimary && !(target instanceof Element && target.closest(SWIPE_IGNORE_SELECTOR));
+    return (
+      event.isPrimary &&
+      event.pointerType === 'mouse' &&
+      !(target instanceof Element && target.closest(SWIPE_IGNORE_SELECTOR))
+    );
   }
 
   function handleSwipePointerDown(event: PointerEvent) {
     if (zoomActual) {
-      if (!canStartPan(event)) return;
+      if (!canStartPan(event) || !zoomViewport) return;
       panPointerId = event.pointerId;
-      panStartX = panX;
-      panStartY = panY;
-      swipeStartX = event.clientX;
-      swipeStartY = event.clientY;
+      panStartX = event.clientX;
+      panStartY = event.clientY;
+      panStartScrollLeft = zoomViewport.scrollLeft;
+      panStartScrollTop = zoomViewport.scrollTop;
       dragging = true;
       (event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId);
       return;
@@ -147,8 +148,9 @@ import type { GalleryEntry } from '$lib/api/types/gallery';
 
   function handleSwipePointerMove(event: PointerEvent) {
     if (panPointerId === event.pointerId) {
-      panX = panStartX + (event.clientX - swipeStartX);
-      panY = panStartY + (event.clientY - swipeStartY);
+      if (!zoomViewport) return;
+      zoomViewport.scrollLeft = panStartScrollLeft - (event.clientX - panStartX);
+      zoomViewport.scrollTop = panStartScrollTop - (event.clientY - panStartY);
       return;
     }
     if (swipePointerId !== event.pointerId) return;
@@ -253,7 +255,11 @@ import type { GalleryEntry } from '$lib/api/types/gallery';
           </div>
         {/if}
         <div class="flex h-full min-h-0 w-full flex-col">
-          <div class="flex min-h-0 flex-1 items-center justify-center">
+          <div
+            class="flex min-h-0 flex-1"
+            class:lightbox-image-viewport-zoomed={zoomActual}
+            bind:this={zoomViewport}
+          >
             {#key fullImageSrc}
               <div
                 class="lightbox-image-stage"
@@ -285,6 +291,7 @@ import type { GalleryEntry } from '$lib/api/types/gallery';
                   class:lightbox-img-loaded={fullImageLoaded}
                   class="lightbox-img"
                   decoding="async"
+                  draggable="false"
                   fetchpriority="high"
                   width={image.image_width || undefined}
                   height={image.image_height || undefined}
