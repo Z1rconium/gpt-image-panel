@@ -10,6 +10,7 @@ from ..api.app_state import app
 from ..core import settings as config
 from ..core.observability import build_metrics_snapshot, metrics
 from ..repositories.coordination import refresh_runtime_coordination_metrics
+from ..repositories.db import optimize_database_if_due
 from ..repositories.image_jobs import get_image_queue_runtime_metrics
 from .blocking import executor_gauges, run_db_operation
 from .job_queue import snapshot_queue_metrics
@@ -70,6 +71,15 @@ async def refresh_runtime_metrics_once(worker_id: str) -> None:
     from .job_events import reconcile_stale_generate_job_memory
 
     await reconcile_stale_generate_job_memory()
+
+    # Refresh planner statistics on a slow cadence; the repository throttles it
+    # to SQLITE_OPTIMIZE_INTERVAL_SECONDS so most cycles are a cheap no-op.
+    if await run_db_operation(
+        optimize_database_if_due,
+        metric_name="optimize_database",
+        retry_busy=False,
+    ):
+        metrics.increment("sqlite.optimize")
 
 
 async def run_runtime_metrics_refresher(worker_id: str) -> None:

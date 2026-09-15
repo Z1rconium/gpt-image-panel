@@ -142,6 +142,34 @@ def get_generate_jobs_updated_at_edges(
     return {str(row["job_id"]): str(row["updated_at"]) for row in rows}
 
 
+def get_generate_sse_edges(
+    *,
+    list_statuses: set[str] | None = None,
+    job_ids: set[str] | None = None,
+    include_list_edge: bool = True,
+) -> tuple[tuple[int, str] | None, dict[str, str]]:
+    """Read both SSE change signals for a single polling cycle.
+
+    Both reads answer on the same thread-local connection (the caller runs
+    inside ``run_db_operation``'s persistent scope), so merging the two SSE
+    pollers into one loop drops a query and a connection checkout per tick
+    without duplicating the SQL. ``job_ids`` returns raw ``updated_at`` values
+    with no status filter so a subscribing stream still observes the terminal
+    update that ends it.
+    """
+    list_edge = (
+        get_generate_jobs_list_updated_at_edge(statuses=list_statuses)
+        if include_list_edge
+        else None
+    )
+    job_edges = (
+        get_generate_jobs_updated_at_edges(job_ids=job_ids)
+        if job_ids is not None
+        else {}
+    )
+    return list_edge, job_edges
+
+
 def count_active_image_job_units() -> int:
     _ensure_database()
     with _connect() as conn:

@@ -210,7 +210,6 @@ async def lifespan(app: FastAPI):
     app.state.generate_jobs_broadcast_task = None
     app.state.generate_jobs_broadcast_reconcile = False
     app.state.generate_jobs_sse_poller_task = None
-    app.state.generate_job_sse_poller_task = None
     app.state.generate_job_last_persist_at = {}
     app.state.webhook_delivery_tasks = set()
     app.state.image_queue_runtime_metrics = {
@@ -295,13 +294,6 @@ async def lifespan(app: FastAPI):
         )
         if generate_jobs_sse_poller_task and not generate_jobs_sse_poller_task.done():
             generate_jobs_sse_poller_task.cancel()
-        generate_job_sse_poller_task = getattr(
-            app.state,
-            "generate_job_sse_poller_task",
-            None,
-        )
-        if generate_job_sse_poller_task and not generate_job_sse_poller_task.done():
-            generate_job_sse_poller_task.cancel()
         dispatcher_task = getattr(app.state, "image_unit_dispatcher_task", None)
         if dispatcher_task and not dispatcher_task.done():
             dispatcher_task.cancel()
@@ -367,7 +359,6 @@ async def lifespan(app: FastAPI):
                 backfill_task,
                 broadcast_task,
                 generate_jobs_sse_poller_task,
-                generate_job_sse_poller_task,
                 dispatcher_task,
                 thumbnail_dispatcher_task,
                 gallery_export_dispatcher_task,

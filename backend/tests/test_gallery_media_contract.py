@@ -1495,6 +1495,55 @@ def test_thumbnail_repository_requeues_running_job(tmp_path):
     }
 
 
+def test_batch_thumbnail_enqueue_applies_per_row_skip_rules(tmp_path):
+    """The batched enqueue must match the per-row helper: keep completed jobs
+    and jobs holding a live lease, skip files that are not on disk, and queue
+    everything else exactly once."""
+    _configure_runtime(tmp_path)
+    for filename in ("batch-ready.png", "batch-done.png", "batch-leased.png"):
+        _fake_gallery_entry(f"batch-{filename}", "batch", "1024x1024", filename)
+
+    with db_repo._connect() as conn:
+        with db_repo._transaction(conn):
+            conn.execute(
+                "UPDATE thumbnail_jobs SET status = 'success' WHERE filename = ?",
+                ("batch-done.png",),
+            )
+            conn.execute(
+                """
+                UPDATE thumbnail_jobs
+                SET status = 'running', lease_expires_at = '2999-01-01T00:00:00+00:00'
+                WHERE filename = ?
+                """,
+                ("batch-leased.png",),
+            )
+
+    with db_repo._connect() as conn:
+        with db_repo._transaction(conn):
+            thumbnail_jobs_repo._enqueue_thumbnail_jobs_on_conn(
+                conn,
+                [
+                    "batch-ready.png",
+                    "batch-done.png",
+                    "batch-leased.png",
+                    "batch-missing.png",
+                    "",
+                    "batch-ready.png",
+                ],
+            )
+
+    with db_repo._connect() as conn:
+        rows = {
+            row["filename"]: row["status"]
+            for row in conn.execute("SELECT filename, status FROM thumbnail_jobs")
+        }
+    assert rows["batch-ready.png"] == "queued"
+    assert rows["batch-done.png"] == "success"
+    assert rows["batch-leased.png"] == "running"
+    assert "batch-missing.png" not in rows
+    assert thumbnail_jobs_repo.get_pending_thumbnail_job_count() == 1
+
+
 def test_thumbnail_job_queue_claims_and_completes(tmp_path):
     _configure_runtime(tmp_path)
     entry = _fake_gallery_entry("queue-thumb", "queue", "1024x1024", "queue-thumb.png")

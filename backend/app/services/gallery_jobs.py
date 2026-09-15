@@ -32,6 +32,7 @@ from .gallery_archive_shared import (
 from .blocking import run_db_operation, run_db_operation_in_current_thread
 from .job_events import publish_queue, serialize_sse_event
 from .job_queue import kick_thumbnail_dispatcher
+from .poll_backoff import next_poll_delay
 from ..api.sse_limiter import sse_limiter
 from ..core import security as auth
 from ..core import settings as config
@@ -674,6 +675,7 @@ def _start_gallery_job_sse_poller(kind: str) -> None:
 
 async def _poll_gallery_job_sse(kind: str) -> None:
     last_edges: dict[str, str] = {}
+    delay = GALLERY_JOB_DISPATCH_INTERVAL_SECONDS
     try:
         while True:
             subscribers_by_job = {
@@ -690,17 +692,18 @@ async def _poll_gallery_job_sse(kind: str) -> None:
                 set(subscribers_by_job),
             )
             metrics.increment(f"sse.poll_queries.gallery_{kind}")
+            changed = False
             for job_id in set(subscribers_by_job) - set(current_edges):
                 for queue in subscribers_by_job[job_id]:
                     publish_queue(queue, {"event": "_missing", "data": None})
                 last_edges.pop(job_id, None)
+                changed = True
 
-            changed_job_ids = [
+            for job_id in (
                 job_id
                 for job_id, updated_at in current_edges.items()
                 if last_edges.get(job_id) != updated_at
-            ]
-            for job_id in changed_job_ids:
+            ):
                 job = await asyncio.to_thread(get_gallery_job, kind, job_id)
                 event = (
                     {
@@ -712,9 +715,18 @@ async def _poll_gallery_job_sse(kind: str) -> None:
                 )
                 for queue in subscribers_by_job.get(job_id, []):
                     publish_queue(queue, event)
+                changed = True
             last_edges = current_edges
 
-            await asyncio.sleep(GALLERY_JOB_DISPATCH_INTERVAL_SECONDS)
+            delay = next_poll_delay(
+                base_interval=GALLERY_JOB_DISPATCH_INTERVAL_SECONDS,
+                current_delay=delay,
+                changed=changed,
+                max_backoff_seconds=config.SSE_IDLE_BACKOFF_MAX_SECONDS,
+            )
+            if delay > GALLERY_JOB_DISPATCH_INTERVAL_SECONDS:
+                metrics.increment("sse.poll_idle_backoff")
+            await asyncio.sleep(delay)
     except asyncio.CancelledError:
         raise
     except Exception:

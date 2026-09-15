@@ -23,6 +23,7 @@ from ...services.job_queue import (
     queue_image_job,
     trim_generate_jobs,
 )
+from ...services.poll_backoff import next_poll_delay
 from ..sse_limiter import sse_limiter
 from ...core import security as auth
 from ...core import settings as config
@@ -34,8 +35,7 @@ from ...repositories.image_jobs import (
     cancel_generate_job_tx,
     clear_generate_job_history as clear_persisted_generate_job_history,
     get_generate_job as get_persisted_generate_job,
-    get_generate_jobs_list_updated_at_edge,
-    get_generate_jobs_updated_at_edges,
+    get_generate_sse_edges,
     list_generate_jobs as list_persisted_generate_jobs,
     release_edit_source_reservation,
 )
@@ -57,40 +57,47 @@ def json_payload_key(payload: dict | list) -> str:
     return json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
-def _start_generate_jobs_sse_poller() -> None:
+def _start_generate_sse_poller() -> None:
     task = getattr(app.state, "generate_jobs_sse_poller_task", None)
     if task and not task.done():
         return
-    app.state.generate_jobs_sse_poller_task = asyncio.create_task(
-        _poll_generate_jobs_sse()
-    )
+    app.state.generate_jobs_sse_poller_task = asyncio.create_task(_poll_generate_sse())
 
 
-def _start_generate_job_sse_poller() -> None:
-    task = getattr(app.state, "generate_job_sse_poller_task", None)
-    if task and not task.done():
-        return
-    app.state.generate_job_sse_poller_task = asyncio.create_task(
-        _poll_generate_job_sse()
-    )
+async def _poll_generate_sse() -> None:
+    """Push generation job changes to every generate SSE subscriber.
 
-
-async def _poll_generate_jobs_sse() -> None:
-    last_edge: tuple[int, str] | None = None
+    A single loop serves both the jobs-list feed and the per-job feeds, reading
+    both change signals in one DB operation on one connection. Job updates are
+    already published in-process at the write site, so this poll only covers
+    writes from other processes and backs off while nothing changes.
+    """
+    last_list_edge: tuple[int, str] | None = None
+    last_job_edges: dict[str, str] = {}
+    delay = config.IMAGE_JOB_UNIT_POLL_INTERVAL_SECONDS
     try:
         while True:
-            subscribers = list(get_jobs_subscribers())
-            if not subscribers:
+            list_subscribers = list(get_jobs_subscribers())
+            subscribers_by_job = {
+                job_id: list(subscribers)
+                for job_id, subscribers in get_job_subscribers().items()
+                if subscribers
+            }
+            if not list_subscribers and not subscribers_by_job:
                 break
 
-            edge = await run_db_operation(
-                get_generate_jobs_list_updated_at_edge,
-                statuses=ACTIVE_GENERATE_JOB_STATUSES,
-                metric_name="poll_generate_jobs_edge",
+            list_edge, job_edges = await run_db_operation(
+                get_generate_sse_edges,
+                list_statuses=ACTIVE_GENERATE_JOB_STATUSES,
+                job_ids=set(subscribers_by_job) if subscribers_by_job else None,
+                include_list_edge=bool(list_subscribers),
+                metric_name="poll_generate_sse_edges",
             )
-            metrics.increment("sse.poll_queries.generate_jobs")
-            if edge != last_edge:
-                last_edge = edge
+            metrics.increment("sse.poll_queries.generate")
+            changed = False
+
+            if list_subscribers and list_edge != last_list_edge:
+                last_list_edge = list_edge
                 jobs = await run_db_operation(
                     list_persisted_generate_jobs,
                     statuses=ACTIVE_GENERATE_JOB_STATUSES,
@@ -98,48 +105,21 @@ async def _poll_generate_jobs_sse() -> None:
                 )
                 jobs = reconcile_active_generate_jobs(jobs)
                 event = {"event": "jobs", "data": jobs}
-                for queue in subscribers:
+                for queue in list_subscribers:
                     publish_queue(queue, event)
+                changed = True
 
-            await asyncio.sleep(config.IMAGE_JOB_UNIT_POLL_INTERVAL_SECONDS)
-    except asyncio.CancelledError:
-        raise
-    except Exception:
-        logger.warning("Generate jobs SSE poller stopped after error", exc_info=True)
-    finally:
-        if getattr(app.state, "generate_jobs_sse_poller_task", None) is asyncio.current_task():
-            app.state.generate_jobs_sse_poller_task = None
-
-
-async def _poll_generate_job_sse() -> None:
-    last_edges: dict[str, str] = {}
-    try:
-        while True:
-            subscribers_by_job = {
-                job_id: list(subscribers)
-                for job_id, subscribers in get_job_subscribers().items()
-                if subscribers
-            }
-            if not subscribers_by_job:
-                break
-
-            current_edges = await run_db_operation(
-                get_generate_jobs_updated_at_edges,
-                job_ids=set(subscribers_by_job),
-                metric_name="poll_generate_job_edges",
-            )
-            metrics.increment("sse.poll_queries.generate_job")
-            for job_id in set(subscribers_by_job) - set(current_edges):
+            for job_id in set(subscribers_by_job) - set(job_edges):
                 for queue in subscribers_by_job[job_id]:
                     publish_queue(queue, {"event": "_missing", "data": None})
-                last_edges.pop(job_id, None)
+                last_job_edges.pop(job_id, None)
+                changed = True
 
-            changed_job_ids = [
+            for job_id in (
                 job_id
-                for job_id, updated_at in current_edges.items()
-                if last_edges.get(job_id) != updated_at
-            ]
-            for job_id in changed_job_ids:
+                for job_id, updated_at in job_edges.items()
+                if last_job_edges.get(job_id) != updated_at
+            ):
                 job = await run_db_operation(
                     get_persisted_generate_job,
                     job_id,
@@ -152,16 +132,29 @@ async def _poll_generate_job_sse() -> None:
                 )
                 for queue in subscribers_by_job.get(job_id, []):
                     publish_queue(queue, event)
-            last_edges = current_edges
+                changed = True
+            last_job_edges = job_edges
 
-            await asyncio.sleep(config.IMAGE_JOB_UNIT_POLL_INTERVAL_SECONDS)
+            base_interval = config.IMAGE_JOB_UNIT_POLL_INTERVAL_SECONDS
+            delay = next_poll_delay(
+                base_interval=base_interval,
+                current_delay=delay,
+                changed=changed,
+                max_backoff_seconds=config.SSE_IDLE_BACKOFF_MAX_SECONDS,
+            )
+            if delay > base_interval:
+                metrics.increment("sse.poll_idle_backoff")
+            await asyncio.sleep(delay)
     except asyncio.CancelledError:
         raise
     except Exception:
-        logger.warning("Generate job SSE poller stopped after error", exc_info=True)
+        logger.warning("Generate SSE poller stopped after error", exc_info=True)
     finally:
-        if getattr(app.state, "generate_job_sse_poller_task", None) is asyncio.current_task():
-            app.state.generate_job_sse_poller_task = None
+        if (
+            getattr(app.state, "generate_jobs_sse_poller_task", None)
+            is asyncio.current_task()
+        ):
+            app.state.generate_jobs_sse_poller_task = None
 
 
 @router.post("/api/generate", response_model=GenerateJobResponse, status_code=202)
@@ -220,7 +213,7 @@ async def stream_generate_jobs(request: Request):
         queue: asyncio.Queue = asyncio.Queue(maxsize=SSE_QUEUE_MAXSIZE)
         subscribers = get_jobs_subscribers()
         subscribers.add(queue)
-        _start_generate_jobs_sse_poller()
+        _start_generate_sse_poller()
         try:
             jobs = await run_db_operation(
                 list_persisted_generate_jobs,
@@ -327,7 +320,7 @@ async def stream_generate_job(job_id: str, request: Request):
         queue: asyncio.Queue = asyncio.Queue(maxsize=SSE_QUEUE_MAXSIZE)
         subscribers = get_job_subscribers().setdefault(job_id, set())
         subscribers.add(queue)
-        _start_generate_job_sse_poller()
+        _start_generate_sse_poller()
         try:
             current = await resolve_generate_job_view(job_id)
             if not current:

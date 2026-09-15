@@ -283,6 +283,8 @@ THUMBNAIL_JOB_MAX_ATTEMPTS = 3
 WORKER_METRIC_SNAPSHOT_TTL_SECONDS = 300
 
 _initialized_database_file: Path | None = None
+_resolved_database_file_raw: str = ""
+_resolved_database_file_path: Path | None = None
 _db_init_lock = threading.RLock()
 # These locks only serialize file operations inside one Python process. Cross-process
 # gallery writes/deletes are deliberately coordinated by SQLite row leases plus
@@ -311,6 +313,9 @@ _gallery_fts_available: bool | None = None
 
 _verified_thumbnails: set[str] = set()
 _verified_thumbnails_lock = threading.RLock()
+
+_last_optimize_at: float = 0.0
+_optimize_lock = threading.RLock()
 
 
 def _add_verified_thumbnail(filename: str):
@@ -935,6 +940,27 @@ def verify_storage_writable():
     _ensure_database()
 
 
+def optimize_database_if_due() -> bool:
+    """Run ``PRAGMA optimize`` on this thread's connection at most every
+    ``SQLITE_OPTIMIZE_INTERVAL_SECONDS``.
+
+    SQLite recommends running it periodically rather than only at startup, so
+    the planner keeps statistics for the query shapes the app actually runs.
+    Returns True when the pragma was executed.
+    """
+    global _last_optimize_at
+    interval = float(config.SQLITE_OPTIMIZE_INTERVAL_SECONDS)
+    now = time.monotonic()
+    with _optimize_lock:
+        if now - _last_optimize_at < interval:
+            return False
+        _last_optimize_at = now
+    _ensure_database()
+    with _connect() as conn:
+        conn.execute("PRAGMA optimize")
+    return True
+
+
 def _open_connection(
     *,
     timeout: float = SQLITE_TIMEOUT_SECONDS,
@@ -946,6 +972,15 @@ def _open_connection(
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute(f"PRAGMA busy_timeout = {int(busy_timeout_ms)}")
     conn.execute("PRAGMA synchronous = NORMAL")
+    # Read-path tuning: a larger page cache and mmap window cut syscalls for the
+    # keyset scans the gallery does, and keeping temp b-trees in memory avoids
+    # disk spills for the filter-option rebuilds.
+    conn.execute(f"PRAGMA cache_size = -{int(config.SQLITE_CACHE_SIZE_MB) * 1024}")
+    conn.execute(f"PRAGMA temp_store = {config.SQLITE_TEMP_STORE}")
+    conn.execute(f"PRAGMA mmap_size = {int(config.SQLITE_MMAP_SIZE_MB) * 1024 * 1024}")
+    conn.execute(
+        f"PRAGMA wal_autocheckpoint = {int(config.SQLITE_WAL_AUTOCHECKPOINT_PAGES)}"
+    )
     return conn
 
 
@@ -1187,14 +1222,30 @@ def _ensure_gallery_fts(conn: sqlite3.Connection):
         logger.warning("SQLite FTS5 prompt search unavailable; falling back to LIKE: %s", e)
 
 
+def _resolved_database_file() -> Path:
+    """Resolve the configured database path once per raw config value.
+
+    ``_ensure_database`` runs at the top of nearly every repository call, so
+    repeating ``Path.resolve()`` (realpath syscalls) on each one is pure
+    overhead. Keying the cache on the raw setting keeps a swapped
+    ``config.DATABASE_FILE`` (as tests do) from being served a stale path.
+    """
+    global _resolved_database_file_raw, _resolved_database_file_path
+    raw = str(config.DATABASE_FILE)
+    if _resolved_database_file_path is None or _resolved_database_file_raw != raw:
+        _resolved_database_file_path = Path(raw).resolve()
+        _resolved_database_file_raw = raw
+    return _resolved_database_file_path
+
+
 def _ensure_database():
     global _gallery_fts_available, _initialized_database_file
-    database_file = Path(config.DATABASE_FILE).resolve()
+    database_file = _resolved_database_file()
     if _initialized_database_file == database_file and database_file.exists():
         return
 
     with _db_init_lock:
-        database_file = Path(config.DATABASE_FILE).resolve()
+        database_file = _resolved_database_file()
         if _initialized_database_file == database_file and database_file.exists():
             return
         if _initialized_database_file != database_file:
@@ -2020,6 +2071,42 @@ def _migration_image_job_unit_lease_fencing(conn: sqlite3.Connection):
     )
 
 
+def _migration_performance_indexes(conn: sqlite3.Connection):
+    # Queue counts and the enqueue capacity guard filter on both active statuses
+    # at once, which neither single-status partial index can satisfy. Matching
+    # the predicate exactly keeps this index as small as the live queue.
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_image_job_units_active_status
+            ON image_job_units(status)
+            WHERE status IN ('queued', 'running')
+        """
+    )
+    # Auxiliary-state GC deletes stale heartbeats by last_seen_at on every
+    # maintenance cycle.
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_worker_heartbeats_last_seen
+            ON worker_heartbeats(last_seen_at)
+        """
+    )
+    # Gallery job file cleanup filters on kind with a non-null path.
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_gallery_jobs_kind_path
+            ON gallery_jobs(kind, path)
+            WHERE path IS NOT NULL
+        """
+    )
+    # Lockout listing and overflow eviction order by (last_failed_at, client_ip).
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_access_failures_last_failed_client
+            ON access_failures(last_failed_at, client_ip)
+        """
+    )
+
+
 SCHEMA_MIGRATIONS = (
     (1, "baseline_legacy_schema", _migration_baseline_legacy_schema),
     (2, "gallery_filter_options", _migration_gallery_filter_options),
@@ -2040,6 +2127,7 @@ SCHEMA_MIGRATIONS = (
     (17, "generate_job_usage_cost_columns", _migration_generate_job_usage_cost_columns),
     (18, "generate_job_streaming_columns", _migration_generate_job_streaming_columns),
     (19, "image_job_unit_lease_fencing", _migration_image_job_unit_lease_fencing),
+    (20, "performance_indexes", _migration_performance_indexes),
 )
 
 

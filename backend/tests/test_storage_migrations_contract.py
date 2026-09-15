@@ -279,6 +279,58 @@ def test_schema_migrations_are_recorded_and_idempotent(tmp_path):
     ]
 
 
+def test_performance_indexes_are_created(tmp_path):
+    _configure_runtime(tmp_path)
+    db_repo.verify_storage_writable()
+    with db_repo._connect() as conn:
+        index_names = {
+            row["name"]
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'index'")
+        }
+    assert {
+        "idx_image_job_units_active_status",
+        "idx_worker_heartbeats_last_seen",
+        "idx_gallery_jobs_kind_path",
+        "idx_access_failures_last_failed_client",
+    }.issubset(index_names)
+
+
+def test_active_unit_count_uses_partial_index(tmp_path):
+    """The queue counts filter both active statuses at once; neither
+    single-status partial index can serve that predicate."""
+    _configure_runtime(tmp_path)
+    db_repo.verify_storage_writable()
+    now = "2026-01-01T00:00:00+00:00"
+    with db_repo._connect() as conn:
+        with db_repo._transaction(conn):
+            conn.executemany(
+                """
+                INSERT INTO image_job_units(
+                    unit_id, parent_job_id, operation, unit_index, status,
+                    created_at, updated_at, request_json
+                ) VALUES(?, 'plan-parent', 'generation', ?, ?, ?, ?, '{}')
+                """,
+                [
+                    (
+                        f"unit-{index}",
+                        index,
+                        "queued" if index % 2 else "success",
+                        now,
+                        now,
+                    )
+                    for index in range(50)
+                ],
+            )
+        plan = [
+            row["detail"]
+            for row in conn.execute(
+                "EXPLAIN QUERY PLAN SELECT COUNT(*) FROM image_job_units "
+                "WHERE status IN ('queued', 'running')"
+            )
+        ]
+    assert any("idx_image_job_units_active_status" in detail for detail in plan)
+
+
 def test_gallery_and_access_migrations_own_only_their_schema():
     with sqlite3.connect(":memory:") as conn:
         conn.row_factory = sqlite3.Row

@@ -62,7 +62,10 @@ def _insert_gallery_entries_on_conn(
         if existing is not None:
             _add_gallery_filter_option_deltas(filter_option_deltas, existing, -1)
         _add_gallery_filter_option_deltas(filter_option_deltas, entry, 1)
-        _enqueue_thumbnail_job_on_conn(conn, str(entry.get("filename") or ""))
+    _enqueue_thumbnail_jobs_on_conn(
+        conn,
+        (str(entry.get("filename") or "") for entry in normalized_entries),
+    )
     _apply_gallery_filter_option_deltas_on_conn(conn, filter_option_deltas)
     _invalidate_gallery_query_caches_on_conn(conn)
 
@@ -396,22 +399,19 @@ def update_gallery_entry(image_id: str, updates: dict[str, Any]) -> GalleryEntry
                     "size": row["size"],
                 }
                 assignments = ", ".join(f"{key} = ?" for key in allowed_updates)
-                conn.execute(
-                    f"UPDATE gallery_entries SET {assignments} WHERE id = ?",
+                row = conn.execute(
+                    f"""
+                    UPDATE gallery_entries
+                    SET {assignments}
+                    WHERE id = ?
+                    RETURNING {", ".join(GALLERY_COLUMNS)}
+                    """,
                     (*allowed_updates.values(), image_id),
-                )
+                ).fetchone()
                 if allowed_updates.keys() & GALLERY_PAGE_ANCHOR_INVALIDATING_UPDATE_FIELDS:
                     _invalidate_gallery_query_caches_on_conn(conn)
                 elif "bytes" in allowed_updates:
                     _invalidate_gallery_total_bytes_cache()
-                row = conn.execute(
-                    f"""
-                    SELECT {", ".join(GALLERY_COLUMNS)}
-                    FROM gallery_entries
-                    WHERE id = ?
-                    """,
-                    (image_id,),
-                ).fetchone()
                 if allowed_updates.keys() & {"model", "api_preset_name", "size"}:
                     _increment_gallery_filter_options_on_conn(
                         conn,
@@ -420,7 +420,6 @@ def update_gallery_entry(image_id: str, updates: dict[str, Any]) -> GalleryEntry
                     )
                     _increment_gallery_filter_options_on_conn(conn, row, 1)
 
-    with _connect() as conn:
         thumbnail_status_map = _get_gallery_thumbnail_status_map_on_conn(conn, [row])
     return GalleryEntry(**_gallery_entry_from_row(row, thumbnail_status_map))
 

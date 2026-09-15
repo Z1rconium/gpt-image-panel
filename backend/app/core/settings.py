@@ -136,9 +136,35 @@ SQLITE_CRITICAL_BUSY_RETRY_ATTEMPTS = max(
 )
 # Write transactions held longer than this are logged with their call label.
 SQLITE_SLOW_TXN_WARN_MS = max(1, int(os.getenv("SQLITE_SLOW_TXN_WARN_MS", "500")))
+# Page cache per connection. SQLite's default (~2MB) is small for a gallery
+# database that keyset-scans tens of thousands of rows per page.
+SQLITE_CACHE_SIZE_MB = max(1, int(os.getenv("SQLITE_CACHE_SIZE_MB", "16")))
+# Memory-mapped I/O window; 0 disables mmap.
+SQLITE_MMAP_SIZE_MB = max(0, int(os.getenv("SQLITE_MMAP_SIZE_MB", "256")))
+# Where transient sorts/aggregates (filter-option rebuilds) are kept.
+_SQLITE_TEMP_STORE_VALUES = {"DEFAULT", "FILE", "MEMORY", "0", "1", "2"}
+SQLITE_TEMP_STORE = os.getenv("SQLITE_TEMP_STORE", "MEMORY").strip().upper()
+if SQLITE_TEMP_STORE not in _SQLITE_TEMP_STORE_VALUES:
+    SQLITE_TEMP_STORE = "MEMORY"
+# WAL auto-checkpoint threshold in pages (SQLite's default is 1000); 0 disables.
+SQLITE_WAL_AUTOCHECKPOINT_PAGES = max(
+    0, int(os.getenv("SQLITE_WAL_AUTOCHECKPOINT_PAGES", "1000"))
+)
+# Interval for the background `PRAGMA optimize` refresh of planner statistics.
+SQLITE_OPTIMIZE_INTERVAL_SECONDS = max(
+    60, int(os.getenv("SQLITE_OPTIMIZE_INTERVAL_SECONDS", "300"))
+)
 IMAGE_JOB_PROGRESS_PERSIST_INTERVAL_SECONDS = max(
     0.1,
     float(os.getenv("IMAGE_JOB_PROGRESS_PERSIST_INTERVAL_SECONDS", "1")),
+)
+# A running unit persists progress every ~1s, but the parent row's persisted
+# counts only need to track it at the parent persist cadence. The authoritative
+# finalize always happens once the unit reaches a terminal state, so this only
+# gates the interim aggregate read.
+IMAGE_JOB_AGGREGATE_MIN_INTERVAL_SECONDS = max(
+    0.1,
+    float(os.getenv("IMAGE_JOB_AGGREGATE_MIN_INTERVAL_SECONDS", "5")),
 )
 RUNTIME_METRICS_REFRESH_SECONDS = max(
     5.0,
@@ -193,6 +219,14 @@ IMAGE_JOB_UNIT_MAX_ATTEMPTS = max(1, int(os.getenv("IMAGE_JOB_UNIT_MAX_ATTEMPTS"
 IMAGE_JOB_UNIT_POLL_INTERVAL_SECONDS = max(
     0.1,
     float(os.getenv("IMAGE_JOB_UNIT_POLL_INTERVAL_SECONDS", "0.35")),
+)
+# SSE pollers query SQLite only as a cross-process fallback for job updates:
+# same-process updates are pushed by the in-process job event bus. They start
+# at the base poll interval and double the delay while nothing changes, capped
+# here, so an idle-but-connected UI does not hold a DB worker at a fixed rate.
+SSE_IDLE_BACKOFF_MAX_SECONDS = max(
+    0.35,
+    float(os.getenv("SSE_IDLE_BACKOFF_MAX_SECONDS", "2")),
 )
 IMAGES_DIR = os.getenv("IMAGES_DIR", "./images")
 THUMBNAILS_DIR = os.getenv("THUMBNAILS_DIR", os.path.join(IMAGES_DIR, "thumbs"))

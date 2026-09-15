@@ -129,6 +129,84 @@ def _enqueue_thumbnail_job_on_conn(
     return True
 
 
+def _enqueue_thumbnail_jobs_on_conn(
+    conn: sqlite3.Connection,
+    filenames: Iterable[str],
+) -> None:
+    """Batch form of ``_enqueue_thumbnail_job_on_conn`` for gallery writes.
+
+    The per-row helper issues one SELECT plus one INSERT for every entry, so a
+    batch import paid two statements per image. This applies the same skip
+    rules from a single chunked read, then upserts the remainder with one
+    ``executemany``.
+    """
+    now = utc_now()
+    candidates: list[str] = []
+    seen: set[str] = set()
+    for filename in filenames:
+        normalized = str(filename or "").strip()
+        if not normalized or normalized in seen:
+            continue
+        image_path = safe_image_path(normalized)
+        if not image_path or not image_path.is_file():
+            continue
+        seen.add(normalized)
+        candidates.append(normalized)
+    if not candidates:
+        return
+
+    existing_by_filename: dict[str, sqlite3.Row] = {}
+    for chunk in _iter_sqlite_in_chunks(candidates):
+        placeholders = ", ".join("?" for _ in chunk)
+        rows = conn.execute(
+            f"""
+            SELECT filename, status, lease_expires_at
+            FROM thumbnail_jobs
+            WHERE filename IN ({placeholders})
+            """,
+            tuple(chunk),
+        ).fetchall()
+        existing_by_filename.update({row["filename"]: row for row in rows})
+
+    pending: list[tuple[str, str, str]] = []
+    for filename in candidates:
+        existing = existing_by_filename.get(filename)
+        if existing is not None:
+            if existing["status"] == "success":
+                continue
+            if (
+                existing["status"] == "running"
+                and str(existing["lease_expires_at"] or "") > now
+            ):
+                continue
+        pending.append((filename, now, now))
+    if not pending:
+        return
+
+    conn.executemany(
+        """
+        INSERT INTO thumbnail_jobs (
+            filename,
+            status,
+            attempts,
+            lease_owner,
+            lease_expires_at,
+            created_at,
+            updated_at,
+            error
+        )
+        VALUES (?, 'queued', 0, NULL, NULL, ?, ?, NULL)
+        ON CONFLICT(filename) DO UPDATE SET
+            status = 'queued',
+            lease_owner = NULL,
+            lease_expires_at = NULL,
+            updated_at = excluded.updated_at,
+            error = NULL
+        """,
+        pending,
+    )
+
+
 def enqueue_thumbnail_job(filename: str, *, force: bool = False) -> bool:
     _ensure_database()
     image_path = safe_image_path(filename)

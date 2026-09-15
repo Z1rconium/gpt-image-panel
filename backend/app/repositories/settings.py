@@ -117,7 +117,7 @@ def upsert_gallery_ai_metadata(
             ).fetchone()
             if not exists:
                 raise KeyError("Gallery entry not found")
-            conn.execute(
+            row = conn.execute(
                 """
                 INSERT INTO gallery_ai_metadata (
                     image_id,
@@ -135,6 +135,9 @@ def upsert_gallery_ai_metadata(
                     analysis_json = excluded.analysis_json,
                     model = excluded.model,
                     updated_at = excluded.updated_at
+                RETURNING
+                    image_id, description, prompt, analysis_json, model,
+                    created_at, updated_at
                 """,
                 (
                     image_id,
@@ -145,14 +148,6 @@ def upsert_gallery_ai_metadata(
                     now,
                     now,
                 ),
-            )
-            row = conn.execute(
-                """
-                SELECT image_id, description, prompt, analysis_json, model, created_at, updated_at
-                FROM gallery_ai_metadata
-                WHERE image_id = ?
-                """,
-                (image_id,),
             ).fetchone()
     return _gallery_ai_metadata_from_row(row)
 

@@ -393,6 +393,7 @@ async def run_claimed_image_unit(unit: dict, worker_id: str):
     lease_task: asyncio.Task | None = None
     upstream_task: asyncio.Task | None = None
     last_progress_persist_at = 0.0
+    last_aggregate_at = 0.0
     lease_lost = asyncio.Event()
     # Local view of when the SQLite lease expires. Every successful write that
     # sets `claim_expires_at` (start progress, coalesced progress, renewal)
@@ -504,6 +505,7 @@ async def run_claimed_image_unit(unit: dict, worker_id: str):
 
     async def persist_progress_updates():
         nonlocal progress_pending, progress_task, last_progress_persist_at
+        nonlocal last_aggregate_at
         try:
             while progress_pending is not None:
                 delay = config.IMAGE_JOB_PROGRESS_PERSIST_INTERVAL_SECONDS - (
@@ -534,8 +536,14 @@ async def run_claimed_image_unit(unit: dict, worker_id: str):
                     mark_lease_lost()
                     return
                 note_lease_extended(persist_started_at)
-                last_progress_persist_at = time.monotonic()
-                await aggregate_parent_image_job(parent_job_id)
+                now = time.monotonic()
+                last_progress_persist_at = now
+                if (
+                    now - last_aggregate_at
+                    >= config.IMAGE_JOB_AGGREGATE_MIN_INTERVAL_SECONDS
+                ):
+                    last_aggregate_at = now
+                    await aggregate_parent_image_job(parent_job_id)
         finally:
             progress_task = None
             if progress_pending is not None and not lease_lost.is_set():
