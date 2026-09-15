@@ -133,6 +133,35 @@ def test_estimate_image_cost_ignores_malformed_env_rates_json(monkeypatch, caplo
     assert cost["rate_source"] == "builtin"
 
 
+IMAGE_2_SERIES_MODELS = (
+    "gpt-image-2",
+    "gpt-image-2-2026-04-21",
+    "gpt-image-2.5-flare",
+    "gpt-image-2.5-flare-2026-09-08",
+    "gpt-image-2.5-sunburst",
+    "gpt-image-2.5-sunburst-2026-09-08",
+)
+
+
+@pytest.mark.parametrize("model", IMAGE_2_SERIES_MODELS)
+def test_estimate_image_cost_uses_builtin_image_2_series_rates(model):
+    usage = image_cost.normalize_usage(
+        {
+            "input_tokens_details": {"text_tokens": 1_000_000, "image_tokens": 1_000_000},
+            "output_tokens_details": {"image_tokens": 1_000_000},
+        }
+    )
+    cost = image_cost.estimate_image_cost(model, usage)
+    assert cost["rate_source"] == "builtin"
+    assert cost["complete"] is True
+    assert cost["estimated_cost_usd"] == pytest.approx(5.0 + 8.0 + 30.0)
+
+
+def test_configured_model_count_includes_builtin_image_2_series(monkeypatch):
+    monkeypatch.setattr(image_cost.config, "IMAGE_COST_RATES_JSON", "")
+    assert image_cost.configured_model_count() == 7
+
+
 # ── sum_usage / sum_costs ────────────────────────────────────────
 
 

@@ -319,7 +319,7 @@ Overall Config 會將 Override 持久化至 SQLite。部分設定可熱更新；
 - 串流預覽需在生成表單中主動開啟（「串流預覽」開關），僅適用於 `/v1/images/generations` 與 `/v1/images/edits`，且數量必須為 1——每張請求圖片都會作為獨立執行單元排隊，因此串流預覽無法與批次生成組合使用。可選擇 1–3 個預覽畫面；畫面數越多，上游消耗的輸出 token 越多，最終圖片的費用也會略高。
 - 若相容服務聲稱支援 OpenAI 卻拒絕 `stream`/`partial_images` 參數，工作會以明確錯誤結束，提示您關閉串流預覽後重試——不會自動降級為非串流請求重新發起，因為這可能導致重複計費。
 - 階段性預覽圖片僅保存在伺服器記憶體中，每個執行單元只保留最新一幀，大小受 `PREVIEW_CACHE_MAX_ENTRY_MB`/`PREVIEW_CACHE_MAX_ENTRIES`（見 `.env.example`）限制，不會寫入 SQLite 或 Gallery。工作進行中重新連線的客戶端會收到目前快取的預覽畫面，或等待下一幀；行程重新啟動或切換到其他 worker 後不會有可重播的快取。
-- **費用估算並非帳單。** 僅在上游實際回傳 `usage` 時才會計算；缺少 usage 或該模型未設定費率時，介面會顯示具體原因（例如「未設定該模型的費率」），而非顯示 `$0.00`。內建費率僅涵蓋 `gpt-image-1`，取自 OpenAI 官方 Images API 定價；第三方「OpenAI 相容」上游的實際定價通常並不相同。可透過 `.env.example` 中的 `IMAGE_COST_RATES_JSON` 覆寫或新增各模型的費率。
+- **費用估算並非帳單。** 僅在上游實際回傳 `usage` 時才會計算；缺少 usage 或該模型未設定費率時，介面會顯示具體原因（例如「未設定該模型的費率」），而非顯示 `$0.00`。內建費率涵蓋 `gpt-image-1` 與 GPT Image 2 / 2.5 系列模型 id，取自 OpenAI 官方 Images API 定價；第三方「OpenAI 相容」上游的實際定價通常並不相同。可透過 `.env.example` 中的 `IMAGE_COST_RATES_JSON` 覆寫或新增各模型的費率。
 
 ## API 概覽
 

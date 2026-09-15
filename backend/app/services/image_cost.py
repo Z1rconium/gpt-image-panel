@@ -21,14 +21,36 @@ logger = logging.getLogger(__name__)
 COST_DECIMAL_PLACES = Decimal("0.000001")
 
 # Builtin USD-per-1,000,000-token rates. Sourced from OpenAI's published Images
-# API pricing for gpt-image-1. Third-party upstreams rarely match this exactly;
-# override or extend via IMAGE_COST_RATES_JSON (see .env.example).
-PRICING_VERSION = "builtin-2026-01"
+# API pricing (standard tier) for gpt-image-1 and the GPT Image 2 / 2.5 models;
+# verified 2026-09-15. Third-party upstreams rarely match this exactly; override
+# or extend via IMAGE_COST_RATES_JSON (see .env.example).
+PRICING_VERSION = "builtin-2026-09"
+
+# GPT Image 2 and both GPT Image 2.5 tiers share one rate card (OpenAI documents
+# "token rates match GPT Image 2" for the 2.5 models). Text output is not billed
+# because these models only output images.
+_IMAGE_2_SERIES_MODELS = (
+    "gpt-image-2",
+    "gpt-image-2-2026-04-21",
+    "gpt-image-2.5-flare",
+    "gpt-image-2.5-flare-2026-09-08",
+    "gpt-image-2.5-sunburst",
+    "gpt-image-2.5-sunburst-2026-09-08",
+)
+
 BUILTIN_RATES_PER_MILLION: dict[str, dict[str, float]] = {
     "gpt-image-1": {
         "text_input_per_million": 5.0,
         "image_input_per_million": 10.0,
         "image_output_per_million": 40.0,
+    },
+    **{
+        model: {
+            "text_input_per_million": 5.0,
+            "image_input_per_million": 8.0,
+            "image_output_per_million": 30.0,
+        }
+        for model in _IMAGE_2_SERIES_MODELS
     },
 }
 

@@ -319,7 +319,7 @@ Overall Config 会把 override 持久化到 SQLite。部分配置可热更新；
 - 流式预览需要在生成表单中主动开启（"流式预览"开关），仅适用于 `/v1/images/generations` 和 `/v1/images/edits`，且数量必须为 1——每张请求图片都会作为独立执行单元排队，因此流式预览无法与批量生成组合使用。可选择 1–3 个预览帧；帧数越多，上游消耗的输出 token 越多，最终图片的费用也会相应略高。
 - 如果兼容服务声称支持 OpenAI 但拒绝 `stream`/`partial_images` 参数，任务会以明确的错误结束，提示您关闭流式预览后重试——不会自动降级为非流式请求重新发起，因为这可能导致重复计费。
 - 阶段性预览图片只保存在服务端内存中，每个执行单元仅保留最新一帧，大小受 `PREVIEW_CACHE_MAX_ENTRY_MB`/`PREVIEW_CACHE_MAX_ENTRIES`（见 `.env.example`）限制，不会写入 SQLite 或 Gallery。任务进行中重连的客户端会收到当前缓存的预览帧，或等待下一帧；进程重启或切换到其他 worker 后不会有可重放的缓存。
-- **费用估算不是账单。** 只有当上游实际返回 `usage` 时才会计算，缺少 usage 或该模型未配置费率时,界面会显示具体原因（例如"未配置该模型的费率"），而不是显示 `$0.00`。内置费率仅覆盖 `gpt-image-1`，取自 OpenAI 官方 Images API 定价；第三方"OpenAI 兼容"上游的实际定价通常并不相同。可通过 `.env.example` 中的 `IMAGE_COST_RATES_JSON` 覆盖或新增按模型的费率。
+- **费用估算不是账单。** 只有当上游实际返回 `usage` 时才会计算，缺少 usage 或该模型未配置费率时,界面会显示具体原因（例如"未配置该模型的费率"），而不是显示 `$0.00`。内置费率覆盖 `gpt-image-1` 与 GPT Image 2 / 2.5 系列模型 id，取自 OpenAI 官方 Images API 定价；第三方"OpenAI 兼容"上游的实际定价通常并不相同。可通过 `.env.example` 中的 `IMAGE_COST_RATES_JSON` 覆盖或新增按模型的费率。
 
 ## API 概览
 
