@@ -3,7 +3,6 @@ import hashlib
 import inspect
 import logging
 import mimetypes
-import os
 import time
 import uuid
 from collections.abc import Iterable, Iterator
@@ -110,10 +109,7 @@ from ..schemas.gallery import (
 )
 
 def granian_worker_count() -> int:
-    try:
-        return max(1, int(os.getenv("GRANIAN_WORKERS", "1")))
-    except (TypeError, ValueError):
-        return 1
+    return max(1, int(config.GRANIAN_WORKERS))
 logger = logging.getLogger(__name__)
 PRIVATE_GALLERY_CACHE_CONTROL = "private, no-store"
 IMMUTABLE_GALLERY_CACHE_CONTROL = "private, max-age=31536000, immutable"

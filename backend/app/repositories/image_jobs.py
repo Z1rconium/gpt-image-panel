@@ -436,20 +436,24 @@ def get_image_job_unit(unit_id: str) -> dict[str, Any] | None:
 def has_claimable_image_job_unit(
     now: str,
     max_attempts: int | None = None,
+    running_limit: int | None = None,
 ) -> bool:
     """Read-only precheck used to skip an empty claim write transaction.
 
     Mirrors the `claim_next_image_job_unit` candidate predicate using the
     partial claim indexes; never takes a write lock.
+
+    When `running_limit` is provided the queued/expired candidates are also
+    gated on the global unexpired-running count, exactly like the claim update.
+    This lets an idle worker skip the write transaction while the global queue is
+    saturated by other workers instead of repeatedly contending for the lock.
     """
     _ensure_database()
     if max_attempts is None:
         max_attempts = getattr(config, "IMAGE_JOB_UNIT_MAX_ATTEMPTS", 2)
     max_attempts = max(1, int(max_attempts or 1))
-    with _connect() as conn:
-        row = conn.execute(
-            """
-            WITH
+
+    candidates_sql = """
                 expired_candidate(unit_id) AS (
                     SELECT unit_id
                     FROM image_job_units
@@ -465,6 +469,11 @@ def has_claimable_image_job_unit(
                     WHERE status = 'queued'
                     LIMIT 1
                 )
+    """
+    if running_limit is None:
+        query = f"""
+            WITH
+                {candidates_sql}
             SELECT 1
             FROM (
                 SELECT unit_id FROM expired_candidate
@@ -472,9 +481,32 @@ def has_claimable_image_job_unit(
                 SELECT unit_id FROM queued_candidate
             )
             LIMIT 1
-            """,
-            (now, max_attempts),
-        ).fetchone()
+        """
+        params: tuple[Any, ...] = (now, max_attempts)
+    else:
+        query = f"""
+            WITH
+                running_count(value) AS (
+                    SELECT COUNT(*)
+                    FROM image_job_units
+                    WHERE status = 'running'
+                        AND claim_expires_at IS NOT NULL
+                        AND claim_expires_at > ?
+                ),
+                {candidates_sql}
+            SELECT 1
+            FROM (
+                SELECT unit_id FROM expired_candidate
+                UNION ALL
+                SELECT unit_id FROM queued_candidate
+            )
+            WHERE (SELECT value FROM running_count) < ?
+            LIMIT 1
+        """
+        params = (now, now, max_attempts, max(1, int(running_limit)))
+
+    with _connect() as conn:
+        row = conn.execute(query, params).fetchone()
     return row is not None
 
 

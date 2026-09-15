@@ -200,6 +200,9 @@ IMPORT_UPLOADS_PER_IP_PER_MINUTE = max(
     1,
     int(os.getenv("IMPORT_UPLOADS_PER_IP_PER_MINUTE", "3")),
 )
+# Granian worker processes. Each process runs its own image-unit dispatcher;
+# the per-worker claim share below spreads a job's `n` units across them.
+GRANIAN_WORKERS = max(1, int(os.getenv("GRANIAN_WORKERS", "1")))
 MAX_ACTIVE_GENERATE_JOBS = max(1, int(os.getenv("MAX_ACTIVE_GENERATE_JOBS", "2")))
 MAX_QUEUED_GENERATE_JOBS = max(0, int(os.getenv("MAX_QUEUED_GENERATE_JOBS", "20")))
 IMAGE_JOB_UNIT_LEASE_SECONDS = max(30, int(os.getenv("IMAGE_JOB_UNIT_LEASE_SECONDS", "120")))
@@ -316,3 +319,17 @@ NODEIMAGE_API_KEY = os.getenv("NODEIMAGE_API_KEY", "").strip()
 # image_output_per_million} in USD. Overrides/extends the builtin rate table in
 # backend/app/services/image_cost.py. See .env.example for the exact shape.
 IMAGE_COST_RATES_JSON = os.getenv("IMAGE_COST_RATES_JSON", "").strip()
+
+
+def per_worker_generate_limit() -> int:
+    """Return the image-unit claim share for one Granian worker process.
+
+    The SQL claim still enforces the global ``MAX_ACTIVE_GENERATE_JOBS`` cap;
+    this only bounds how many units a single process's claim loop may hold, so
+    an ``n>1`` job is spread across workers instead of being monopolized by the
+    worker that accepted the request. Values are read at call time so tests and
+    runtime config can override them.
+    """
+
+    workers = max(1, int(GRANIAN_WORKERS))
+    return max(1, -(-int(MAX_ACTIVE_GENERATE_JOBS) // workers))

@@ -105,6 +105,7 @@ async def run_image_unit_dispatcher(worker_id: str):
                 has_claimable_image_job_unit,
                 utc_now(),
                 config.IMAGE_JOB_UNIT_MAX_ATTEMPTS,
+                running_limit=config.MAX_ACTIVE_GENERATE_JOBS,
                 metric_name="precheck_image_job_unit",
                 retry_busy=False,
             )
@@ -133,7 +134,7 @@ async def run_image_unit_dispatcher(worker_id: str):
     await run_claim_loop(
         claim_fn=claim_unit,
         run_fn=run_unit,
-        running_limit=lambda: config.MAX_ACTIVE_GENERATE_JOBS,
+        running_limit=lambda: config.per_worker_generate_limit(),
         idle_interval=lambda: config.IMAGE_JOB_UNIT_POLL_INTERVAL_SECONDS,
         max_backoff=IMAGE_DISPATCHER_MAX_IDLE_BACKOFF_SECONDS,
         kick_event=get_image_unit_dispatcher_kick_event(),

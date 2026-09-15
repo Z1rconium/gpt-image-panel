@@ -137,6 +137,8 @@ def snapshot_queue_metrics() -> dict[str, int]:
         "image_jobs.running_capacity": config.MAX_ACTIVE_GENERATE_JOBS,
         "image_jobs.queued_capacity": config.MAX_QUEUED_GENERATE_JOBS,
         "image_jobs.upstream_request_capacity": config.MAX_ACTIVE_GENERATE_JOBS,
+        "image_jobs.workers": config.GRANIAN_WORKERS,
+        "image_jobs.per_worker_capacity": config.per_worker_generate_limit(),
         "image_jobs.tasks": len(get_generate_job_tasks()),
         "image_jobs.sse_job_subscribers": sum(
             len(subscribers)
