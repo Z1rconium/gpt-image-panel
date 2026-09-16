@@ -2466,3 +2466,79 @@ def test_missing_env_api_key_is_reported(client, monkeypatch):
     )
     assert resp.status_code == 422
     assert "MISSING_IMAGE_KEY" in resp.json()["detail"]
+
+
+def test_saving_overall_config_keeps_derived_defaults(client):
+    """A config save must not reset settings that are derived from others.
+
+    apply_rows_to_config used to write the registry's literal default for every
+    name it touched, so saving any overall-config key reset IMPORT_ARCHIVE_MAX_MB
+    and friends to values that contradict the base setting they come from.
+    """
+    config.MAX_FILE_SIZE_MB = 25
+    config.IMPORT_ARCHIVE_MAX_MB = config.MAX_FILE_SIZE_MB * 20
+    config.MAX_PENDING_EDIT_SOURCE_MB = config.MAX_FILE_SIZE_MB * 4
+    config.MAX_UPSTREAM_IMAGE_BYTES_PER_TASK_MB = config.MAX_FILE_SIZE_MB
+
+    response = client.put(
+        "/api/settings/overall-config",
+        json={"updates": [{"name": "ENABLE_METRICS", "value": True}]},
+    )
+
+    assert response.status_code == 200
+    assert config.IMPORT_ARCHIVE_MAX_MB == config.MAX_FILE_SIZE_MB * 20
+    assert config.MAX_PENDING_EDIT_SOURCE_MB == config.MAX_FILE_SIZE_MB * 4
+    assert config.MAX_UPSTREAM_IMAGE_BYTES_PER_TASK_MB == config.MAX_FILE_SIZE_MB
+
+
+def test_overall_config_reports_derived_defaults_it_actually_uses(client):
+    """The default the settings UI shows must be the value the process runs with."""
+    body = client.get("/api/settings/overall-config").json()
+    items = {item["name"]: item for item in body["items"]}
+
+    for name in ("IMPORT_ARCHIVE_MAX_MB", "MAX_PENDING_EDIT_SOURCE_MB"):
+        assert items[name]["value"] == getattr(config, name)
+        assert items[name]["source"] == "default"
+
+
+def test_api_settings_reload_is_skipped_while_a_write_is_pending(client):
+    """A reload racing an in-flight write must not revert the new values."""
+    from backend.app.services import presets
+    from backend.app.runtime.state import state
+
+    presets.load_api_settings()
+    stored = list(state.api_presets)
+
+    presets.begin_api_settings_write()
+    try:
+        state.api_presets = [{"id": "in-flight", "name": "In flight"}]
+        presets.load_api_settings()
+        assert state.api_presets == [{"id": "in-flight", "name": "In flight"}]
+    finally:
+        presets.end_api_settings_write()
+
+    presets.load_api_settings()
+    assert state.api_presets == stored
+
+
+def test_api_settings_reload_skips_a_write_that_finished_during_the_read(client, monkeypatch):
+    """The generation counter catches a write that completed mid-read."""
+    from backend.app.services import presets
+    from backend.app.runtime.state import state
+
+    presets.load_api_settings()
+    stored = list(state.api_presets)
+    real_load = presets.load_settings
+
+    def racing_load():
+        data = real_load()
+        presets.begin_api_settings_write()
+        presets.end_api_settings_write()
+        return data
+
+    monkeypatch.setattr(presets, "load_settings", racing_load)
+    state.api_presets = [{"id": "in-flight", "name": "In flight"}]
+
+    presets.load_api_settings()
+
+    assert state.api_presets == [{"id": "in-flight", "name": "In flight"}]

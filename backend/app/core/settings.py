@@ -1,6 +1,23 @@
+"""Runtime configuration.
+
+Values come from three places, in this order:
+
+1. Environment variables, read once at import into module constants.
+2. Values derived from other settings (``DERIVED_CONFIG_NAMES``), which follow
+   their base value unless the name is configured explicitly.
+3. Runtime overrides stored in SQLite and applied by
+   ``core.overall_config.apply_rows_to_config``, which is the only caller
+   allowed to change a setting after import (see ``apply_overrides``).
+
+Readers keep using module attributes (``config.MAX_FILE_SIZE_MB``); what
+changed is that writing them now happens in exactly one place that also
+recomputes the derived values.
+"""
+
 import os
 import re
 from pathlib import Path
+from collections.abc import Callable
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 VERSION_FILE = PROJECT_ROOT / "VERSION"
@@ -34,6 +51,27 @@ def env_non_negative_int(name: str, default: int = 0) -> int:
     except (TypeError, ValueError):
         return default
     return parsed if parsed >= 0 else default
+
+
+def _env_or_derived(
+    name: str,
+    derive: Callable[[], object],
+    cast: Callable[[str], object],
+) -> object:
+    """Read ``name`` from the environment, else derive it from other settings."""
+    raw = os.getenv(name)
+    return cast(raw) if raw is not None else derive()
+
+
+def _clamp_lease_renew(value: float) -> float:
+    """Keep the image-unit lease renewal cadence below half the lease."""
+    lease = float(IMAGE_JOB_UNIT_LEASE_SECONDS)
+    renew = float(value)
+    if renew < 5.0:
+        renew = min(5.0, lease / 4)
+    if lease > 0 and renew >= lease / 2:
+        renew = lease / 4
+    return renew
 
 
 def _validate_github_repo(value: str) -> str:
@@ -100,13 +138,15 @@ MAX_FILE_SIZE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "50"))
 NODEIMAGE_UPLOAD_CONCURRENCY = max(1, int(os.getenv("NODEIMAGE_UPLOAD_CONCURRENCY", "4")))
 MAX_JSON_BODY_MB = max(1, int(os.getenv("MAX_JSON_BODY_MB", "1")))
 MAX_UPSTREAM_JSON_MB = max(1, int(os.getenv("MAX_UPSTREAM_JSON_MB", "128")))
-MAX_UPSTREAM_IMAGE_BYTES_PER_TASK_MB = max(
-    1,
-    int(os.getenv("MAX_UPSTREAM_IMAGE_BYTES_PER_TASK_MB", str(MAX_FILE_SIZE_MB))),
+MAX_UPSTREAM_IMAGE_BYTES_PER_TASK_MB = _env_or_derived(
+    "MAX_UPSTREAM_IMAGE_BYTES_PER_TASK_MB",
+    lambda: max(1, MAX_FILE_SIZE_MB),
+    lambda raw: max(1, int(raw)),
 )
-UPSTREAM_MEMORY_BUDGET_MB = max(
-    MAX_UPSTREAM_IMAGE_BYTES_PER_TASK_MB,
-    int(os.getenv("UPSTREAM_MEMORY_BUDGET_MB", "256")),
+UPSTREAM_MEMORY_BUDGET_MB = _env_or_derived(
+    "UPSTREAM_MEMORY_BUDGET_MB",
+    lambda: max(MAX_UPSTREAM_IMAGE_BYTES_PER_TASK_MB, 256),
+    lambda raw: max(MAX_UPSTREAM_IMAGE_BYTES_PER_TASK_MB, int(raw)),
 )
 MAX_IMAGE_PIXELS = max(1, int(os.getenv("MAX_IMAGE_PIXELS", "100000000")))
 IMAGE_CPU_CONCURRENCY = max(1, int(os.getenv("IMAGE_CPU_CONCURRENCY", "2")))
@@ -119,8 +159,10 @@ _max_active_generate_jobs_default = max(
 # worker for up to the critical busy budget, so size the pool from generation
 # concurrency rather than a fixed constant.
 _default_db_executor_workers = max(4, _max_active_generate_jobs_default // 2 + 2)
-DB_EXECUTOR_WORKERS = max(
-    1, int(os.getenv("DB_EXECUTOR_WORKERS", str(_default_db_executor_workers)))
+DB_EXECUTOR_WORKERS = _env_or_derived(
+    "DB_EXECUTOR_WORKERS",
+    lambda: _default_db_executor_workers,
+    lambda raw: max(1, int(raw)),
 )
 SQLITE_BUSY_TIMEOUT_MS = max(10, int(os.getenv("SQLITE_BUSY_TIMEOUT_MS", "250")))
 SQLITE_BUSY_RETRY_ATTEMPTS = max(0, int(os.getenv("SQLITE_BUSY_RETRY_ATTEMPTS", "5")))
@@ -177,20 +219,26 @@ EVENT_LOOP_LAG_SAMPLE_SECONDS = max(
     0.1,
     float(os.getenv("EVENT_LOOP_LAG_SAMPLE_SECONDS", "0.5")),
 )
-MAX_PENDING_EDIT_SOURCE_MB = max(
-    0,
-    int(os.getenv("MAX_PENDING_EDIT_SOURCE_MB", str(MAX_FILE_SIZE_MB * 4))),
+MAX_PENDING_EDIT_SOURCE_MB = _env_or_derived(
+    "MAX_PENDING_EDIT_SOURCE_MB",
+    lambda: max(0, MAX_FILE_SIZE_MB * 4),
+    lambda raw: max(0, int(raw)),
 )
-IMPORT_ARCHIVE_MAX_MB = int(os.getenv("IMPORT_ARCHIVE_MAX_MB", str(MAX_FILE_SIZE_MB * 20)))
+IMPORT_ARCHIVE_MAX_MB = _env_or_derived(
+    "IMPORT_ARCHIVE_MAX_MB",
+    lambda: MAX_FILE_SIZE_MB * 20,
+    int,
+)
 IMPORT_MAX_FILES = int(os.getenv("IMPORT_MAX_FILES", "500"))
 IMPORT_MAX_UNCOMPRESSED_MB = int(os.getenv("IMPORT_MAX_UNCOMPRESSED_MB", "1024"))
 IMPORT_MAX_METADATA_BYTES = int(os.getenv("IMPORT_MAX_METADATA_BYTES", str(2 * 1024 * 1024)))
 IMPORT_MAX_ENTRIES = max(1, int(os.getenv("IMPORT_MAX_ENTRIES", "500")))
 IMPORT_MAX_OUTPUT_MB = max(1, int(os.getenv("IMPORT_MAX_OUTPUT_MB", "1024")))
 IMPORT_MAX_COMPRESSION_RATIO = float(os.getenv("IMPORT_MAX_COMPRESSION_RATIO", "20"))
-IMPORT_TEMP_RESERVATION_MAX_MB = max(
-    1,
-    int(os.getenv("IMPORT_TEMP_RESERVATION_MAX_MB", str(IMPORT_ARCHIVE_MAX_MB * 2))),
+IMPORT_TEMP_RESERVATION_MAX_MB = _env_or_derived(
+    "IMPORT_TEMP_RESERVATION_MAX_MB",
+    lambda: max(1, IMPORT_ARCHIVE_MAX_MB * 2),
+    lambda raw: max(1, int(raw)),
 )
 IMPORT_UPLOAD_RESERVATION_TTL_SECONDS = max(
     60,
@@ -209,13 +257,13 @@ IMAGE_JOB_UNIT_LEASE_SECONDS = max(30, int(os.getenv("IMAGE_JOB_UNIT_LEASE_SECON
 # Lease renewal cadence. Defaults to lease/3 and is clamped below lease/2 so the
 # renewal loop can always extend the lease before it can expire.
 _image_job_unit_renew_default = max(5.0, IMAGE_JOB_UNIT_LEASE_SECONDS / 3)
-IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS = float(
-    os.getenv("IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS", str(_image_job_unit_renew_default))
+IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS = _clamp_lease_renew(
+    _env_or_derived(
+        "IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS",
+        lambda: _image_job_unit_renew_default,
+        float,
+    )
 )
-if IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS < 5.0:
-    IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS = min(5.0, IMAGE_JOB_UNIT_LEASE_SECONDS / 4)
-if IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS >= IMAGE_JOB_UNIT_LEASE_SECONDS / 2:
-    IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS = IMAGE_JOB_UNIT_LEASE_SECONDS / 4
 # How many times an image unit may be claimed (each claim increments attempts)
 # before an exhausted lease is interrupted instead of retried forever.
 IMAGE_JOB_UNIT_MAX_ATTEMPTS = max(1, int(os.getenv("IMAGE_JOB_UNIT_MAX_ATTEMPTS", "2")))
@@ -282,9 +330,10 @@ AI_ASSISTANT_MAX_RESPONSE_MB = max(
     1,
     int(os.getenv("AI_ASSISTANT_MAX_RESPONSE_MB", "8")),
 )
-AI_ASSISTANT_MAX_CONCURRENCY = max(
-    1,
-    int(os.getenv("AI_ASSISTANT_MAX_CONCURRENCY", str(MAX_ACTIVE_GENERATE_JOBS))),
+AI_ASSISTANT_MAX_CONCURRENCY = _env_or_derived(
+    "AI_ASSISTANT_MAX_CONCURRENCY",
+    lambda: max(1, MAX_ACTIVE_GENERATE_JOBS),
+    lambda raw: max(1, int(raw)),
 )
 AI_ASSISTANT_BATCH_MAX_IMAGES = max(
     1,
@@ -333,3 +382,58 @@ def per_worker_generate_limit() -> int:
 
     workers = max(1, int(GRANIAN_WORKERS))
     return max(1, -(-int(MAX_ACTIVE_GENERATE_JOBS) // workers))
+
+
+# Settings computed from other settings. Each follows its base value unless the
+# name itself is configured (env at import, or an override applied later), which
+# is what ``explicit`` carries. Order matters: a later entry may read an earlier
+# derived value.
+DERIVED_CONFIG_NAMES: dict[str, Callable[[], object]] = {
+    "MAX_UPSTREAM_IMAGE_BYTES_PER_TASK_MB": lambda: max(1, MAX_FILE_SIZE_MB),
+    "UPSTREAM_MEMORY_BUDGET_MB": lambda: max(MAX_UPSTREAM_IMAGE_BYTES_PER_TASK_MB, 256),
+    "MAX_PENDING_EDIT_SOURCE_MB": lambda: max(0, MAX_FILE_SIZE_MB * 4),
+    "IMPORT_ARCHIVE_MAX_MB": lambda: MAX_FILE_SIZE_MB * 20,
+    "IMPORT_TEMP_RESERVATION_MAX_MB": lambda: max(1, IMPORT_ARCHIVE_MAX_MB * 2),
+    "DB_EXECUTOR_WORKERS": lambda: max(4, MAX_ACTIVE_GENERATE_JOBS // 2 + 2),
+    "AI_ASSISTANT_MAX_CONCURRENCY": lambda: max(1, MAX_ACTIVE_GENERATE_JOBS),
+    "IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS": lambda: max(
+        5.0, IMAGE_JOB_UNIT_LEASE_SECONDS / 3
+    ),
+}
+
+
+def recompute_derived(explicit: frozenset[str] = frozenset()) -> None:
+    """Recompute the settings derived from others.
+
+    A base value that changes at runtime (``MAX_FILE_SIZE_MB``, say) has to move
+    the limits derived from it, or the process runs with limits that contradict
+    each other. Names in ``explicit`` were configured on their own and keep their
+    value.
+    """
+    for name, derive in DERIVED_CONFIG_NAMES.items():
+        if name in explicit:
+            continue
+        globals()[name] = derive()
+    globals()["IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS"] = _clamp_lease_renew(
+        IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS
+    )
+
+
+def apply_overrides(
+    values: dict[str, object],
+    *,
+    explicit: frozenset[str] = frozenset(),
+) -> None:
+    """Change settings after import. This is the only supported write path.
+
+    Callers pass the values they want applied plus the names that were
+    configured on their own; everything derived from the bases then follows.
+    Unknown names are rejected so a typo cannot invent a setting.
+    """
+    if not values:
+        return
+    unknown = sorted(name for name in values if name not in globals())
+    if unknown:
+        raise KeyError(f"Unknown settings: {', '.join(unknown)}")
+    globals().update(values)
+    recompute_derived(explicit)

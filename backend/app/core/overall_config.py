@@ -1,3 +1,13 @@
+"""Overall Config: the env-backed registry and how stored overrides reach the app.
+
+`apply_rows_to_config` decides which names a call may write (it skips build-only
+names, runtime paths, keys owned by `/api/settings`, and restart-required names
+unless the startup path asked for them) and hands the result to
+`settings.apply_overrides`, which is the only supported mutation entry point.
+Names that are derived in `settings` are never given the registry's literal
+default: they follow the base setting they come from.
+"""
+
 import os
 import re
 from dataclasses import dataclass
@@ -90,7 +100,7 @@ OVERALL_CONFIG_REGISTRY: tuple[OverallConfigSpec, ...] = (
     _spec("AI_ASSISTANT_ENABLED", "bool", "true", "AI Assistant", "Enable AI Assistant tools.", exposed_in_settings=True),
     _spec("AI_ASSISTANT_VISION_MODEL", "string", "gpt-4o-mini", "AI Assistant", "Assistant vision model.", exposed_in_settings=True),
     _spec("AI_ASSISTANT_MAX_RESPONSE_MB", "int", "8", "AI Assistant", "Max assistant response body size.", min_value=1),
-    _spec("AI_ASSISTANT_MAX_CONCURRENCY", "int", "2", "AI Assistant", "Global assistant upstream request concurrency.", min_value=1),
+    _spec("AI_ASSISTANT_MAX_CONCURRENCY", "int", str(config.AI_ASSISTANT_MAX_CONCURRENCY), "AI Assistant", "Global assistant upstream request concurrency.", min_value=1),
     _spec("AI_ASSISTANT_BATCH_MAX_IMAGES", "int", "200", "AI Assistant", "Max images per gallery AI batch analysis job.", min_value=1),
     _spec("AI_ASSISTANT_IMAGE_MAX_SIDE", "int", "1024", "AI Assistant", "Max assistant vision preview side.", min_value=256),
     _spec("AI_ASSISTANT_IMAGE_MAX_BYTES", "int", "1048576", "AI Assistant", "Max assistant vision preview bytes.", min_value=65536),
@@ -129,7 +139,7 @@ OVERALL_CONFIG_REGISTRY: tuple[OverallConfigSpec, ...] = (
     _spec("MAX_JSON_BODY_MB", "int", "1", "Limits", "Max JSON request body size.", min_value=1),
     _spec("MAX_UPSTREAM_JSON_MB", "int", "128", "Limits", "Max upstream JSON/SSE response size.", min_value=1),
     _spec("MAX_IMAGE_PIXELS", "int", "100000000", "Limits", "Max decoded image pixels.", min_value=1),
-    _spec("IMPORT_ARCHIVE_MAX_MB", "int", "1000", "Limits", "Max uploaded import ZIP size.", min_value=1),
+    _spec("IMPORT_ARCHIVE_MAX_MB", "int", str(config.IMPORT_ARCHIVE_MAX_MB), "Limits", "Max uploaded import ZIP size.", min_value=1),
     _spec("IMPORT_MAX_FILES", "int", "500", "Limits", "Max files inside one import archive.", min_value=1),
     _spec("IMPORT_MAX_UNCOMPRESSED_MB", "int", "1024", "Limits", "Max uncompressed import archive size.", min_value=1),
     _spec("IMPORT_MAX_METADATA_BYTES", "int", "2097152", "Limits", "Max import metadata.json bytes.", min_value=1),
@@ -139,9 +149,12 @@ OVERALL_CONFIG_REGISTRY: tuple[OverallConfigSpec, ...] = (
     _spec("MAX_ACTIVE_GENERATE_JOBS", "int", "2", "Job Queue / SSE", "Concurrent generation/edit jobs.", restart_required=True, min_value=1),
     _spec("MAX_QUEUED_GENERATE_JOBS", "int", "20", "Job Queue / SSE", "Additional queued jobs before 429.", restart_required=True, min_value=0),
     _spec("IMAGE_JOB_UNIT_LEASE_SECONDS", "int", "120", "Job Queue / SSE", "SQLite claim lease for a running image unit before another worker may retry it; crash-detection latency, not the max upstream duration.", restart_required=True, min_value=30),
-    _spec("IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS", "float", "40", "Job Queue / SSE", "How often the executing worker renews an image unit lease; must be below lease/2.", restart_required=True, min_value=5),
+    _spec(
+        "IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS",
+        "float",
+        str(config.IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS), "Job Queue / SSE", "How often the executing worker renews an image unit lease; must be below lease/2.", restart_required=True, min_value=5),
     _spec("IMAGE_JOB_UNIT_MAX_ATTEMPTS", "int", "2", "Job Queue / SSE", "Max claim attempts for one image unit before an expired lease is marked interrupted.", restart_required=True, min_value=1),
-    _spec("MAX_PENDING_EDIT_SOURCE_MB", "int", "200", "Job Queue / SSE", "SQLite global pending edit source byte cap.", min_value=0),
+    _spec("MAX_PENDING_EDIT_SOURCE_MB", "int", str(config.MAX_PENDING_EDIT_SOURCE_MB), "Job Queue / SSE", "SQLite global pending edit source byte cap.", min_value=0),
     _spec("MAX_SSE_SUBSCRIBERS_GLOBAL", "int", "200", "Job Queue / SSE", "Global active SSE subscriber cap across Granian workers via SQLite slot leases.", min_value=1),
     _spec("MAX_SSE_SUBSCRIBERS_PER_IP", "int", "10", "Job Queue / SSE", "Per-IP active SSE subscriber cap.", min_value=1),
     _spec("SSE_CONNECTION_TTL_SECONDS", "int", "3600", "Job Queue / SSE", "Maximum SSE connection lifetime.", min_value=60),
@@ -299,6 +312,15 @@ def apply_rows_to_config(
     include_restart_required: bool = False,
     overrides_only: bool = False,
 ) -> None:
+    """Apply stored overrides and env values to the running settings.
+
+    Skips build-only names, runtime paths, keys owned by /api/settings, and
+    restart-required names unless the caller is the startup path. Names whose
+    effective source is just the default are left to ``settings``: for a derived
+    name the registry literal is not the value the process uses.
+    """
+    applied: dict[str, object] = {}
+    explicit: set[str] = set()
     secret_cache_dirty = False
     for spec in OVERALL_CONFIG_REGISTRY:
         if spec.build_only:
@@ -312,10 +334,18 @@ def apply_rows_to_config(
         row = rows.get(spec.name)
         if overrides_only and (not row or row.get("override_value") is None):
             continue
-        value, _source = effective_value(spec, row)
-        setattr(config, spec.name, typed_value(spec, value))
+        value, source = effective_value(spec, row)
+        if source == "default" and spec.name in config.DERIVED_CONFIG_NAMES:
+            # The derived value is owned by settings.recompute_derived; the
+            # registry default would contradict the base setting it comes from.
+            continue
+        applied[spec.name] = typed_value(spec, value)
+        if source in {"env", "override"}:
+            explicit.add(spec.name)
         if spec.secret or spec.name in {"ACCESS_KEY", "WEBHOOK_SIGNING_SECRET"}:
             secret_cache_dirty = True
+
+    config.apply_overrides(applied, explicit=frozenset(explicit))
 
     if secret_cache_dirty:
         try:
@@ -332,19 +362,6 @@ def apply_rows_to_config(
     except Exception:
         pass
 
-    # Cross-field guard: the image-unit lease renewal cadence must stay below
-    # half the lease so a running unit can always renew before expiry.
-    try:
-        lease = float(getattr(config, "IMAGE_JOB_UNIT_LEASE_SECONDS", 120))
-        renew = float(getattr(config, "IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS", 0) or 0)
-        if lease > 0 and (renew <= 0 or renew >= lease / 2):
-            setattr(
-                config,
-                "IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS",
-                max(1.0, lease / 4),
-            )
-    except (TypeError, ValueError):
-        pass
 
 
 def validate_effective_security(rows: dict[str, dict[str, Any]]) -> None:
