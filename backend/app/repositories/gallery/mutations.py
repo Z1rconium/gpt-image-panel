@@ -3,7 +3,7 @@
 from ..db import *
 from ..thumbnail_jobs import *
 from .queries import *
-from ...services.blocking import run_db_operation, run_image_operation
+from ...runtime.blocking import run_db_operation, run_image_operation
 
 
 def _insert_gallery_entries_on_conn(

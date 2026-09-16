@@ -21,7 +21,7 @@ from .job_executor import (
     run_claimed_image_unit,
 )
 from .job_queue import get_image_unit_dispatcher_kick_event
-from .blocking import run_db_operation
+from ..runtime.blocking import run_db_operation
 
 logger = logging.getLogger(__name__)
 

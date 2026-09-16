@@ -341,7 +341,7 @@ async def lifespan(app: FastAPI):
         if awaitables:
             await asyncio.gather(*awaitables, return_exceptions=True)
         from ..integrations.session_pool import close_pool
-        from ..services.blocking import close_blocking_executors
+        from ..runtime.blocking import close_blocking_executors
         await close_pool()
         await close_blocking_executors()
         close_database_connections()

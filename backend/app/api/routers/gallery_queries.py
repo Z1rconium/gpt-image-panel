@@ -34,7 +34,7 @@ from ...core import security as auth
 from ...core import settings as config
 from ...core.observability import metrics
 from ...core.utils import utc_now
-from ...services.blocking import run_db_operation
+from ...runtime.blocking import run_db_operation
 from ...repositories.coordination import (
     acquire_background_lease,
     claim_next_gallery_job,

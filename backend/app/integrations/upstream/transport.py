@@ -28,7 +28,7 @@ from ...repositories.image_files import (
 )
 from ...schemas.gallery import GalleryEntry
 from ...schemas.generation import EditRequest, GenerateRequest
-from ...services.blocking import run_file_operation, run_image_operation
+from ...runtime.blocking import run_file_operation, run_image_operation
 from ..session_pool import TIMEOUT_PROBE, TIMEOUT_UPSTREAM, get_pool
 
 ProgressCallback = Callable[[str, str], None]

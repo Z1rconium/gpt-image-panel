@@ -14,7 +14,7 @@ from backend.app.repositories import db as db_repo
 from backend.app.repositories import image_jobs as image_jobs_repo
 from backend.app.repositories.gallery import mutations as gallery_mutations
 from backend.app.repositories.gallery import queries as gallery_queries
-from backend.app.services import blocking
+from backend.app.runtime import blocking
 
 
 pytestmark = pytest.mark.skipif(

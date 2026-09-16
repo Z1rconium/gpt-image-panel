@@ -8,7 +8,7 @@ from backend.tests.support.contract import *  # noqa: F403
 
 from backend.app.core.utils import utc_now
 from backend.app.repositories import db as db_repo
-from backend.app.services import blocking
+from backend.app.runtime import blocking
 from backend.app.services.claim_loop import run_claim_loop
 
 

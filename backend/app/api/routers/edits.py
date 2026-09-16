@@ -26,7 +26,7 @@ from ...repositories.image_files import (
     validate_image_file,
 )
 from ...schemas.generation import EditRequest, GenerateJobResponse
-from ...services.blocking import run_db_operation, run_image_operation
+from ...runtime.blocking import run_db_operation, run_image_operation
 
 
 router = APIRouter()

@@ -26,7 +26,7 @@ from ...repositories.image_files import (
     generate_image_id,
     validate_image_header_bytes,
 )
-from ...services.blocking import run_image_operation, upstream_memory_lease
+from ...runtime.blocking import run_image_operation, upstream_memory_lease
 from ...schemas.gallery import GalleryEntry
 from ...schemas.generation import EditRequest, GenerateRequest
 from ..session_pool import TIMEOUT_PROBE, TIMEOUT_UPSTREAM, get_pool

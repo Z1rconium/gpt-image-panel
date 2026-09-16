@@ -44,13 +44,10 @@ ALLOWED_VIOLATIONS: frozenset[str] = frozenset(
         "backend/app/integrations/upstream/errors.py:23 -> backend.app.repositories.image_files",
         "backend/app/integrations/upstream/generation.py:23 -> backend.app.repositories.gallery.mutations",
         "backend/app/integrations/upstream/generation.py:24 -> backend.app.repositories.image_files",
-        "backend/app/integrations/upstream/generation.py:29 -> backend.app.services.blocking",
         "backend/app/integrations/upstream/payloads.py:21 -> backend.app.repositories.gallery.mutations",
         "backend/app/integrations/upstream/payloads.py:22 -> backend.app.repositories.image_files",
         "backend/app/integrations/upstream/transport.py:23 -> backend.app.repositories.gallery.mutations",
         "backend/app/integrations/upstream/transport.py:24 -> backend.app.repositories.image_files",
-        "backend/app/integrations/upstream/transport.py:31 -> backend.app.services.blocking",
-        "backend/app/repositories/gallery/mutations.py:6 -> backend.app.services.blocking",
         "backend/app/repositories/image_jobs.py:6 -> backend.app.services",
         "backend/app/services/assistant_batch.py:15 -> backend.app.api",
         "backend/app/services/assistant_batch.py:17 -> backend.app.api.uploads",
@@ -68,15 +65,17 @@ ALLOWED_VIOLATIONS: frozenset[str] = frozenset(
         "backend/app/services/job_executor.py:10 -> backend.app.api.presets",
         "backend/app/services/job_queue.py:13 -> backend.app.api.presets",
     }
-)# Project imports inside function bodies. Some are deliberate cycle breaks
-# that Python requires; new entries need a documented reason to be added.
+)
+
+# Project imports inside function bodies. Some are deliberate cycle breaks that
+# Python requires; new entries need a documented reason to be added.
 ALLOWED_DEFERRED_IMPORTS: frozenset[str] = frozenset(
     {
         "backend/app/api/app_state.py:205 -> backend.app.services",
         "backend/app/api/app_state.py:206 -> backend.app.services",
         "backend/app/api/app_state.py:235 -> backend.app.services",
         "backend/app/api/app_state.py:343 -> backend.app.integrations.session_pool",
-        "backend/app/api/app_state.py:344 -> backend.app.services.blocking",
+        "backend/app/api/app_state.py:344 -> backend.app.runtime.blocking",
         "backend/app/api/app_state.py:85 -> backend.app.api",
         "backend/app/api/app_state.py:86 -> backend.app.services",
         "backend/app/api/presets.py:46 -> backend.app.core.redaction",
@@ -95,12 +94,14 @@ ALLOWED_DEFERRED_IMPORTS: frozenset[str] = frozenset(
         "backend/app/core/validators.py:500 -> backend.app.core.secrets",
         "backend/app/repositories/db.py:2174 -> backend.app.core.overall_config",
         "backend/app/repositories/db.py:2242 -> backend.app.core.overall_config",
-        "backend/app/services/blocking.py:140 -> backend.app.repositories",
-        "backend/app/services/blocking.py:183 -> backend.app.repositories",
-        "backend/app/services/blocking.py:306 -> backend.app.repositories",
+        "backend/app/runtime/blocking.py:145 -> backend.app.repositories",
+        "backend/app/runtime/blocking.py:188 -> backend.app.repositories",
+        "backend/app/runtime/blocking.py:311 -> backend.app.repositories",
         "backend/app/services/runtime_metrics.py:71 -> backend.app.services.job_events",
     }
 )
+
+
 def _module_name_for(path: Path) -> str:
     relative = path.relative_to(APP_DIR).with_suffix("")
     parts = list(relative.parts)

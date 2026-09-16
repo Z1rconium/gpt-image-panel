@@ -19,7 +19,7 @@ from backend.app.runtime import state as runtime_state
 from backend.app.repositories.coordination import mark_worker_heartbeat
 from backend.app.repositories.image_files import validate_image_bytes
 from backend.app.repositories import thumbnail_jobs as thumbnail_jobs_repo
-from backend.app.services.blocking import (
+from backend.app.runtime.blocking import (
     close_blocking_executors,
     run_db_operation,
     run_db_operation_in_current_thread,

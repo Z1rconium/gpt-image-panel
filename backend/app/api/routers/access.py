@@ -11,7 +11,7 @@ from ...repositories.coordination import (
     record_access_failure,
 )
 from ...schemas.access import AccessRequest, AccessStatusResponse
-from ...services.blocking import run_db_operation
+from ...runtime.blocking import run_db_operation
 
 
 router = APIRouter()

@@ -13,7 +13,7 @@ from typing import Any
 
 from fastapi import HTTPException, UploadFile
 from zipstream import ZipStream
-from .blocking import run_file_operation
+from ..runtime.blocking import run_file_operation
 
 from ..core import settings as config
 from ..core.utils import utc_now

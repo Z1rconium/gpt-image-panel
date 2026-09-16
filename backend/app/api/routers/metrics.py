@@ -6,7 +6,7 @@ from ...runtime.state import state
 from ...services.job_queue import snapshot_queue_metrics
 from ...core import settings as config
 from ...core.observability import build_metrics_snapshot, format_prometheus_metrics
-from ...services.blocking import executor_gauges
+from ...runtime.blocking import executor_gauges
 
 
 router = APIRouter()

@@ -29,7 +29,7 @@ from .gallery_archive_shared import (
     GalleryZipFileResult,
     import_archive_max_bytes,
 )
-from .blocking import run_db_operation, run_db_operation_in_current_thread
+from ..runtime.blocking import run_db_operation, run_db_operation_in_current_thread
 from .job_events import publish_queue, serialize_sse_event
 from .job_queue import kick_thumbnail_dispatcher
 from .poll_backoff import next_poll_delay

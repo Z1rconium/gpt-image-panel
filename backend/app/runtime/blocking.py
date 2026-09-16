@@ -1,4 +1,9 @@
-"""Bounded executors and memory admission for blocking backend work."""
+"""Bounded executors and memory admission for blocking backend work.
+
+repositories.gallery.mutations imports run_db_operation from here at module
+level, so the repository helpers this module needs for connection scoping stay
+function-local imports to keep the pair importable in either order.
+"""
 
 import asyncio
 import contextvars

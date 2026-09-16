@@ -17,7 +17,7 @@ from ...services.job_events import (
     resolve_generate_job_view,
     serialize_sse_event,
 )
-from ...services.blocking import run_db_operation
+from ...runtime.blocking import run_db_operation
 from ...services.job_queue import (
     cleanup_parent_edit_sources,
     queue_image_job,

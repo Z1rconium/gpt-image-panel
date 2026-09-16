@@ -38,7 +38,7 @@ from ..repositories.image_jobs import (
 from ..repositories.gallery.queries import image_url_for_filename
 from ..schemas.gallery import GalleryEntry
 from ..schemas.generation import EditRequest, GenerateJobResponse, GenerateRequest
-from .blocking import run_db_operation
+from ..runtime.blocking import run_db_operation
 from .job_events import (
     get_job_subscribers,
     get_jobs_subscribers,

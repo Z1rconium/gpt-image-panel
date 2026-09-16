@@ -40,7 +40,7 @@ from .job_events import (
     publish_generate_job_row_async,
     store_generate_job_async,
 )
-from .blocking import run_db_operation
+from ..runtime.blocking import run_db_operation
 from .job_queue import (
     cleanup_parent_edit_sources,
     edit_source_from_payload,
