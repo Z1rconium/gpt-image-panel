@@ -82,7 +82,7 @@ def cleanup_stale_gallery_export_files():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    from . import presets
+    from ..services import presets
     from ..services import job_events, job_scheduler
 
     init_defaults()

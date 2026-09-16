@@ -4,7 +4,7 @@ import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
-from backend.app.api import presets
+from backend.app.services import presets
 from backend.app.api.middleware import register_exception_handlers
 from backend.app.core import secrets
 from backend.app.core import settings as config

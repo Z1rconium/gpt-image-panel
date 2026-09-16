@@ -39,12 +39,6 @@ ALLOWED_VIOLATIONS: frozenset[str] = frozenset(
         "backend/app/integrations/upstream/generation.py:23 -> backend.app.repositories.gallery.mutations",
         "backend/app/integrations/upstream/payloads.py:21 -> backend.app.repositories.gallery.mutations",
         "backend/app/integrations/upstream/transport.py:23 -> backend.app.repositories.gallery.mutations",
-        "backend/app/services/assistant_batch.py:15 -> backend.app.api",
-        "backend/app/services/assistant_runtime.py:16 -> backend.app.api",
-        "backend/app/services/assistant_text.py:16 -> backend.app.api",
-        "backend/app/services/assistant_vision.py:19 -> backend.app.api",
-        "backend/app/services/job_executor.py:10 -> backend.app.api.presets",
-        "backend/app/services/job_queue.py:13 -> backend.app.api.presets",
     }
 )
 
@@ -57,13 +51,12 @@ ALLOWED_DEFERRED_IMPORTS: frozenset[str] = frozenset(
         "backend/app/api/app_state.py:235 -> backend.app.services",
         "backend/app/api/app_state.py:343 -> backend.app.integrations.session_pool",
         "backend/app/api/app_state.py:344 -> backend.app.runtime.blocking",
-        "backend/app/api/app_state.py:85 -> backend.app.api",
+        "backend/app/api/app_state.py:85 -> backend.app.services",
         "backend/app/api/app_state.py:86 -> backend.app.services",
-        "backend/app/api/presets.py:46 -> backend.app.core.redaction",
-        "backend/app/api/routers/settings.py:322 -> backend.app.api.presets",
-        "backend/app/api/routers/settings.py:331 -> backend.app.api.presets",
-        "backend/app/api/routers/settings.py:336 -> backend.app.api.presets",
-        "backend/app/api/routers/settings.py:368 -> backend.app.api.presets",
+        "backend/app/api/routers/settings.py:322 -> backend.app.services.presets",
+        "backend/app/api/routers/settings.py:331 -> backend.app.services.presets",
+        "backend/app/api/routers/settings.py:336 -> backend.app.services.presets",
+        "backend/app/api/routers/settings.py:368 -> backend.app.services.presets",
         "backend/app/core/overall_config.py:322 -> backend.app.core.secrets",
         "backend/app/core/overall_config.py:329 -> backend.app.core.security",
         "backend/app/core/redaction.py:63 -> backend.app.core.secrets",
@@ -78,6 +71,7 @@ ALLOWED_DEFERRED_IMPORTS: frozenset[str] = frozenset(
         "backend/app/runtime/blocking.py:145 -> backend.app.repositories",
         "backend/app/runtime/blocking.py:188 -> backend.app.repositories",
         "backend/app/runtime/blocking.py:311 -> backend.app.repositories",
+        "backend/app/services/presets.py:46 -> backend.app.core.redaction",
         "backend/app/services/runtime_metrics.py:71 -> backend.app.services.job_events",
     }
 )

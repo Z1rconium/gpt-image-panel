@@ -5,7 +5,7 @@ import uuid
 from fastapi import APIRouter, Body, HTTPException
 
 from ...runtime.state import state
-from ..presets import (
+from ...services.presets import (
     apply_api_preset,
     apply_ai_assistant_settings,
     apply_r2_backup_settings,
@@ -319,7 +319,7 @@ async def update_settings(req: SettingsRequest):
     finally:
         end_api_settings_write()
     if req.prompt_optimizer is not None:
-        from ..presets import (
+        from ...services.presets import (
             apply_prompt_optimizer_settings,
             get_prompt_optimizer_settings,
         )
@@ -328,12 +328,12 @@ async def update_settings(req: SettingsRequest):
         _validate_optimizer_secret_binding(updated_optimizer)
         await asyncio.to_thread(save_prompt_optimizer_settings, updated_optimizer)
     if req.ai_assistant is not None:
-        from ..presets import get_ai_assistant_settings
+        from ...services.presets import get_ai_assistant_settings
         current_assistant = get_ai_assistant_settings()
         updated_assistant = apply_ai_assistant_settings(current_assistant, req.ai_assistant)
         await asyncio.to_thread(save_ai_assistant_settings, updated_assistant)
     if req.r2_backup is not None:
-        from ..presets import get_r2_backup_settings
+        from ...services.presets import get_r2_backup_settings
         current_r2 = get_r2_backup_settings()
         updated_r2 = apply_r2_backup_settings(current_r2, req.r2_backup)
         if updated_r2.get("endpoint_url"):
@@ -365,7 +365,7 @@ async def get_settings():
 
 @router.post("/api/settings/r2/health", response_model=R2HealthResponse)
 async def check_r2_settings_health(req: R2BackupSettingsRequest):
-    from ..presets import get_r2_backup_settings
+    from ...services.presets import get_r2_backup_settings
 
     current = await asyncio.to_thread(get_r2_backup_settings)
     draft = apply_r2_backup_settings(current, req)

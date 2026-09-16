@@ -7,7 +7,7 @@ import time
 from datetime import datetime
 
 from ..runtime.state import state
-from ..api.presets import (
+from .presets import (
     get_effective_preset_api_key,
     get_exception_message,
     get_upstream_socks5_proxy,

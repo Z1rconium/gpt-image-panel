@@ -12,7 +12,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Body, File, Form, HTTPException, Request, UploadFile
 
-from ..api import presets
+from . import presets
 from ..runtime.state import state
 from .uploads import is_image_upload, resolve_upload_content_type
 from ..core import settings as config

@@ -10,7 +10,7 @@ from typing import Literal
 from fastapi import HTTPException
 
 from ..runtime.state import MAX_GENERATE_JOBS, state
-from ..api.presets import (
+from .presets import (
     get_active_preset,
     get_api_presets,
     get_effective_preset_api_key,
