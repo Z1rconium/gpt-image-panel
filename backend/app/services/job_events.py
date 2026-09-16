@@ -117,6 +117,42 @@ def publish_queue(queue: asyncio.Queue, event: dict):
             pass
 
 
+async def publish_job_edges(
+    *,
+    subscribers_by_job: dict[str, list[asyncio.Queue]],
+    edges: dict[str, str],
+    last_edges: dict[str, str],
+    read_event,
+) -> bool:
+    """Fan out one poll cycle of per-job edge changes.
+
+    A job with subscribers but no edge row is gone: its subscribers get a
+    ``_missing`` event so their streams can close. Changed rows ask
+    ``read_event`` for the payload to publish. Returns whether anything was
+    sent, which the callers use to reset their idle backoff.
+    """
+    changed = False
+    for job_id in set(subscribers_by_job) - set(edges):
+        for queue in subscribers_by_job[job_id]:
+            publish_queue(queue, {"event": "_missing", "data": None})
+        last_edges.pop(job_id, None)
+        changed = True
+
+    for job_id in (
+        job_id
+        for job_id, updated_at in edges.items()
+        if last_edges.get(job_id) != updated_at
+    ):
+        event = await read_event(job_id)
+        for queue in subscribers_by_job.get(job_id, []):
+            publish_queue(queue, event)
+        changed = True
+
+    last_edges.clear()
+    last_edges.update(edges)
+    return changed
+
+
 def publish_generate_job(
     job: dict,
     *,

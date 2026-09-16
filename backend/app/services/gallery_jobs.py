@@ -30,7 +30,7 @@ from .gallery_archive_shared import (
     import_archive_max_bytes,
 )
 from ..runtime.blocking import run_db_operation, run_db_operation_in_current_thread
-from .job_events import publish_queue, serialize_sse_event
+from .job_events import publish_job_edges, publish_queue, serialize_sse_event
 from .job_queue import kick_thumbnail_dispatcher
 from .poll_backoff import next_poll_delay
 from ..repositories.sse_limiter import sse_limiter
@@ -125,7 +125,7 @@ from ..integrations.nodeimage.client import (
     resolve_nodeimage_settings,
     upload_image_file,
 )
-from .claim_loop import run_claim_loop
+from .claim_loop import fail_open_precheck, run_claim_loop
 from .gallery_common import (
     BACKGROUND_TASK_ERROR_BACKOFF_INITIAL_SECONDS,
     BACKGROUND_TASK_ERROR_BACKOFF_MAX_SECONDS,
@@ -693,20 +693,10 @@ async def _poll_gallery_job_sse(kind: str) -> None:
                 set(subscribers_by_job),
             )
             metrics.increment(f"sse.poll_queries.gallery_{kind}")
-            changed = False
-            for job_id in set(subscribers_by_job) - set(current_edges):
-                for queue in subscribers_by_job[job_id]:
-                    publish_queue(queue, {"event": "_missing", "data": None})
-                last_edges.pop(job_id, None)
-                changed = True
 
-            for job_id in (
-                job_id
-                for job_id, updated_at in current_edges.items()
-                if last_edges.get(job_id) != updated_at
-            ):
+            async def read_event(job_id: str) -> dict:
                 job = await asyncio.to_thread(get_gallery_job, kind, job_id)
-                event = (
+                return (
                     {
                         "event": _gallery_job_event_name(kind),
                         "data": _gallery_job_payload(kind, job),
@@ -714,10 +704,13 @@ async def _poll_gallery_job_sse(kind: str) -> None:
                     if job
                     else {"event": "_missing", "data": None}
                 )
-                for queue in subscribers_by_job.get(job_id, []):
-                    publish_queue(queue, event)
-                changed = True
-            last_edges = current_edges
+
+            changed = await publish_job_edges(
+                subscribers_by_job=subscribers_by_job,
+                edges=current_edges,
+                last_edges=last_edges,
+                read_event=read_event,
+            )
 
             delay = next_poll_delay(
                 base_interval=GALLERY_JOB_DISPATCH_INTERVAL_SECONDS,
@@ -1955,15 +1948,11 @@ async def _run_gallery_job_dispatcher(kind: str, worker_id: str, running_limit: 
         await runner(job)
 
     async def has_claimable_gallery() -> bool:
-        try:
-            return await asyncio.to_thread(
-                has_claimable_gallery_job,
-                kind=kind,
-                now=utc_now(),
-            )
-        except Exception:
-            # Fail open: a broken precheck must never stall the dispatcher.
-            return True
+        return await asyncio.to_thread(
+            has_claimable_gallery_job,
+            kind=kind,
+            now=utc_now(),
+        )
 
     await run_claim_loop(
         claim_fn=claim_gallery_job,
@@ -1972,7 +1961,7 @@ async def _run_gallery_job_dispatcher(kind: str, worker_id: str, running_limit: 
         idle_interval=GALLERY_JOB_DISPATCH_INTERVAL_SECONDS,
         max_backoff=GALLERY_JOB_DISPATCH_MAX_IDLE_BACKOFF_SECONDS,
         claim_miss_fn=lambda: metrics.increment(f"gallery.{kind}.claim_miss"),
-        claim_precheck_fn=has_claimable_gallery,
+        claim_precheck_fn=fail_open_precheck(has_claimable_gallery),
         claim_precheck_metric=f"gallery.{kind}.claim_precheck_skipped",
         logger=logger,
         error_message=f"Gallery {kind} dispatcher error",

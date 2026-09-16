@@ -8,6 +8,7 @@ from fastapi.responses import StreamingResponse
 
 from ...runtime.state import state
 from ...services.job_events import (
+    publish_job_edges,
     get_cached_generate_job_previews,
     get_job_subscribers,
     get_jobs_subscribers,
@@ -109,31 +110,27 @@ async def _poll_generate_sse() -> None:
                     publish_queue(queue, event)
                 changed = True
 
-            for job_id in set(subscribers_by_job) - set(job_edges):
-                for queue in subscribers_by_job[job_id]:
-                    publish_queue(queue, {"event": "_missing", "data": None})
-                last_job_edges.pop(job_id, None)
-                changed = True
-
-            for job_id in (
-                job_id
-                for job_id, updated_at in job_edges.items()
-                if last_job_edges.get(job_id) != updated_at
-            ):
+            async def read_event(job_id: str) -> dict:
                 job = await run_db_operation(
                     get_persisted_generate_job,
                     job_id,
                     metric_name="poll_generate_job",
                 )
-                event = (
+                return (
                     {"event": "job", "data": job}
                     if job
                     else {"event": "_missing", "data": None}
                 )
-                for queue in subscribers_by_job.get(job_id, []):
-                    publish_queue(queue, event)
-                changed = True
-            last_job_edges = job_edges
+
+            changed = (
+                await publish_job_edges(
+                    subscribers_by_job=subscribers_by_job,
+                    edges=job_edges,
+                    last_edges=last_job_edges,
+                    read_event=read_event,
+                )
+                or changed
+            )
 
             base_interval = config.IMAGE_JOB_UNIT_POLL_INTERVAL_SECONDS
             delay = next_poll_delay(

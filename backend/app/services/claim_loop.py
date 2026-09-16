@@ -81,6 +81,25 @@ async def _wait_for_claim_loop_wakeup(
     return kicked
 
 
+def fail_open_precheck(
+    check: Callable[[], Awaitable[bool]],
+) -> Callable[[], Awaitable[bool]]:
+    """Wrap a claim precheck so a failure reports "possibly claimable".
+
+    A precheck exists to avoid taking a write lock when there is provably
+    nothing to claim, so a broken one must never stall the dispatcher: the
+    wrapper biases every error towards attempting the claim.
+    """
+
+    async def precheck() -> bool:
+        try:
+            return bool(await check())
+        except Exception:
+            return True
+
+    return precheck
+
+
 async def run_claim_loop(
     *,
     claim_fn: Callable[[], Awaitable[Any | None]],
