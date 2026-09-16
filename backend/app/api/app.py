@@ -74,7 +74,7 @@ async def lifespan(app: FastAPI):
     presets.load_api_settings()
     presets.validate_configured_secret_bindings()
     dispatchers.start()
-    job_events.reconcile_active_generate_jobs_from_storage()
+    await asyncio.to_thread(job_events.reconcile_active_generate_jobs_from_storage)
     try:
         yield
     finally:

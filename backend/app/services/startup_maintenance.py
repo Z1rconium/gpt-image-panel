@@ -93,7 +93,12 @@ async def _backfill_gallery_bytes(owner: str) -> None:
 
 
 async def run() -> asyncio.Task | None:
-    """Run the startup maintenance pass and return its background follow-up task."""
+    """Run the startup maintenance pass and return its background follow-up task.
+
+    Every step touches the filesystem or SQLite and the gallery sweep is
+    unbounded, so the whole pass is offloaded to keep the event loop responsive
+    for the workers that are already serving traffic.
+    """
     owner = f"startup-maintenance:{state.worker_id}"
     acquired = await asyncio.to_thread(
         acquire_background_lease,
@@ -103,21 +108,21 @@ async def run() -> asyncio.Task | None:
         completed_ttl_seconds=STARTUP_MAINTENANCE_COMPLETED_TTL_SECONDS,
     )
     if not acquired:
-        verify_storage_writable()
+        await asyncio.to_thread(verify_storage_writable)
         logger.info("Skipping startup maintenance; another worker already owns it")
         return None
 
     try:
-        cleanup_stale_edit_source_files()
-        cleanup_stale_gallery_export_files()
-        verify_storage_writable()
+        await asyncio.to_thread(cleanup_stale_edit_source_files)
+        await asyncio.to_thread(cleanup_stale_gallery_export_files)
+        await asyncio.to_thread(verify_storage_writable)
     except Exception:
-        release_background_lease(name="startup_maintenance", owner=owner)
+        await asyncio.to_thread(release_background_lease, name="startup_maintenance", owner=owner)
         raise
 
     try:
-        removed_gallery_entries = sync_gallery_with_image_files()
-        cleaned_auxiliary = cleanup_auxiliary_state()
+        removed_gallery_entries = await asyncio.to_thread(sync_gallery_with_image_files)
+        cleaned_auxiliary = await asyncio.to_thread(cleanup_auxiliary_state)
         if removed_gallery_entries:
             logger.info(
                 "Removed %s stale gallery entries for missing image files",
@@ -126,7 +131,7 @@ async def run() -> asyncio.Task | None:
         if any(cleaned_auxiliary.values()):
             logger.info("Cleaned stale auxiliary rows: %s", cleaned_auxiliary)
     except Exception:
-        release_background_lease(name="startup_maintenance", owner=owner)
+        await asyncio.to_thread(release_background_lease, name="startup_maintenance", owner=owner)
         raise
 
     return asyncio.create_task(_backfill_gallery_bytes(owner))
