@@ -22,7 +22,6 @@ from urllib.parse import quote
 
 from .gallery_job_payloads import _missing_gallery_ids
 
-from fastapi.responses import StreamingResponse
 
 from ..core.errors import RateLimitedError
 from ..runtime.state import state
@@ -34,6 +33,7 @@ from .gallery_archive_export import (
 from .gallery_archive_shared import GalleryZipFileResult
 from ..runtime.blocking import run_db_operation
 from ..core import settings as config
+from ..core.streaming import StreamedBody
 from ..core.utils import utc_now
 from ..repositories.coordination import (
     count_active_gallery_jobs,
@@ -67,7 +67,7 @@ async def _gallery_zip_response(
     direct_export_job: dict | None = None,
     requested_count: int = 0,
     prepare_before_response: bool = False,
-) -> StreamingResponse:
+) -> StreamedBody:
     cleanup_direct_job = False
     if direct_export_job:
         active_direct_job = direct_export_job
@@ -257,8 +257,8 @@ async def _gallery_zip_response(
             if cleanup_direct_job and direct_job_id:
                 _release_gallery_export_direct_slot(direct_job_id)
 
-    return StreamingResponse(
-        zip_chunks(),
+    return StreamedBody(
+        chunks=zip_chunks(),
         media_type="application/zip",
         headers=headers,
     )

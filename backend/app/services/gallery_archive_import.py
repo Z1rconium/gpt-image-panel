@@ -1,4 +1,5 @@
 import json
+from typing import BinaryIO
 import os
 import re
 import shutil
@@ -11,7 +12,6 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from fastapi import UploadFile
 from zipstream import ZipStream
 from ..runtime.blocking import run_file_operation
 
@@ -169,7 +169,7 @@ def count_import_gallery_entries(zip_path: Path) -> int:
 
 
 async def stream_upload_to_tempfile(
-    archive: UploadFile,
+    source: BinaryIO,
     max_bytes: int,
     *,
     directory: Path | None = None,
@@ -186,10 +186,10 @@ async def stream_upload_to_tempfile(
         total = 0
         chunk_size = 1024 * 1024
         try:
-            archive.file.seek(0)
+            source.seek(0)
             with os.fdopen(fd, "wb") as out:
                 while True:
-                    chunk = archive.file.read(chunk_size)
+                    chunk = source.read(chunk_size)
                     if not chunk:
                         break
                     total += len(chunk)

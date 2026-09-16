@@ -12,6 +12,8 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Body, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
+
+from ..responses import empty_response
 from starlette.background import BackgroundTask
 
 from ...services.gallery_archive_export import (
@@ -339,12 +341,13 @@ async def _image_file_response(filename: str, *, download: bool = False):
 
     media_type = image_content_type_for_filename(path.name)
     if config.ENABLE_NGINX_ACCEL_REDIRECT:
-        return _x_accel_response(
+        body = _x_accel_response(
             path,
             internal_prefix="/_protected/images/",
             media_type=media_type,
             download=download,
         )
+        return empty_response(body)
 
     if download:
         extension = path.suffix.lstrip(".") or "png"
@@ -382,11 +385,12 @@ async def serve_thumbnail(filename: str):
         )
 
     if config.ENABLE_NGINX_ACCEL_REDIRECT:
-        return _x_accel_response(
+        body = _x_accel_response(
             path,
             internal_prefix="/_protected/thumbs/",
             media_type=THUMBNAIL_CONTENT_TYPE,
         )
+        return empty_response(body)
 
     return FileResponse(
         path,

@@ -33,6 +33,7 @@ from ...repositories.sse_limiter import sse_limiter
 from ...core import security as auth
 from ...core import settings as config
 from ...core.observability import metrics
+from ..responses import streaming_response
 from ...core.utils import utc_now
 from ...repositories.coordination import (
     acquire_background_lease,
@@ -248,7 +249,7 @@ async def download_gallery_batch(req: GalleryBatchRequest):
         requested_count = await asyncio.to_thread(get_gallery_count, filters)
         if requested_count <= 0:
             raise HTTPException(status_code=404, detail="Gallery entries not found")
-        return await _gallery_zip_response(
+        body = await _gallery_zip_response(
             iter_gallery_export_rows(filters),
             "gpt-images-selected",
             extra_headers={"X-Gallery-Requested-Count": str(requested_count)},
@@ -256,6 +257,7 @@ async def download_gallery_batch(req: GalleryBatchRequest):
             requested_count=requested_count,
             prepare_before_response=True,
         )
+        return streaming_response(body)
 
     ids, entries, requested_count, missing_ids = await _resolve_gallery_batch_ids(req)
     if not entries:
@@ -274,7 +276,7 @@ async def download_gallery_batch(req: GalleryBatchRequest):
     )
     skipped_entries.extend(file_skipped_entries)
 
-    return await _gallery_zip_response(
+    body = await _gallery_zip_response(
         exportable_entries,
         "gpt-images-selected",
         skipped=skipped_entries,
@@ -286,6 +288,7 @@ async def download_gallery_batch(req: GalleryBatchRequest):
         reserve_export_slot=True,
         requested_count=requested_count,
     )
+    return streaming_response(body)
 
 
 @router.post(

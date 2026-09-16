@@ -30,6 +30,7 @@ from ...services.gallery_archive_shared import (
 from ...core import security as auth
 from ...core import settings as config
 from ...core.observability import metrics
+from ..responses import streaming_response
 from ...core.utils import utc_now
 from ...integrations.r2 import config as r2_config
 from ...repositories.coordination import (
@@ -214,7 +215,7 @@ async def get_gallery_export_job(job_id: str):
 
 @router.get("/api/gallery/export-jobs/{job_id}/events")
 async def stream_gallery_export_job(job_id: str, request: Request):
-    return await stream_gallery_job(
+    body = await stream_gallery_job(
         kind="export",
         job_id=job_id,
         client_ip=auth.get_client_ip(request),
@@ -224,11 +225,12 @@ async def stream_gallery_export_job(job_id: str, request: Request):
         payload_builder=_gallery_export_payload,
         not_found_detail="Gallery export job not found",
     )
+    return streaming_response(body)
 
 
 @router.get("/api/gallery/direct-export-jobs/{job_id}/events")
 async def stream_gallery_direct_export_job(job_id: str, request: Request):
-    return await stream_gallery_job(
+    body = await stream_gallery_job(
         kind="export_direct",
         job_id=job_id,
         client_ip=auth.get_client_ip(request),
@@ -238,6 +240,7 @@ async def stream_gallery_direct_export_job(job_id: str, request: Request):
         payload_builder=_gallery_export_payload,
         not_found_detail="Direct gallery export job not found",
     )
+    return streaming_response(body)
 
 
 def _cleanup_downloaded_gallery_export_job(job_id: str) -> None:
@@ -345,7 +348,7 @@ async def get_gallery_sync_job(job_id: str):
 
 @router.get("/api/gallery/sync-jobs/{job_id}/events")
 async def stream_gallery_sync_job(job_id: str, request: Request):
-    return await stream_gallery_job(
+    body = await stream_gallery_job(
         kind="sync",
         job_id=job_id,
         client_ip=auth.get_client_ip(request),
@@ -355,6 +358,7 @@ async def stream_gallery_sync_job(job_id: str, request: Request):
         payload_builder=_gallery_sync_payload,
         not_found_detail="Gallery sync job not found",
     )
+    return streaming_response(body)
 
 
 @router.get("/api/gallery/import-jobs/{job_id}", response_model=GalleryImportJobStatus)
@@ -367,7 +371,7 @@ async def get_gallery_import_job(job_id: str):
 
 @router.get("/api/gallery/import-jobs/{job_id}/events")
 async def stream_gallery_import_job(job_id: str, request: Request):
-    return await stream_gallery_job(
+    body = await stream_gallery_job(
         kind="import",
         job_id=job_id,
         client_ip=auth.get_client_ip(request),
@@ -377,6 +381,7 @@ async def stream_gallery_import_job(job_id: str, request: Request):
         payload_builder=_gallery_import_payload,
         not_found_detail="Gallery import job not found",
     )
+    return streaming_response(body)
 
 
 @router.get("/api/gallery/nodeimage-upload-jobs/{job_id}", response_model=NodeImageUploadJobStatus)
@@ -389,7 +394,7 @@ async def get_gallery_nodeimage_upload_job(job_id: str):
 
 @router.get("/api/gallery/nodeimage-upload-jobs/{job_id}/events")
 async def stream_gallery_nodeimage_upload_job(job_id: str, request: Request):
-    return await stream_gallery_job(
+    body = await stream_gallery_job(
         kind=NODEIMAGE_UPLOAD_JOB_KIND,
         job_id=job_id,
         client_ip=auth.get_client_ip(request),
@@ -399,6 +404,7 @@ async def stream_gallery_nodeimage_upload_job(job_id: str, request: Request):
         payload_builder=_nodeimage_upload_payload,
         not_found_detail="NodeImage upload job not found",
     )
+    return streaming_response(body)
 
 
 async def _cancel_gallery_nodeimage_upload_job(job_id: str):
@@ -468,13 +474,14 @@ async def download_all_images(export_job_id: str = Query(...)):
     )
     direct_job = updated_direct_job or direct_job
 
-    return await _gallery_zip_response(
+    body = await _gallery_zip_response(
         iter_gallery_export_rows(),
         "gpt-images",
         reserve_export_slot=False,
         direct_export_job=direct_job,
         requested_count=gallery_count,
     )
+    return streaming_response(body)
 
 
 @router.post("/api/import")
@@ -508,7 +515,7 @@ async def import_gallery_archive(
     temp_path: Path | None = None
     try:
         temp_path = await stream_upload_to_tempfile(
-            archive,
+            archive.file,
             reservation_bytes,
             directory=import_dir,
         )

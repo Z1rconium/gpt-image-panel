@@ -11,7 +11,6 @@ picked up by polling each job's updated_at edge (see job_events)."""
 import asyncio
 import time
 
-from fastapi.responses import StreamingResponse
 
 from ..core.errors import (
     NotFoundError,
@@ -23,6 +22,7 @@ from .poll_backoff import next_poll_delay
 from ..repositories.sse_limiter import sse_limiter
 from ..core import security as auth
 from ..core import settings as config
+from ..core.streaming import StreamedBody
 from ..core.observability import metrics
 from ..repositories.coordination import (
     get_gallery_job,
@@ -223,8 +223,8 @@ async def stream_gallery_job(
                 _get_gallery_job_subscribers(kind).pop(job_id, None)
             await sse_limiter.release(sse_lease)
 
-    return StreamingResponse(
-        event_stream(),
+    return StreamedBody(
+        chunks=event_stream(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": PRIVATE_GALLERY_CACHE_CONTROL,

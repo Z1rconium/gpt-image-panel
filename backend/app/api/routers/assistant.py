@@ -4,6 +4,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Body, File, Form, Request, UploadFile
 
+from ..responses import streaming_response
 from ..uploads import read_image_upload, resolve_upload_content_type
 from ...core import security as auth
 from ...core.image_models import MAX_PROMPT_CHARS
@@ -82,8 +83,9 @@ async def assistant_optimize_image_prompt(
 
 @router.get("/api/assistant/gallery/batch/analyze/{job_id}/events")
 async def stream_assistant_batch_analyze_job(job_id: str, request: Request):
-    return await assistant_batch.stream_batch_analyze_job(
+    body = await assistant_batch.stream_batch_analyze_job(
         job_id,
         client_ip=auth.get_client_ip(request),
         is_disconnected=request.is_disconnected,
     )
+    return streaming_response(body)

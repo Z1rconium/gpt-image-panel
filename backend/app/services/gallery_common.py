@@ -10,9 +10,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote
 
-from fastapi import APIRouter, Body, File, Query, Request, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
-from starlette.background import BackgroundTask
+from ..core.streaming import EmptyResponse
 
 from ..core.errors import (
     NotFoundError,
@@ -257,7 +255,7 @@ def _x_accel_response(
     internal_prefix: str,
     media_type: str,
     download: bool = False,
-) -> Response:
+) -> EmptyResponse:
     headers = {
         "X-Accel-Redirect": f"{internal_prefix}{quote(path.name, safe='')}",
         "Cache-Control": IMMUTABLE_GALLERY_CACHE_CONTROL,
@@ -266,7 +264,7 @@ def _x_accel_response(
         extension = path.suffix.lstrip(".") or "png"
         filename = f"gpt-image-{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.{extension}"
         headers["Content-Disposition"] = f'attachment; filename="{filename}"'
-    return Response(status_code=200, media_type=media_type, headers=headers)
+    return EmptyResponse(status_code=200, media_type=media_type, headers=headers)
 
 
 def _resolve_batch_download_entries(
