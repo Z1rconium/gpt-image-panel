@@ -13,18 +13,15 @@ from ...services.job_queue import (
     build_edit_request_from_form,
     queue_edit_job,
 )
-from ..uploads import (
+from ...services.uploads import (
     is_image_upload,
     resolve_upload_content_type,
     validate_upload_image_bytes,
 )
 from ...core import settings as config
 from ...repositories.gallery.queries import get_gallery_entry
-from ...repositories.image_files import (
-    image_content_type_for_filename,
-    safe_image_path,
-    validate_image_file,
-)
+from ...core.media import image_content_type_for_filename, safe_image_path
+from ...repositories.image_files import validate_image_file
 from ...schemas.generation import EditRequest, GenerateJobResponse
 from ...runtime.blocking import run_db_operation, run_image_operation
 

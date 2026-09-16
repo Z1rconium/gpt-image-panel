@@ -37,27 +37,29 @@ from ..core.validators import (
 )
 from ..schemas.gallery import GalleryEntry, GalleryFilterOptions
 from ..schemas.snippets import PromptSnippet
-from .image_files import (
+from ..core.media import (
     IMAGE_CONTENT_TYPE_FORMATS,
     IMAGE_EXTENSION_FORMATS,
     IMAGE_FILE_EXTENSIONS,
     IMAGE_FORMAT_CONTENT_TYPES,
     THUMBNAIL_CONTENT_TYPE,
     THUMBNAIL_EXTENSION,
-    delete_image_from_disk as _delete_image_unlocked,
     detect_image_format,
     generate_image_id,
     get_image_dimensions,
     image_dimension_metadata as _image_dimension_metadata,
-    promote_image_temp as _promote_image_temp_unlocked,
     safe_image_path,
     safe_thumbnail_path,
+    validate_image_header_bytes,
+    validate_image_bytes,
+)
+from .image_files import (
+    delete_image_from_disk as _delete_image_unlocked,
+    promote_image_temp as _promote_image_temp_unlocked,
     save_image_to_temp as _save_image_temp_unlocked,
     save_image_to_temp_with_metadata as _save_image_temp_with_metadata_unlocked,
     scan_image_files as _scan_image_files,
     validate_image_file,
-    validate_image_header_bytes,
-    validate_image_bytes,
 )
 from .thumbnails import (
     create_thumbnail_temp as _create_thumbnail_temp_unlocked,

@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 
 from ..core import settings as config
 from ..core.observability import metrics
-from ..repositories.coordination import (
+from .coordination import (
     acquire_sse_slot,
     count_active_sse_slots,
     refresh_sse_slot,

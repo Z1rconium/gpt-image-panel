@@ -30,7 +30,7 @@ from .gallery_archive_shared import (
     import_archive_max_bytes,
 )
 from .job_events import publish_queue, serialize_sse_event
-from ..api.sse_limiter import sse_limiter
+from ..repositories.sse_limiter import sse_limiter
 from ..core import security as auth
 from ..core import settings as config
 from ..core.observability import metrics
@@ -77,7 +77,7 @@ from ..repositories.gallery.sync_state import (
     iter_gallery_r2_sync_rows,
     mark_gallery_r2_sync_state,
 )
-from ..repositories.image_files import (
+from ..core.media import (
     THUMBNAIL_CONTENT_TYPE,
     safe_image_path,
     safe_thumbnail_path,

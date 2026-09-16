@@ -49,7 +49,7 @@ from backend.app.integrations.upstream.generation import (
 )
 from backend.app.repositories import coordination as coordination_repo
 from backend.app.repositories import db as db_repo
-from backend.app.repositories import image_files
+from backend.app.core import media
 from backend.app.repositories import image_jobs as image_jobs_repo
 from backend.app.repositories import settings as settings_repo
 from backend.app.repositories import thumbnail_jobs as thumbnail_jobs_repo
@@ -341,7 +341,7 @@ def _fake_gallery_entry(image_id: str, prompt: str, size: str, filename: str):
 
 
 async def _add_generated_gallery_entry(payload, api_path, api_preset_name):
-    image_id = image_files.generate_image_id()
+    image_id = media.generate_image_id()
     filename = f"{image_id}.png"
     return await gallery_mutations.add_to_gallery_async(
         image_bytes=PNG_BYTES,
@@ -559,7 +559,7 @@ def patch_upstream(monkeypatch):
             progress("saving_image_file", "Saving image file and gallery metadata")
         entries = []
         for _index in range(payload.n):
-            image_id = image_files.generate_image_id()
+            image_id = media.generate_image_id()
             filename = f"{image_id}.png"
             entry = await gallery_mutations.add_to_gallery_async(
                 image_bytes=PNG_BYTES,
@@ -607,7 +607,7 @@ def patch_upstream(monkeypatch):
             progress("saving_images", "Saving edited images")
         entries = []
         for _index in range(payload.n):
-            image_id = image_files.generate_image_id()
+            image_id = media.generate_image_id()
             filename = f"{image_id}.png"
             entry = await gallery_mutations.add_to_gallery_async(
                 image_bytes=PNG_BYTES,

@@ -2088,7 +2088,7 @@ def test_socks5_proxy_only_flows_to_generation_and_edit(client, monkeypatch):
         socks5_proxy=None,
     ):
         seen["generation_proxy"] = socks5_proxy or ""
-        image_id = image_files.generate_image_id()
+        image_id = media.generate_image_id()
         filename = f"{image_id}.png"
         entry = await gallery_mutations.add_to_gallery_async(
             image_bytes=PNG_BYTES,
@@ -2112,7 +2112,7 @@ def test_socks5_proxy_only_flows_to_generation_and_edit(client, monkeypatch):
         assert len(image_sources) == 1
         assert image_sources[0].temp_path.exists()
         seen["edit_proxy"] = socks5_proxy or ""
-        image_id = image_files.generate_image_id()
+        image_id = media.generate_image_id()
         filename = f"{image_id}.png"
         entry = await gallery_mutations.add_to_gallery_async(
             image_bytes=PNG_BYTES,
@@ -2183,7 +2183,7 @@ def test_preset_health_and_env_api_key_resolution(client, monkeypatch):
         socks5_proxy=None,
     ):
         seen["generation_key"] = api_key
-        image_id = image_files.generate_image_id()
+        image_id = media.generate_image_id()
         filename = f"{image_id}.png"
         entry = await gallery_mutations.add_to_gallery_async(
             image_bytes=PNG_BYTES,

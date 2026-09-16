@@ -19,7 +19,7 @@ from ..core.api_paths import (
     RESPONSES_API_PATH,
     build_upstream_url,
 )
-from ..repositories.image_files import configure_pillow_image_limits, validate_image_header_bytes
+from ..core.media import configure_pillow_image_limits, validate_image_header_bytes
 from .session_pool import TIMEOUT_PROMPT_OPTIMIZER, get_pool
 from .upstream.errors import UpstreamApiError
 from .upstream.transport import classify_probe_status, read_limited_text_response

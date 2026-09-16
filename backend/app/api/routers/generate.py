@@ -24,7 +24,7 @@ from ...services.job_queue import (
     trim_generate_jobs,
 )
 from ...services.poll_backoff import next_poll_delay
-from ..sse_limiter import sse_limiter
+from ...repositories.sse_limiter import sse_limiter
 from ...core import security as auth
 from ...core import settings as config
 from ...core.api_paths import normalize_api_path

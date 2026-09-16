@@ -29,7 +29,7 @@ from ..runtime.state import (
     state,
     utc_lease_expires_at,
 )
-from ..services.image_cost import configured_model_count
+from ..core.image_cost import configured_model_count
 
 
 logger = logging.getLogger(__name__)

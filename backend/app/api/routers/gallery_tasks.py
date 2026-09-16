@@ -78,7 +78,7 @@ from ...repositories.gallery.sync_state import (
     iter_gallery_r2_sync_rows,
     mark_gallery_r2_sync_state,
 )
-from ...repositories.image_files import (
+from ...core.media import (
     THUMBNAIL_CONTENT_TYPE,
     safe_image_path,
     safe_thumbnail_path,

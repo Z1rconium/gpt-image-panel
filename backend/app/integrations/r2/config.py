@@ -11,7 +11,7 @@ from ...core import secrets
 from ...core import settings as config
 from ...core.utils import utc_now
 from ...core.validators import normalize_r2_endpoint_url, validate_r2_endpoint_url
-from ...repositories.image_files import safe_image_path
+from ...core.media import safe_image_path
 
 
 HealthStatus = str

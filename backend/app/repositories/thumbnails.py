@@ -9,7 +9,7 @@ from urllib.parse import quote
 from ..core.cdn import signed_media_url
 
 from ..core import settings as config
-from .image_files import (
+from ..core.media import (
     IMAGE_FILE_EXTENSIONS,
     THUMBNAIL_EXTENSION,
     configure_pillow_image_limits,

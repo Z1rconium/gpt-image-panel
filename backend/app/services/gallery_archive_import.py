@@ -17,9 +17,9 @@ from ..runtime.blocking import run_file_operation
 
 from ..core import settings as config
 from ..core.utils import utc_now
-from ..repositories.image_files import safe_image_path, validate_image_bytes
+from ..core.media import safe_image_path, validate_image_bytes
 from ..schemas.gallery import GalleryEntry
-from ..api.uploads import IMAGE_UPLOAD_CONTENT_TYPES, IMAGE_UPLOAD_EXTENSIONS
+from .uploads import IMAGE_UPLOAD_CONTENT_TYPES, IMAGE_UPLOAD_EXTENSIONS
 
 GalleryZipProgressCallback = Callable[[dict[str, Any]], None]
 from .gallery_archive_shared import *

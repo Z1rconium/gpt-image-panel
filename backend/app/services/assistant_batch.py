@@ -14,7 +14,7 @@ from fastapi import APIRouter, Body, File, Form, HTTPException, Request, UploadF
 
 from ..api import presets
 from ..runtime.state import state
-from ..api.uploads import is_image_upload, resolve_upload_content_type
+from .uploads import is_image_upload, resolve_upload_content_type
 from ..core import settings as config
 from ..core import validators as ssrf
 from ..core.utils import utc_now
@@ -37,7 +37,7 @@ from ..repositories.gallery.queries import (
     get_gallery_id_batch,
     get_gallery_selection_snapshot,
 )
-from ..repositories.image_files import safe_image_path
+from ..core.media import safe_image_path
 from ..repositories.image_jobs import get_generate_job
 from ..repositories.settings import (
     get_gallery_ai_metadata,

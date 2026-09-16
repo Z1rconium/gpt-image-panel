@@ -578,7 +578,7 @@ def test_generate_job_reports_usage_and_cost_when_upstream_provides_it(client, m
                 "output_tokens_details": {"image_tokens": 1_000_000},
             }
         )
-        image_id = image_files.generate_image_id()
+        image_id = media.generate_image_id()
         entry = await gallery_mutations.add_to_gallery_async(
             image_bytes=PNG_BYTES,
             image_id=image_id,
@@ -774,7 +774,7 @@ def test_edit_upload_accepts_multiple_sources(client, monkeypatch):
         for source in image_sources:
             assert source.temp_path.exists()
             assert source.temp_path.read_bytes() == PNG_BYTES
-        image_id = image_files.generate_image_id()
+        image_id = media.generate_image_id()
         filename = f"{image_id}.png"
         entry = await gallery_mutations.add_to_gallery_async(
             image_bytes=PNG_BYTES,
@@ -826,7 +826,7 @@ def test_edit_from_gallery_combines_uploaded_sources(client, monkeypatch):
         assert len(image_sources) == 2
         assert image_sources[0].temp_path.read_bytes() == PNG_BYTES
         assert image_sources[1].temp_path.read_bytes() == PNG_BYTES
-        image_id = image_files.generate_image_id()
+        image_id = media.generate_image_id()
         filename = f"{image_id}.png"
         entry = await gallery_mutations.add_to_gallery_async(
             image_bytes=PNG_BYTES,
@@ -938,7 +938,7 @@ def test_edit_source_temp_path_is_cleaned_after_success(client, monkeypatch):
         for source in image_sources:
             assert source.temp_path.exists()
             assert source.temp_path.read_bytes() == PNG_BYTES
-        image_id = image_files.generate_image_id()
+        image_id = media.generate_image_id()
         filename = f"{image_id}.png"
         entry = await gallery_mutations.add_to_gallery_async(
             image_bytes=PNG_BYTES,
@@ -1062,7 +1062,7 @@ def test_edit_queue_capacity_uses_pending_source_bytes(tmp_path, monkeypatch):
         assert len(image_sources) == 1
         assert image_sources[0].temp_path.exists()
         await asyncio.to_thread(release_event.wait)
-        image_id = image_files.generate_image_id()
+        image_id = media.generate_image_id()
         filename = f"{image_id}.png"
         entry = await gallery_mutations.add_to_gallery_async(
             image_bytes=PNG_BYTES,
@@ -1208,7 +1208,7 @@ def test_generate_queue_capacity_and_concurrency_limit(tmp_path, monkeypatch):
         payload = args[3]
         api_path = args[2]
         api_preset_name = args[4]
-        image_id = image_files.generate_image_id()
+        image_id = media.generate_image_id()
         filename = f"{image_id}.png"
         entry = await gallery_mutations.add_to_gallery_async(
             image_bytes=PNG_BYTES,
@@ -1350,7 +1350,7 @@ def test_edit_jobs_share_queue_capacity(tmp_path, monkeypatch):
     async def blocking_generation_api(*args, **kwargs):
         await asyncio.to_thread(release_event.wait)
         payload = args[3]
-        image_id = image_files.generate_image_id()
+        image_id = media.generate_image_id()
         filename = f"{image_id}.png"
         entry = await gallery_mutations.add_to_gallery_async(
             image_bytes=PNG_BYTES,
@@ -1366,7 +1366,7 @@ def test_edit_jobs_share_queue_capacity(tmp_path, monkeypatch):
         await asyncio.to_thread(release_event.wait)
         payload = args[2]
         assert args[3][0].temp_path.exists()
-        image_id = image_files.generate_image_id()
+        image_id = media.generate_image_id()
         filename = f"{image_id}.png"
         entry = await gallery_mutations.add_to_gallery_async(
             image_bytes=PNG_BYTES,
@@ -1440,7 +1440,7 @@ def test_running_progress_persists_only_terminal_states(tmp_path, monkeypatch):
         if progress:
             for index in range(5):
                 progress(f"stage_{index}", f"Stage {index}")
-        image_id = image_files.generate_image_id()
+        image_id = media.generate_image_id()
         filename = f"{image_id}.png"
         entry = await gallery_mutations.add_to_gallery_async(
             image_bytes=PNG_BYTES,
@@ -1867,7 +1867,7 @@ def test_streaming_generation_job_delivers_previews_and_completes(client, monkey
         preview(1, "image/png", PNG_BYTES)
         captured["preview_calls"].append("ran")
 
-        image_id = image_files.generate_image_id()
+        image_id = media.generate_image_id()
         entry = await gallery_mutations.add_to_gallery_async(
             image_bytes=PNG_BYTES,
             image_id=image_id,

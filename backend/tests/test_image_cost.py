@@ -1,6 +1,6 @@
 import pytest
 
-from backend.app.services import image_cost
+from backend.app.core import image_cost
 from backend.tests.support.contract import *  # noqa: F403
 
 

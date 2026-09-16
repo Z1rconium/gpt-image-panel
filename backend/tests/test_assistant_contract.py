@@ -1160,7 +1160,7 @@ def test_ai_assistant_gallery_batch_analysis_treats_missing_images_as_error(clie
 
     entry = _fake_gallery_entry("assistant-batch-missing", "prompt", "1024x1024", "assistant-batch-missing.png")
     assert entry is not None
-    image_path = image_files.safe_image_path(entry.filename)
+    image_path = media.safe_image_path(entry.filename)
     assert image_path is not None
     image_path.unlink()
 

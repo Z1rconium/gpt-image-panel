@@ -151,7 +151,7 @@ def test_gallery_thumbnail_statuses_are_fetched_in_one_batch(client, monkeypatch
 def test_gzip_compresses_text_but_bypasses_large_image_responses(client):
     large_image_bytes = PNG_BYTES * 64
     _fake_gallery_entry("gzip-image", "gzip bypass " * 120, "1024x1024", "gzip-image.png")
-    path = image_files.safe_image_path("gzip-image.png")
+    path = media.safe_image_path("gzip-image.png")
     assert path is not None
     path.write_bytes(large_image_bytes)
 
@@ -190,7 +190,7 @@ def test_gallery_image_responses_use_x_accel_redirect_when_enabled(client):
     thumb = client.get("/api/thumb/gallery%20accel.png")
     updated = gallery_queries.get_gallery_entry("gallery-accel")
     assert updated.thumbnail_filename
-    thumbnail_path = image_files.safe_thumbnail_path(updated.thumbnail_filename)
+    thumbnail_path = media.safe_thumbnail_path(updated.thumbnail_filename)
     assert thumbnail_path is not None
     assert thumb.status_code == 200
     assert thumb.headers["x-accel-redirect"] == f"/_protected/thumbs/{updated.thumbnail_filename}"
@@ -422,7 +422,7 @@ def test_orphan_gallery_file_gc_removes_unreferenced_files(client):
 
     thumbnail_filename = thumbnail_jobs_repo.generate_thumbnail_for_image("orphan-gc.png")
     assert thumbnail_filename
-    orphan_thumbnail_path = image_files.safe_thumbnail_path(thumbnail_filename)
+    orphan_thumbnail_path = media.safe_thumbnail_path(thumbnail_filename)
     assert orphan_thumbnail_path is not None
     assert orphan_thumbnail_path.exists()
 
@@ -928,7 +928,7 @@ def test_gallery_sync_job_rejects_empty_gallery_and_missing_r2_config(client):
 
 def test_gallery_total_bytes_uses_sql_aggregate_without_disk_backfill(client, monkeypatch):
     db_repo._ensure_database()
-    image_path = image_files.safe_image_path("legacy-bytes.png")
+    image_path = media.safe_image_path("legacy-bytes.png")
     assert image_path is not None
     image_path.write_bytes(PNG_BYTES)
 
@@ -1112,8 +1112,8 @@ def test_gallery_batch_delete_only_selected_entries(client):
     assert gallery_queries.get_gallery_entry("batch-delete-1") is None
     assert gallery_queries.get_gallery_entry("batch-delete-2") is not None
     assert gallery_queries.get_gallery_entry("batch-delete-3") is None
-    assert not image_files.safe_image_path("batch-delete-1.png").exists()
-    assert image_files.safe_image_path("batch-delete-2.png").exists()
+    assert not media.safe_image_path("batch-delete-1.png").exists()
+    assert media.safe_image_path("batch-delete-2.png").exists()
 
 
 def test_gallery_batch_delete_preserves_shared_filename(client):
@@ -1130,12 +1130,12 @@ def test_gallery_batch_delete_preserves_shared_filename(client):
     assert first.status_code == 200
     assert first.json()["count"] == 1
     assert first.json()["file_count"] == 0
-    assert image_files.safe_image_path("shared.png") is not None
+    assert media.safe_image_path("shared.png") is not None
 
     second = client.post("/api/gallery/batch/delete", json={"ids": ["shared-2"]})
     assert second.status_code == 200
     assert second.json()["file_count"] == 1
-    assert not image_files.safe_image_path("shared.png").exists()
+    assert not media.safe_image_path("shared.png").exists()
 
 
 def test_delete_all_gallery_commits_rows_when_file_delete_fails(client, monkeypatch, caplog):
@@ -1156,8 +1156,8 @@ def test_delete_all_gallery_commits_rows_when_file_delete_fails(client, monkeypa
     assert total == 2
     assert deleted_files == 1
     assert gallery_queries.get_gallery_count() == 0
-    assert image_files.safe_image_path("delete-all-1.png").exists()
-    assert not image_files.safe_image_path("delete-all-2.png").exists()
+    assert media.safe_image_path("delete-all-1.png").exists()
+    assert not media.safe_image_path("delete-all-2.png").exists()
     assert "Failed to delete gallery image file delete-all-1.png" in caplog.text
 
 
@@ -1381,7 +1381,7 @@ def test_gallery_batch_operations_report_partial_missing(client):
 def test_gallery_batch_download_records_skipped_entries(client):
     _fake_gallery_entry("batch-download-1", "one", "1024x1024", "batch-download-1.png")
     _fake_gallery_entry("batch-download-missing-file", "two", "1024x1024", "batch-download-missing-file.png")
-    image_files.safe_image_path("batch-download-missing-file.png").unlink()
+    media.safe_image_path("batch-download-missing-file.png").unlink()
 
     archive = client.post(
         "/api/gallery/batch/download",
@@ -1424,7 +1424,7 @@ def test_thumbnail_endpoint_enqueues_missing_thumbnail_job(client, monkeypatch):
     monkeypatch.setattr(gallery_maintenance, "generate_thumbnail_for_image", original_generate_thumbnail)
     thumbnail_filename = thumbnail_jobs_repo.generate_thumbnail_for_image("lazy-thumb.png")
     assert thumbnail_filename
-    thumbnail_path = image_files.safe_thumbnail_path(thumbnail_filename)
+    thumbnail_path = media.safe_thumbnail_path(thumbnail_filename)
     assert thumbnail_path is not None
     assert thumbnail_path.exists()
 
@@ -1436,7 +1436,7 @@ def test_thumbnail_cache_invalidation_self_heals_missing_verified_file(client):
     _fake_gallery_entry("self-heal-thumb", "self heal", "1024x1024", "self-heal-thumb.png")
     thumbnail_filename = thumbnail_jobs_repo.generate_thumbnail_for_image("self-heal-thumb.png")
     assert thumbnail_filename
-    thumbnail_path = image_files.safe_thumbnail_path(thumbnail_filename)
+    thumbnail_path = media.safe_thumbnail_path(thumbnail_filename)
     assert thumbnail_path is not None
     assert thumbnail_path.exists()
 

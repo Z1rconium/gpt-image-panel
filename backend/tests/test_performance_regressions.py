@@ -17,7 +17,7 @@ from backend.app.integrations.upstream import transport as upstream_transport
 from backend.app.repositories import db as db_repo
 from backend.app.runtime import state as runtime_state
 from backend.app.repositories.coordination import mark_worker_heartbeat
-from backend.app.repositories.image_files import validate_image_bytes
+from backend.app.core.media import validate_image_bytes
 from backend.app.repositories import thumbnail_jobs as thumbnail_jobs_repo
 from backend.app.runtime.blocking import (
     close_blocking_executors,

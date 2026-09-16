@@ -14,7 +14,7 @@ import logging
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any, TypedDict
 
-from ..core import settings as config
+from . import settings as config
 
 logger = logging.getLogger(__name__)
 

@@ -3,7 +3,7 @@
 from collections.abc import Callable
 
 from .db import *
-from ..services import image_cost
+from ..core import image_cost
 
 
 def upsert_generate_job_guarded(job: dict[str, Any]) -> tuple[dict[str, Any], bool]:

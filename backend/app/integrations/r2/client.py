@@ -15,7 +15,7 @@ from ...core.validators import (
     normalize_r2_endpoint_url,
     resolve_env_var_ref,
 )
-from ...repositories.image_files import safe_image_path
+from ...core.media import safe_image_path
 
 
 HealthStatus = str

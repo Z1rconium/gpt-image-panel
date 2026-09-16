@@ -317,7 +317,7 @@ NODEIMAGE_API_KEY = os.getenv("NODEIMAGE_API_KEY", "").strip()
 # ── Image generation cost estimation ─────────────────────────────
 # JSON object mapping model name -> {text_input_per_million, image_input_per_million,
 # image_output_per_million} in USD. Overrides/extends the builtin rate table in
-# backend/app/services/image_cost.py. See .env.example for the exact shape.
+# backend/app/core/image_cost.py. See .env.example for the exact shape.
 IMAGE_COST_RATES_JSON = os.getenv("IMAGE_COST_RATES_JSON", "").strip()
 
 

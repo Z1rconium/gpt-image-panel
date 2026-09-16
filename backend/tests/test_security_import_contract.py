@@ -30,7 +30,7 @@ def test_import_archive_truncates_long_image_filename(client):
     assert imported.filename.endswith(".png")
     assert len(imported.filename.encode("utf-8")) <= 240
     assert len(Path(imported.filename).stem) < len(long_stem)
-    path = image_files.safe_image_path(imported.filename)
+    path = media.safe_image_path(imported.filename)
     assert path is not None
     assert path.exists()
 
@@ -292,9 +292,9 @@ def test_import_archive_skips_mismatched_png_content(client):
 
 
 def test_safe_image_paths_reject_traversal(client):
-    assert image_files.safe_image_path("gallery-zip.png") is not None
-    assert image_files.safe_image_path("../secret.png") is None
-    assert image_files.safe_image_path("nested/secret.png") is None
+    assert media.safe_image_path("gallery-zip.png") is not None
+    assert media.safe_image_path("../secret.png") is None
+    assert media.safe_image_path("nested/secret.png") is None
 
     image = client.get("/api/image/..%2Fsecret.png")
     thumb = client.get("/api/thumb/..%2Fsecret.png")
@@ -307,7 +307,7 @@ def test_safe_image_paths_reject_traversal(client):
 
 def test_image_validation_rejects_magic_only_truncated_image(client):
     with pytest.raises(ValueError, match="fully decodable"):
-        image_files.validate_image_bytes(b"\xff\xd8\xff\xd9", filename="truncated.jpg")
+        media.validate_image_bytes(b"\xff\xd8\xff\xd9", filename="truncated.jpg")
 
 
 def test_download_all_skips_polluted_gallery_filename(client):

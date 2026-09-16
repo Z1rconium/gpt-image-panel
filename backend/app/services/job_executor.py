@@ -33,7 +33,7 @@ from ..repositories.image_jobs import (
     renew_image_job_unit_lease,
     update_image_job_unit_progress,
 )
-from . import image_cost
+from ..core import image_cost
 from .job_events import (
     publish_generate_job,
     publish_generate_job_preview,

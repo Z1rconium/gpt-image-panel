@@ -2,7 +2,7 @@ from pathlib import Path
 
 from fastapi import HTTPException, UploadFile
 
-from ..repositories.image_files import (
+from ..core.media import (
     IMAGE_CONTENT_TYPE_FORMATS,
     IMAGE_EXTENSION_FORMATS,
     IMAGE_FILE_EXTENSIONS,

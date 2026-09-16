@@ -14,7 +14,7 @@ import aiohttp
 
 from ...core import secrets
 from ...core.redaction import redact_sensitive_text
-from ...repositories.image_files import image_content_type_for_filename
+from ...core.media import image_content_type_for_filename
 from ..session_pool import TIMEOUT_NODEIMAGE, get_pool
 
 NODEIMAGE_API_URL = "https://api.nodeimage.com"
