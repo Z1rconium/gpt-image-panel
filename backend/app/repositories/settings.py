@@ -76,8 +76,8 @@ def save_prompt_optimizer_settings(settings: dict):
     _ensure_database()
     normalized = _normalize_prompt_optimizer_settings(settings)
     with _connect() as conn:
-        _set_setting_value(conn, PROMPT_OPTIMIZER_SETTINGS_KEY, json.dumps(normalized))
-        conn.commit()
+        with _transaction(conn):
+            _set_setting_value(conn, PROMPT_OPTIMIZER_SETTINGS_KEY, json.dumps(normalized))
     _secure_data_storage_permissions()
 
 
@@ -97,8 +97,8 @@ def save_ai_assistant_settings(settings: dict):
     _ensure_database()
     normalized = _normalize_ai_assistant_settings(settings)
     with _connect() as conn:
-        _set_setting_value(conn, AI_ASSISTANT_SETTINGS_KEY, json.dumps(normalized))
-        conn.commit()
+        with _transaction(conn):
+            _set_setting_value(conn, AI_ASSISTANT_SETTINGS_KEY, json.dumps(normalized))
     _secure_data_storage_permissions()
 
 
@@ -196,8 +196,8 @@ def save_r2_backup_settings(settings: dict):
     _ensure_database()
     normalized = _normalize_r2_backup_settings(settings)
     with _connect() as conn:
-        _set_setting_value(conn, R2_BACKUP_SETTINGS_KEY, json.dumps(normalized))
-        conn.commit()
+        with _transaction(conn):
+            _set_setting_value(conn, R2_BACKUP_SETTINGS_KEY, json.dumps(normalized))
     _secure_data_storage_permissions()
 
 
@@ -215,8 +215,8 @@ def save_nodeimage_settings(settings: dict):
     _ensure_database()
     normalized = _normalize_nodeimage_settings(settings)
     with _connect() as conn:
-        _set_setting_value(conn, NODEIMAGE_SETTINGS_KEY, json.dumps(normalized))
-        conn.commit()
+        with _transaction(conn):
+            _set_setting_value(conn, NODEIMAGE_SETTINGS_KEY, json.dumps(normalized))
     _secure_data_storage_permissions()
 
 

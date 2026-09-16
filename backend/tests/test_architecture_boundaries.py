@@ -35,6 +35,7 @@ ALLOWED_TARGET_LAYERS = {
 # architecture phase deletes the entries it fixes; the list may only shrink.
 # Frozen debt: every entry is a mapping the matrix forbids.
 # Frozen debt: every entry is a mapping the matrix forbids.
+# Frozen debt: every entry is a mapping the matrix forbids.
 ALLOWED_VIOLATIONS: frozenset[str] = frozenset(
     {
         "backend/app/integrations/upstream/errors.py:22 -> backend.app.repositories.gallery.mutations",
@@ -46,6 +47,7 @@ ALLOWED_VIOLATIONS: frozenset[str] = frozenset(
 
 # Project imports inside function bodies. Some are deliberate cycle breaks that
 # Python requires; new entries need a documented reason to be added.
+# Project imports inside function bodies. Some are
 # Project imports inside function bodies. Some are
 # Project imports inside function bodies. Some are
 ALLOWED_DEFERRED_IMPORTS: frozenset[str] = frozenset(
@@ -63,8 +65,8 @@ ALLOWED_DEFERRED_IMPORTS: frozenset[str] = frozenset(
         "backend/app/core/validators.py:38 -> backend.app.core.secrets",
         "backend/app/core/validators.py:446 -> backend.app.core.secrets",
         "backend/app/core/validators.py:500 -> backend.app.core.secrets",
-        "backend/app/repositories/db/settings_store.py:477 -> backend.app.core.overall_config",
-        "backend/app/repositories/db/settings_store.py:545 -> backend.app.core.overall_config",
+        "backend/app/repositories/db/settings_store.py:489 -> backend.app.core.overall_config",
+        "backend/app/repositories/db/settings_store.py:557 -> backend.app.core.overall_config",
         "backend/app/runtime/blocking.py:145 -> backend.app.repositories",
         "backend/app/runtime/blocking.py:188 -> backend.app.repositories",
         "backend/app/runtime/blocking.py:311 -> backend.app.repositories",

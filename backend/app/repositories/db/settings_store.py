@@ -380,8 +380,14 @@ def _has_r2_backup_storage_values(settings: dict | None) -> bool:
 
 
 def _store_r2_backup_settings_on_conn(conn: sqlite3.Connection, settings: dict):
+    # Runs from the read path when stored values are missing, so it must not
+    # commit a transaction the caller already opened.
+    started_transaction = not conn.in_transaction
+    if started_transaction:
+        conn.execute("BEGIN IMMEDIATE")
     _set_setting_value(conn, R2_BACKUP_SETTINGS_KEY, json.dumps(settings))
-    conn.commit()
+    if started_transaction:
+        conn.commit()
     _secure_data_storage_permissions()
 
 
@@ -427,8 +433,14 @@ def _has_nodeimage_storage_values(settings: dict | None) -> bool:
 
 
 def _store_nodeimage_settings_on_conn(conn: sqlite3.Connection, settings: dict) -> None:
+    # Runs from the read path when stored values are missing, so it must not
+    # commit a transaction the caller already opened.
+    started_transaction = not conn.in_transaction
+    if started_transaction:
+        conn.execute("BEGIN IMMEDIATE")
     _set_setting_value(conn, NODEIMAGE_SETTINGS_KEY, json.dumps(settings))
-    conn.commit()
+    if started_transaction:
+        conn.commit()
     _secure_data_storage_permissions()
 
 
