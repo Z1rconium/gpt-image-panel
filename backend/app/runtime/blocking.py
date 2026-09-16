@@ -6,6 +6,7 @@ function-local imports to keep the pair importable in either order.
 """
 
 import asyncio
+import logging
 import contextvars
 import random
 import sqlite3
@@ -13,6 +14,7 @@ import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import wait as futures_wait
 from contextlib import asynccontextmanager
 from functools import partial
 from typing import Any, TypeVar
@@ -21,7 +23,12 @@ from ..core import settings as config
 from ..core.observability import metrics
 
 
+logger = logging.getLogger(__name__)
+
 T = TypeVar("T")
+
+# Worker fan-out (per-thread connection cleanup) must never outlive this.
+WORKER_FANOUT_TIMEOUT_SECONDS = 2.0
 
 
 class _BoundedExecutor:
@@ -85,34 +92,57 @@ class _BoundedExecutor:
                 or max(1, int(self._max_workers())),
             }
 
+    def run_on_each_worker(
+        self,
+        callback: Callable[[], None],
+        *,
+        timeout: float = WORKER_FANOUT_TIMEOUT_SECONDS,
+    ) -> int:
+        """Run the callback on worker threads, returning how many threads ran it.
+
+        The submissions deliberately do not rendezvous on a barrier. A barrier
+        needs every worker to arrive, so a worker still finishing earlier work
+        leaves the arrivals waiting - and when shutdown then cancels a queued
+        arrival, they wait forever. Submissions are capped at the pool size and
+        bounded by ``timeout``, so the worst case is fewer threads cleaned up,
+        never a wait that cannot end.
+        """
+        with self._lock:
+            executor = self._executor
+            worker_count = self._worker_count
+        if executor is None or worker_count <= 0:
+            return 0
+
+        ran_on: set[int] = set()
+        lock = threading.Lock()
+
+        def invoke() -> None:
+            with lock:
+                ran_on.add(threading.get_ident())
+            callback()
+
+        futures = [executor.submit(invoke) for _ in range(worker_count)]
+        done, pending = futures_wait(futures, timeout=timeout)
+        for future in done:
+            future.result()
+        for future in pending:
+            future.cancel()
+        if pending:
+            metrics.increment(f"executor.{self.name}.fanout_skipped")
+        return len(ran_on)
+
     def shutdown(self) -> None:
         with self._lock:
             executor = self._executor
             self._executor = None
         if executor is not None:
+            # Safe to wait: no cross-worker rendezvous can be outstanding, so
+            # this only waits for callbacks that are already running.
             executor.shutdown(wait=True, cancel_futures=True)
         with self._lock:
             self._pending = 0
             self._running = 0
             self._worker_count = 0
-
-    def run_on_each_worker(self, callback: Callable[[], None]) -> None:
-        with self._lock:
-            executor = self._executor
-            worker_count = self._worker_count
-        if executor is None:
-            return
-        if worker_count <= 0:
-            return
-        barrier = threading.Barrier(worker_count)
-
-        def invoke() -> None:
-            barrier.wait()
-            callback()
-
-        futures = [executor.submit(invoke) for _ in range(worker_count)]
-        for future in futures:
-            future.result()
 
 
 _db_executor = _BoundedExecutor("db", lambda: config.DB_EXECUTOR_WORKERS)
@@ -310,9 +340,20 @@ async def upstream_memory_lease(expected_bytes: int):
 async def close_blocking_executors() -> None:
     from ..repositories import db as db_repo
 
-    _db_executor.run_on_each_worker(db_repo._close_thread_connection)
+    closed_workers = await asyncio.to_thread(
+        _db_executor.run_on_each_worker,
+        db_repo._close_thread_connection,
+    )
+    expected_workers = max(1, int(config.DB_EXECUTOR_WORKERS))
+    if closed_workers < expected_workers:
+        logger.warning(
+            "Closed %s of %s database worker connections at shutdown; the rest "
+            "close when their threads exit",
+            closed_workers,
+            expected_workers,
+        )
     for executor in (_file_executor, _image_executor, _db_executor):
-        executor.shutdown()
+        await asyncio.to_thread(executor.shutdown)
 
 
 __all__ = [

@@ -44,6 +44,7 @@ FRAMEWORK_IMPORT_ALLOWLIST: frozenset[str] = frozenset(
 )
 
 # Frozen debt: every entry is a mapping the matrix forbids.
+# Frozen debt: every entry is a mapping the matrix forbids.
 ALLOWED_VIOLATIONS: frozenset[str] = frozenset(
     {
     }
@@ -51,6 +52,7 @@ ALLOWED_VIOLATIONS: frozenset[str] = frozenset(
 
 # Project imports inside function bodies. Some are deliberate cycle breaks that
 # Python requires; new entries need a documented reason to be added.
+# Project imports inside function bodies. Some are
 # Project imports inside function bodies. Some are
 # Project imports inside function bodies. Some are
 # Project imports inside function bodies. Some are
@@ -77,9 +79,9 @@ ALLOWED_DEFERRED_IMPORTS: frozenset[str] = frozenset(
         "backend/app/core/validators.py:500 -> backend.app.core.secrets",
         "backend/app/repositories/db/settings_store.py:489 -> backend.app.core.overall_config",
         "backend/app/repositories/db/settings_store.py:557 -> backend.app.core.overall_config",
-        "backend/app/runtime/blocking.py:145 -> backend.app.repositories",
-        "backend/app/runtime/blocking.py:188 -> backend.app.repositories",
-        "backend/app/runtime/blocking.py:311 -> backend.app.repositories",
+        "backend/app/runtime/blocking.py:175 -> backend.app.repositories",
+        "backend/app/runtime/blocking.py:218 -> backend.app.repositories",
+        "backend/app/runtime/blocking.py:341 -> backend.app.repositories",
         "backend/app/services/presets.py:46 -> backend.app.core.redaction",
         "backend/app/services/runtime_metrics.py:71 -> backend.app.services.job_events",
     }
