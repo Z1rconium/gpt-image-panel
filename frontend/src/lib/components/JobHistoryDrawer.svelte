@@ -10,6 +10,13 @@
 
   type JobsTab = 'running' | 'history';
   type MaybePromise = void | Promise<void>;
+
+  // Stable default identities: per-instantiation literals would break
+  // referential-equality memoization on every render.
+  const EMPTY_JOBS: GenerateJobStatus[] = [];
+  const EMPTY_STRING_SET: Set<string> = new Set();
+  const EMPTY_DIAGNOSES: Record<string, AssistantJobDiagnoseResponse> = {};
+
   type Props = {
     open?: boolean;
     activeTab?: JobsTab;
@@ -41,13 +48,13 @@
   let {
     open = false,
     activeTab = 'running',
-    jobs = [],
-    historyJobs = [],
+    jobs = EMPTY_JOBS,
+    historyJobs = EMPTY_JOBS,
     historyLoading = false,
     historyLoaded = false,
     historyHasMore = false,
     historyFailedOnly = false,
-    selectedIds = new Set<string>(),
+    selectedIds = EMPTY_STRING_SET,
     onClose = () => {},
     onTabChange = () => {},
     onRefresh = () => {},
@@ -62,11 +69,12 @@
     onRetryJob = () => {},
     aiAssistantEnabled = false,
     diagnosingJobId = null,
-    diagnoses = {},
+    diagnoses = EMPTY_DIAGNOSES,
     onDiagnoseJob = () => {}
   }: Props = $props();
 
-  let internalActiveTab = $state<JobsTab>('running');
+  let internalActiveTabOverride = $state<JobsTab | null>(null);
+  const currentTab = $derived(open ? (internalActiveTabOverride ?? activeTab) : 'running');
 
   // Remote work changes while you watch it; mark the rows that just moved.
   const lastSeenStatus = new Map<string, string>();
@@ -106,18 +114,21 @@
   });
 
   $effect(() => {
-    if (!open && internalActiveTab !== 'running') internalActiveTab = 'running';
-    else if (open && internalActiveTab !== activeTab) internalActiveTab = activeTab;
+    // Reset the local override whenever the drawer closes or the parent
+    // steers the tab, so the prop stays the source of truth between clicks.
+    void open;
+    void activeTab;
+    internalActiveTabOverride = null;
   });
 
   function selectTab(tab: JobsTab) {
-    internalActiveTab = tab;
+    internalActiveTabOverride = tab;
     onTabChange(tab);
     if (tab === 'history' && !historyLoaded && !historyLoading) void onRefreshHistory();
   }
 
   function refreshCurrentTab() {
-    if (internalActiveTab === 'history') void onRefreshHistory();
+    if (currentTab === 'history') void onRefreshHistory();
     else void onRefresh();
   }
 
@@ -174,20 +185,20 @@
 
       <div class="flex flex-col gap-3 border-b border-stone-200 p-5 sm:flex-row sm:items-center sm:justify-between dark:border-zinc-800">
         <div class="grid grid-cols-2 rounded-lg border border-stone-200 bg-stone-100 p-1 text-xs font-medium dark:border-zinc-800 dark:bg-zinc-950">
-          <button type="button" class={`control-focus rounded-md px-3 py-1.5 ${internalActiveTab === 'running' ? 'bg-white text-stone-900 shadow-sm dark:bg-zinc-800 dark:text-zinc-100 dark:shadow-none' : 'text-stone-500 hover:text-stone-900 dark:text-zinc-500 dark:hover:text-zinc-200'}`} onclick={() => selectTab('running')}>
+          <button type="button" class={`control-focus rounded-md px-3 py-1.5 ${currentTab === 'running' ? 'bg-white text-stone-900 shadow-sm dark:bg-zinc-800 dark:text-zinc-100 dark:shadow-none' : 'text-stone-500 hover:text-stone-900 dark:text-zinc-500 dark:hover:text-zinc-200'}`} onclick={() => selectTab('running')}>
             {$t.jobs.runningTab}
           </button>
-          <button type="button" class={`control-focus rounded-md px-3 py-1.5 ${internalActiveTab === 'history' ? 'bg-white text-stone-900 shadow-sm dark:bg-zinc-800 dark:text-zinc-100 dark:shadow-none' : 'text-stone-500 hover:text-stone-900 dark:text-zinc-500 dark:hover:text-zinc-200'}`} onclick={() => selectTab('history')}>
+          <button type="button" class={`control-focus rounded-md px-3 py-1.5 ${currentTab === 'history' ? 'bg-white text-stone-900 shadow-sm dark:bg-zinc-800 dark:text-zinc-100 dark:shadow-none' : 'text-stone-500 hover:text-stone-900 dark:text-zinc-500 dark:hover:text-zinc-200'}`} onclick={() => selectTab('history')}>
             {$t.jobs.historyTab}
           </button>
         </div>
         <div class="flex flex-wrap justify-end gap-3">
-          {#if internalActiveTab === 'running'}
+          {#if currentTab === 'running'}
             <button type="button" class="control-focus rounded-lg border border-stone-300 px-3 py-2 text-xs text-stone-700 hover:bg-stone-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800" disabled={!jobs.length} onclick={onToggleAll}>
               {$t.jobs.selectAll}
             </button>
           {/if}
-          {#if internalActiveTab === 'history'}
+          {#if currentTab === 'history'}
             <label class={`control-focus flex items-center gap-2 rounded-lg border border-stone-300 px-3 py-2 text-xs text-stone-700 dark:border-zinc-700 dark:text-zinc-300 ${historyLoading ? 'cursor-not-allowed opacity-40' : 'cursor-pointer hover:bg-stone-100 dark:hover:bg-zinc-800'}`}>
               <input
                 type="checkbox"
@@ -208,13 +219,13 @@
               {$t.jobs.clearHistory}
             </button>
           {/if}
-          <button type="button" class="control-focus rounded-lg border border-stone-300 px-3 py-2 text-xs text-stone-700 hover:bg-stone-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800" disabled={internalActiveTab === 'history' && historyLoading} onclick={refreshCurrentTab}>
+          <button type="button" class="control-focus rounded-lg border border-stone-300 px-3 py-2 text-xs text-stone-700 hover:bg-stone-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800" disabled={currentTab === 'history' && historyLoading} onclick={refreshCurrentTab}>
             {$t.jobs.refresh}
           </button>
         </div>
       </div>
 
-      {#if internalActiveTab === 'running'}
+      {#if currentTab === 'running'}
         <RunningJobsList {jobs} {selectedIds} {settledJobIds} {onToggle} />
       {:else}
         {#if historyCostSummary}
@@ -248,7 +259,7 @@
         />
       {/if}
 
-      {#if internalActiveTab === 'running'}
+      {#if currentTab === 'running'}
         <div class="border-t border-zinc-800 p-5">
           <button type="button" disabled={!selectedIds.size} class="control-focus w-full rounded-xl bg-red-600 px-4 py-3 text-sm font-semibold text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-40" onclick={onCancelSelected}>
             {$t.jobs.cancelSelected}

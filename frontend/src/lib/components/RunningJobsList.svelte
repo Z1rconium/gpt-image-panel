@@ -16,7 +16,11 @@
   const ITEM_GAP = 12;
   const OVERSCAN_PX = 720;
 
-  let { jobs = [], selectedIds = new Set<string>(), settledJobIds = new Set<string>(), onToggle = () => {} }: Props = $props();
+  // Stable default identities: per-instantiation literals would break
+  // referential-equality memoization on every render.
+  const EMPTY_STRING_SET: Set<string> = new Set();
+
+  let { jobs = [], selectedIds = EMPTY_STRING_SET, settledJobIds = EMPTY_STRING_SET, onToggle = () => {} }: Props = $props();
 
   let scrollTop = $state(0);
   let viewportHeight = $state(0);
