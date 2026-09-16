@@ -30,7 +30,8 @@
 
   onMount(() => {
     const sync = () => {
-      scrolled = window.scrollY > 4;
+      const next = window.scrollY > 4;
+      if (next !== scrolled) scrolled = next;
     };
     let ticking = false;
     let rafId = 0;
