@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { Upload, X } from 'lucide-svelte';
+  import Upload from 'lucide-svelte/icons/upload';
+  import X from 'lucide-svelte/icons/x';
   import { t } from '$lib/i18n';
   import { MAX_EDIT_SOURCE_IMAGES } from '$lib/stores/editSource';
 
