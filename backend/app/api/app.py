@@ -12,7 +12,7 @@ from ..core import secrets
 from ..core import security as auth
 from ..core import settings as config
 from ..core.image_cost import configured_model_count
-from ..repositories.settings import sync_overall_config_env_values
+from ..repositories.db import sync_overall_config_env_values
 from ..runtime.state import init_defaults, state
 from ..services import dispatchers, job_events, presets, startup_maintenance
 

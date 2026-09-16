@@ -26,8 +26,6 @@ from ..core.constants import ACTIVE_GENERATE_JOB_STATUSES
 from ..core.observability import metrics
 from ..core.utils import utc_now
 from ..repositories.image_jobs import (
-    EditSourceQueueFullError,
-    ImageJobQueueFullError,
     aggregate_image_job_units,
     count_pending_image_job_units,
     enqueue_image_job,
@@ -35,7 +33,11 @@ from ..repositories.image_jobs import (
     release_edit_source_reservation,
     trim_generate_jobs as trim_persisted_generate_jobs,
 )
-from ..repositories.gallery.queries import image_url_for_filename
+from ..repositories.db import (
+    EditSourceQueueFullError,
+    ImageJobQueueFullError,
+)
+from ..repositories.db import image_url_for_filename
 from ..schemas.gallery import GalleryEntry
 from ..schemas.generation import EditRequest, GenerateJobResponse, GenerateRequest
 from ..runtime.blocking import run_db_operation

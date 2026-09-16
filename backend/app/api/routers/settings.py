@@ -44,12 +44,14 @@ from ...core.api_paths import (
 from ...integrations.upstream import generation as proxy
 from ...integrations.r2.client import probe_r2_settings
 from ...repositories.settings import (
-    list_overall_config_values,
     save_ai_assistant_settings,
-    save_overall_config_overrides,
     save_prompt_optimizer_settings,
     save_r2_backup_settings,
     save_nodeimage_settings,
+)
+from ...repositories.db import (
+    list_overall_config_values,
+    save_overall_config_overrides,
 )
 from ...schemas.settings import (
     OverallConfigItem,

@@ -1,8 +1,84 @@
 """Gallery image insertion, updates, deletion, and file reconciliation."""
 
-from ..db import *
-from ..thumbnail_jobs import *
-from .queries import *
+from ...core import settings as config
+from ...core.media import (
+    IMAGE_FILE_EXTENSIONS,
+    THUMBNAIL_EXTENSION,
+    image_dimension_metadata as _image_dimension_metadata,
+    safe_image_path,
+    safe_thumbnail_path,
+)
+from ...core.observability import (
+    metrics,
+    observe_job_stage,
+)
+from ...core.utils import utc_now
+from ...schemas.gallery import GalleryEntry
+from ..db import (
+    GALLERY_COLUMNS,
+    GALLERY_IMPORT_BATCH_SIZE,
+    GALLERY_ORPHAN_FILE_TTL_SECONDS,
+    GALLERY_ORPHAN_GC_BATCH_SIZE,
+    GALLERY_PAGE_ANCHOR_INVALIDATING_UPDATE_FIELDS,
+    GALLERY_SYNC_BATCH_SIZE,
+    REQUIRED_GALLERY_COLUMNS,
+    _PreparedGalleryFile,
+    _add_gallery_filter_option_deltas,
+    _apply_gallery_filter_option_deltas_on_conn,
+    _attach_gallery_thumbnail_url,
+    _build_gallery_filter_where,
+    _clear_verified_thumbnails,
+    _connect,
+    _ensure_database,
+    _gallery_entry_from_row,
+    _gallery_file_write_lock,
+    _gallery_row_values,
+    _increment_gallery_filter_options_on_conn,
+    _invalidate_filter_options_cache,
+    _invalidate_gallery_query_caches_on_conn,
+    _invalidate_gallery_total_bytes_cache,
+    _iter_sqlite_in_chunks,
+    _normalize_gallery_entry,
+    _normalize_gallery_favorite,
+    _remove_verified_thumbnail,
+    _storage_lock,
+    _transaction,
+    _unique_sqlite_values,
+    logger,
+)
+from ..image_files import (
+    delete_image_from_disk as _delete_image_unlocked,
+    scan_image_files as _scan_image_files,
+)
+from ..thumbnail_jobs import (
+    _attach_gallery_thumbnail_url,
+    _cleanup_prepared_gallery_files,
+    _dedupe_import_entries_on_conn,
+    _enqueue_thumbnail_jobs_on_conn,
+    _prepare_gallery_file,
+    _promote_prepared_images,
+    _promote_prepared_thumbnails,
+)
+from ..thumbnails import (
+    delete_thumbnail as _delete_thumbnail_unlocked,
+    thumbnail_filename_for_image as _thumbnail_filename_for_image,
+)
+from .queries import (
+    _combine_gallery_where,
+    _get_all_filenames_on_conn,
+    _get_gallery_row_batch_after_cursor_on_conn,
+    _get_gallery_thumbnail_status_map_on_conn,
+)
+
+from pathlib import Path
+from typing import (
+    Any,
+    Iterable,
+    Sequence,
+)
+import hashlib
+import sqlite3
+import time
 from ...runtime.blocking import run_db_operation, run_image_operation
 
 

@@ -85,13 +85,13 @@ from ...core.media import (
 )
 from ...repositories.settings import load_r2_backup_settings
 from ...repositories.thumbnail_jobs import (
-    THUMBNAIL_JOB_LEASE_SECONDS,
     claim_next_thumbnail_job,
     complete_thumbnail_job,
     ensure_thumbnail_for_image,
     fail_thumbnail_job,
     generate_thumbnail_for_image,
 )
+from ...repositories.db import THUMBNAIL_JOB_LEASE_SECONDS
 from ...schemas.common import MessageResponse
 from ...schemas.gallery import (
     GalleryBatchFavoriteRequest,

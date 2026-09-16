@@ -3188,6 +3188,3 @@ def _rebuild_gallery_filter_options_on_conn(conn: sqlite3.Connection):
         )
     _bump_filter_options_cache_version()
 
-
-# Internal repository modules explicitly import private SQL helpers from here.
-__all__ = [name for name in globals() if not name.startswith("__")]

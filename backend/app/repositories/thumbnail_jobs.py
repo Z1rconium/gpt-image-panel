@@ -1,6 +1,58 @@
 """Thumbnail queue persistence and thumbnail generation orchestration."""
 
-from .db import *
+from ..core import settings as config
+from ..core.media import (
+    generate_image_id,
+    safe_image_path,
+    safe_thumbnail_path,
+)
+from ..core.utils import utc_now
+from .db import (
+    THUMBNAIL_CPU_SLOT_LEASE_SECONDS,
+    THUMBNAIL_JOB_MAX_ATTEMPTS,
+    WORKER_METRIC_SNAPSHOT_TTL_SECONDS,
+    _PreparedGalleryFile,
+    _add_verified_thumbnail,
+    _attach_gallery_thumbnail_url,
+    _connect,
+    _ensure_database,
+    _iter_sqlite_in_chunks,
+    _storage_lock,
+    _transaction,
+    _verified_thumbnails,
+    _verified_thumbnails_lock,
+    image_url_for_filename,
+    logger,
+)
+from .image_files import (
+    promote_image_temp as _promote_image_temp_unlocked,
+    save_image_to_temp_with_metadata as _save_image_temp_with_metadata_unlocked,
+)
+from .thumbnails import (
+    create_thumbnail_temp_from_path as _create_thumbnail_temp_from_path_unlocked,
+    promote_thumbnail_temp as _promote_thumbnail_temp_unlocked,
+    thumbnail_filename_for_image as _thumbnail_filename_for_image,
+    thumbnail_url_for_filename as _thumbnail_url_for_filename,
+)
+
+from contextlib import contextmanager
+from datetime import (
+    datetime,
+    timedelta,
+    timezone,
+)
+from pathlib import Path
+from typing import (
+    Any,
+    Iterable,
+    Iterator,
+    Sequence,
+)
+import os
+import sqlite3
+import threading
+import time
+import uuid
 from .coordination import acquire_background_slot, release_background_slot
 
 
@@ -575,7 +627,6 @@ def _set_thumbnail_filename_for_image(filename: str, thumbnail_filename: str):
                 """,
                 (thumbnail_filename, filename),
             )
-
 
 
 __all__ = [name for name in globals() if not name.startswith("__")]

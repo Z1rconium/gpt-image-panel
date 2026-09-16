@@ -49,7 +49,7 @@ def test_storage_enqueue_image_job_rejects_queue_full_atomically(tmp_path):
         max_pending_edit_source_bytes=1024 * 1024,
     )
 
-    with pytest.raises(image_jobs_repo.ImageJobQueueFullError):
+    with pytest.raises(db_repo.ImageJobQueueFullError):
         image_jobs_repo.enqueue_image_job(
             parent_job={"job_id": "overflow-parent", "status": "queued"},
             operation="generation",
@@ -228,7 +228,7 @@ def test_storage_edit_source_reservation_is_global_and_released_on_terminal(tmp_
         max_pending_edit_source_bytes=max_pending_bytes,
     )
 
-    with pytest.raises(image_jobs_repo.EditSourceQueueFullError):
+    with pytest.raises(db_repo.EditSourceQueueFullError):
         image_jobs_repo.enqueue_image_job(
             parent_job={"job_id": "edit-overflow", "status": "queued"},
             operation="edit",

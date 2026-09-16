@@ -1,6 +1,22 @@
 """Incremental gallery-to-object-storage synchronization state."""
 
-from ..db import *
+from ...core.utils import utc_now
+from ..db import (
+    GALLERY_SYNC_BATCH_SIZE,
+    _coerce_nonnegative_int,
+    _connect,
+    _ensure_database,
+    _invalidate_gallery_total_bytes_cache,
+    _transaction,
+    logger,
+)
+
+from typing import (
+    Any,
+    Iterable,
+    Iterator,
+)
+import sqlite3
 
 
 def _gallery_r2_sync_changed_condition() -> str:

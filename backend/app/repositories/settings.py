@@ -1,7 +1,41 @@
 """Settings, assistant metadata, and prompt snippet persistence."""
 
 from ..core.image_models import MAX_PROMPT_CHARS
-from .db import *
+from ..core.utils import utc_now
+from ..schemas.snippets import PromptSnippet
+from .db import (
+    AI_ASSISTANT_SETTINGS_KEY,
+    NODEIMAGE_SETTINGS_KEY,
+    PROMPT_OPTIMIZER_SETTINGS_KEY,
+    PROMPT_SNIPPET_COLUMNS,
+    R2_BACKUP_SETTINGS_KEY,
+    _connect,
+    _default_ai_assistant_settings,
+    _default_prompt_optimizer_settings,
+    _default_settings,
+    _ensure_database,
+    _generate_prompt_snippet_id,
+    _get_setting_value,
+    _json_loads_dict,
+    _like_prompt_snippet_query,
+    _load_nodeimage_settings_from_conn,
+    _load_r2_backup_settings_from_conn,
+    _load_settings_from_conn,
+    _normalize_ai_assistant_settings,
+    _normalize_nodeimage_settings,
+    _normalize_prompt_optimizer_settings,
+    _normalize_prompt_snippet_favorite,
+    _normalize_r2_backup_settings,
+    _prompt_snippet_from_row,
+    _replace_settings_on_conn,
+    _secure_data_storage_permissions,
+    _set_setting_value,
+    _transaction,
+)
+
+from typing import Any
+import json
+import sqlite3
 
 
 def load_settings() -> dict:

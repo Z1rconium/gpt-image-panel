@@ -1,6 +1,17 @@
 """Gallery filter option maintenance and reads."""
 
-from ..db import *
+from ...schemas.gallery import GalleryFilterOptions
+from ..db import (
+    _GalleryFilterOptionsCacheEntry,
+    _connect,
+    _ensure_database,
+    _filter_options_cache,
+    _filter_options_cache_lock,
+    _get_filter_options_cache_version,
+    _rebuild_gallery_filter_options_on_conn,
+    _transaction,
+)
+import sqlite3
 
 
 def rebuild_gallery_filter_options() -> GalleryFilterOptions:

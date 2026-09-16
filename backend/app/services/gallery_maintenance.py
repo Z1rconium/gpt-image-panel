@@ -23,13 +23,13 @@ from ..repositories.gallery.sync_state import (
 )
 from ..repositories.settings import load_r2_backup_settings
 from ..repositories.thumbnail_jobs import (
-    THUMBNAIL_JOB_LEASE_SECONDS,
     claim_next_thumbnail_job,
     complete_thumbnail_job,
     fail_thumbnail_job,
     generate_thumbnail_for_image,
     has_claimable_thumbnail_job,
 )
+from ..repositories.db import THUMBNAIL_JOB_LEASE_SECONDS
 from .claim_loop import run_claim_loop
 from .gallery_common import (
     AI_ANALYZE_JOB_KIND,

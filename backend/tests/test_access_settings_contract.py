@@ -2264,7 +2264,7 @@ def test_overall_config_syncs_env_and_hot_override(client, monkeypatch):
     assert item["source"] == "override"
     assert config.ENABLE_METRICS is True
 
-    rows = settings_repo.sync_overall_config_env_values(
+    rows = db_repo.sync_overall_config_env_values(
         {"ENABLE_METRICS": ("false", True), "ALLOW_UNAUTHENTICATED": ("true", True)}
     )
     assert rows["ENABLE_METRICS"]["override_value"] == "true"
@@ -2290,7 +2290,7 @@ def test_overall_config_startup_only_cannot_be_overridden(client):
 
 def test_overall_config_secret_env_value_is_not_persisted(client, monkeypatch):
     monkeypatch.setenv("WEBHOOK_SIGNING_SECRET", "never-store-this")
-    rows = settings_repo.sync_overall_config_env_values(
+    rows = db_repo.sync_overall_config_env_values(
         overall_config.current_env_snapshot()
     )
     assert rows["WEBHOOK_SIGNING_SECRET"]["is_env_set"] is True
