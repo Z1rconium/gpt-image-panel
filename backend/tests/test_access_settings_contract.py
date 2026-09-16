@@ -1,6 +1,6 @@
 import urllib.parse
 
-import httpx
+import aiohttp
 
 from backend.app.integrations import turnstile as turnstile_client
 from backend.app.integrations.turnstile import TurnstileVerification
@@ -208,46 +208,77 @@ def test_access_turnstile_enabled_requires_valid_token(tmp_path, monkeypatch):
         assert seen_tokens == ["good-token"]
 
 
+class _TurnstileResponse:
+    def __init__(self, status: int = 200, payload: dict | None = None) -> None:
+        self.status = status
+        self._payload = payload if payload is not None else {}
+        self.request_info = None
+        self.history: tuple = ()
+
+    async def json(self, content_type=None):
+        return self._payload
+
+
+class _TurnstileRequest:
+    """Stand-in for aiohttp's request context manager."""
+
+    def __init__(self, response: _TurnstileResponse | BaseException) -> None:
+        self._response = response
+
+    async def __aenter__(self):
+        if isinstance(self._response, BaseException):
+            raise self._response
+        return self._response
+
+    async def __aexit__(self, *exc_info):
+        return False
+
+
+class _TurnstileSession:
+    def __init__(self, response: _TurnstileResponse | BaseException) -> None:
+        self._response = response
+        self.posts: list[dict] = []
+
+    def post(self, url, **kwargs):
+        self.posts.append({"url": url, **kwargs})
+        return _TurnstileRequest(self._response)
+
+
+class _TurnstilePool:
+    def __init__(self, session: _TurnstileSession) -> None:
+        self._session = session
+
+    def get(self, timeout_kind=None, socks5_proxy=None):
+        return self._session
+
+
+def _install_turnstile_session(monkeypatch, response):
+    session = _TurnstileSession(response)
+    monkeypatch.setattr(turnstile_client, "get_pool", lambda: _TurnstilePool(session))
+    return session
+
+
 def test_turnstile_verify_sends_secret_response_and_remoteip(monkeypatch):
-    captured = {}
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        form = urllib.parse.parse_qs(request.content.decode())
-        captured.update({key: values[0] for key, values in form.items()})
-        return httpx.Response(200, json={"success": True})
-
-    real_client = httpx.AsyncClient
-
-    def fake_async_client(**kwargs):
-        kwargs.pop("transport", None)
-        return real_client(transport=httpx.MockTransport(handler), **kwargs)
-
-    monkeypatch.setattr(turnstile_client, "httpx", types.SimpleNamespace(AsyncClient=fake_async_client))
+    session = _install_turnstile_session(monkeypatch, _TurnstileResponse(200, {"success": True}))
     monkeypatch.setattr(config, "TURNSTILE_SECRET_KEY", "unit-secret")
 
     result = asyncio.run(turnstile_client.verify_turnstile_token("unit-token", "203.0.113.7"))
 
     assert result.ok is True
     assert result.error_codes == ()
-    assert captured["secret"] == "unit-secret"
-    assert captured["response"] == "unit-token"
-    assert captured["remoteip"] == "203.0.113.7"
+    assert session.posts[0]["url"] == config.TURNSTILE_VERIFY_URL
+    assert session.posts[0]["data"] == {
+        "secret": "unit-secret",
+        "response": "unit-token",
+        "remoteip": "203.0.113.7",
+    }
 
 
 def test_turnstile_verify_failure_payload_reports_error_codes(monkeypatch):
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            200,
-            json={"success": False, "error-codes": ["invalid-input-response"]},
-        )
-
-    real_client = httpx.AsyncClient
-
-    def fake_async_client(**kwargs):
-        kwargs.pop("transport", None)
-        return real_client(transport=httpx.MockTransport(handler), **kwargs)
-
-    monkeypatch.setattr(turnstile_client, "httpx", types.SimpleNamespace(AsyncClient=fake_async_client))
+    _install_turnstile_session(
+        monkeypatch,
+        _TurnstileResponse(200, {"success": False, "error-codes": ["invalid-input-response"]}),
+    )
 
     result = asyncio.run(turnstile_client.verify_turnstile_token("bad"))
 
@@ -255,15 +286,18 @@ def test_turnstile_verify_failure_payload_reports_error_codes(monkeypatch):
     assert result.error_codes == ("invalid-input-response",)
 
 
-def test_turnstile_verify_network_error_is_rejected(monkeypatch):
-    def failing_async_client(*args, **kwargs):
-        raise OSError("network unreachable")
+def test_turnstile_verify_http_error_is_rejected(monkeypatch):
+    _install_turnstile_session(monkeypatch, _TurnstileResponse(500, {"success": True}))
 
-    monkeypatch.setattr(
-        turnstile_client,
-        "httpx",
-        types.SimpleNamespace(AsyncClient=failing_async_client, HTTPError=httpx.HTTPError),
-    )
+    result = asyncio.run(turnstile_client.verify_turnstile_token("tok"))
+
+    assert result.ok is False
+    assert len(result.error_codes) == 1
+    assert result.error_codes[0].startswith("verification_request_failed:")
+
+
+def test_turnstile_verify_network_error_is_rejected(monkeypatch):
+    _install_turnstile_session(monkeypatch, aiohttp.ClientConnectionError("network unreachable"))
 
     result = asyncio.run(turnstile_client.verify_turnstile_token("tok"))
 

@@ -2,3 +2,5 @@
 # `--reload` for `npm run backend:dev`; the production image installs granian[uvloop] only.
 granian[reload]>=1.7.0
 pytest>=8.0.0
+# FastAPI's TestClient (starlette.testclient) speaks httpx; the app itself does not.
+httpx>=0.28.0

@@ -1,18 +1,33 @@
 from pathlib import Path
 
 
-def test_turnstile_http_client_is_a_runtime_dependency():
-    requirements = (
+def test_turnstile_uses_the_shared_session_pool():
+    """The app has one HTTP stack; a second client library must not creep in."""
+    turnstile = (
+        Path(__file__).resolve().parents[1] / "app/integrations/turnstile.py"
+    ).read_text(encoding="utf-8")
+
+    assert "from .session_pool import" in turnstile
+    assert "httpx" not in turnstile
+
+
+def test_test_client_http_dependency_is_declared():
+    """starlette.testclient imports httpx, so the test requirements need it."""
+    dev_requirements = (
+        Path(__file__).resolve().parents[1] / "requirements-dev.txt"
+    ).read_text(encoding="utf-8")
+    runtime_requirements = (
         Path(__file__).resolve().parents[2] / "requirements.txt"
     ).read_text(encoding="utf-8")
 
     package_names = {
         line.split("[", 1)[0].split("=", 1)[0].split("<", 1)[0].split(">", 1)[0].strip()
-        for line in requirements.splitlines()
+        for line in dev_requirements.splitlines()
         if line.strip() and not line.lstrip().startswith("#")
     }
 
     assert "httpx" in package_names
+    assert "httpx" not in runtime_requirements
 
 
 def _requirement_names(text: str) -> set[str]:

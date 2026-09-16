@@ -1,10 +1,12 @@
 """Cloudflare Turnstile server-side verification client."""
 
+import asyncio
 from dataclasses import dataclass
 
-import httpx
+import aiohttp
 
 from ..core import settings as config
+from .session_pool import TIMEOUT_PROBE, get_pool
 
 
 @dataclass(frozen=True)
@@ -30,11 +32,19 @@ async def verify_turnstile_token(token: str, client_ip: str | None = None) -> Tu
         payload["remoteip"] = client_ip
 
     try:
-        async with httpx.AsyncClient(timeout=config.TURNSTILE_TIMEOUT_SECONDS) as client:
-            resp = await client.post(config.TURNSTILE_VERIFY_URL, data=payload)
-            resp.raise_for_status()
-            data = resp.json()
-    except (httpx.HTTPError, ValueError, OSError) as exc:
+        session = get_pool().get(timeout_kind=TIMEOUT_PROBE)
+        async with session.post(
+            config.TURNSTILE_VERIFY_URL,
+            data=payload,
+            timeout=aiohttp.ClientTimeout(total=config.TURNSTILE_TIMEOUT_SECONDS),
+        ) as resp:
+            if resp.status >= 400:
+                return TurnstileVerification(
+                    ok=False,
+                    error_codes=(f"verification_request_failed:HTTP {resp.status}",),
+                )
+            data = await resp.json(content_type=None)
+    except (aiohttp.ClientError, asyncio.TimeoutError, ValueError, OSError) as exc:
         return TurnstileVerification(ok=False, error_codes=(f"verification_request_failed:{exc}",))
 
     errors = tuple(str(code) for code in data.get("error-codes", []) if isinstance(code, str))
