@@ -10,10 +10,10 @@ import logging
 import time
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
 
 from ..core import settings as config
 from ..core.observability import metrics
+from ..runtime.state import utc_lease_expires_at
 from .coordination import (
     acquire_sse_slot,
     count_active_sse_slots,
@@ -112,7 +112,7 @@ class SSELimiter:
         metrics.increment("sse.released" if released else "sse.release_missed")
 
     def _lease_expires_at(self) -> str:
-        return (datetime.now(timezone.utc) + timedelta(seconds=self.lease_seconds)).isoformat()
+        return utc_lease_expires_at(self.lease_seconds)
 
     def _count_active_slots(self, client_ip: str | None = None) -> int:
         try:

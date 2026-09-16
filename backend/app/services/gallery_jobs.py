@@ -38,6 +38,7 @@ from ..core import security as auth
 from ..core import settings as config
 from ..core.observability import metrics
 from ..core.utils import utc_now
+from ..runtime.state import utc_lease_expires_at
 from ..integrations.r2 import config as r2_config
 from ..integrations.r2 import sync as r2_algorithm
 from ..repositories.coordination import (
@@ -834,15 +835,15 @@ async def stream_gallery_job(
 
 
 def _gallery_job_lease_expires_at() -> str:
-    return (datetime.now(timezone.utc) + timedelta(seconds=GALLERY_JOB_LEASE_SECONDS)).isoformat()
+    return utc_lease_expires_at(GALLERY_JOB_LEASE_SECONDS)
 
 
 def _direct_export_slot_expires_at() -> str:
-    return (datetime.now(timezone.utc) + timedelta(seconds=DIRECT_EXPORT_SLOT_LEASE_SECONDS)).isoformat()
+    return utc_lease_expires_at(DIRECT_EXPORT_SLOT_LEASE_SECONDS)
 
 
 def _background_task_lease_expires_at() -> str:
-    return (datetime.now(timezone.utc) + timedelta(seconds=BACKGROUND_TASK_LEASE_SECONDS)).isoformat()
+    return utc_lease_expires_at(BACKGROUND_TASK_LEASE_SECONDS)
 
 
 def _next_background_task_error_backoff(current: float) -> float:

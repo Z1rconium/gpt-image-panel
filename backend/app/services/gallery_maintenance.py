@@ -1,10 +1,9 @@
 import asyncio
 import logging
 import uuid
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from ..runtime.state import state
+from ..runtime.state import state, utc_lease_expires_at
 from ..core import settings as config
 from ..core.observability import metrics
 from ..core.utils import utc_now
@@ -82,10 +81,7 @@ def kick_thumbnail_dispatcher() -> None:
 
 
 def _thumbnail_job_lease_expires_at() -> str:
-    return (
-        datetime.now(timezone.utc)
-        + timedelta(seconds=THUMBNAIL_JOB_LEASE_SECONDS)
-    ).isoformat()
+    return utc_lease_expires_at(THUMBNAIL_JOB_LEASE_SECONDS)
 
 
 async def run_thumbnail_dispatcher(worker_id: str) -> None:

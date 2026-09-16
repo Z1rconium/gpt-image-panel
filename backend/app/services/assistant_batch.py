@@ -6,14 +6,13 @@ import os
 import re
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import APIRouter, Body, File, Form, HTTPException, Request, UploadFile
 
 from . import presets
-from ..runtime.state import state
+from ..runtime.state import state, utc_lease_expires_at
 from .uploads import is_image_upload, resolve_upload_content_type
 from ..core import settings as config
 from ..core import validators as ssrf
@@ -244,9 +243,7 @@ def _build_ai_analyze_job(
 
 
 def _gallery_job_lease_expires_at() -> str:
-    from datetime import timedelta
-
-    return (datetime.now(timezone.utc) + timedelta(seconds=AI_ANALYZE_JOB_LEASE_SECONDS)).isoformat()
+    return utc_lease_expires_at(AI_ANALYZE_JOB_LEASE_SECONDS)
 
 
 async def _renew_ai_analyze_job_lease(job_id: str, lease_owner: str, stop_event: asyncio.Event) -> None:

@@ -6,7 +6,6 @@ import os
 import re
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal
 
@@ -14,7 +13,7 @@ from fastapi import APIRouter, Body, File, Form, HTTPException, UploadFile
 
 from ..core.image_models import MAX_PROMPT_CHARS
 from . import presets
-from ..runtime.state import state
+from ..runtime.state import state, utc_lease_expires_at
 from .uploads import is_image_upload, resolve_upload_content_type
 from ..core import settings as config
 from ..core import validators as ssrf
@@ -194,7 +193,7 @@ def _assistant_request_semaphore() -> asyncio.Semaphore:
 
 def _assistant_slot_expires_at(timeout_seconds: int) -> str:
     lease_seconds = max(30, int(timeout_seconds or config.PROMPT_OPTIMIZER_TIMEOUT_SECONDS) + 30)
-    return (datetime.now(timezone.utc) + timedelta(seconds=lease_seconds)).isoformat()
+    return utc_lease_expires_at(lease_seconds)
 
 
 def _assistant_slot_owner() -> str:
