@@ -2,6 +2,9 @@
 
 import threading
 import time
+from pathlib import Path
+
+import pytest
 
 from backend.app.runtime import blocking
 
@@ -79,3 +82,39 @@ def test_worker_fanout_is_a_no_op_without_an_executor():
     assert calls == []
 
     executor.shutdown()
+
+
+def test_storage_probe_tolerates_another_worker_removing_its_file(tmp_path, monkeypatch):
+    """Concurrent workers must not fail a writable directory.
+
+    Every worker verifies storage at startup. With a fixed probe name, one
+    worker's cleanup deleted another's probe before it could remove its own,
+    and the check raised PermissionError for a directory that was writable.
+    """
+    import builtins
+
+    from backend.app.repositories.db import connection
+
+    real_open = builtins.open
+
+    def racing_open(file, *args, **kwargs):
+        handle = real_open(file, *args, **kwargs)
+        # The other worker finishes its check and unlinks its probe first.
+        Path(file).unlink(missing_ok=True)
+        return handle
+
+    monkeypatch.setattr(builtins, "open", racing_open)
+
+    connection._check_directory_writable(tmp_path)
+
+
+def test_storage_probe_reports_an_unwritable_directory(tmp_path, monkeypatch):
+    from backend.app.repositories.db import connection
+
+    def failing_open(file, *args, **kwargs):
+        raise PermissionError("read-only file system")
+
+    monkeypatch.setattr("builtins.open", failing_open)
+
+    with pytest.raises(PermissionError, match="Directory is not writable"):
+        connection._check_directory_writable(tmp_path)

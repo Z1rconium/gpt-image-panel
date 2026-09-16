@@ -5,6 +5,7 @@ import logging
 import os
 import sqlite3
 import time
+import uuid
 from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
@@ -195,11 +196,16 @@ def _ensure_directories():
 
 
 def _check_directory_writable(path: Path):
-    test_file = path / ".write-test"
+    """Probe the directory with a file name unique to this caller.
+
+    Every worker process verifies storage at startup, so a shared probe name
+    would have them delete each other's file mid-check and fail a directory
+    that is perfectly writable.
+    """
+    probe = path / f".write-test-{os.getpid()}-{uuid.uuid4().hex}"
     try:
-        with open(test_file, "wb") as f:
+        with open(probe, "wb") as f:
             f.write(b"ok")
-        test_file.unlink()
     except OSError as e:
         uid = os.getuid()
         gid = os.getgid()
@@ -208,6 +214,12 @@ def _check_directory_writable(path: Path):
             f"Directory is not writable: {absolute_path} "
             f"(process uid={uid}, gid={gid}). Original error: {e}"
         ) from e
+    finally:
+        try:
+            probe.unlink()
+        except OSError:
+            # Someone else removing our probe is not a writability problem.
+            pass
 
 
 def _open_connection(
