@@ -1068,7 +1068,7 @@ def test_gallery_favorite_filter_normalizes_string_booleans(client):
 
 
 def test_gallery_batch_operations_chunk_sqlite_in_clauses(client, monkeypatch):
-    monkeypatch.setattr(db_repo, "SQLITE_IN_CLAUSE_CHUNK_SIZE", 2)
+    monkeypatch.setattr(db_repo.connection, "SQLITE_IN_CLAUSE_CHUNK_SIZE", 2)
     for index in range(5):
         _fake_gallery_entry(f"chunk-{index}", f"chunk {index}", "1024x1024", f"chunk-{index}.png")
 

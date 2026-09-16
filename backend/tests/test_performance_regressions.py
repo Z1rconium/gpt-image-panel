@@ -139,14 +139,14 @@ def test_db_executor_reuses_worker_connection(tmp_path, monkeypatch):
     _configure_runtime(tmp_path)
     monkeypatch.setattr(config, "DB_EXECUTOR_WORKERS", 1)
     opened = 0
-    original_open = db_repo._open_connection
+    original_open = db_repo.connection._open_connection
 
     def tracked_open(*args, **kwargs):
         nonlocal opened
         opened += 1
         return original_open(*args, **kwargs)
 
-    monkeypatch.setattr(db_repo, "_open_connection", tracked_open)
+    monkeypatch.setattr(db_repo.connection, "_open_connection", tracked_open)
 
     async def scenario():
         await run_db_operation(
@@ -171,13 +171,13 @@ def test_current_thread_db_operation_uses_short_timeout_without_persisting_conne
     _configure_runtime(tmp_path)
     monkeypatch.setattr(config, "SQLITE_BUSY_TIMEOUT_MS", 17)
     seen: dict[str, object] = {}
-    original_open = db_repo._open_connection
+    original_open = db_repo.connection._open_connection
 
     def tracked_open(*args, **kwargs):
         seen["busy_timeout_ms"] = kwargs.get("busy_timeout_ms")
         return original_open(*args, **kwargs)
 
-    monkeypatch.setattr(db_repo, "_open_connection", tracked_open)
+    monkeypatch.setattr(db_repo.connection, "_open_connection", tracked_open)
 
     run_db_operation_in_current_thread(
         mark_worker_heartbeat,
@@ -340,7 +340,7 @@ def test_thread_connection_reuse_does_not_stat_database_path(tmp_path, monkeypat
         raise AssertionError("database Path() should not be checked when reusing a connection")
 
     try:
-        monkeypatch.setattr(db_repo, "Path", fail_path)
+        monkeypatch.setattr(db_repo.connection, "Path", fail_path)
         assert db_repo._get_thread_connection() is conn
     finally:
         db_repo._close_thread_connection()
