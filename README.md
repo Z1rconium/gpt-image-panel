@@ -286,6 +286,16 @@ Secret fields prefer `${ENV_VAR_NAME}` references. Literal secrets stored in SQL
 
 Overall Config persists overrides in SQLite. Some settings are hot-reloaded; restart-required and build-only settings are marked in the UI and should still be changed through `.env`/Compose for reproducible deployments.
 
+### Configuration precedence
+
+Settings reach the process through three layers, and which one owns a name matters:
+
+1. **Environment, read at import.** `backend/app/core/settings.py` reads every env var once into a module constant, and readers use those constants directly. Eight of them are *derived* from another setting (`MAX_UPSTREAM_IMAGE_BYTES_PER_TASK_MB`, `UPSTREAM_MEMORY_BUDGET_MB`, `MAX_PENDING_EDIT_SOURCE_MB`, `IMPORT_ARCHIVE_MAX_MB`, `IMPORT_TEMP_RESERVATION_MAX_MB`, `DB_EXECUTOR_WORKERS`, `AI_ASSISTANT_MAX_CONCURRENCY`, `IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS`): they follow their base value unless that name is itself set, and they are recomputed when a base changes at runtime.
+2. **Overall Config overrides, in SQLite.** `/api/settings/overall-config` stores overrides in `overall_config_values`. Hot-reloadable keys take effect immediately; `restart_required` keys are stored and applied on the next start. `settings.apply_overrides` is the only code path that changes a setting after import, and it recomputes the derived values so the process cannot run with limits that contradict each other.
+3. **Keys owned by `/api/settings`.** Names marked `exposed_in_settings` (API presets, prompt optimizer, AI assistant, R2, NodeImage) are read from SQLite first, with the environment value only seeding the default: after the first save from Web Settings, changing the matching env var has no effect.
+
+Known limits: a runtime change to `DB_EXECUTOR_WORKERS`, `IMAGE_CPU_CONCURRENCY`, or `FILE_IO_CONCURRENCY` does not resize an already created thread pool, and each worker process keeps its own in-memory mirror of the API presets — those are re-read from SQLite for every job unit, so workers do not drift apart.
+
 ### SQLite write-lock and lease metrics
 
 With `ENABLE_METRICS=true`, `/api/metrics` exposes the diagnostics used to size SQLite coordination:
