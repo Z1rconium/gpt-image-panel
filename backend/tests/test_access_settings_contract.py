@@ -2542,3 +2542,25 @@ def test_api_settings_reload_skips_a_write_that_finished_during_the_read(client,
     presets.load_api_settings()
 
     assert state.api_presets == [{"id": "in-flight", "name": "In flight"}]
+
+
+def test_hot_overriding_a_base_setting_moves_its_derived_settings(client):
+    """The whole chain: registry -> apply -> recompute, through the API."""
+    response = client.put(
+        "/api/settings/overall-config",
+        json={"updates": [{"name": "MAX_FILE_SIZE_MB", "value": 25}]},
+    )
+
+    assert response.status_code == 200
+    item = next(
+        entry
+        for entry in response.json()["items"]
+        if entry["name"] == "MAX_FILE_SIZE_MB"
+    )
+    assert item["hot_reload"] is True
+
+    assert config.MAX_FILE_SIZE_MB == 25
+    assert config.MAX_UPSTREAM_IMAGE_BYTES_PER_TASK_MB == 25
+    assert config.MAX_PENDING_EDIT_SOURCE_MB == 100
+    assert config.IMPORT_ARCHIVE_MAX_MB == 500
+    assert config.IMPORT_TEMP_RESERVATION_MAX_MB == 1000
