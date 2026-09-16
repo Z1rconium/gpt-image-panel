@@ -6,7 +6,7 @@ import logging
 import time
 from datetime import datetime
 
-from ..api.app_state import app
+from ..runtime.state import state
 from ..api.presets import (
     get_effective_preset_api_key,
     get_exception_message,
@@ -314,7 +314,7 @@ def set_generate_job_progress(
     message: str,
     operation: str,
 ):
-    job = app.state.generate_jobs.get(job_id)
+    job = state.generate_jobs.get(job_id)
     if not job:
         return
 
@@ -326,7 +326,7 @@ def set_generate_job_progress(
         "operation": operation,
         "updated_at": utc_now(),
     }
-    app.state.generate_jobs[job_id] = updated
+    state.generate_jobs[job_id] = updated
     publish_generate_job(updated, list_debounce=True, list_reconcile=False)
 
 

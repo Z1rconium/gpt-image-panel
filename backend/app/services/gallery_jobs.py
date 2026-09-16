@@ -14,7 +14,7 @@ from fastapi import APIRouter, Body, File, HTTPException, Query, Request, Upload
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from starlette.background import BackgroundTask
 
-from ..api.app_state import app
+from ..runtime.state import state
 from .gallery_archive_export import (
     iter_gallery_zip_chunks,
     prepare_gallery_zip_chunks,
@@ -375,9 +375,9 @@ def _missing_gallery_ids(requested_ids: list[str], entries: list[GalleryEntry]) 
 
 
 def _gallery_export_lock() -> asyncio.Lock:
-    if not hasattr(app.state, "gallery_export_lock"):
-        app.state.gallery_export_lock = asyncio.Lock()
-    return app.state.gallery_export_lock
+    if not hasattr(state, "gallery_export_lock"):
+        state.gallery_export_lock = asyncio.Lock()
+    return state.gallery_export_lock
 
 
 def _create_gallery_export_direct_slot(
@@ -630,10 +630,10 @@ def _gallery_job_payload(kind: str, job: dict) -> dict:
 
 
 def _get_gallery_job_subscribers(kind: str) -> dict[str, set[asyncio.Queue]]:
-    all_subscribers = getattr(app.state, "gallery_job_subscribers", None)
+    all_subscribers = getattr(state, "gallery_job_subscribers", None)
     if not isinstance(all_subscribers, dict):
         all_subscribers = {}
-        app.state.gallery_job_subscribers = all_subscribers
+        state.gallery_job_subscribers = all_subscribers
     subscribers = all_subscribers.get(kind)
     if not isinstance(subscribers, dict):
         subscribers = {}
@@ -642,10 +642,10 @@ def _get_gallery_job_subscribers(kind: str) -> dict[str, set[asyncio.Queue]]:
 
 
 def _get_gallery_job_sse_poller_tasks() -> dict[str, asyncio.Task]:
-    tasks = getattr(app.state, "gallery_job_sse_poller_tasks", None)
+    tasks = getattr(state, "gallery_job_sse_poller_tasks", None)
     if not isinstance(tasks, dict):
         tasks = {}
-        app.state.gallery_job_sse_poller_tasks = tasks
+        state.gallery_job_sse_poller_tasks = tasks
     return tasks
 
 

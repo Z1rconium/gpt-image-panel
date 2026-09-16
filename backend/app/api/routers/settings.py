@@ -4,7 +4,7 @@ import uuid
 
 from fastapi import APIRouter, Body, HTTPException
 
-from ..app_state import app
+from ...runtime.state import state
 from ..presets import (
     apply_api_preset,
     apply_ai_assistant_settings,
@@ -302,14 +302,14 @@ async def update_settings(req: SettingsRequest):
             current_proxy = get_upstream_socks5_proxy(raw=True)
             requested_proxy = req.upstream_socks5_proxy.strip()
             if current_proxy and requested_proxy == mask_socks5_proxy_url(current_proxy):
-                app.state.upstream_socks5_proxy = current_proxy
+                state.upstream_socks5_proxy = current_proxy
             else:
                 apply_upstream_socks5_proxy(requested_proxy)
         if req.webhook_url is not None:
             current_webhook_url = get_webhook_url(raw=True)
             requested_webhook_url = req.webhook_url.strip()
             if current_webhook_url and requested_webhook_url == mask_webhook_url(current_webhook_url):
-                app.state.webhook_url = current_webhook_url
+                state.webhook_url = current_webhook_url
             else:
                 apply_webhook_url(requested_webhook_url)
             _validate_webhook_security()
@@ -478,14 +478,14 @@ async def delete_settings_preset(preset_id: str):
 
     begin_api_settings_write()
     try:
-        active_preset_id = getattr(app.state, "active_preset_id", presets[0]["id"])
+        active_preset_id = getattr(state, "active_preset_id", presets[0]["id"])
         presets.pop(delete_index)
-        app.state.api_presets = presets
+        state.api_presets = presets
         if not any(preset["id"] == active_preset_id for preset in presets):
             fallback = presets[min(delete_index, len(presets) - 1)]
             apply_api_preset(fallback)
         else:
-            app.state.active_preset_id = active_preset_id
+            state.active_preset_id = active_preset_id
 
         await asyncio.to_thread(persist_api_settings)
     finally:

@@ -1,6 +1,6 @@
 from fastapi import HTTPException
 
-from .app_state import app
+from ..runtime.state import state
 from ..core import secrets
 from ..core import settings as config
 from ..core.api_paths import (
@@ -237,7 +237,7 @@ def normalize_ai_assistant_settings(raw: dict | None) -> dict:
 def persist_api_settings():
     save_settings(
         {
-            "active_preset_id": getattr(app.state, "active_preset_id", "default"),
+            "active_preset_id": getattr(state, "active_preset_id", "default"),
             "upstream_socks5_proxy": get_upstream_socks5_proxy(raw=True),
             "webhook_url": get_webhook_url(raw=True),
             "presets": get_api_presets(),
@@ -253,79 +253,79 @@ def begin_api_settings_write() -> None:
     """Mark an in-memory API-settings update as in flight.
 
     While a settings write is applying its new values and persisting them,
-    concurrent `load_api_settings` calls must not repopulate `app.state` from
+    concurrent `load_api_settings` calls must not repopulate the runtime state from
     the pre-commit database row, or they would revert the update.
     """
-    app.state.api_settings_write_generation = (
-        int(getattr(app.state, "api_settings_write_generation", 0)) + 1
+    state.api_settings_write_generation = (
+        int(getattr(state, "api_settings_write_generation", 0)) + 1
     )
-    app.state.api_settings_write_pending = True
+    state.api_settings_write_pending = True
 
 
 def end_api_settings_write() -> None:
-    app.state.api_settings_write_pending = False
+    state.api_settings_write_pending = False
 
 
 def load_api_settings():
-    if bool(getattr(app.state, "api_settings_write_pending", False)):
+    if bool(getattr(state, "api_settings_write_pending", False)):
         return
-    generation = int(getattr(app.state, "api_settings_write_generation", 0))
+    generation = int(getattr(state, "api_settings_write_generation", 0))
     data = load_settings()
     if (
-        generation != int(getattr(app.state, "api_settings_write_generation", 0))
-        or bool(getattr(app.state, "api_settings_write_pending", False))
+        generation != int(getattr(state, "api_settings_write_generation", 0))
+        or bool(getattr(state, "api_settings_write_pending", False))
     ):
         return
     presets = data["presets"]
-    app.state.api_presets = presets
-    app.state.active_preset_id = data["active_preset_id"]
+    state.api_presets = presets
+    state.active_preset_id = data["active_preset_id"]
     apply_upstream_socks5_proxy(data.get("upstream_socks5_proxy"))
     apply_webhook_url(data.get("webhook_url"))
     apply_api_preset(get_active_preset())
 
 
 def get_api_presets() -> list[dict]:
-    presets = getattr(app.state, "api_presets", None)
+    presets = getattr(state, "api_presets", None)
     if presets:
         normalized = [
             normalize_api_preset(preset, str(preset.get("id") or f"preset-{index + 1}"))
             for index, preset in enumerate(presets)
         ]
-        app.state.api_presets = normalized
+        state.api_presets = normalized
         return normalized
 
     preset = normalize_api_preset(
         {
             "id": "default",
             "name": "Default",
-            "api_url": getattr(app.state, "api_url", config.DEFAULT_API_URL),
+            "api_url": getattr(state, "api_url", config.DEFAULT_API_URL),
             "api_key": getattr(
-                app.state,
+                state,
                 "api_key",
                 _default_secret_reference("builtin-default-api-key", config.DEFAULT_API_KEY),
             ),
-            "api_path": getattr(app.state, "api_path", config.DEFAULT_API_PATH),
-            "default_model": getattr(app.state, "default_model", ""),
+            "api_path": getattr(state, "api_path", config.DEFAULT_API_PATH),
+            "default_model": getattr(state, "default_model", ""),
             "default_response_format": getattr(
-                app.state,
+                state,
                 "default_response_format",
                 "url",
             ),
         }
     )
-    app.state.api_presets = [preset]
-    app.state.active_preset_id = preset["id"]
-    return app.state.api_presets
+    state.api_presets = [preset]
+    state.active_preset_id = preset["id"]
+    return state.api_presets
 
 
 def get_active_preset() -> dict:
     presets = get_api_presets()
-    active_id = getattr(app.state, "active_preset_id", presets[0]["id"])
+    active_id = getattr(state, "active_preset_id", presets[0]["id"])
     for preset in presets:
         if preset["id"] == active_id:
             return preset
 
-    app.state.active_preset_id = presets[0]["id"]
+    state.active_preset_id = presets[0]["id"]
     return presets[0]
 
 
@@ -337,23 +337,23 @@ def get_preset_by_id(preset_id: str) -> dict | None:
 
 
 def apply_api_preset(preset: dict):
-    app.state.api_url = preset.get("api_url", "").rstrip("/")
-    app.state.api_key = preset.get("api_key", "")
-    app.state.api_path = normalize_api_path(
+    state.api_url = preset.get("api_url", "").rstrip("/")
+    state.api_key = preset.get("api_key", "")
+    state.api_path = normalize_api_path(
         preset.get("api_path", "/v1/images/generations")
     )
-    app.state.default_model = normalize_default_model(
+    state.default_model = normalize_default_model(
         preset.get("default_model"),
-        app.state.api_path,
+        state.api_path,
     )
-    app.state.default_response_format = normalize_default_response_format(
+    state.default_response_format = normalize_default_response_format(
         preset.get("default_response_format")
     )
-    app.state.active_preset_id = preset["id"]
+    state.active_preset_id = preset["id"]
 
 
 def get_upstream_socks5_proxy(*, raw: bool = False) -> str:
-    value = str(getattr(app.state, "upstream_socks5_proxy", "") or "").strip()
+    value = str(getattr(state, "upstream_socks5_proxy", "") or "").strip()
     if raw:
         return value
     if not value:
@@ -375,7 +375,7 @@ def get_upstream_socks5_proxy(*, raw: bool = False) -> str:
 
 
 def apply_upstream_socks5_proxy(value: str | None):
-    app.state.upstream_socks5_proxy = normalize_secret_env_ref_or_plaintext(
+    state.upstream_socks5_proxy = normalize_secret_env_ref_or_plaintext(
         value,
         field_name="SOCKS5 proxy URL",
         normalizer=normalize_socks5_proxy_url,
@@ -383,7 +383,7 @@ def apply_upstream_socks5_proxy(value: str | None):
 
 
 def get_webhook_url(*, raw: bool = False) -> str:
-    value = str(getattr(app.state, "webhook_url", "") or "").strip()
+    value = str(getattr(state, "webhook_url", "") or "").strip()
     if raw:
         return value
     if not value:
@@ -405,7 +405,7 @@ def get_webhook_url(*, raw: bool = False) -> str:
 
 
 def apply_webhook_url(value: str | None):
-    app.state.webhook_url = normalize_secret_env_ref_or_plaintext(
+    state.webhook_url = normalize_secret_env_ref_or_plaintext(
         value,
         field_name="Webhook URL",
         normalizer=normalize_webhook_url,

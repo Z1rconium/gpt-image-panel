@@ -1,11 +1,10 @@
 import asyncio
 import logging
-import os
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from ..api.app_state import app
+from ..runtime.state import state
 from ..core import settings as config
 from ..core.observability import metrics
 from ..core.utils import utc_now
@@ -64,20 +63,20 @@ from .gallery_jobs import (
 logger = logging.getLogger(__name__)
 
 def get_thumbnail_dispatcher_kick_event() -> asyncio.Event:
-    event = getattr(app.state, "thumbnail_dispatcher_kick", None)
+    event = getattr(state, "thumbnail_dispatcher_kick", None)
     if event is None:
         event = asyncio.Event()
-        app.state.thumbnail_dispatcher_kick = event
+        state.thumbnail_dispatcher_kick = event
     return event
 
 
 def kick_thumbnail_dispatcher() -> None:
-    task = getattr(app.state, "thumbnail_dispatcher_task", None)
+    task = getattr(state, "thumbnail_dispatcher_task", None)
     if task and not task.done():
         get_thumbnail_dispatcher_kick_event().set()
         return
-    worker_id = getattr(app.state, "worker_id", f"{os.getpid()}-{id(app)}")
-    app.state.thumbnail_dispatcher_task = asyncio.create_task(
+    worker_id = state.worker_id
+    state.thumbnail_dispatcher_task = asyncio.create_task(
         run_thumbnail_dispatcher(worker_id)
     )
 
@@ -147,21 +146,21 @@ async def run_thumbnail_dispatcher(worker_id: str) -> None:
 
 
 def kick_gallery_file_gc() -> None:
-    task = getattr(app.state, "gallery_file_gc_task", None)
+    task = getattr(state, "gallery_file_gc_task", None)
     if task and not task.done():
         get_gallery_file_gc_kick_event().set()
         return
-    worker_id = getattr(app.state, "worker_id", f"{os.getpid()}-{id(app)}")
-    app.state.gallery_file_gc_task = asyncio.create_task(
+    worker_id = state.worker_id
+    state.gallery_file_gc_task = asyncio.create_task(
         run_gallery_file_gc(worker_id, initial_delay_seconds=0.0)
     )
 
 
 def get_gallery_file_gc_kick_event() -> asyncio.Event:
-    event = getattr(app.state, "gallery_file_gc_kick", None)
+    event = getattr(state, "gallery_file_gc_kick", None)
     if event is None:
         event = asyncio.Event()
-        app.state.gallery_file_gc_kick = event
+        state.gallery_file_gc_kick = event
     return event
 
 
@@ -184,11 +183,11 @@ def kick_gallery_job_dispatchers() -> None:
         ("gallery_import_dispatcher_task", run_gallery_import_dispatcher),
         ("gallery_nodeimage_upload_dispatcher_task", run_gallery_nodeimage_upload_dispatcher),
     ):
-        task = getattr(app.state, name, None)
+        task = getattr(state, name, None)
         if task and not task.done():
             continue
-        worker_id = getattr(app.state, "worker_id", f"{os.getpid()}-{id(app)}")
-        setattr(app.state, name, asyncio.create_task(starter(worker_id)))
+        worker_id = state.worker_id
+        setattr(state, name, asyncio.create_task(starter(worker_id)))
 
 
 def _r2_sync_interval_hours(r2_settings: dict | None) -> int:

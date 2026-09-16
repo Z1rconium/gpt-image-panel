@@ -14,7 +14,7 @@ from fastapi import APIRouter, Body, File, Form, HTTPException, UploadFile
 
 from ..core.image_models import MAX_PROMPT_CHARS
 from ..api import presets
-from ..api.app_state import app
+from ..runtime.state import state
 from ..api.uploads import is_image_upload, resolve_upload_content_type
 from ..core import settings as config
 from ..core import validators as ssrf
@@ -184,12 +184,12 @@ def _truncate_assistant_data(value: Any, *, key: str = "") -> Any:
 
 def _assistant_request_semaphore() -> asyncio.Semaphore:
     limit = max(1, int(config.AI_ASSISTANT_MAX_CONCURRENCY or 1))
-    state = getattr(app.state, "assistant_request_semaphore_state", None)
-    if not state or state[0] != limit:
+    cached = getattr(state, "assistant_request_semaphore_state", None)
+    if not cached or cached[0] != limit:
         semaphore = asyncio.Semaphore(limit)
-        app.state.assistant_request_semaphore_state = (limit, semaphore)
+        state.assistant_request_semaphore_state = (limit, semaphore)
         return semaphore
-    return state[1]
+    return cached[1]
 
 
 def _assistant_slot_expires_at(timeout_seconds: int) -> str:
@@ -198,7 +198,7 @@ def _assistant_slot_expires_at(timeout_seconds: int) -> str:
 
 
 def _assistant_slot_owner() -> str:
-    worker_id = getattr(app.state, "worker_id", f"{os.getpid()}-{id(app)}")
+    worker_id = state.worker_id
     return f"{worker_id}-{os.urandom(8).hex()}"
 
 

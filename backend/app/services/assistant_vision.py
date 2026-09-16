@@ -17,7 +17,6 @@ from fastapi import APIRouter, Body, File, Form, HTTPException, UploadFile
 
 from ..core.image_models import MAX_PROMPT_CHARS
 from ..api import presets
-from ..api.app_state import app
 from ..api.uploads import is_image_upload, resolve_upload_content_type
 from ..core import settings as config
 from ..core import validators as ssrf

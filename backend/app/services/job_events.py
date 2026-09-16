@@ -7,10 +7,10 @@ import time
 
 from fastapi import HTTPException
 
-from ..api.app_state import (
+from ..runtime.state import (
     GENERATE_JOB_PERSIST_INTERVAL_SECONDS,
     GENERATE_JOBS_BROADCAST_DEBOUNCE_SECONDS,
-    app,
+    state,
 )
 from ..core import settings as config
 from ..core import validators as ssrf
@@ -31,18 +31,18 @@ from .blocking import run_db_operation
 logger = logging.getLogger(__name__)
 
 def get_job_subscribers() -> dict[str, set[asyncio.Queue]]:
-    subscribers = getattr(app.state, "generate_job_subscribers", None)
+    subscribers = getattr(state, "generate_job_subscribers", None)
     if not isinstance(subscribers, dict):
         subscribers = {}
-        app.state.generate_job_subscribers = subscribers
+        state.generate_job_subscribers = subscribers
     return subscribers
 
 
 def get_jobs_subscribers() -> set[asyncio.Queue]:
-    subscribers = getattr(app.state, "generate_jobs_subscribers", None)
+    subscribers = getattr(state, "generate_jobs_subscribers", None)
     if not isinstance(subscribers, set):
         subscribers = set()
-        app.state.generate_jobs_subscribers = subscribers
+        state.generate_jobs_subscribers = subscribers
     return subscribers
 
 
@@ -52,10 +52,10 @@ def get_generate_job_preview_cache() -> dict[tuple[str, int], dict]:
     reconnecting client either gets this cached frame or waits for the next
     one; a restarted/other worker process has nothing to replay, which is an
     accepted tradeoff for keeping base64 image data out of shared storage."""
-    cache = getattr(app.state, "generate_job_preview_cache", None)
+    cache = getattr(state, "generate_job_preview_cache", None)
     if not isinstance(cache, dict):
         cache = {}
-        app.state.generate_job_preview_cache = cache
+        state.generate_job_preview_cache = cache
     return cache
 
 
@@ -146,21 +146,21 @@ def get_generate_job_seen_at() -> dict[str, float]:
     Tracked in a side table rather than inside the job dict so it never leaks
     into API responses or SSE payloads.
     """
-    seen = getattr(app.state, "generate_job_seen_at", None)
+    seen = getattr(state, "generate_job_seen_at", None)
     if not isinstance(seen, dict):
         seen = {}
-        app.state.generate_job_seen_at = seen
+        state.generate_job_seen_at = seen
     return seen
 
 
 def remember_generate_job_memory(job_id: str, job: dict) -> None:
-    app.state.generate_jobs[job_id] = job
+    state.generate_jobs[job_id] = job
     get_generate_job_seen_at()[job_id] = time.monotonic()
 
 
 def drop_generate_job_memory(job_id: str) -> None:
-    app.state.generate_jobs.pop(job_id, None)
-    app.state.generate_job_last_persist_at.pop(job_id, None)
+    state.generate_jobs.pop(job_id, None)
+    state.generate_job_last_persist_at.pop(job_id, None)
     get_generate_job_seen_at().pop(job_id, None)
     clear_generate_job_preview_cache(job_id)
 
@@ -170,7 +170,7 @@ def has_stale_generate_job_memory() -> bool:
     for two persist windows, so another worker (or a finished job) likely owns
     the real state."""
     now = time.monotonic()
-    jobs = getattr(app.state, "generate_jobs", {}) or {}
+    jobs = getattr(state, "generate_jobs", {}) or {}
     seen = get_generate_job_seen_at()
     return any(
         now - seen.get(job_id, 0.0) > 2 * GENERATE_JOB_PERSIST_INTERVAL_SECONDS
@@ -198,7 +198,7 @@ async def reconcile_stale_generate_job_memory() -> bool:
 
 
 def snapshot_active_generate_jobs_from_memory() -> list[dict]:
-    generate_jobs = getattr(app.state, "generate_jobs", {})
+    generate_jobs = getattr(state, "generate_jobs", {})
     jobs = [
         public_generate_job(job)
         for job in generate_jobs.values()
@@ -209,7 +209,7 @@ def snapshot_active_generate_jobs_from_memory() -> list[dict]:
 
 def reconcile_active_generate_jobs(storage_jobs: list[dict]) -> list[dict]:
     jobs_by_id = {job["job_id"]: job for job in storage_jobs}
-    local_jobs = getattr(app.state, "generate_jobs", {})
+    local_jobs = getattr(state, "generate_jobs", {})
     for job_id, job in local_jobs.items():
         if job.get("status") not in ACTIVE_GENERATE_JOB_STATUSES:
             continue
@@ -218,7 +218,7 @@ def reconcile_active_generate_jobs(storage_jobs: list[dict]) -> list[dict]:
         storage_job = jobs_by_id[job_id]
         if str(job.get("updated_at") or "") >= str(storage_job.get("updated_at") or ""):
             jobs_by_id[job_id] = job
-    app.state.generate_jobs = jobs_by_id
+    state.generate_jobs = jobs_by_id
     seen = get_generate_job_seen_at()
     now = time.monotonic()
     for job_id in jobs_by_id:
@@ -254,20 +254,20 @@ def publish_generate_jobs_now(*, reconcile: bool = False):
 async def publish_generate_jobs_debounced():
     try:
         await asyncio.sleep(GENERATE_JOBS_BROADCAST_DEBOUNCE_SECONDS)
-        reconcile = bool(app.state.generate_jobs_broadcast_reconcile)
-        app.state.generate_jobs_broadcast_reconcile = False
+        reconcile = bool(state.generate_jobs_broadcast_reconcile)
+        state.generate_jobs_broadcast_reconcile = False
         publish_generate_jobs_now(reconcile=reconcile)
     finally:
-        if app.state.generate_jobs_broadcast_task is asyncio.current_task():
-            app.state.generate_jobs_broadcast_task = None
+        if state.generate_jobs_broadcast_task is asyncio.current_task():
+            state.generate_jobs_broadcast_task = None
 
 
 def cancel_pending_generate_jobs_broadcast():
-    task = app.state.generate_jobs_broadcast_task
+    task = state.generate_jobs_broadcast_task
     if task and not task.done():
         task.cancel()
-    app.state.generate_jobs_broadcast_task = None
-    app.state.generate_jobs_broadcast_reconcile = False
+    state.generate_jobs_broadcast_task = None
+    state.generate_jobs_broadcast_reconcile = False
 
 
 def publish_generate_jobs(*, debounce: bool = True, reconcile: bool = False):
@@ -280,9 +280,9 @@ def publish_generate_jobs(*, debounce: bool = True, reconcile: bool = False):
         return
 
     if reconcile:
-        app.state.generate_jobs_broadcast_reconcile = True
+        state.generate_jobs_broadcast_reconcile = True
 
-    task = app.state.generate_jobs_broadcast_task
+    task = state.generate_jobs_broadcast_task
     if task and not task.done():
         return
 
@@ -292,7 +292,7 @@ def publish_generate_jobs(*, debounce: bool = True, reconcile: bool = False):
         publish_generate_jobs_now(reconcile=reconcile)
         return
 
-    app.state.generate_jobs_broadcast_task = loop.create_task(
+    state.generate_jobs_broadcast_task = loop.create_task(
         publish_generate_jobs_debounced()
     )
 
@@ -320,10 +320,10 @@ def validate_job_webhook_url(webhook_url: str | None) -> str | None:
 
 
 def get_webhook_delivery_tasks() -> set[asyncio.Task]:
-    tasks = getattr(app.state, "webhook_delivery_tasks", None)
+    tasks = getattr(state, "webhook_delivery_tasks", None)
     if not isinstance(tasks, set):
         tasks = set()
-        app.state.webhook_delivery_tasks = tasks
+        state.webhook_delivery_tasks = tasks
     return tasks
 
 
@@ -369,7 +369,7 @@ async def dispatch_job_webhook_async(job: dict):
 
 def build_job_update(job_id: str, updates: dict) -> dict:
     now = utc_now()
-    existing = app.state.generate_jobs.get(job_id) or get_generate_job(job_id) or {}
+    existing = state.generate_jobs.get(job_id) or get_generate_job(job_id) or {}
     job = {
         **existing,
         **updates,
@@ -389,7 +389,7 @@ def should_persist_generate_job(job_id: str, job: dict, persist: bool) -> bool:
     if job.get("status") != "running":
         return True
 
-    last_persist_at = app.state.generate_job_last_persist_at
+    last_persist_at = state.generate_job_last_persist_at
     now = time.monotonic()
     previous = last_persist_at.get(job_id)
     if previous is None or now - previous >= GENERATE_JOB_PERSIST_INTERVAL_SECONDS:
@@ -457,7 +457,7 @@ async def store_generate_job_async(
     *,
     persist: bool = True,
 ) -> dict:
-    existing = app.state.generate_jobs.get(job_id)
+    existing = state.generate_jobs.get(job_id)
     if existing is None:
         existing = await run_db_operation(
             get_generate_job,
@@ -525,7 +525,7 @@ async def resolve_generate_job_view(job_id: str) -> dict | None:
         job_id,
         metric_name="resolve_generate_job_view",
     )
-    memory = app.state.generate_jobs.get(job_id)
+    memory = state.generate_jobs.get(job_id)
     if db_job is None:
         return memory
     if db_job.get("status") not in ACTIVE_GENERATE_JOB_STATUSES:

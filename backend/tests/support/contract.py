@@ -19,6 +19,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.app import main as backend_main
+from backend.app.runtime import state as runtime_state
 from backend.app.api import app_state
 from backend.app.api import body_limit
 from backend.app.services import assistant_batch as assistant_router
@@ -225,7 +226,7 @@ def _configure_runtime(tmp_path: Path, *, access_key: str = "", allow_unauthenti
 
     db_repo.close_database_connections()
     metrics.reset()
-    backend_main.app.state._state.clear()
+    runtime_state.reset()
 
 
 @pytest.fixture()

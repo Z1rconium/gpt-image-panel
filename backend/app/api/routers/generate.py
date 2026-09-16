@@ -6,7 +6,7 @@ import time
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
-from ..app_state import app
+from ...runtime.state import state
 from ...services.job_events import (
     get_cached_generate_job_previews,
     get_job_subscribers,
@@ -58,10 +58,10 @@ def json_payload_key(payload: dict | list) -> str:
 
 
 def _start_generate_sse_poller() -> None:
-    task = getattr(app.state, "generate_jobs_sse_poller_task", None)
+    task = getattr(state, "generate_jobs_sse_poller_task", None)
     if task and not task.done():
         return
-    app.state.generate_jobs_sse_poller_task = asyncio.create_task(_poll_generate_sse())
+    state.generate_jobs_sse_poller_task = asyncio.create_task(_poll_generate_sse())
 
 
 async def _poll_generate_sse() -> None:
@@ -151,10 +151,10 @@ async def _poll_generate_sse() -> None:
         logger.warning("Generate SSE poller stopped after error", exc_info=True)
     finally:
         if (
-            getattr(app.state, "generate_jobs_sse_poller_task", None)
+            getattr(state, "generate_jobs_sse_poller_task", None)
             is asyncio.current_task()
         ):
-            app.state.generate_jobs_sse_poller_task = None
+            state.generate_jobs_sse_poller_task = None
 
 
 @router.post("/api/generate", response_model=GenerateJobResponse, status_code=202)

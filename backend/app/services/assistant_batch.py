@@ -13,7 +13,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, Body, File, Form, HTTPException, Request, UploadFile
 
 from ..api import presets
-from ..api.app_state import app
+from ..runtime.state import state
 from ..api.uploads import is_image_upload, resolve_upload_content_type
 from ..core import settings as config
 from ..core import validators as ssrf
@@ -544,19 +544,19 @@ async def run_ai_analyze_dispatcher(worker_id: str) -> None:
 
 
 def get_ai_analyze_dispatcher_kick_event() -> asyncio.Event:
-    event = getattr(app.state, "gallery_ai_analyze_dispatcher_kick", None)
+    event = getattr(state, "gallery_ai_analyze_dispatcher_kick", None)
     if event is None:
         event = asyncio.Event()
-        app.state.gallery_ai_analyze_dispatcher_kick = event
+        state.gallery_ai_analyze_dispatcher_kick = event
     return event
 
 
 def _kick_ai_analyze_dispatcher() -> None:
-    task = getattr(app.state, "gallery_ai_analyze_dispatcher_task", None)
+    task = getattr(state, "gallery_ai_analyze_dispatcher_task", None)
     if task and not task.done():
         get_ai_analyze_dispatcher_kick_event().set()
         return
-    worker_id = getattr(app.state, "worker_id", f"{os.getpid()}-{id(app)}")
-    app.state.gallery_ai_analyze_dispatcher_task = asyncio.create_task(
+    worker_id = state.worker_id
+    state.gallery_ai_analyze_dispatcher_task = asyncio.create_task(
         run_ai_analyze_dispatcher(worker_id)
     )

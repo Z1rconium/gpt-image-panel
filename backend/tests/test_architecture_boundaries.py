@@ -53,45 +53,32 @@ ALLOWED_VIOLATIONS: frozenset[str] = frozenset(
         "backend/app/repositories/gallery/mutations.py:6 -> backend.app.services.blocking",
         "backend/app/repositories/image_jobs.py:6 -> backend.app.services",
         "backend/app/services/assistant_batch.py:15 -> backend.app.api",
-        "backend/app/services/assistant_batch.py:16 -> backend.app.api.app_state",
         "backend/app/services/assistant_batch.py:17 -> backend.app.api.uploads",
         "backend/app/services/assistant_runtime.py:16 -> backend.app.api",
-        "backend/app/services/assistant_runtime.py:17 -> backend.app.api.app_state",
         "backend/app/services/assistant_runtime.py:18 -> backend.app.api.uploads",
         "backend/app/services/assistant_text.py:16 -> backend.app.api",
-        "backend/app/services/assistant_text.py:17 -> backend.app.api.app_state",
-        "backend/app/services/assistant_text.py:18 -> backend.app.api.uploads",
+        "backend/app/services/assistant_text.py:17 -> backend.app.api.uploads",
         "backend/app/services/assistant_vision.py:19 -> backend.app.api",
-        "backend/app/services/assistant_vision.py:20 -> backend.app.api.app_state",
-        "backend/app/services/assistant_vision.py:21 -> backend.app.api.uploads",
+        "backend/app/services/assistant_vision.py:20 -> backend.app.api.uploads",
         "backend/app/services/gallery_archive_export.py:21 -> backend.app.api.uploads",
         "backend/app/services/gallery_archive_import.py:22 -> backend.app.api.uploads",
         "backend/app/services/gallery_archive_shared.py:21 -> backend.app.api.uploads",
-        "backend/app/services/gallery_common.py:17 -> backend.app.api.app_state",
         "backend/app/services/gallery_common.py:33 -> backend.app.api.sse_limiter",
-        "backend/app/services/gallery_jobs.py:17 -> backend.app.api.app_state",
         "backend/app/services/gallery_jobs.py:36 -> backend.app.api.sse_limiter",
-        "backend/app/services/gallery_maintenance.py:8 -> backend.app.api.app_state",
-        "backend/app/services/job_events.py:10 -> backend.app.api.app_state",
         "backend/app/services/job_executor.py:10 -> backend.app.api.presets",
-        "backend/app/services/job_executor.py:9 -> backend.app.api.app_state",
-        "backend/app/services/job_queue.py:12 -> backend.app.api.app_state",
         "backend/app/services/job_queue.py:13 -> backend.app.api.presets",
-        "backend/app/services/runtime_metrics.py:9 -> backend.app.api.app_state",
     }
-)
-
-# Project imports inside function bodies. Some are deliberate cycle breaks
+)# Project imports inside function bodies. Some are deliberate cycle breaks
 # that Python requires; new entries need a documented reason to be added.
 ALLOWED_DEFERRED_IMPORTS: frozenset[str] = frozenset(
     {
-        "backend/app/api/app_state.py:243 -> backend.app.services",
-        "backend/app/api/app_state.py:244 -> backend.app.services",
-        "backend/app/api/app_state.py:274 -> backend.app.services",
-        "backend/app/api/app_state.py:382 -> backend.app.integrations.session_pool",
-        "backend/app/api/app_state.py:383 -> backend.app.services.blocking",
-        "backend/app/api/app_state.py:89 -> backend.app.api",
-        "backend/app/api/app_state.py:90 -> backend.app.services",
+        "backend/app/api/app_state.py:205 -> backend.app.services",
+        "backend/app/api/app_state.py:206 -> backend.app.services",
+        "backend/app/api/app_state.py:235 -> backend.app.services",
+        "backend/app/api/app_state.py:343 -> backend.app.integrations.session_pool",
+        "backend/app/api/app_state.py:344 -> backend.app.services.blocking",
+        "backend/app/api/app_state.py:85 -> backend.app.api",
+        "backend/app/api/app_state.py:86 -> backend.app.services",
         "backend/app/api/presets.py:46 -> backend.app.core.redaction",
         "backend/app/api/routers/settings.py:322 -> backend.app.api.presets",
         "backend/app/api/routers/settings.py:331 -> backend.app.api.presets",
@@ -114,8 +101,6 @@ ALLOWED_DEFERRED_IMPORTS: frozenset[str] = frozenset(
         "backend/app/services/runtime_metrics.py:71 -> backend.app.services.job_events",
     }
 )
-
-
 def _module_name_for(path: Path) -> str:
     relative = path.relative_to(APP_DIR).with_suffix("")
     parts = list(relative.parts)

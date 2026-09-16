@@ -7,7 +7,8 @@ import aiohttp
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
-from ..app_state import FRONTEND_BUILD_DIR, app
+from ..app_state import FRONTEND_BUILD_DIR
+from ...runtime.state import state
 from ..csp import frontend_index_response
 from ...core import settings as config
 from ...core.utils import utc_now
@@ -107,7 +108,7 @@ async def favicon():
 
 
 def get_frontend_build_dir():
-    return getattr(app.state, "frontend_build_dir", FRONTEND_BUILD_DIR)
+    return getattr(state, "frontend_build_dir", FRONTEND_BUILD_DIR)
 
 
 @router.get("/")
@@ -147,19 +148,19 @@ async def latest_version():
 
     repo = config.GITHUB_REPO
     current_version = _current_app_version()
-    cache = getattr(app.state, "latest_version_cache", {})
+    cache = getattr(state, "latest_version_cache", {})
     cached = cache.get(repo) if isinstance(cache, dict) else None
     now = time.monotonic()
     if cached and now - float(cached[0]) < config.VERSION_CHECK_CACHE_SECONDS:
         latest = cached[1]
         checked_at = cached[2]
     else:
-        lock = getattr(app.state, "latest_version_check_lock", None)
+        lock = getattr(state, "latest_version_check_lock", None)
         if lock is None:
             lock = asyncio.Lock()
-            app.state.latest_version_check_lock = lock
+            state.latest_version_check_lock = lock
         async with lock:
-            cache = getattr(app.state, "latest_version_cache", {})
+            cache = getattr(state, "latest_version_cache", {})
             cached = cache.get(repo) if isinstance(cache, dict) else None
             now = time.monotonic()
             if cached and now - float(cached[0]) < config.VERSION_CHECK_CACHE_SECONDS:
@@ -169,7 +170,7 @@ async def latest_version():
                 latest = await _fetch_latest_version_text(repo)
                 checked_at = utc_now() if latest else None
                 if latest:
-                    app.state.latest_version_cache = {
+                    state.latest_version_cache = {
                         **cache,
                         repo: (now, latest, checked_at),
                     }

@@ -6,7 +6,7 @@ import resource
 import sys
 import time
 
-from ..api.app_state import app
+from ..runtime.state import state
 from ..core import settings as config
 from ..core.observability import build_metrics_snapshot, metrics
 from ..repositories.coordination import refresh_runtime_coordination_metrics
@@ -35,7 +35,7 @@ def _resource_gauges() -> dict[str, int | float]:
     return {
         "process.rss_peak_bytes": int(usage.ru_maxrss * rss_scale),
         "event_loop.lag_last_ms": float(
-            getattr(app.state, "event_loop_lag_last_ms", 0.0)
+            getattr(state, "event_loop_lag_last_ms", 0.0)
         ),
     }
 
@@ -45,7 +45,7 @@ async def refresh_runtime_metrics_once(worker_id: str) -> None:
         get_image_queue_runtime_metrics,
         metric_name="snapshot_image_queue",
     )
-    app.state.image_queue_runtime_metrics = queue_metrics
+    state.image_queue_runtime_metrics = queue_metrics
 
     gauges = snapshot_queue_metrics()
     gauges.update(executor_gauges())
@@ -65,8 +65,8 @@ async def refresh_runtime_metrics_once(worker_id: str) -> None:
         metric_name="refresh_runtime_coordination_metrics",
         retry_busy=False,
     )
-    app.state.runtime_coordination_metrics = runtime
-    app.state.runtime_resource_gauges = _resource_gauges()
+    state.runtime_coordination_metrics = runtime
+    state.runtime_resource_gauges = _resource_gauges()
 
     from .job_events import reconcile_stale_generate_job_memory
 
@@ -101,7 +101,7 @@ async def run_event_loop_lag_observer() -> None:
         await asyncio.sleep(interval)
         now = time.monotonic()
         lag_ms = max(0.0, (now - expected) * 1000)
-        app.state.event_loop_lag_last_ms = lag_ms
+        state.event_loop_lag_last_ms = lag_ms
         metrics.observe_ms("event_loop.lag", lag_ms)
         expected = now + interval
 

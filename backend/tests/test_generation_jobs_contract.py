@@ -648,13 +648,13 @@ def test_metrics_snapshot_uses_cached_runtime_without_writes(monkeypatch):
         lambda: {"image_jobs.active": 0},
     )
     monkeypatch.setattr(
-        metrics_router.app.state,
+        runtime_state.state,
         "worker_id",
         "local-worker",
         raising=False,
     )
     monkeypatch.setattr(
-        metrics_router.app.state,
+        runtime_state.state,
         "runtime_coordination_metrics",
         {
             "gauges": {"sse.active_connections": 3},
@@ -2199,7 +2199,7 @@ def test_stale_memory_reconcile_drops_terminal_ghost(tmp_path):
             "updated_at": "2026-01-01T00:00:01+00:00",
         }
         job_events.get_generate_job_seen_at()["ghost-job"] = (
-            time.monotonic() - 2 * app_state.GENERATE_JOB_PERSIST_INTERVAL_SECONDS - 5
+            time.monotonic() - 2 * runtime_state.GENERATE_JOB_PERSIST_INTERVAL_SECONDS - 5
         )
         assert job_events.has_stale_generate_job_memory() is True
 

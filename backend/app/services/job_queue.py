@@ -9,7 +9,7 @@ from typing import Literal
 
 from fastapi import HTTPException
 
-from ..api.app_state import MAX_GENERATE_JOBS, app
+from ..runtime.state import MAX_GENERATE_JOBS, state
 from ..api.presets import (
     get_active_preset,
     get_api_presets,
@@ -50,8 +50,8 @@ from .job_events import (
 
 
 def kick_thumbnail_dispatcher() -> None:
-    task = getattr(app.state, "thumbnail_dispatcher_task", None)
-    event = getattr(app.state, "thumbnail_dispatcher_kick", None)
+    task = getattr(state, "thumbnail_dispatcher_task", None)
+    event = getattr(state, "thumbnail_dispatcher_kick", None)
     if task and not task.done() and event is not None:
         event.set()
 
@@ -69,23 +69,7 @@ def trim_generate_jobs():
 
 
 def get_generate_job_tasks() -> dict[str, asyncio.Task]:
-    return app.state.generate_job_tasks
-
-
-def get_generate_job_semaphore() -> asyncio.Semaphore:
-    semaphore = getattr(app.state, "generate_job_semaphore", None)
-    if semaphore is None:
-        semaphore = asyncio.Semaphore(config.MAX_ACTIVE_GENERATE_JOBS)
-        app.state.generate_job_semaphore = semaphore
-    return semaphore
-
-
-def get_upstream_request_semaphore() -> asyncio.Semaphore:
-    semaphore = getattr(app.state, "upstream_request_semaphore", None)
-    if semaphore is None:
-        semaphore = asyncio.Semaphore(config.MAX_ACTIVE_GENERATE_JOBS)
-        app.state.upstream_request_semaphore = semaphore
-    return semaphore
+    return state.generate_job_tasks
 
 
 def get_pending_edit_source_bytes() -> int:
@@ -103,15 +87,15 @@ def release_pending_edit_source_bytes(job_id: str):
 
 
 def get_image_unit_dispatcher_kick_event() -> asyncio.Event:
-    event = getattr(app.state, "image_unit_dispatcher_kick", None)
+    event = getattr(state, "image_unit_dispatcher_kick", None)
     if event is None:
         event = asyncio.Event()
-        app.state.image_unit_dispatcher_kick = event
+        state.image_unit_dispatcher_kick = event
     return event
 
 
 def kick_image_unit_dispatcher():
-    event = getattr(app.state, "image_unit_dispatcher_kick", None)
+    event = getattr(state, "image_unit_dispatcher_kick", None)
     if event is not None:
         event.set()
 
@@ -124,8 +108,8 @@ def request_image_units(req: GenerateRequest | EditRequest) -> int:
 
 
 def snapshot_queue_metrics() -> dict[str, int]:
-    jobs = app.state.generate_jobs or {}
-    repository_metrics = getattr(app.state, "image_queue_runtime_metrics", {})
+    jobs = state.generate_jobs or {}
+    repository_metrics = getattr(state, "image_queue_runtime_metrics", {})
     running_units = int(repository_metrics.get("running", 0))
     queued_units = int(repository_metrics.get("queued", 0))
     counts: dict[str, int] = {
@@ -436,7 +420,7 @@ async def queue_image_job(
         raise
 
     remember_generate_job_memory(job_id, stored_job)
-    app.state.generate_job_last_persist_at.pop(job_id, None)
+    state.generate_job_last_persist_at.pop(job_id, None)
     metrics.increment(f"image_jobs.{operation}.queued")
     publish_generate_job(stored_job, list_debounce=False, list_reconcile=True)
     kick_image_unit_dispatcher()

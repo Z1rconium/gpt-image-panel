@@ -15,6 +15,7 @@ from backend.app.core import redaction, secrets
 from backend.app.core import settings as config
 from backend.app.integrations.upstream import transport as upstream_transport
 from backend.app.repositories import db as db_repo
+from backend.app.runtime import state as runtime_state
 from backend.app.repositories.coordination import mark_worker_heartbeat
 from backend.app.repositories.image_files import validate_image_bytes
 from backend.app.repositories import thumbnail_jobs as thumbnail_jobs_repo
@@ -308,7 +309,7 @@ def test_gallery_page_query_uses_db_executor(monkeypatch):
 
 def test_webhook_delivery_tasks_are_strongly_tracked(monkeypatch):
     async def scenario() -> None:
-        job_events.app.state.webhook_delivery_tasks = set()
+        runtime_state.state.webhook_delivery_tasks = set()
         started = asyncio.Event()
 
         async def fake_deliver_webhook(webhook_url, job):
@@ -459,10 +460,10 @@ def test_thumbnail_cpu_concurrency_override_is_applied(monkeypatch):
 
 
 def test_metrics_snapshot_is_database_free(monkeypatch):
-    metrics_router.app.state.generate_jobs = {}
-    metrics_router.app.state.generate_job_tasks = {}
-    metrics_router.app.state.image_queue_runtime_metrics = {}
-    metrics_router.app.state.runtime_coordination_metrics = {
+    runtime_state.state.generate_jobs = {}
+    runtime_state.state.generate_job_tasks = {}
+    runtime_state.state.image_queue_runtime_metrics = {}
+    runtime_state.state.runtime_coordination_metrics = {
         "gauges": {},
         "background_leases": [],
         "workers": [],
