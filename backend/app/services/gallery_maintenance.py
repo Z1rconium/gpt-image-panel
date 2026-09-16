@@ -48,16 +48,18 @@ from .gallery_common import (
     THUMBNAIL_DISPATCH_MAX_IDLE_BACKOFF_SECONDS,
     _unlink_trusted_gallery_job_path,
 )
-from .gallery_jobs import (
+from .gallery_job_shared import (
     _background_task_lease_expires_at,
-    _create_gallery_sync_job,
     _next_background_task_error_backoff,
     _sleep_while_renewing_background_lease,
+)
+from .gallery_jobs import (
     run_gallery_export_dispatcher,
     run_gallery_import_dispatcher,
     run_gallery_nodeimage_upload_dispatcher,
     run_gallery_sync_dispatcher,
 )
+from .gallery_sync_jobs import _create_gallery_sync_job
 
 logger = logging.getLogger(__name__)
 

@@ -24,6 +24,7 @@ from backend.app.integrations.nodeimage import client as nodeimage_client
 from backend.app.repositories.coordination import create_gallery_job, get_gallery_job
 from backend.app.schemas.gallery import GalleryEntry
 from backend.app.services import gallery_jobs
+from backend.app.services import nodeimage_upload_jobs
 
 
 def _enable_nodeimage() -> None:
@@ -191,7 +192,7 @@ def test_batch_nodeimage_upload_reports_partial_results(client, monkeypatch, cap
             markdown=f"![image](https://cdn.nodeimage.com/{filename})",
         )
 
-    monkeypatch.setattr(gallery_jobs, "upload_image_file", fake_upload)
+    monkeypatch.setattr(nodeimage_upload_jobs, "upload_image_file", fake_upload)
     caplog.set_level(logging.ERROR, logger=gallery_jobs.__name__)
     created = _start_nodeimage_batch(
         client,
@@ -276,7 +277,7 @@ def test_batch_nodeimage_auth_probe_stops_uploads_and_preserves_file_errors(
     def fail_read_bytes(_path):
         raise AssertionError("NodeImage batch upload must not read the whole file")
 
-    monkeypatch.setattr(gallery_jobs, "upload_image_file", reject_upload)
+    monkeypatch.setattr(nodeimage_upload_jobs, "upload_image_file", reject_upload)
     monkeypatch.setattr(Path, "read_bytes", fail_read_bytes)
 
     created = _start_nodeimage_batch(
@@ -345,7 +346,7 @@ def test_batch_nodeimage_probe_then_limits_concurrency(client, monkeypatch):
         )
 
     config.NODEIMAGE_UPLOAD_CONCURRENCY = 4
-    monkeypatch.setattr(gallery_jobs, "upload_image_file", fake_upload)
+    monkeypatch.setattr(nodeimage_upload_jobs, "upload_image_file", fake_upload)
     created = _start_nodeimage_batch(client, ids)
     body = _wait_for_nodeimage_job(client, created["job_id"])
     assert calls[0] == "node-concurrent-0.png"
@@ -391,7 +392,7 @@ def test_batch_nodeimage_stops_queued_uploads_after_late_auth_failure(
         )
 
     config.NODEIMAGE_UPLOAD_CONCURRENCY = 4
-    monkeypatch.setattr(gallery_jobs, "upload_image_file", fake_upload)
+    monkeypatch.setattr(nodeimage_upload_jobs, "upload_image_file", fake_upload)
     created = _start_nodeimage_batch(client, ids)
     body = _wait_for_nodeimage_job(client, created["job_id"])
     assert calls[0] == "node-late-auth-0.png"
@@ -433,7 +434,7 @@ def test_batch_nodeimage_upload_accepts_filtered_selection_token(client, monkeyp
             markdown=f"![image](https://cdn.nodeimage.com/{filename})",
         )
 
-    monkeypatch.setattr(gallery_jobs, "upload_image_file", fake_upload)
+    monkeypatch.setattr(nodeimage_upload_jobs, "upload_image_file", fake_upload)
     token_response = client.post(
         "/api/gallery/batch/selection-tokens",
         json={"filters": {"prompt": "nodeimage token match"}},
@@ -503,7 +504,7 @@ def test_nodeimage_batch_rejects_oversized_files_before_upload(client, monkeypat
         calls.append(filename)
         raise AssertionError("oversized files must fail before upload")
 
-    monkeypatch.setattr(gallery_jobs, "upload_image_file", fail_upload)
+    monkeypatch.setattr(nodeimage_upload_jobs, "upload_image_file", fail_upload)
     created = _start_nodeimage_batch(client, [entry.id])
     body = _wait_for_nodeimage_job(client, created["job_id"])
 
@@ -532,7 +533,7 @@ def test_nodeimage_batch_cancellation_preserves_inflight_results(client, monkeyp
             markdown=f"![image](https://cdn.nodeimage.com/{filename})",
         )
 
-    monkeypatch.setattr(gallery_jobs, "upload_image_file", slow_upload)
+    monkeypatch.setattr(nodeimage_upload_jobs, "upload_image_file", slow_upload)
     created = _start_nodeimage_batch(client, ids)
     assert started.wait(2)
 
@@ -572,7 +573,7 @@ def test_nodeimage_batch_capacity_is_reserved_before_dispatch(client, monkeypatc
             markdown=f"![image](https://cdn.nodeimage.com/{filename})",
         )
 
-    monkeypatch.setattr(gallery_jobs, "upload_image_file", slow_upload)
+    monkeypatch.setattr(nodeimage_upload_jobs, "upload_image_file", slow_upload)
     created = _start_nodeimage_batch(client, ids)
     assert started.wait(2)
 
@@ -596,7 +597,7 @@ def test_nodeimage_batch_sse_replays_persisted_terminal_results(client, monkeypa
             markdown=f"![image](https://cdn.nodeimage.com/{filename})",
         )
 
-    monkeypatch.setattr(gallery_jobs, "upload_image_file", fake_upload)
+    monkeypatch.setattr(nodeimage_upload_jobs, "upload_image_file", fake_upload)
     created = _start_nodeimage_batch(client, ["node-sse"])
     body = _wait_for_nodeimage_job(client, created["job_id"])
     assert body["status"] == "success"
@@ -614,14 +615,14 @@ def test_nodeimage_batch_recovery_skips_persisted_completed_items(client, monkey
         _fake_gallery_entry(image_id, image_id, "1024x1024", f"{image_id}.png")
     _enable_nodeimage()
     calls = []
-    first_result = gallery_jobs._nodeimage_result_item(
+    first_result = nodeimage_upload_jobs._nodeimage_result_item(
         ids[0],
         f"{ids[0]}.png",
         "ok",
         url="https://cdn.nodeimage.com/recovered.png",
         markdown="![recovered](https://cdn.nodeimage.com/recovered.png)",
     )
-    job = gallery_jobs._build_nodeimage_upload_job(ids, 2, [])
+    job = nodeimage_upload_jobs._build_nodeimage_upload_job(ids, 2, [])
     job.update(
         status="running",
         stage="uploading",
@@ -638,7 +639,7 @@ def test_nodeimage_batch_recovery_skips_persisted_completed_items(client, monkey
             markdown=f"![image](https://cdn.nodeimage.com/{filename})",
         )
 
-    monkeypatch.setattr(gallery_jobs, "upload_image_file", fake_upload)
+    monkeypatch.setattr(nodeimage_upload_jobs, "upload_image_file", fake_upload)
     asyncio.run(gallery_jobs._run_nodeimage_upload_job(stored_job))
     recovered = get_gallery_job("nodeimage_upload", stored_job["job_id"])
 
@@ -1131,27 +1132,27 @@ def test_nodeimage_file_inspection_returns_path_or_structured_error(
         created_at="2026-01-01T00:00:00Z",
     )
 
-    monkeypatch.setattr(gallery_jobs, "safe_image_path", lambda _filename: None)
-    missing = gallery_jobs._inspect_nodeimage_file(entry)
+    monkeypatch.setattr(nodeimage_upload_jobs, "safe_image_path", lambda _filename: None)
+    missing = nodeimage_upload_jobs._inspect_nodeimage_file(entry)
     assert isinstance(missing, dict)
     assert missing["error"] == "Image file not found"
 
     missing_path = tmp_path / "missing.png"
     monkeypatch.setattr(
-        gallery_jobs,
+        nodeimage_upload_jobs,
         "safe_image_path",
         lambda _filename: missing_path,
     )
-    assert gallery_jobs._inspect_nodeimage_file(entry)["error"] == "Image file not found"
+    assert nodeimage_upload_jobs._inspect_nodeimage_file(entry)["error"] == "Image file not found"
 
     empty_path = tmp_path / "empty.png"
     empty_path.write_bytes(b"")
     monkeypatch.setattr(
-        gallery_jobs,
+        nodeimage_upload_jobs,
         "safe_image_path",
         lambda _filename: empty_path,
     )
-    assert gallery_jobs._inspect_nodeimage_file(entry)["error"] == "Image file is empty"
+    assert nodeimage_upload_jobs._inspect_nodeimage_file(entry)["error"] == "Image file is empty"
 
     class UnreadablePath:
         def stat(self):
@@ -1161,11 +1162,11 @@ def test_nodeimage_file_inspection_returns_path_or_structured_error(
             raise OSError("unreadable")
 
     monkeypatch.setattr(
-        gallery_jobs,
+        nodeimage_upload_jobs,
         "safe_image_path",
         lambda _filename: UnreadablePath(),
     )
-    unreadable = gallery_jobs._inspect_nodeimage_file(entry)
+    unreadable = nodeimage_upload_jobs._inspect_nodeimage_file(entry)
     assert unreadable["error"] == "Image file could not be read"
 
     valid_path = tmp_path / "valid.png"
@@ -1173,15 +1174,15 @@ def test_nodeimage_file_inspection_returns_path_or_structured_error(
     original_limit = config.MAX_FILE_SIZE_MB
     monkeypatch.setattr(config, "MAX_FILE_SIZE_MB", 0)
     monkeypatch.setattr(
-        gallery_jobs,
+        nodeimage_upload_jobs,
         "safe_image_path",
         lambda _filename: valid_path,
     )
-    oversized = gallery_jobs._inspect_nodeimage_file(entry)
+    oversized = nodeimage_upload_jobs._inspect_nodeimage_file(entry)
     assert "too large" in oversized["error"]
 
     monkeypatch.setattr(config, "MAX_FILE_SIZE_MB", original_limit)
-    assert gallery_jobs._inspect_nodeimage_file(entry) == valid_path
+    assert nodeimage_upload_jobs._inspect_nodeimage_file(entry) == valid_path
 
 
 def test_nodeimage_client_does_not_retry_ambiguous_network_errors(monkeypatch):

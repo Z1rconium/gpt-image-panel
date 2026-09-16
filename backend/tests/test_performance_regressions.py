@@ -27,6 +27,7 @@ from backend.app.runtime.blocking import (
     upstream_memory_lease,
 )
 from backend.app.services import gallery_jobs, job_events
+from backend.app.services import gallery_job_shared
 
 
 def _configure_runtime(tmp_path: Path) -> None:
@@ -198,17 +199,17 @@ def test_gallery_job_publish_uses_db_executor(monkeypatch):
         calls.append((callback, args, metric_name))
         return {"kind": "export", "job_id": "gallery-job-1"}
 
-    monkeypatch.setattr(gallery_jobs, "run_db_operation", fake_run_db_operation)
-    monkeypatch.setattr(gallery_jobs, "_publish_gallery_job_sse", published.append)
+    monkeypatch.setattr(gallery_job_shared, "run_db_operation", fake_run_db_operation)
+    monkeypatch.setattr(gallery_job_shared, "_publish_gallery_job_sse", published.append)
 
     result = asyncio.run(
-        gallery_jobs._publish_gallery_job("gallery-job-1", {"status": "running"})
+        gallery_job_shared._publish_gallery_job("gallery-job-1", {"status": "running"})
     )
 
     assert result == {"kind": "export", "job_id": "gallery-job-1"}
     assert calls == [
         (
-            gallery_jobs.update_gallery_job,
+            gallery_job_shared.update_gallery_job,
             ("gallery-job-1", {"status": "running"}),
             "update_gallery_job",
         )
@@ -224,18 +225,18 @@ def test_gallery_job_worker_progress_stays_in_worker_db_path(monkeypatch):
         return True
 
     monkeypatch.setattr(
-        gallery_jobs,
+        gallery_job_shared,
         "run_db_operation_in_current_thread",
         fake_run_db_operation_in_current_thread,
     )
 
-    assert gallery_jobs._publish_gallery_job_progress_from_worker(
+    assert gallery_job_shared._publish_gallery_job_progress_from_worker(
         "gallery-job-1",
         {"progress": 50},
     ) is True
     assert calls == [
         (
-            gallery_jobs.update_gallery_job_progress,
+            gallery_job_shared.update_gallery_job_progress,
             ("gallery-job-1", {"progress": 50}),
             "update_gallery_job_progress",
         )
@@ -247,12 +248,12 @@ def test_gallery_job_worker_progress_failure_is_best_effort(monkeypatch):
         raise sqlite3.OperationalError("database is locked")
 
     monkeypatch.setattr(
-        gallery_jobs,
+        gallery_job_shared,
         "run_db_operation_in_current_thread",
         failing_current_thread_db_operation,
     )
 
-    assert gallery_jobs._publish_gallery_job_progress_from_worker(
+    assert gallery_job_shared._publish_gallery_job_progress_from_worker(
         "gallery-job-1",
         {"progress": 50},
     ) is False

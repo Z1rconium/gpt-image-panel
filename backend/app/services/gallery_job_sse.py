@@ -11,8 +11,11 @@ picked up by polling each job's updated_at edge (see job_events)."""
 import asyncio
 import time
 
-from fastapi import APIRouter, Body, File, HTTPException, Query, Request, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
+from fastapi import (
+    HTTPException,
+    Request,
+)
+from fastapi.responses import StreamingResponse
 
 from ..runtime.state import state
 from .job_events import publish_job_edges, publish_queue, serialize_sse_event
@@ -22,48 +25,14 @@ from ..core import security as auth
 from ..core import settings as config
 from ..core.observability import metrics
 from ..repositories.coordination import (
-    acquire_background_lease,
-    claim_next_gallery_job,
-    cleanup_expired_gallery_jobs,
-    cleanup_stale_gallery_jobs,
-    count_active_gallery_jobs,
-    create_gallery_job,
-    delete_gallery_job,
     get_gallery_job,
     get_gallery_jobs_updated_at_edges,
-    has_claimable_gallery_job,
-    list_gallery_job_ids_with_files,
-    release_background_lease,
-    release_import_upload_reservation,
-    reserve_gallery_job_capacity,
-    renew_gallery_job_lease,
-    update_gallery_job,
-    update_gallery_job_progress,
 )
 from .gallery_common import (
-    BACKGROUND_TASK_ERROR_BACKOFF_INITIAL_SECONDS,
-    BACKGROUND_TASK_ERROR_BACKOFF_MAX_SECONDS,
-    BACKGROUND_TASK_LEASE_SECONDS,
-    DIRECT_EXPORT_SLOT_LEASE_SECONDS,
-    GALLERY_EXPORT_TERMINAL_STATUSES,
-    GALLERY_IMPORT_TERMINAL_STATUSES,
     GALLERY_JOB_DISPATCH_INTERVAL_SECONDS,
-    GALLERY_JOB_DISPATCH_MAX_IDLE_BACKOFF_SECONDS,
-    GALLERY_JOB_LEASE_SECONDS,
     GALLERY_JOB_SSE_IDLE_CHECK_SECONDS,
     GALLERY_JOB_SSE_QUEUE_MAXSIZE,
-    MAX_ACTIVE_EXPORT_JOBS,
-    MAX_ACTIVE_IMPORT_JOBS,
-    MAX_ACTIVE_NODEIMAGE_UPLOAD_JOBS,
-    MAX_ACTIVE_SYNC_JOBS,
-    NODEIMAGE_UPLOAD_JOB_KIND,
-    NODEIMAGE_UPLOAD_JOB_TTL_SECONDS,
-    NODEIMAGE_UPLOAD_TERMINAL_STATUSES,
     PRIVATE_GALLERY_CACHE_CONTROL,
-    GalleryProgressThrottler,
-    _progress_item_count,
-    _resolve_trusted_gallery_job_path,
-    _unlink_trusted_gallery_job_path,
 )
 
 

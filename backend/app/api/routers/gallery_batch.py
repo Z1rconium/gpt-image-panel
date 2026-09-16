@@ -116,10 +116,8 @@ from ...services.gallery_job_payloads import (
     _missing_gallery_ids,
     _nodeimage_upload_payload,
 )
-from ...services.gallery_jobs import (
-    _create_reserved_nodeimage_upload_job,
-    _gallery_zip_response,
-)
+from ...services.gallery_export_jobs import _gallery_zip_response
+from ...services.nodeimage_upload_jobs import _create_reserved_nodeimage_upload_job
 from ...services.gallery_maintenance import kick_gallery_file_gc
 from ...schemas.nodeimage import NodeImageUploadJobStatus
 
