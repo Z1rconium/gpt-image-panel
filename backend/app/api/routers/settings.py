@@ -65,6 +65,7 @@ from ...schemas.settings import (
     SettingsRequest,
     SettingsResponse,
 )
+from backend.app.integrations.upstream import transport as transport_client
 
 
 router = APIRouter()
@@ -606,7 +607,7 @@ async def check_settings_preset_health(
 
     if api_path_ok and url_ok:
         try:
-            probe_result = await proxy.probe_upstream_endpoint(
+            probe_result = await transport_client.probe_upstream_endpoint(
                 api_url,
                 api_path,
                 effective_api_key,

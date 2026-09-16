@@ -45,8 +45,8 @@ from backend.app.integrations import session_pool
 from backend.app.integrations.upstream.generation import (
     call_image_generation_api as ORIGINAL_CALL_IMAGE_GENERATION_API,
     call_image_edit_api as ORIGINAL_CALL_IMAGE_EDIT_API,
-    classify_probe_status,
 )
+from ...app.integrations.upstream.transport import classify_probe_status
 from backend.app.repositories import coordination as coordination_repo
 from backend.app.repositories import db as db_repo
 from backend.app.core import media
@@ -58,6 +58,7 @@ from backend.app.repositories.gallery import mutations as gallery_mutations
 from backend.app.repositories.gallery import queries as gallery_queries
 from backend.app.repositories.gallery import sync_state as gallery_sync_state
 from backend.app.schemas.generation import EditRequest
+from backend.app.integrations.upstream import transport as transport_client
 
 
 PNG_BYTES = base64.b64decode(
@@ -532,7 +533,7 @@ class _FakePool:
 async def _download_with_fake_session(session: _FakeSession, image_url: str):
     from backend.app.integrations.upstream import generation as upstream_client
 
-    return await upstream_client.download_image_url(session, image_url)
+    return await transport_client.download_image_url(session, image_url)
 
 
 @pytest.fixture(autouse=True)

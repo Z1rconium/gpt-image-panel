@@ -23,7 +23,15 @@ from ..schemas.gallery import GalleryEntry
 from .uploads import IMAGE_UPLOAD_CONTENT_TYPES, IMAGE_UPLOAD_EXTENSIONS
 
 GalleryZipProgressCallback = Callable[[dict[str, Any]], None]
-from .gallery_archive_shared import *
+from .gallery_archive_shared import (
+    IMPORT_FILENAME_DEDUPE_SUFFIX_BYTES,
+    ImportZipManifest,
+    MAX_IMPORT_FILENAME_BYTES,
+    _emit_zip_progress,
+    import_max_output_bytes,
+    import_max_uncompressed_bytes,
+    max_upload_bytes,
+)
 
 def sanitize_import_filename(filename: str, fallback_ext: str = ".png") -> str:
     name = Path(filename or "").name

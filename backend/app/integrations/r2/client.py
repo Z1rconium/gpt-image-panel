@@ -22,7 +22,12 @@ HealthStatus = str
 ProgressCallback = Callable[[dict[str, Any]], None]
 ClientFactory = Callable[["R2EffectiveSettings"], Any]
 SyncStateRecorder = Callable[[Iterable[dict[str, Any]]], None]
-from .config import *
+from .config import (
+    R2EffectiveSettings,
+    _check,
+    _health_status,
+    resolve_r2_backup_settings,
+)
 
 def _normalize_concurrency(value: Any | None = None) -> int:
     try:
@@ -130,7 +135,6 @@ def probe_r2_settings(
         )
 
     return {"status": _health_status(checks), "checks": checks}
-
 
 
 __all__ = [name for name in globals() if not name.startswith("__")]

@@ -20,7 +20,12 @@ from ..schemas.gallery import GalleryEntry
 from .uploads import IMAGE_UPLOAD_CONTENT_TYPES, IMAGE_UPLOAD_EXTENSIONS
 
 GalleryZipProgressCallback = Callable[[dict[str, Any]], None]
-from .gallery_archive_shared import *
+from .gallery_archive_shared import (
+    GalleryZipFileResult,
+    _GALLERY_ENTRY_EXPORT_FIELDS,
+    _JsonArrayTempWriter,
+    _PreparedGalleryZip,
+)
 
 def _entry_to_dict(entry: GalleryEntry | dict[str, Any]) -> dict[str, Any]:
     if isinstance(entry, dict):
@@ -405,6 +410,5 @@ def write_gallery_zip_file(
         missing_count=prepared.missing_count,
         bytes_total=prepared.bytes_total,
     )
-
 
 

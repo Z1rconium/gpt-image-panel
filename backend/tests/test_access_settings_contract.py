@@ -5,6 +5,7 @@ import httpx
 from backend.app.integrations import turnstile as turnstile_client
 from backend.app.integrations.turnstile import TurnstileVerification
 from backend.tests.support.contract import *  # noqa: F403
+from backend.app.integrations.upstream import transport as transport_client
 
 def test_health_and_version(client):
     health = client.get("/health")
@@ -2126,7 +2127,7 @@ def test_socks5_proxy_only_flows_to_generation_and_edit(client, monkeypatch):
         )
         return [entry]
 
-    monkeypatch.setattr(backend_main.proxy, "probe_upstream_endpoint", fake_probe)
+    monkeypatch.setattr(transport_client, "probe_upstream_endpoint", fake_probe)
     monkeypatch.setattr(backend_main.proxy, "call_image_generation_api", fake_generation_api)
     monkeypatch.setattr(backend_main.proxy, "call_image_edit_api", fake_edit_api)
 
@@ -2207,7 +2208,7 @@ def test_preset_health_and_env_api_key_resolution(client, monkeypatch):
         )
         return [entry]
 
-    monkeypatch.setattr(backend_main.proxy, "probe_upstream_endpoint", fake_probe)
+    monkeypatch.setattr(transport_client, "probe_upstream_endpoint", fake_probe)
     monkeypatch.setattr(backend_main.proxy, "call_image_generation_api", fake_generation_api)
 
     updated = client.post(
@@ -2371,7 +2372,7 @@ def test_preset_health_ignores_upstream_probe_error_for_overall_status(client, m
             "message": "HEAD probe returned HTTP 404; check API URL/path",
         }
 
-    monkeypatch.setattr(backend_main.proxy, "probe_upstream_endpoint", fake_probe)
+    monkeypatch.setattr(transport_client, "probe_upstream_endpoint", fake_probe)
     updated = client.post(
         "/api/settings",
         json={
@@ -2405,7 +2406,7 @@ def test_missing_env_api_key_is_reported(client, monkeypatch):
             "message": "OPTIONS probe reached upstream with HTTP 401",
         }
 
-    monkeypatch.setattr(backend_main.proxy, "probe_upstream_endpoint", fake_probe)
+    monkeypatch.setattr(transport_client, "probe_upstream_endpoint", fake_probe)
     updated = client.post(
         "/api/settings",
         json={

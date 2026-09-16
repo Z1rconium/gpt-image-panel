@@ -45,6 +45,7 @@ FRAMEWORK_IMPORT_ALLOWLIST: frozenset[str] = frozenset(
 
 # Frozen debt: every entry is a mapping the matrix forbids.
 # Frozen debt: every entry is a mapping the matrix forbids.
+# Frozen debt: every entry is a mapping the matrix forbids.
 ALLOWED_VIOLATIONS: frozenset[str] = frozenset(
     {
     }
@@ -62,12 +63,13 @@ ALLOWED_VIOLATIONS: frozenset[str] = frozenset(
 # Project imports inside function bodies. Some are
 # Project imports inside function bodies. Some are
 # Project imports inside function bodies. Some are
+# Project imports inside function bodies. Some are
 ALLOWED_DEFERRED_IMPORTS: frozenset[str] = frozenset(
     {
-        "backend/app/api/routers/settings.py:324 -> backend.app.services.presets",
-        "backend/app/api/routers/settings.py:333 -> backend.app.services.presets",
-        "backend/app/api/routers/settings.py:338 -> backend.app.services.presets",
-        "backend/app/api/routers/settings.py:370 -> backend.app.services.presets",
+        "backend/app/api/routers/settings.py:325 -> backend.app.services.presets",
+        "backend/app/api/routers/settings.py:334 -> backend.app.services.presets",
+        "backend/app/api/routers/settings.py:339 -> backend.app.services.presets",
+        "backend/app/api/routers/settings.py:371 -> backend.app.services.presets",
         "backend/app/core/overall_config.py:322 -> backend.app.core.secrets",
         "backend/app/core/overall_config.py:329 -> backend.app.core.security",
         "backend/app/core/redaction.py:63 -> backend.app.core.secrets",

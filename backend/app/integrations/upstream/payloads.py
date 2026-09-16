@@ -31,7 +31,13 @@ ProgressCallback = Callable[[str, str], None]
 logger = logging.getLogger(__name__)
 
 
-from .errors import *
+from .errors import (
+    DATA_IMAGE_URL_RE,
+    HTTP_IMAGE_URL_RE,
+    MARKDOWN_IMAGE_RE,
+    OUTPUT_FORMATS,
+    UpstreamApiError,
+)
 
 def get_output_format_info(output_format: str) -> dict[str, str]:
     return OUTPUT_FORMATS.get(output_format, OUTPUT_FORMATS["png"])

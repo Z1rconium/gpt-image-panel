@@ -22,8 +22,23 @@ HealthStatus = str
 ProgressCallback = Callable[[dict[str, Any]], None]
 ClientFactory = Callable[["R2EffectiveSettings"], Any]
 SyncStateRecorder = Callable[[Iterable[dict[str, Any]]], None]
-from .config import *
-from .client import *
+from .client import (
+    _client_for,
+    _normalize_concurrency,
+)
+from .config import (
+    CandidateSyncOutcome,
+    LocalSyncCandidate,
+    R2EffectiveSettings,
+    R2SyncError,
+    R2SyncResult,
+    R2_REMOTE_HEAD_LOOKUP_THRESHOLD,
+    R2_REMOTE_LISTING_FALLBACK_THRESHOLD,
+    R2_SYNC_BATCH_SIZE,
+    RemoteKeyLookup,
+    logger,
+    resolve_r2_backup_settings,
+)
 
 def _entry_value(entry: Any, key: str) -> Any:
     if isinstance(entry, dict):
