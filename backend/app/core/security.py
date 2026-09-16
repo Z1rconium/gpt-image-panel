@@ -2,11 +2,11 @@ import base64
 import hmac
 import ipaddress
 import json
+from collections.abc import Mapping
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
-from typing import Optional
+from typing import Optional, Protocol
 
-from fastapi import Request
 
 from . import settings as config
 
@@ -120,7 +120,22 @@ def is_trusted_proxy(client_host: str) -> bool:
     return any(addr in net for net in _trusted_proxy_networks)
 
 
-def get_client_ip(request: Request) -> str:
+class _ClientAddress(Protocol):
+    host: str | None
+
+
+class ClientRequest(Protocol):
+    """The parts of an HTTP request this module reads.
+
+    Typed structurally so core stays free of the web framework while still
+    accepting the framework's request object.
+    """
+
+    headers: Mapping[str, str]
+    client: _ClientAddress | None
+
+
+def get_client_ip(request: ClientRequest) -> str:
     client_host = request.client.host if request.client else ""
     if is_trusted_proxy(client_host):
         forwarded_for = request.headers.get("x-forwarded-for", "")

@@ -33,14 +33,16 @@ ALLOWED_TARGET_LAYERS = {
 
 # Frozen debt: every entry is a mapping the dependency matrix forbids. Each
 # architecture phase deletes the entries it fixes; the list may only shrink.
-# Frozen debt: every entry is a mapping the matrix forbids.
-# Frozen debt: every entry is a mapping the matrix forbids.
-# Frozen debt: every entry is a mapping the matrix forbids.
-# Frozen debt: every entry is a mapping the matrix forbids.
-# Frozen debt: every entry is a mapping the matrix forbids.
-# Frozen debt: every entry is a mapping the matrix forbids.
-# Frozen debt: every entry is a mapping the matrix forbids.
-# Frozen debt: every entry is a mapping the matrix forbids.
+FRAMEWORK_FREE_LAYERS = frozenset(
+    {"core", "integrations", "repositories", "runtime", "schemas", "services"}
+)
+WEB_FRAMEWORKS = ("fastapi", "starlette")
+# runtime/state.py binds the shared starlette State object the app exposes as
+# app.state, so it is the one module outside the api layer that may import it.
+FRAMEWORK_IMPORT_ALLOWLIST: frozenset[str] = frozenset(
+    {"backend/app/runtime/state.py -> starlette"}
+)
+
 # Frozen debt: every entry is a mapping the matrix forbids.
 ALLOWED_VIOLATIONS: frozenset[str] = frozenset(
     {
@@ -206,4 +208,44 @@ def test_boundary_allowlists_have_no_stale_entries(scan_result):
     assert not stale_deferred, _report(
         "ALLOWED_DEFERRED_IMPORTS entries no longer occur, delete them",
         stale_deferred,
+    )
+
+
+def _framework_imports() -> list[str]:
+    """FastAPI/starlette imports in layers that must stay framework-free."""
+    found: list[str] = []
+    for path in sorted(APP_DIR.rglob("*.py")):
+        source_layer = _layer_of(_module_name_for(path))
+        if source_layer not in FRAMEWORK_FREE_LAYERS:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        relative_path = path.relative_to(REPO_ROOT).as_posix()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                modules = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                modules = [node.module or ""]
+            else:
+                continue
+            for module in modules:
+                top_level = module.split(".", 1)[0]
+                if top_level in WEB_FRAMEWORKS:
+                    found.append(f"{relative_path} -> {top_level}")
+    return found
+
+
+def test_non_api_layers_do_not_import_a_web_framework():
+    found = _framework_imports()
+    unexpected = sorted(set(found) - FRAMEWORK_IMPORT_ALLOWLIST)
+    assert not unexpected, _report(
+        "Only the api layer may import FastAPI/starlette (see FRAMEWORK_IMPORT_ALLOWLIST)",
+        unexpected,
+    )
+
+
+def test_framework_import_allowlist_has_no_stale_entries():
+    stale = sorted(FRAMEWORK_IMPORT_ALLOWLIST - set(_framework_imports()))
+    assert not stale, _report(
+        "FRAMEWORK_IMPORT_ALLOWLIST entries no longer occur, delete them",
+        stale,
     )
