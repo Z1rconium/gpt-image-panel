@@ -448,14 +448,50 @@ function createGalleryStore() {
     });
   }
 
+  function patchPrefetchedEntries(idSet: Set<string>, updater: (image: GalleryEntry) => GalleryEntry | null) {
+    // In-place prefetch patching keeps neighbouring pages warm for metadata
+    // updates (favorite toggles); removals still fall back to wholesale
+    // invalidation because server-side pages shift after a delete.
+    if (!prefetchedPages.size) return;
+    for (const [key, page] of prefetchedPages) {
+      let removedCount = 0;
+      let removedBytes = 0;
+      let changed = false;
+      const nextImages: GalleryEntry[] = [];
+      for (const image of page.images) {
+        if (!idSet.has(image.id)) {
+          nextImages.push(image);
+          continue;
+        }
+        const nextImage = updater(image);
+        if (nextImage === null) {
+          changed = true;
+          removedCount += 1;
+          removedBytes += image.bytes || 0;
+          continue;
+        }
+        if (nextImage !== image) changed = true;
+        nextImages.push(nextImage);
+      }
+      if (!changed) continue;
+      prefetchedPages.set(key, {
+        ...page,
+        images: nextImages,
+        total: Math.max(0, page.total - removedCount),
+        total_bytes: Math.max(0, page.total_bytes - removedBytes)
+      });
+    }
+  }
+
   function patchGalleryEntries(
     ids: Iterable<string>,
     updater: (image: GalleryEntry) => GalleryEntry | null,
-    options: { pruneSelection?: boolean } = {}
+    options: { pruneSelection?: boolean; prefetchUpdate?: boolean } = {}
   ) {
     const idSet = new Set(ids);
     if (!idSet.size) return;
-    invalidateGalleryPrefetch();
+    if (options.prefetchUpdate) patchPrefetchedEntries(idSet, updater);
+    else invalidateGalleryPrefetch();
     update((current) => {
       if (!current.gallery) return current;
       let changed = false;
@@ -598,7 +634,7 @@ function createGalleryStore() {
     patchGalleryEntries(
       [image.id],
       (current) => (state.filters.favorite && !nextImage.favorite ? null : { ...current, favorite: nextImage.favorite }),
-      { pruneSelection: false }
+      { pruneSelection: false, prefetchUpdate: true }
     );
     onChanged?.(nextImage);
   }
@@ -634,20 +670,31 @@ function createGalleryStore() {
     if (!confirmed) return;
 
     cancelPendingSingleDelete(image.id);
+    const deletedOnPage = state.page;
+    const wasOnCurrentPage = Boolean(state.gallery?.images.some((entry) => entry.id === image.id));
     pendingSingleDeletes.set(image.id, {
       image,
       timer: setTimeout(async () => {
         try {
           await apiFetch(`/api/gallery/${encodeURIComponent(image.id)}`, { method: 'DELETE' }, 'deleting image');
-          try {
-            await loadGallery(state.page);
-          } catch {
-            // The DELETE already succeeded; keep the optimistic deletion visible if refresh races or fails.
-          }
           pendingSingleDeletes.delete(image.id);
-          removeGalleryEntryFromCurrentPage(image);
+          // Kill any gallery request that was still in flight across the
+          // delete; its response predates the deletion and would resurrect
+          // the removed entry. Requests started from now on are safe.
+          abortController?.abort();
           onDeleted?.(image);
           showToast(get(t).messages.imageDeleted);
+          // The entry was already hidden optimistically, so no refetch is
+          // needed; only walk back when the current page just went empty.
+          if (
+            wasOnCurrentPage &&
+            state.page === deletedOnPage &&
+            state.page > 1 &&
+            state.gallery &&
+            !state.gallery.images.length
+          ) {
+            await loadGallery(state.page - 1).catch(() => undefined);
+          }
         } catch (error) {
           if (isAbortError(error)) return;
           pendingSingleDeletes.delete(image.id);

@@ -46,7 +46,9 @@ function downloadBlob(blob: Blob, filename: string) {
   document.body.appendChild(link);
   link.click();
   link.remove();
-  URL.revokeObjectURL(url);
+  // Revoking synchronously can cancel the download in WebKit before the
+  // navigation consumes the blob URL; defer it to a later task.
+  setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
 function startNativeDownload(url: string, filename?: string) {

@@ -3,6 +3,7 @@ import { ApiError, apiFetch } from '$lib/api/client';
 import { openJsonEventSource } from '$lib/api/events';
 import { t } from '$lib/i18n';
 import { filenameFromImageUrl, jobFailureMessage } from '$lib/utils/format';
+import { isPageVisible } from '$lib/utils/network';
 import { isActiveJobStatus } from '$lib/utils/jobs';
 import type { GeneratePreviewEvent, GenerateJobResponse, GenerateJobStatus } from '$lib/api/types/jobs';
 import type { PreviewState } from '$lib/stores/preview';
@@ -128,6 +129,7 @@ function createJobsStore() {
   let state = initialJobsState;
   let jobsSource: EventSource | null = null;
   let jobsPollingTimer: ReturnType<typeof setInterval> | null = null;
+  let jobsPollInFlight = false;
   let jobsFeedHealthy = false;
   let activeJobSource: EventSource | null = null;
   let activeJobFeedHealthy = false;
@@ -274,11 +276,21 @@ function createJobsStore() {
     }
   }
 
+  function loadJobsIfVisible() {
+    // Background tabs must not burn the fallback poll; the visibilitychange
+    // handler refreshes once when the page becomes visible again.
+    if (!isPageVisible() || jobsPollInFlight) return;
+    jobsPollInFlight = true;
+    void loadJobs().finally(() => {
+      jobsPollInFlight = false;
+    });
+  }
+
   function startJobsPolling() {
     if (jobsPollingTimer) return;
-    void loadJobs();
+    void loadJobsIfVisible();
     jobsPollingTimer = setInterval(() => {
-      void loadJobs();
+      void loadJobsIfVisible();
     }, 5000);
   }
 
@@ -412,6 +424,7 @@ function createJobsStore() {
 
   function scheduleTrackedJobPoll(jobId: string, generation: number) {
     if (activeJobPollingTimer || trackedJobId !== jobId || trackedJobGeneration !== generation) return;
+    if (!isPageVisible()) return;
     activeJobPollingTimer = setTimeout(() => {
       activeJobPollingTimer = null;
       if (trackedJobId === jobId && trackedJobGeneration === generation) void pollJob(jobId, generation);
@@ -424,6 +437,7 @@ function createJobsStore() {
       trackedJobGeneration !== generation ||
       activeJobPollsInFlight.has(generation)
     ) return;
+    if (!isPageVisible()) return;
     clearActiveJobPollingTimer();
     activeJobPollsInFlight.add(generation);
     try {
@@ -473,8 +487,9 @@ function createJobsStore() {
   function previewFromJob(job: GenerateJobStatus, preview: PreviewState): PreviewState {
     const primaryImage = job.images?.[0];
     const image = primaryImage?.image_url || job.image_url || '';
+    const active = isActiveJobStatus(job.status);
     return {
-      loading: isActiveJobStatus(job.status),
+      loading: active,
       error: jobFailureMessage(job, get(t).messages.jobFailed),
       job,
       imageUrl: image || preview.imageUrl,
@@ -482,8 +497,9 @@ function createJobsStore() {
       prompt: job.prompt || preview.prompt,
       // The final image always wins over a streamed partial; once it lands,
       // drop the streaming preview so PreviewPanel switches to the real image.
-      streamingPreviewDataUrl: image ? '' : preview.streamingPreviewDataUrl,
-      streamingPreviewSequence: image ? 0 : preview.streamingPreviewSequence
+      // A failed job never gets one, so release its (potentially large) data URL.
+      streamingPreviewDataUrl: image || !active ? '' : preview.streamingPreviewDataUrl,
+      streamingPreviewSequence: image || !active ? 0 : preview.streamingPreviewSequence
     };
   }
 
@@ -508,7 +524,23 @@ function createJobsStore() {
     trackedJobPreview = null;
   }
 
+  function handleVisibilityChange() {
+    if (typeof document === 'undefined' || document.visibilityState !== 'visible') return;
+    // Polling is suspended while hidden, so converge once on return. The SSE
+    // feeds stay connected and keep the store current, so only refresh
+    // tracked-job data when its own feed is unhealthy.
+    void loadJobs();
+    if (!activeJobFeedHealthy) startTrackedJobPolling();
+  }
+
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+  }
+
   function cleanup() {
+    if (typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    }
     closeActiveJobSource();
     jobsSource?.close();
     jobsSource = null;
