@@ -1,24 +1,22 @@
 <script lang="ts">
   import { dialogIn, dialogOut, overlayIn, overlayOut } from '$lib/motion';
   import { browser } from '$app/environment';
-  import { onDestroy, onMount } from 'svelte';
   import { dialog } from '$lib/actions/dialog';
+  import { onDestroy, onMount, untrack } from 'svelte';
+  import { promptForm } from '$lib/features/workspace/formState.svelte';
   import { MAX_PROMPT_CHARS, promptLength } from '$lib/utils/imageModels';
   import { plainTextInput } from '$lib/actions/plainTextInput';
   import { apiFetch } from '$lib/api/client';
   import { language, t } from '$lib/i18n';
-import type { PromptOptimizeResponse } from '$lib/api/types/assistant';
-import type { ApiPath } from '$lib/api/types/common';
-  import { initialPromptFormState, type PromptFormState } from '$lib/stores/preview';
+  import type { PromptOptimizeResponse } from '$lib/api/types/assistant';
   import { buildPromptOptimizeRequest } from '$lib/utils/promptOptimizer';
 
-  export let currentPrompt = '';
-  export let apiPath: ApiPath = initialPromptFormState.apiPath;
-  export let model = initialPromptFormState.model;
-  export let size = initialPromptFormState.size;
-  export let quality: PromptFormState['quality'] = initialPromptFormState.quality;
-  export let onApplyPrompt: (prompt: string) => void = () => {};
-  export let enabled = true;
+  interface Props {
+    onApplyPrompt?: (prompt: string) => void;
+    enabled?: boolean;
+  }
+
+  let { onApplyPrompt = () => {}, enabled = true }: Props = $props();
 
   type Phase = 'draft' | 'review';
   type FloatingPosition = {
@@ -31,34 +29,42 @@ import type { ApiPath } from '$lib/api/types/common';
   const TAP_MOVE_THRESHOLD = 8;
   const VIEWPORT_EDGE_GAP = 12;
 
-  let triggerButton: HTMLButtonElement | null = null;
-  let open = false;
-  let phase: Phase = 'draft';
-  let intent = '';
-  let error = '';
-  let optimizing = false;
-  let optimizedPrompt = '';
-  let originalPrompt = '';
-  let submittedIntent = '';
+  let triggerButton: HTMLButtonElement | null = $state(null);
+  let open = $state(false);
+  let phase = $state<Phase>('draft');
+  let intent = $state('');
+  let error = $state('');
+  let optimizing = $state(false);
+  let optimizedPrompt = $state('');
+  let originalPrompt = $state('');
+  let submittedIntent = $state('');
+  let floatingPosition = $state<FloatingPosition | null>(browser ? readStoredPosition() : null);
+  let dragging = $state(false);
   let requestSeq = 0;
   let activeRequest: AbortController | null = null;
-  let floatingPosition: FloatingPosition | null = browser ? readStoredPosition() : null;
   let pressTimer: ReturnType<typeof setTimeout> | null = null;
   let activePointerId: number | null = null;
   let pointerDownAt: FloatingPosition | null = null;
   let pointerDownTriggerPosition: FloatingPosition | null = null;
   let dragPointerOffset: FloatingPosition | null = null;
   let dragPending = false;
-  let dragging = false;
   let suppressClick = false;
   let lastPointerPosition: FloatingPosition | null = null;
   let resizeObserver: ResizeObserver | null = null;
   let observedTriggerButton: HTMLButtonElement | null = null;
   let triggerSize: { width: number; height: number } | null = null;
 
-  $: submitDisabled = optimizing || !intent.trim() || !currentPrompt.trim();
-  $: if (!enabled && open) closeAssistant();
-  $: syncTriggerObserver(enabled, triggerButton);
+  const currentPrompt = $derived(promptForm.prompt);
+  const submitDisabled = $derived(optimizing || !intent.trim() || !currentPrompt.trim());
+
+  $effect(() => {
+    if (!enabled && open) closeAssistant();
+  });
+  $effect(() => {
+    // Untracked: the observer internally reads and re-clamps the floating
+    // position, which must not become a dependency of this effect.
+    untrack(() => syncTriggerObserver(enabled, triggerButton));
+  });
 
   function readStoredPosition(): FloatingPosition | null {
     if (!browser) return null;
@@ -192,13 +198,13 @@ import type { ApiPath } from '$lib/api/types/common';
     phase = 'draft';
     error = '';
     optimizedPrompt = '';
-    originalPrompt = currentPrompt.trim();
+    originalPrompt = promptForm.prompt.trim();
     submittedIntent = '';
     intent = '';
   }
 
   async function submitOptimization() {
-    const trimmedPrompt = currentPrompt.trim();
+    const trimmedPrompt = promptForm.prompt.trim();
     const trimmedIntent = intent.trim();
     if (!trimmedPrompt || !trimmedIntent || optimizing) return;
 
@@ -221,10 +227,10 @@ import type { ApiPath } from '$lib/api/types/common';
               prompt: trimmedPrompt,
               intent: trimmedIntent,
               targetLanguage: $language,
-              apiPath,
-              model,
-              size,
-              quality
+              apiPath: promptForm.apiPath,
+              model: promptForm.model,
+              size: promptForm.size,
+              quality: promptForm.quality
             })
           )
         },
@@ -418,12 +424,12 @@ import type { ApiPath } from '$lib/api/types/common';
     style:top={floatingPosition ? `${floatingPosition.y}px` : null}
     style:right={floatingPosition ? 'auto' : null}
     style:bottom={floatingPosition ? 'auto' : null}
-    on:pointerdown={handlePointerDown}
-    on:pointermove={handlePointerMove}
-    on:pointerup={handlePointerUp}
-    on:pointercancel={handlePointerCancel}
-    on:click={handleClick}
-    on:contextmenu|preventDefault
+    onpointerdown={handlePointerDown}
+    onpointermove={handlePointerMove}
+    onpointerup={handlePointerUp}
+    onpointercancel={handlePointerCancel}
+    onclick={handleClick}
+    oncontextmenu={(event) => event.preventDefault()}
   >
     <svg viewBox="0 0 24 24" class="h-4 w-4 shrink-0 fill-none stroke-current stroke-[1.8]" aria-hidden="true">
       <path d="M4 12h6"></path>
@@ -441,7 +447,7 @@ import type { ApiPath } from '$lib/api/types/common';
       class="absolute inset-0"
       tabindex="-1"
       aria-label={$t.promptOptimizerAssistant.closeLabel}
-      on:click={closeAssistant}
+      onclick={closeAssistant}
     ></button>
     <div
       class="mobile-dvh-dialog overlay-panel relative z-10 flex w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-stone-200 bg-white dark:border-zinc-800 dark:bg-zinc-950" in:dialogIn out:dialogOut
@@ -462,7 +468,7 @@ import type { ApiPath } from '$lib/api/types/common';
           class="control-focus rounded-lg p-2 text-stone-500 hover:bg-stone-100 hover:text-stone-950 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
           aria-label={$t.promptOptimizerAssistant.closeLabel}
           title={$t.promptOptimizerAssistant.closeLabel}
-          on:click={closeAssistant}
+          onclick={closeAssistant}
         >
           <svg viewBox="0 0 24 24" class="h-4 w-4 fill-none stroke-current stroke-[1.8]" aria-hidden="true">
             <path d="M6 6l12 12"></path>
@@ -518,7 +524,7 @@ import type { ApiPath } from '$lib/api/types/common';
               <button
                 type="button"
                 class="control-focus rounded-lg border border-stone-300 px-4 py-2.5 text-sm font-medium text-stone-700 hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                on:click={closeAssistant}
+                onclick={closeAssistant}
               >
                 {$t.common.close}
               </button>
@@ -526,7 +532,7 @@ import type { ApiPath } from '$lib/api/types/common';
                 type="button"
                 disabled={submitDisabled}
                 class="control-focus rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
-                on:click={submitOptimization}
+                onclick={submitOptimization}
               >
                 {optimizing ? $t.promptOptimizerAssistant.optimizing : $t.promptOptimizerAssistant.optimize}
               </button>
@@ -565,14 +571,14 @@ import type { ApiPath } from '$lib/api/types/common';
               <button
                 type="button"
                 class="control-focus rounded-lg border border-stone-300 px-4 py-2.5 text-sm font-medium text-stone-700 hover:bg-stone-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                on:click={rejectOptimization}
+                onclick={rejectOptimization}
               >
                 {$t.common.reject}
               </button>
               <button
                 type="button"
                 class="control-focus rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-500"
-                on:click={acceptOptimization}
+                onclick={acceptOptimization}
               >
                 {$t.common.accept}
               </button>

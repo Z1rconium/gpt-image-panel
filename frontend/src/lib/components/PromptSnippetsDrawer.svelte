@@ -1,7 +1,8 @@
 <script lang="ts">
   import Overlay from '$lib/components/Overlay.svelte';
   import { tick } from 'svelte';
-import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput } from '$lib/api/types/snippets';
+  import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput } from '$lib/api/types/snippets';
+  import { promptForm } from '$lib/features/workspace/formState.svelte';
   import { MAX_PROMPT_CHARS, promptLength } from '$lib/utils/imageModels';
   import { plainTextInput } from '$lib/actions/plainTextInput';
   import { t } from '$lib/i18n';
@@ -9,38 +10,56 @@ import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput 
 
   type MaybePromise = void | Promise<void>;
 
-  export let open = false;
-  export let snippets: PromptSnippet[] = [];
-  export let loading = false;
-  export let saving = false;
-  export let currentPrompt = '';
-  export let onClose: () => void = () => {};
-  export let onSearch: (query: string) => MaybePromise = () => {};
-  export let onCreate: (input: PromptSnippetCreateInput) => MaybePromise = () => {};
-  export let onUpdate: (snippetId: string, input: PromptSnippetUpdateInput) => MaybePromise = () => {};
-  export let onDelete: (snippet: PromptSnippet) => MaybePromise = () => {};
-  export let onUse: (snippet: PromptSnippet) => void = () => {};
-  export let onCopy: (snippet: PromptSnippet) => MaybePromise = () => {};
+  interface Props {
+    open?: boolean;
+    snippets?: PromptSnippet[];
+    loading?: boolean;
+    saving?: boolean;
+    onClose?: () => void;
+    onSearch?: (query: string) => MaybePromise;
+    onCreate?: (input: PromptSnippetCreateInput) => MaybePromise;
+    onUpdate?: (snippetId: string, input: PromptSnippetUpdateInput) => MaybePromise;
+    onDelete?: (snippet: PromptSnippet) => MaybePromise;
+    onUse?: (snippet: PromptSnippet) => void;
+    onCopy?: (snippet: PromptSnippet) => MaybePromise;
+  }
 
-  let query = '';
-  let title = '';
-  let promptText = '';
-  let favorite = false;
-  let editingId = '';
-  let initialTitle = '';
-  let initialPromptText = '';
-  let initialFavorite = false;
+  let {
+    open = false,
+    snippets = [],
+    loading = false,
+    saving = false,
+    onClose = () => {},
+    onSearch = () => {},
+    onCreate = () => {},
+    onUpdate = () => {},
+    onDelete = () => {},
+    onUse = () => {},
+    onCopy = () => {}
+  }: Props = $props();
+
+  let query = $state('');
+  let title = $state('');
+  let promptText = $state('');
+  let favorite = $state(false);
+  let editingId = $state('');
+  let initialTitle = $state('');
+  let initialPromptText = $state('');
+  let initialFavorite = $state(false);
+  let titleInput: HTMLInputElement | null = $state(null);
   let searchTimer: ReturnType<typeof setTimeout> | null = null;
-  let titleInput: HTMLInputElement | null = null;
 
-  $: isEditing = Boolean(editingId);
-  $: formReady = Boolean(title.trim() && promptText.trim()) && promptLength(promptText.trim()) <= MAX_PROMPT_CHARS && !saving;
-  $: hasCurrentPrompt = Boolean(currentPrompt.trim()) && promptLength(currentPrompt.trim()) <= MAX_PROMPT_CHARS;
-  $: emptyLabel = query.trim() ? $t.promptSnippets.noMatch : $t.promptSnippets.noSnippets;
-  $: emptyHint = query.trim() ? $t.promptSnippets.noMatchHint : $t.promptSnippets.noSnippetsHint;
-  $: formDirty = editingId
-    ? title !== initialTitle || promptText !== initialPromptText || favorite !== initialFavorite
-    : Boolean(title.trim() || promptText.trim() || favorite);
+  const currentPrompt = $derived(promptForm.prompt);
+  const isEditing = $derived(Boolean(editingId));
+  const formReady = $derived(Boolean(title.trim() && promptText.trim()) && promptLength(promptText.trim()) <= MAX_PROMPT_CHARS && !saving);
+  const hasCurrentPrompt = $derived(Boolean(currentPrompt.trim()) && promptLength(currentPrompt.trim()) <= MAX_PROMPT_CHARS);
+  const emptyLabel = $derived(query.trim() ? $t.promptSnippets.noMatch : $t.promptSnippets.noSnippets);
+  const emptyHint = $derived(query.trim() ? $t.promptSnippets.noMatchHint : $t.promptSnippets.noSnippetsHint);
+  const formDirty = $derived(
+    editingId
+      ? title !== initialTitle || promptText !== initialPromptText || favorite !== initialFavorite
+      : Boolean(title.trim() || promptText.trim() || favorite)
+  );
 
   function resetForm() {
     editingId = '';
@@ -125,11 +144,13 @@ import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput 
     onUse(snippet);
   }
 
-  $: if (!open) {
-    if (searchTimer) clearTimeout(searchTimer);
-    query = '';
-    resetForm();
-  }
+  $effect(() => {
+    if (!open) {
+      if (searchTimer) clearTimeout(searchTimer);
+      query = '';
+      resetForm();
+    }
+  });
 </script>
 
 <Overlay
@@ -146,7 +167,7 @@ import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput 
           <h2 id="prompt-snippets-drawer-title" class="text-lg font-semibold text-stone-900 dark:text-zinc-100">{$t.promptSnippets.title}</h2>
           <p class="mt-1 text-xs text-stone-500 dark:text-zinc-500">{$t.promptSnippets.subtitle}</p>
         </div>
-        <button type="button" class="mobile-touch-target control-focus rounded-lg p-1.5 text-stone-500 hover:bg-stone-100 hover:text-stone-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100" aria-label={$t.promptSnippets.closeLabel} on:click={closeDrawer}>x</button>
+        <button type="button" class="mobile-touch-target control-focus rounded-lg p-1.5 text-stone-500 hover:bg-stone-100 hover:text-stone-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100" aria-label={$t.promptSnippets.closeLabel} onclick={closeDrawer}>x</button>
       </div>
 
       <div class="space-y-4 border-b border-stone-200 p-5 dark:border-zinc-800">
@@ -158,13 +179,13 @@ import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput 
             placeholder={$t.promptSnippets.search}
             aria-label={$t.promptSnippets.search}
             class="control-focus min-w-0 flex-1 rounded-lg border border-stone-300 bg-stone-50 px-3 py-2 text-sm text-stone-900 focus:border-emerald-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
-            on:input={scheduleSearch}
+            oninput={scheduleSearch}
           />
           <button
             type="button"
             disabled={!hasCurrentPrompt || saving}
             class="control-focus shrink-0 rounded-lg border border-emerald-500/40 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-500/10 disabled:cursor-not-allowed disabled:border-stone-300 disabled:text-stone-400 dark:text-emerald-200 dark:disabled:border-zinc-700 dark:disabled:text-zinc-500"
-            on:click={saveCurrentPrompt}
+            onclick={saveCurrentPrompt}
           >
             {$t.promptSnippets.saveCurrent}
           </button>
@@ -174,7 +195,7 @@ import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput 
           <div class="mb-3 flex items-center justify-between gap-3">
             <h3 id="prompt-snippet-form-title" class="text-sm font-semibold text-stone-800 dark:text-zinc-200">{isEditing ? $t.promptSnippets.editTitle : $t.promptSnippets.newTitle}</h3>
             {#if isEditing}
-              <button type="button" class="control-focus rounded text-xs font-medium text-stone-600 hover:text-stone-900 dark:text-zinc-400 dark:hover:text-zinc-100" on:click={cancelEdit}>
+              <button type="button" class="control-focus rounded text-xs font-medium text-stone-600 hover:text-stone-900 dark:text-zinc-400 dark:hover:text-zinc-100" onclick={cancelEdit}>
                 {$t.promptSnippets.cancelEdit}
               </button>
             {/if}
@@ -212,7 +233,7 @@ import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput 
               type="button"
               disabled={!formReady}
               class="control-focus rounded-lg bg-emerald-600 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
-              on:click={submitForm}
+              onclick={submitForm}
             >
               {saving ? $t.promptSnippets.saving : isEditing ? $t.promptSnippets.update : $t.promptSnippets.create}
             </button>
@@ -245,22 +266,22 @@ import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput 
                     aria-label={snippet.favorite ? $t.common.unfavorite : $t.common.favorite}
                     title={snippet.favorite ? $t.common.unfavorite : $t.common.favorite}
                     disabled={saving}
-                    on:click={() => onUpdate(snippet.id, { favorite: !snippet.favorite })}
+                    onclick={() => onUpdate(snippet.id, { favorite: !snippet.favorite })}
                   >
                     {snippet.favorite ? '★' : '☆'}
                   </button>
                 </div>
                 <div class="mt-4 flex flex-wrap justify-end gap-2">
-                  <button type="button" class="control-focus rounded-lg border border-stone-300 px-3 py-2 text-xs text-stone-700 hover:bg-stone-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800" on:click={() => onCopy(snippet)}>
+                  <button type="button" class="control-focus rounded-lg border border-stone-300 px-3 py-2 text-xs text-stone-700 hover:bg-stone-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800" onclick={() => onCopy(snippet)}>
                     {$t.promptSnippets.copy}
                   </button>
-                  <button type="button" class="control-focus rounded-lg border border-stone-300 px-3 py-2 text-xs text-stone-700 hover:bg-stone-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800" on:click={() => editSnippet(snippet)}>
+                  <button type="button" class="control-focus rounded-lg border border-stone-300 px-3 py-2 text-xs text-stone-700 hover:bg-stone-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800" onclick={() => editSnippet(snippet)}>
                     {$t.promptSnippets.edit}
                   </button>
-                  <button type="button" class="control-focus rounded-lg border border-red-500/40 px-3 py-2 text-xs text-red-700 hover:bg-red-500/10 dark:text-red-300" on:click={() => onDelete(snippet)}>
+                  <button type="button" class="control-focus rounded-lg border border-red-500/40 px-3 py-2 text-xs text-red-700 hover:bg-red-500/10 dark:text-red-300" onclick={() => onDelete(snippet)}>
                     {$t.common.delete}
                   </button>
-                  <button type="button" class="control-focus rounded-lg border border-emerald-500/40 px-3 py-2 text-xs font-medium text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-200" on:click={() => useSnippet(snippet)}>
+                  <button type="button" class="control-focus rounded-lg border border-emerald-500/40 px-3 py-2 text-xs font-medium text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-200" onclick={() => useSnippet(snippet)}>
                     {$t.promptSnippets.use}
                   </button>
                 </div>

@@ -9,12 +9,11 @@
   import ToastHost from '$lib/components/ToastHost.svelte';
   import { apiFetch } from '$lib/api/client';
   import { language, t } from '$lib/i18n';
-import type { AssistantJobDiagnoseResponse, AssistantRecommendParamsResponse, PromptOptimizeResponse } from '$lib/api/types/assistant';
-import type { ApiPath, ResponseFormatDefault } from '$lib/api/types/common';
-import type { GalleryEntry } from '$lib/api/types/gallery';
-import type { GenerateJobStatus } from '$lib/api/types/jobs';
-import type { AIAssistantSettingsInput, OverallConfigUpdateRequest, SettingsInput, SettingsResponse } from '$lib/api/types/settings';
-import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput } from '$lib/api/types/snippets';
+  import type { AssistantJobDiagnoseResponse, AssistantRecommendParamsResponse, PromptOptimizeResponse } from '$lib/api/types/assistant';
+  import type { GalleryEntry } from '$lib/api/types/gallery';
+  import type { GenerateJobStatus } from '$lib/api/types/jobs';
+  import type { AIAssistantSettingsInput, OverallConfigUpdateRequest, SettingsInput } from '$lib/api/types/settings';
+  import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput } from '$lib/api/types/snippets';
   import { accessStore } from '$lib/stores/access';
   import { assistantStore, isAbortError } from '$lib/stores/assistant';
   import { confirmStore } from '$lib/stores/confirm';
@@ -23,7 +22,7 @@ import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput 
   import { jobsStore } from '$lib/stores/jobs';
   import { lightboxStore } from '$lib/stores/lightbox';
   import { nodeImageResult } from '$lib/stores/nodeImage';
-  import { DEFAULT_PROMPT_MODEL, initialPromptFormState, previewStore, type PromptFormState } from '$lib/stores/preview';
+  import { initialPromptFormState, previewStore, type PromptFormState } from '$lib/stores/preview';
   import { promptSnippetsStore } from '$lib/stores/promptSnippets';
   import { settingsActivityStore, settingsStore } from '$lib/stores/settings';
   import { toastStore, uiStore, type ToastOptions } from '$lib/stores/ui';
@@ -46,44 +45,32 @@ import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput 
     sizePanel,
     snippetsPanel
   } from '$lib/features/workspace/panels';
+  import { promptForm } from '$lib/features/workspace/formState.svelte';
   import { createLightboxController } from '$lib/features/workspace/lightbox';
   import { createPanelController } from '$lib/features/workspace/panelController';
   import { installWorkspaceLifecycle } from '$lib/features/workspace/lifecycle';
   import { waitForGalleryAnalysis } from '$lib/features/workspace/gallery';
-  import {
-    activePreset,
-    presetApiPath,
-    presetDefaultModel,
-    presetDefaultResponseFormat
-  } from '$lib/features/workspace/prompt';
   import { createUrlSyncScheduler, readPageUrl, writePageUrl, type JobsTab } from '$lib/utils/pageUrlSync';
   import {
     galleryEntryToEditForm,
     galleryEntryToPromptForm,
     galleryEntryToPromptOnly,
-    jobToPromptForm,
-    normalizeApiPath,
-    normalizeResponseFormat,
-    normalizeSubmissionQuantity
+    jobToPromptForm
   } from '$lib/utils/promptForm';
 
-  let jobsTab: JobsTab = 'running';
-  let form: PromptFormState = { ...initialPromptFormState };
-  let editPicker: EditSourcePicker;
-  let galleryEditImage: GalleryEntry | null = null;
-  let galleryEditDialogOpen = false;
-  let editPreviewUrl = '';
-  let editPreviewLabel = '';
-  let lastActivePresetId = '';
-  let lastActivePresetDefaultModel = DEFAULT_PROMPT_MODEL;
-  let lastActivePresetDefaultResponseFormat: ResponseFormatDefault = initialPromptFormState.responseFormat;
-  let jobDiagnoses: Record<string, AssistantJobDiagnoseResponse> = {};
-  let lastActivePresetApiPath: ApiPath = initialPromptFormState.apiPath;
-  let optimizingPrompt = false;
+  let jobsTab = $state<JobsTab>('running');
+  let editPicker: EditSourcePicker | undefined = $state();
+  let galleryEditImage = $state<GalleryEntry | null>(null);
+  let galleryEditDialogOpen = $state(false);
+  let editPreviewUrl = $state('');
+  let editPreviewLabel = $state('');
+  let jobDiagnoses = $state<Record<string, AssistantJobDiagnoseResponse>>({});
+  let optimizingPrompt = $state(false);
   let gallerySuccessRefreshTimer: ReturnType<typeof setTimeout> | null = null;
   const handledTerminalJobIds = new Set<string>();
-  $: hasEditSource = editSourceCount($editSourceStore) > 0;
-  $: editSources = [
+
+  const hasEditSource = $derived(editSourceCount($editSourceStore) > 0);
+  const editSources = $derived.by(() => [
     ...($editSourceStore.selectedGalleryImageId
       ? [
           {
@@ -100,7 +87,53 @@ import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput 
       previewUrl: source.previewUrl,
       kind: 'upload' as const
     }))
-  ];
+  ]);
+  const activeJobsCount = $derived($jobsStore.jobs.length);
+  const optimizerSettings = $derived($settingsStore.settings?.prompt_optimizer || null);
+  const promptOptimizerConfigAvailable = $derived(
+    Boolean(
+      optimizerSettings?.api_url.trim() &&
+        optimizerSettings.model.trim() &&
+        optimizerSettings.has_api_key
+    )
+  );
+  const optimizerAvailable = $derived(
+    Boolean(optimizerSettings?.enabled && promptOptimizerConfigAvailable)
+  );
+  const optimizerAssistantEnabled = $derived(
+    optimizerAvailable &&
+      !$uiStore.settingsOpen &&
+      !$uiStore.promptSnippetsOpen &&
+      !$uiStore.imagePromptOpen &&
+      !$uiStore.jobsOpen &&
+      !$uiStore.editPreviewOpen &&
+      !$uiStore.sizeDialogOpen &&
+      !$confirmStore.request &&
+      !Boolean($lightboxStore.image)
+  );
+  const aiAssistantSettings = $derived($settingsStore.settings?.ai_assistant || null);
+  const aiAssistantAvailable = $derived(
+    Boolean(
+      aiAssistantSettings?.enabled &&
+        promptOptimizerConfigAvailable &&
+        (aiAssistantSettings.vision_model.trim() || optimizerSettings?.model.trim())
+    )
+  );
+  const r2BackupSettings = $derived($settingsStore.settings?.r2_backup || null);
+  const r2BackupAvailable = $derived(
+    Boolean(
+      r2BackupSettings?.enabled &&
+        r2BackupSettings.endpoint_url.trim() &&
+        r2BackupSettings.bucket_name.trim() &&
+        r2BackupSettings.has_access_key_id &&
+        r2BackupSettings.has_secret_access_key
+    )
+  );
+  const nodeImageSettings = $derived($settingsStore.settings?.nodeimage || null);
+  const nodeImageAvailable = $derived(
+    Boolean(nodeImageSettings?.enabled && nodeImageSettings.api_key_resolvable)
+  );
+
   const urlSync = createUrlSyncScheduler((mode) => {
     writePageUrl(
       {
@@ -128,47 +161,31 @@ import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput 
     onAnalyzed: () => showToast($t.messages.aiAssistantGalleryAnalyzed),
     onError: showError
   });
-  $: activeJobsCount = $jobsStore.jobs.length;
-  $: optimizerSettings = $settingsStore.settings?.prompt_optimizer || null;
-  $: promptOptimizerConfigAvailable = Boolean(
-    optimizerSettings?.api_url.trim() &&
-      optimizerSettings.model.trim() &&
-      optimizerSettings.has_api_key
-  );
-  $: optimizerAvailable = Boolean(
-    optimizerSettings?.enabled && promptOptimizerConfigAvailable
-  );
-  $: optimizerAssistantEnabled =
-    optimizerAvailable &&
-    !$uiStore.settingsOpen &&
-    !$uiStore.promptSnippetsOpen &&
-    !$uiStore.imagePromptOpen &&
-    !$uiStore.jobsOpen &&
-    !$uiStore.editPreviewOpen &&
-    !$uiStore.sizeDialogOpen &&
-    !$confirmStore.request &&
-    !Boolean($lightboxStore.image);
-  $: aiAssistantSettings = $settingsStore.settings?.ai_assistant || null;
-  $: aiAssistantAvailable = Boolean(
-    aiAssistantSettings?.enabled &&
-      promptOptimizerConfigAvailable &&
-      (aiAssistantSettings.vision_model.trim() || optimizerSettings?.model.trim())
-  );
-  $: lightboxController.sync($lightboxStore.image, $galleryStore.gallery, aiAssistantAvailable);
-  $: r2BackupSettings = $settingsStore.settings?.r2_backup || null;
-  $: r2BackupAvailable = Boolean(
-    r2BackupSettings?.enabled &&
-      r2BackupSettings.endpoint_url.trim() &&
-      r2BackupSettings.bucket_name.trim() &&
-      r2BackupSettings.has_access_key_id &&
-      r2BackupSettings.has_secret_access_key
-  );
-  $: nodeImageSettings = $settingsStore.settings?.nodeimage || null;
-  $: nodeImageAvailable = Boolean(
-    nodeImageSettings?.enabled && nodeImageSettings.api_key_resolvable
-  );
-  $: syncFormDefaultsToActivePreset($settingsStore.settings);
-  $: if (optimizerAssistantEnabled) void ensurePanel('optimizer', false);
+
+  const {
+    loadingPanel,
+    ensurePanel,
+    prefetchPanel,
+    rememberPanelFocus,
+    restorePanelFocus,
+    openPanel: openUiPanel,
+    closePanel: closeUiPanel,
+    reset: resetPanels
+  } = createPanelController(showToast);
+
+  // Keep the lightbox navigation state and neighbor prefetch in step with the
+  // stores it reads; only these three values may trigger a re-sync.
+  $effect(() => {
+    lightboxController.sync($lightboxStore.image, $galleryStore.gallery, aiAssistantAvailable);
+  });
+  // Track the active preset's defaults without re-running on form keystrokes;
+  // the controller reads/writes form fields inside untrack.
+  $effect(() => {
+    promptForm.applyPresetDefaults($settingsStore.settings);
+  });
+  $effect(() => {
+    if (optimizerAssistantEnabled) void ensurePanel('optimizer', false);
+  });
 
   async function loadInitialData() {
     await Promise.all([settingsStore.loadSettings(), jobsStore.loadJobs(), applyUrlStateToApp()]);
@@ -195,17 +212,6 @@ import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput 
   function showError(error: unknown, fallback = $t.messages.requestFailed) {
     showToast(errorMessage(error, fallback), 'error');
   }
-
-  const {
-    loadingPanel,
-    ensurePanel,
-    prefetchPanel,
-    rememberPanelFocus,
-    restorePanelFocus,
-    openPanel: openUiPanel,
-    closePanel: closeUiPanel,
-    reset: resetPanels
-  } = createPanelController(showToast);
 
   function syncAfterGalleryMutation(mode: 'replace' | 'push' = 'replace', debounceMs = 0) {
     urlSync.schedule(mode, debounceMs);
@@ -322,41 +328,6 @@ import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput 
     uiStore.setKey(key, value);
   }
 
-  function syncFormDefaultsToActivePreset(settings: SettingsResponse | null) {
-    const preset = activePreset(settings);
-    const nextPresetId = preset?.id || '';
-    const nextDefaultModel = presetDefaultModel(settings);
-    const nextApiPath = presetApiPath(settings);
-    const nextDefaultResponseFormat = presetDefaultResponseFormat(settings);
-    if (
-      nextPresetId === lastActivePresetId &&
-      nextDefaultModel === lastActivePresetDefaultModel &&
-      nextApiPath === lastActivePresetApiPath &&
-      nextDefaultResponseFormat === lastActivePresetDefaultResponseFormat
-    ) {
-      return;
-    }
-
-    const currentModel = form.model.trim();
-    const updates: Partial<PromptFormState> = {};
-    if (!currentModel || currentModel === lastActivePresetDefaultModel) {
-      updates.model = nextDefaultModel;
-    }
-    if (!form.apiPath || form.apiPath === lastActivePresetApiPath) {
-      updates.apiPath = nextApiPath;
-    }
-    if (nextPresetId !== lastActivePresetId || nextDefaultResponseFormat !== lastActivePresetDefaultResponseFormat) {
-      updates.responseFormat = nextDefaultResponseFormat;
-    }
-    if (Object.keys(updates).length) {
-      form = { ...form, ...updates };
-    }
-    lastActivePresetId = nextPresetId;
-    lastActivePresetDefaultModel = nextDefaultModel;
-    lastActivePresetApiPath = nextApiPath;
-    lastActivePresetDefaultResponseFormat = nextDefaultResponseFormat;
-  }
-
   function saveSettings(body: SettingsInput) {
     void settingsStore.saveSettings(body, showToast).then((saved) => {
       if (saved) setUi('settingsOpen', false);
@@ -461,17 +432,10 @@ import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput 
     jobsStore.trackJob(jobId, async (job) => updatePreviewFromJob(job), previewStore.setError, previewStore.applyPreviewEvent);
   }
 
-  function normalizeFormQuantityForSubmit() {
-    const quantity = normalizeSubmissionQuantity(form.quantity);
-    if (form.quantity === '' || Number(form.quantity) !== quantity) {
-      form = { ...form, quantity };
-    }
-  }
-
   function generateImage() {
-    normalizeFormQuantityForSubmit();
+    promptForm.normalizeQuantityForSubmit();
     void previewStore.generateImage(
-      form,
+      promptForm.snapshot(),
       jobsStore.makeQueuedPreview,
       trackJob,
       jobsStore.shouldRefreshJobsAfterSubmit() ? jobsStore.loadJobs : undefined
@@ -479,9 +443,9 @@ import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput 
   }
 
   function editImage() {
-    normalizeFormQuantityForSubmit();
+    promptForm.normalizeQuantityForSubmit();
     void previewStore.editImage(
-      form,
+      promptForm.snapshot(),
       $editSourceStore,
       jobsStore.makeQueuedPreview,
       trackJob,
@@ -495,26 +459,29 @@ import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput 
   }
 
   async function planEdit() {
-    const goal = form.prompt.trim();
+    const goal = promptForm.prompt.trim();
     if (!goal) {
       previewStore.setError($t.messages.promptRequired);
       return;
     }
     try {
-      const previousForm = { ...form };
+      const previousPrompt = promptForm.prompt;
+      const previousSize = promptForm.size;
       const plan = await assistantStore.planEdit({
         goal,
         source_count: $editSourceStore.files.length + ($editSourceStore.selectedGalleryImageId ? 1 : 0),
-        current_prompt: form.prompt,
-        target_size: form.size
+        current_prompt: promptForm.prompt,
+        target_size: promptForm.size
       });
       if (plan.edit_prompt) {
-        form = { ...form, prompt: plan.edit_prompt, size: plan.suggested_size || form.size };
+        promptForm.prompt = plan.edit_prompt;
+        if (plan.suggested_size) promptForm.size = plan.suggested_size;
       }
       showToast($t.messages.aiAssistantEditPlanReady, 'status', {
         actionLabel: $t.common.undo,
         onAction: () => {
-          form = { ...form, prompt: previousForm.prompt, size: previousForm.size };
+          promptForm.prompt = previousPrompt;
+          promptForm.size = previousSize;
         },
         durationMs: 8000
       });
@@ -553,12 +520,12 @@ import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput 
   function appendPromptTag(value: string) {
     const tag = value.trim();
     if (!tag) return;
-    if (promptContainsTag(form.prompt, tag)) {
+    if (promptContainsTag(promptForm.prompt, tag)) {
       showToast($t.messages.promptTagExists);
       return;
     }
-    const prefix = form.prompt.trim();
-    form = { ...form, prompt: prefix ? `${prefix}, ${tag}` : tag };
+    const prefix = promptForm.prompt.trim();
+    promptForm.prompt = prefix ? `${prefix}, ${tag}` : tag;
   }
 
   async function loadPromptSnippets(query = '') {
@@ -606,7 +573,7 @@ import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput 
   }
 
   function usePromptSnippet(snippet: PromptSnippet) {
-    form = { ...form, prompt: snippet.prompt };
+    promptForm.prompt = snippet.prompt;
     closePromptSnippetsDrawer();
     showToast($t.messages.promptSnippetLoaded);
   }
@@ -617,7 +584,7 @@ import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput 
   }
 
   function applyImagePrompt(prompt: string) {
-    form = { ...form, prompt };
+    promptForm.prompt = prompt;
     showToast($t.messages.aiAssistantPromptApplied);
   }
 
@@ -645,7 +612,7 @@ import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput 
   }
 
   async function optimizePrompt() {
-    const originalPrompt = form.prompt;
+    const originalPrompt = promptForm.prompt;
     const prompt = originalPrompt.trim();
     if (!prompt || optimizingPrompt) return;
     if (!optimizerAvailable) {
@@ -664,20 +631,20 @@ import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput 
             buildPromptOptimizeRequest({
               prompt,
               targetLanguage: $language,
-              apiPath: form.apiPath,
-              model: form.model,
-              size: form.size,
-              quality: form.quality
+              apiPath: promptForm.apiPath,
+              model: promptForm.model,
+              size: promptForm.size,
+              quality: promptForm.quality
             })
           )
         },
         'optimizing prompt'
       );
-      form = { ...form, prompt: response.optimized_prompt };
+      promptForm.prompt = response.optimized_prompt;
       showToast($t.messages.promptOptimized, 'status', {
         actionLabel: $t.common.undo,
         onAction: () => {
-          form = { ...form, prompt: originalPrompt };
+          promptForm.prompt = originalPrompt;
         },
         durationMs: 6000
       });
@@ -689,18 +656,18 @@ import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput 
   }
 
   function applyOptimizedPrompt(prompt: string) {
-    form = { ...form, prompt };
+    promptForm.prompt = prompt;
     showToast($t.messages.promptOptimized);
   }
 
   async function applyAssistantPrompt(prompt: string) {
-    form = { ...form, prompt };
+    promptForm.prompt = prompt;
     showToast($t.messages.aiAssistantPromptApplied);
   }
 
   async function insertAssistantPrompt(prompt: string) {
-    const currentPrompt = form.prompt.trimEnd();
-    form = { ...form, prompt: currentPrompt ? `${currentPrompt}\n${prompt}` : prompt };
+    const currentPrompt = promptForm.prompt.trimEnd();
+    promptForm.prompt = currentPrompt ? `${currentPrompt}\n${prompt}` : prompt;
     showToast($t.messages.aiAssistantPromptInserted);
   }
 
@@ -720,20 +687,20 @@ import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput 
   function applyAssistantParams(recommendation: AssistantRecommendParamsResponse) {
     const updates: Partial<PromptFormState> = {};
     if (recommendation.model_name?.trim()) updates.model = recommendation.model_name.trim();
-    if (form.apiPath === '/v1/images/generations') {
+    if (promptForm.apiPath === '/v1/images/generations') {
       if (recommendation.size?.trim()) updates.size = recommendation.size.trim();
       if (recommendation.quality) updates.quality = recommendation.quality;
       if (recommendation.output_format) updates.outputFormat = recommendation.output_format;
       if (recommendation.n) updates.quantity = recommendation.n;
     }
     if (!Object.keys(updates).length) return;
-    form = { ...form, ...updates };
+    promptForm.patch(updates);
     showToast($t.messages.aiAssistantParamsApplied);
   }
 
   function regenerate() {
     previewStore.regenerate(
-      (next) => (form = { ...next, model: next.model.trim() || lastActivePresetDefaultModel || initialPromptFormState.model }),
+      (next) => promptForm.replace({ ...next, model: next.model.trim() || promptForm.presetDefaultModel || initialPromptFormState.model }),
       generateImage,
       editImage
     );
@@ -773,8 +740,8 @@ import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput 
       closeGalleryEditDialog();
       return;
     }
-    const nextForm = galleryEntryToEditForm(image, lastActivePresetDefaultModel, form.apiPath);
-    form = reusePrompt ? nextForm : { ...nextForm, prompt: '' };
+    const nextForm = galleryEntryToEditForm(image, promptForm.presetDefaultModel, promptForm.apiPath);
+    promptForm.replace(reusePrompt ? nextForm : { ...nextForm, prompt: '' });
     closeGalleryEditDialog();
     closeLightbox();
     focusPromptAfterGalleryEdit();
@@ -968,7 +935,7 @@ import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput 
   }
 
   function useGalleryPrompt(image: GalleryEntry) {
-    form = galleryEntryToPromptOnly(image, form);
+    promptForm.replace(galleryEntryToPromptOnly(image, promptForm.snapshot()));
     copyPromptBestEffort(image.prompt);
     closeLightbox();
     showToast($t.messages.galleryPromptLoaded);
@@ -976,14 +943,14 @@ import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput 
 
   function useGalleryParams(image: GalleryEntry) {
     const ignoredEditPath = image.api_path === '/v1/images/edits';
-    form = galleryEntryToPromptForm(image, lastActivePresetDefaultModel, form.apiPath);
+    promptForm.replace(galleryEntryToPromptForm(image, promptForm.presetDefaultModel, promptForm.apiPath));
     copyPromptBestEffort(image.prompt);
     closeLightbox();
     showToast(ignoredEditPath ? $t.messages.galleryEditApiPathIgnored : $t.messages.galleryParamsLoaded);
   }
 
   function useJobAsPrompt(job: GenerateJobStatus) {
-    form = jobToPromptForm(job, lastActivePresetDefaultModel);
+    promptForm.replace(jobToPromptForm(job, promptForm.presetDefaultModel));
     closeJobsDrawer();
     showToast($t.messages.jobLoadedIntoPrompt);
   }
@@ -1009,7 +976,7 @@ import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput 
   }
 
   function retryJob(job: GenerateJobStatus) {
-    form = jobToPromptForm(job, lastActivePresetDefaultModel);
+    promptForm.replace(jobToPromptForm(job, promptForm.presetDefaultModel));
     closeJobsDrawer();
     if (job.operation === 'edit') {
       if (!$editSourceStore.files.length && !$editSourceStore.selectedGalleryImageId) {
@@ -1151,24 +1118,25 @@ import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput 
 
 <ConfirmDialog request={$confirmStore.request} />
 {#if $nodeImageResultPanel.component}
-  <svelte:component this={$nodeImageResultPanel.component} />
+  {@const Panel = $nodeImageResultPanel.component}
+  <Panel />
 {/if}
 
 {#if $imagePromptPanel.component}
-  <svelte:component
-    this={$imagePromptPanel.component}
-    open={$uiStore.imagePromptOpen}
-    available={aiAssistantAvailable}
-    onClose={closeImagePromptDialog}
-    onApply={applyImagePrompt}
-    onSave={saveImagePrompt}
-    onCopy={copyImagePrompt}
-  />
+{@const Panel = $imagePromptPanel.component}
+<Panel
+  open={$uiStore.imagePromptOpen}
+  available={aiAssistantAvailable}
+  onClose={closeImagePromptDialog}
+  onApply={applyImagePrompt}
+  onSave={saveImagePrompt}
+  onCopy={copyImagePrompt}
+/>
 {/if}
 
 {#if $settingsPanel.component}
-<svelte:component
-  this={$settingsPanel.component}
+{@const Panel = $settingsPanel.component}
+<Panel
   open={$uiStore.settingsOpen}
   settings={$settingsStore.settings}
   saving={$settingsActivityStore.saving}
@@ -1200,13 +1168,12 @@ import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput 
 {/if}
 
 {#if $snippetsPanel.component}
-<svelte:component
-  this={$snippetsPanel.component}
+{@const Panel = $snippetsPanel.component}
+<Panel
   open={$uiStore.promptSnippetsOpen}
   snippets={$promptSnippetsStore.snippets}
   loading={$promptSnippetsStore.loading}
   saving={$promptSnippetsStore.saving}
-  currentPrompt={form.prompt}
   onClose={closePromptSnippetsDrawer}
   onSearch={loadPromptSnippets}
   onCreate={createPromptSnippet}
@@ -1218,8 +1185,8 @@ import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput 
 {/if}
 
 {#if $jobsPanel.component}
-<svelte:component
-  this={$jobsPanel.component}
+{@const Panel = $jobsPanel.component}
+<Panel
   open={$uiStore.jobsOpen}
   activeTab={jobsTab}
   jobs={$jobsStore.jobs}
@@ -1252,7 +1219,6 @@ import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput 
   <ToastHost toast={$toastStore} />
 
   <PromptForm
-    bind:form
     loading={$previewStore.loading}
     optimizing={optimizingPrompt}
     optimizerEnabled={optimizerAvailable}
@@ -1265,30 +1231,24 @@ import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput 
     onAppendPromptTag={appendPromptTag}
     onOpenSize={() => void openUiPanel('size', 'sizeDialogOpen')}
   >
-    <EditSourcePicker
-      slot="edit-source"
-      bind:this={editPicker}
-      sources={editSources}
-      onChange={handleEditFile}
-      onDropFiles={handleEditFiles}
-      onPreview={openEditPreview}
-      onRemove={removeEditSource}
-      onClear={clearEditSource}
-    />
+    {#snippet editSource()}
+      <EditSourcePicker
+        bind:this={editPicker}
+        sources={editSources}
+        onChange={handleEditFile}
+        onDropFiles={handleEditFiles}
+        onPreview={openEditPreview}
+        onRemove={removeEditSource}
+        onClear={clearEditSource}
+      />
+    {/snippet}
   </PromptForm>
 
   {#if $aiAssistantPanel.component}
-    <svelte:component
-      this={$aiAssistantPanel.component}
+    {@const Panel = $aiAssistantPanel.component}
+    <Panel
       enabled={aiAssistantAvailable}
       optimizerEnabled={optimizerAvailable}
-      currentPrompt={form.prompt}
-      apiPath={form.apiPath}
-      model={form.model}
-      size={form.size}
-      quality={form.quality}
-      outputFormat={form.outputFormat}
-      quantity={normalizeSubmissionQuantity(form.quantity)}
       loading={$assistantStore.promptLoading || $assistantStore.paramsLoading}
       onApplyPrompt={applyAssistantPrompt}
       onInsertPrompt={insertAssistantPrompt}
@@ -1297,25 +1257,11 @@ import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput 
     />
   {/if}
 
-  <PreviewPanel
-    loading={$previewStore.loading}
-    error={$previewStore.error}
-    job={$previewStore.job}
-    imageUrl={$previewStore.imageUrl}
-    filename={$previewStore.filename}
-    prompt={$previewStore.prompt}
-    streamingPreviewDataUrl={$previewStore.streamingPreviewDataUrl}
-    onRegenerate={regenerate}
-    onClear={clearPreview}
-  />
+  <PreviewPanel onRegenerate={regenerate} onClear={clearPreview} />
 
   {#if $galleryGridPanel.component}
-    <svelte:component
-      this={$galleryGridPanel.component}
-      gallery={$galleryStore.gallery}
-      filters={$galleryStore.filters}
-      loading={$galleryStore.loading}
-      operationStatus={$galleryActivityStore.operationStatus}
+    {@const Panel = $galleryGridPanel.component}
+    <Panel
       canSyncR2={r2BackupAvailable}
       canNodeImageUpload={nodeImageAvailable}
       onFilter={setGalleryFilter}
@@ -1333,17 +1279,8 @@ import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput 
       onUsePrompt={useGalleryPrompt}
       onUseAll={useGalleryParams}
       onNodeImageUpload={uploadGalleryImageToNodeImage}
-      selectionMode={$galleryStore.selectionMode}
-      selectedIds={$galleryStore.selectedIds}
-      selectionTokenCount={$galleryStore.selectionToken?.count || 0}
-      onSelectionMode={galleryStore.setSelectionMode}
-      onToggleSelection={galleryStore.toggleSelection}
-      onSelectPage={galleryStore.selectPage}
-      onSelectFiltered={galleryStore.selectFiltered}
-      onClearSelection={galleryStore.clearSelection}
       onBatchDelete={batchDeleteGallery}
       onBatchFavorite={batchFavoriteGallery}
-      onBatchDownload={() => galleryStore.batchDownload(showToast)}
       onBatchNodeImageUpload={batchUploadGalleryToNodeImage}
       canAiAnalyze={aiAssistantAvailable}
       onBatchAiAnalyze={batchAnalyzeGallery}
@@ -1352,21 +1289,16 @@ import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput 
 </main>
 
 {#if $optimizerPanel.component}
-<svelte:component
-  this={$optimizerPanel.component}
+{@const Panel = $optimizerPanel.component}
+<Panel
   enabled={optimizerAssistantEnabled}
-  currentPrompt={form.prompt}
-  apiPath={form.apiPath}
-  model={form.model}
-  size={form.size}
-  quality={form.quality}
   onApplyPrompt={applyOptimizedPrompt}
 />
 {/if}
 
 {#if $lightboxPanel.component}
-<svelte:component
-  this={$lightboxPanel.component}
+{@const Panel = $lightboxPanel.component}
+<Panel
   open={Boolean($lightboxStore.image)}
   image={$lightboxStore.image}
   onClose={closeLightbox}
@@ -1391,8 +1323,8 @@ import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput 
 {/if}
 
 {#if $editPreviewPanel.component}
-<svelte:component
-  this={$editPreviewPanel.component}
+{@const Panel = $editPreviewPanel.component}
+<Panel
   open={$uiStore.editPreviewOpen}
   url={editPreviewUrl}
   label={editPreviewLabel}
@@ -1401,8 +1333,8 @@ import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput 
 {/if}
 
 {#if $editGalleryDialogPanel.component}
-  <svelte:component
-    this={$editGalleryDialogPanel.component}
+  {@const Panel = $editGalleryDialogPanel.component}
+  <Panel
     open={galleryEditDialogOpen}
     image={galleryEditImage}
     onChoose={applyGalleryEditChoice}
@@ -1411,7 +1343,8 @@ import type { PromptSnippet, PromptSnippetCreateInput, PromptSnippetUpdateInput 
 {/if}
 
 {#if $sizePanel.component}
-  <svelte:component this={$sizePanel.component} open={$uiStore.sizeDialogOpen} value={form.size} onApply={(nextSize: string) => (form = { ...form, size: nextSize })} onClose={() => closeUiPanel('size', 'sizeDialogOpen')} />
+  {@const Panel = $sizePanel.component}
+  <Panel open={$uiStore.sizeDialogOpen} onClose={() => closeUiPanel('size', 'sizeDialogOpen')} />
 {/if}
 
 {#if $loadingPanel}
