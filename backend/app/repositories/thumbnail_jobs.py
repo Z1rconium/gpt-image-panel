@@ -17,10 +17,7 @@ from .db import (
     _connect,
     _ensure_database,
     _iter_sqlite_in_chunks,
-    _storage_lock,
     _transaction,
-    _verified_thumbnails,
-    _verified_thumbnails_lock,
     image_url_for_filename,
     logger,
 )
@@ -54,6 +51,7 @@ import threading
 import time
 import uuid
 from .coordination import acquire_background_slot, release_background_slot
+from .db import state as db_state
 
 
 def _attach_gallery_thumbnail_url(entry: dict[str, Any]) -> dict[str, Any]:
@@ -534,8 +532,8 @@ def ensure_thumbnail_for_image(filename: str) -> str | None:
     if not thumbnail_filename:
         return None
 
-    with _verified_thumbnails_lock:
-        if thumbnail_filename in _verified_thumbnails:
+    with db_state._verified_thumbnails_lock:
+        if thumbnail_filename in db_state._verified_thumbnails:
             return thumbnail_filename
 
     thumbnail_path = safe_thumbnail_path(thumbnail_filename)
@@ -589,7 +587,7 @@ def generate_thumbnail_for_image(filename: str) -> str | None:
             _add_verified_thumbnail(thumbnail_filename)
             return thumbnail_filename
 
-        with _storage_lock:
+        with db_state._storage_lock:
             if thumbnail_path and thumbnail_path.is_file():
                 temp_path.unlink(missing_ok=True)
                 _add_verified_thumbnail(thumbnail_filename)

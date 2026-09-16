@@ -81,6 +81,17 @@ _current_db_metric: ContextVar[str | None] = ContextVar(
 )
 
 
+from . import state as db_state
+from .state import (
+    _add_verified_thumbnail,
+    _remove_verified_thumbnail,
+    _clear_verified_thumbnails,
+    _invalidate_filter_options_cache,
+    _bump_filter_options_cache_version,
+    _get_filter_options_cache_version,
+    _invalidate_gallery_total_bytes_cache,
+    _invalidate_gallery_count_cache,
+)
 from .constants import (
     AI_ASSISTANT_SETTINGS_KEY,
     DATA_DIR_MODE,
@@ -128,55 +139,12 @@ from .constants import (
 )
 
 
-_initialized_database_file: Path | None = None
-_resolved_database_file_raw: str = ""
-_resolved_database_file_path: Path | None = None
-_db_init_lock = threading.RLock()
-# These locks only serialize file operations inside one Python process. Cross-process
-# gallery writes/deletes are deliberately coordinated by SQLite row leases plus
-# UUID-derived filenames, atomic Path.replace(), and orphan-file GC TTL cleanup.
-_storage_lock = threading.RLock()
-_gallery_file_write_lock = threading.RLock()
-_thread_local = threading.local()
-_initialized_storage_paths: tuple[Path, Path, Path, Path] | None = None
-_last_permissions_check = -DATA_PERMISSION_CHECK_INTERVAL_SECONDS
-_permissions_check_lock = threading.RLock()
-
-_filter_options_cache: "_GalleryFilterOptionsCacheEntry | None" = None
-_filter_options_cache_lock = threading.RLock()
-_filter_options_cache_version: int = 0
-_gallery_total_bytes_cache: OrderedDict[
-    tuple[str, str, tuple[Any, ...]],
-    tuple[float, int],
-] = OrderedDict()
-_gallery_total_bytes_cache_lock = threading.RLock()
-_gallery_count_cache: OrderedDict[
-    tuple[str, str, tuple[Any, ...]],
-    tuple[float, int],
-] = OrderedDict()
-_gallery_count_cache_lock = threading.RLock()
-_gallery_fts_available: bool | None = None
-
-_verified_thumbnails: set[str] = set()
-_verified_thumbnails_lock = threading.RLock()
-
-_last_optimize_at: float = 0.0
-_optimize_lock = threading.RLock()
 
 
-def _add_verified_thumbnail(filename: str):
-    with _verified_thumbnails_lock:
-        _verified_thumbnails.add(filename)
 
 
-def _remove_verified_thumbnail(filename: str):
-    with _verified_thumbnails_lock:
-        _verified_thumbnails.discard(filename)
 
 
-def _clear_verified_thumbnails():
-    with _verified_thumbnails_lock:
-        _verified_thumbnails.clear()
 
 
 def _unique_sqlite_values(values: Iterable[Any]) -> list[str]:
@@ -300,18 +268,17 @@ def _chmod_path(path: Path, mode: int) -> None:
 
 
 def _secure_data_storage_permissions(*, force: bool = False) -> None:
-    global _last_permissions_check
     if os.name == "nt":
         return
 
     now = time.monotonic()
-    with _permissions_check_lock:
+    with db_state._permissions_check_lock:
         if (
             not force
-            and now - _last_permissions_check < DATA_PERMISSION_CHECK_INTERVAL_SECONDS
+            and now - db_state._last_permissions_check < DATA_PERMISSION_CHECK_INTERVAL_SECONDS
         ):
             return
-        _last_permissions_check = now
+        db_state._last_permissions_check = now
 
     data_dir = Path(config.DATA_DIR)
     database_path = Path(config.DATABASE_FILE)
@@ -383,32 +350,14 @@ class _GalleryQueryComponents:
     has_filters: bool
 
 
-def _invalidate_filter_options_cache():
-    global _filter_options_cache, _filter_options_cache_version
-    with _filter_options_cache_lock:
-        _filter_options_cache = None
-        _filter_options_cache_version += 1
 
 
-def _bump_filter_options_cache_version():
-    global _filter_options_cache_version
-    with _filter_options_cache_lock:
-        _filter_options_cache_version += 1
 
 
-def _get_filter_options_cache_version() -> int:
-    with _filter_options_cache_lock:
-        return _filter_options_cache_version
 
 
-def _invalidate_gallery_total_bytes_cache():
-    with _gallery_total_bytes_cache_lock:
-        _gallery_total_bytes_cache.clear()
 
 
-def _invalidate_gallery_count_cache():
-    with _gallery_count_cache_lock:
-        _gallery_count_cache.clear()
 
 
 def _get_gallery_version_on_conn(conn: sqlite3.Connection) -> int:
@@ -747,19 +696,18 @@ def _load_nodeimage_settings_from_conn(conn: sqlite3.Connection) -> dict:
 
 
 def _ensure_directories():
-    global _initialized_storage_paths
     storage_paths = (
         Path(config.IMAGES_DIR).resolve(),
         Path(config.THUMBNAILS_DIR).resolve(),
         Path(config.DATA_DIR).resolve(),
         Path(config.DATABASE_FILE).resolve().parent,
     )
-    if _initialized_storage_paths == storage_paths:
+    if db_state._initialized_storage_paths == storage_paths:
         return
     for path in storage_paths:
         path.mkdir(parents=True, exist_ok=True)
     _secure_data_storage_permissions(force=True)
-    _initialized_storage_paths = storage_paths
+    db_state._initialized_storage_paths = storage_paths
 
 
 def _check_directory_writable(path: Path):
@@ -794,13 +742,12 @@ def optimize_database_if_due() -> bool:
     the planner keeps statistics for the query shapes the app actually runs.
     Returns True when the pragma was executed.
     """
-    global _last_optimize_at
     interval = float(config.SQLITE_OPTIMIZE_INTERVAL_SECONDS)
     now = time.monotonic()
-    with _optimize_lock:
-        if now - _last_optimize_at < interval:
+    with db_state._optimize_lock:
+        if now - db_state._last_optimize_at < interval:
             return False
-        _last_optimize_at = now
+        db_state._last_optimize_at = now
     _ensure_database()
     with _connect() as conn:
         conn.execute("PRAGMA optimize")
@@ -833,8 +780,8 @@ def _open_connection(
 @contextmanager
 def _connect() -> Iterator[sqlite3.Connection]:
     conn = _get_thread_connection()
-    depth = int(getattr(_thread_local, "connection_depth", 0))
-    _thread_local.connection_depth = depth + 1
+    depth = int(getattr(db_state._thread_local, "connection_depth", 0))
+    db_state._thread_local.connection_depth = depth + 1
     try:
         yield conn
     except Exception:
@@ -842,19 +789,19 @@ def _connect() -> Iterator[sqlite3.Connection]:
             conn.rollback()
         raise
     finally:
-        _thread_local.connection_depth = depth
+        db_state._thread_local.connection_depth = depth
         if depth == 0 and not bool(
-            getattr(_thread_local, "keep_connection_open", False)
+            getattr(db_state._thread_local, "keep_connection_open", False)
         ):
             _close_thread_connection()
 
 
 def _get_thread_connection() -> sqlite3.Connection:
     database_file = str(config.DATABASE_FILE)
-    busy_timeout_ms = int(getattr(_thread_local, "busy_timeout_ms", 30000))
-    conn = getattr(_thread_local, "conn", None)
-    conn_database_file = getattr(_thread_local, "database_file", None)
-    conn_busy_timeout_ms = getattr(_thread_local, "connection_busy_timeout_ms", None)
+    busy_timeout_ms = int(getattr(db_state._thread_local, "busy_timeout_ms", 30000))
+    conn = getattr(db_state._thread_local, "conn", None)
+    conn_database_file = getattr(db_state._thread_local, "database_file", None)
+    conn_busy_timeout_ms = getattr(db_state._thread_local, "connection_busy_timeout_ms", None)
     if (
         conn is not None
         and conn_database_file == database_file
@@ -867,15 +814,15 @@ def _get_thread_connection() -> sqlite3.Connection:
         timeout=max(0.01, busy_timeout_ms / 1000),
         busy_timeout_ms=busy_timeout_ms,
     )
-    _thread_local.conn = conn
-    _thread_local.database_file = database_file
-    _thread_local.connection_busy_timeout_ms = busy_timeout_ms
-    _thread_local.connection_depth = 0
+    db_state._thread_local.conn = conn
+    db_state._thread_local.database_file = database_file
+    db_state._thread_local.connection_busy_timeout_ms = busy_timeout_ms
+    db_state._thread_local.connection_depth = 0
     return conn
 
 
 def _close_thread_connection():
-    conn = getattr(_thread_local, "conn", None)
+    conn = getattr(db_state._thread_local, "conn", None)
     if conn is None:
         return
     try:
@@ -883,45 +830,45 @@ def _close_thread_connection():
             conn.rollback()
         conn.close()
     finally:
-        _thread_local.conn = None
-        _thread_local.database_file = None
-        _thread_local.connection_busy_timeout_ms = None
-        _thread_local.connection_depth = 0
+        db_state._thread_local.conn = None
+        db_state._thread_local.database_file = None
+        db_state._thread_local.connection_busy_timeout_ms = None
+        db_state._thread_local.connection_depth = 0
 
 
 @contextmanager
 def busy_timeout_scope(busy_timeout_ms: int) -> Iterator[None]:
-    previous_busy_timeout = getattr(_thread_local, "busy_timeout_ms", None)
-    _thread_local.busy_timeout_ms = max(1, int(busy_timeout_ms))
+    previous_busy_timeout = getattr(db_state._thread_local, "busy_timeout_ms", None)
+    db_state._thread_local.busy_timeout_ms = max(1, int(busy_timeout_ms))
     try:
         yield
     finally:
         if previous_busy_timeout is None:
             try:
-                delattr(_thread_local, "busy_timeout_ms")
+                delattr(db_state._thread_local, "busy_timeout_ms")
             except AttributeError:
                 pass
         else:
-            _thread_local.busy_timeout_ms = previous_busy_timeout
+            db_state._thread_local.busy_timeout_ms = previous_busy_timeout
 
 
 @contextmanager
 def persistent_connection_scope(busy_timeout_ms: int) -> Iterator[None]:
-    previous_keep_open = bool(getattr(_thread_local, "keep_connection_open", False))
-    previous_busy_timeout = getattr(_thread_local, "busy_timeout_ms", None)
-    _thread_local.keep_connection_open = True
-    _thread_local.busy_timeout_ms = max(1, int(busy_timeout_ms))
+    previous_keep_open = bool(getattr(db_state._thread_local, "keep_connection_open", False))
+    previous_busy_timeout = getattr(db_state._thread_local, "busy_timeout_ms", None)
+    db_state._thread_local.keep_connection_open = True
+    db_state._thread_local.busy_timeout_ms = max(1, int(busy_timeout_ms))
     try:
         yield
     finally:
-        _thread_local.keep_connection_open = previous_keep_open
+        db_state._thread_local.keep_connection_open = previous_keep_open
         if previous_busy_timeout is None:
             try:
-                delattr(_thread_local, "busy_timeout_ms")
+                delattr(db_state._thread_local, "busy_timeout_ms")
             except AttributeError:
                 pass
         else:
-            _thread_local.busy_timeout_ms = previous_busy_timeout
+            db_state._thread_local.busy_timeout_ms = previous_busy_timeout
 
 
 def close_database_connections():
@@ -1013,7 +960,6 @@ def _reset_gallery_fts_on_conn(conn: sqlite3.Connection):
 
 
 def _ensure_gallery_fts(conn: sqlite3.Connection):
-    global _gallery_fts_available
 
     fts_exists = _table_exists(conn, "gallery_entries_fts")
     needs_rebuild = (
@@ -1062,9 +1008,9 @@ def _ensure_gallery_fts(conn: sqlite3.Connection):
         if needs_rebuild:
             conn.execute("INSERT INTO gallery_entries_fts(gallery_entries_fts) VALUES ('rebuild')")
             _set_setting_value(conn, GALLERY_FTS_VERSION_KEY, GALLERY_FTS_VERSION)
-        _gallery_fts_available = True
+        db_state._gallery_fts_available = True
     except sqlite3.OperationalError as e:
-        _gallery_fts_available = False
+        db_state._gallery_fts_available = False
         logger.warning("SQLite FTS5 prompt search unavailable; falling back to LIKE: %s", e)
 
 
@@ -1076,26 +1022,24 @@ def _resolved_database_file() -> Path:
     overhead. Keying the cache on the raw setting keeps a swapped
     ``config.DATABASE_FILE`` (as tests do) from being served a stale path.
     """
-    global _resolved_database_file_raw, _resolved_database_file_path
     raw = str(config.DATABASE_FILE)
-    if _resolved_database_file_path is None or _resolved_database_file_raw != raw:
-        _resolved_database_file_path = Path(raw).resolve()
-        _resolved_database_file_raw = raw
-    return _resolved_database_file_path
+    if db_state._resolved_database_file_path is None or db_state._resolved_database_file_raw != raw:
+        db_state._resolved_database_file_path = Path(raw).resolve()
+        db_state._resolved_database_file_raw = raw
+    return db_state._resolved_database_file_path
 
 
 def _ensure_database():
-    global _gallery_fts_available, _initialized_database_file
     database_file = _resolved_database_file()
-    if _initialized_database_file == database_file and database_file.exists():
+    if db_state._initialized_database_file == database_file and database_file.exists():
         return
 
-    with _db_init_lock:
+    with db_state._db_init_lock:
         database_file = _resolved_database_file()
-        if _initialized_database_file == database_file and database_file.exists():
+        if db_state._initialized_database_file == database_file and database_file.exists():
             return
-        if _initialized_database_file != database_file:
-            _gallery_fts_available = None
+        if db_state._initialized_database_file != database_file:
+            db_state._gallery_fts_available = None
             _invalidate_gallery_query_caches()
             _clear_verified_thumbnails()
 
@@ -1446,7 +1390,7 @@ def _ensure_database():
             conn.commit()
             conn.execute("PRAGMA optimize")
 
-        _initialized_database_file = database_file
+        db_state._initialized_database_file = database_file
         _secure_data_storage_permissions(force=True)
 
 
@@ -2481,7 +2425,7 @@ def _fts_phrase_query(value: str) -> str:
 
 def _use_prompt_fts(prompt: str) -> bool:
     return bool(
-        _gallery_fts_available
+        db_state._gallery_fts_available
         and len(prompt) >= GALLERY_FTS_MIN_QUERY_LENGTH
     )
 

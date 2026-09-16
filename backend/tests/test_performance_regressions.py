@@ -187,7 +187,7 @@ def test_current_thread_db_operation_uses_short_timeout_without_persisting_conne
     )
 
     assert seen["busy_timeout_ms"] == 17
-    assert getattr(db_repo._thread_local, "conn", None) is None
+    assert getattr(db_repo.state._thread_local, "conn", None) is None
 
 
 def test_gallery_job_publish_uses_db_executor(monkeypatch):

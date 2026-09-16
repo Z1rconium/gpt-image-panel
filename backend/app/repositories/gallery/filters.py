@@ -5,13 +5,12 @@ from ..db import (
     _GalleryFilterOptionsCacheEntry,
     _connect,
     _ensure_database,
-    _filter_options_cache,
-    _filter_options_cache_lock,
     _get_filter_options_cache_version,
     _rebuild_gallery_filter_options_on_conn,
     _transaction,
 )
 import sqlite3
+from ..db import state as db_state
 
 
 def rebuild_gallery_filter_options() -> GalleryFilterOptions:
@@ -23,10 +22,9 @@ def rebuild_gallery_filter_options() -> GalleryFilterOptions:
 
 
 def _get_gallery_filter_options_on_conn(conn: sqlite3.Connection) -> GalleryFilterOptions:
-    global _filter_options_cache
     cache_version = _get_filter_options_cache_version()
-    with _filter_options_cache_lock:
-        cached = _filter_options_cache
+    with db_state._filter_options_cache_lock:
+        cached = db_state._filter_options_cache
         if cached is not None and cached.version == cache_version:
             return cached.options
 
@@ -48,8 +46,8 @@ def _get_gallery_filter_options_on_conn(conn: sqlite3.Connection) -> GalleryFilt
         options[key] = [row["value"] for row in rows if row["value"]]
 
     result = GalleryFilterOptions(**options)
-    with _filter_options_cache_lock:
-        _filter_options_cache = _GalleryFilterOptionsCacheEntry(
+    with db_state._filter_options_cache_lock:
+        db_state._filter_options_cache = _GalleryFilterOptionsCacheEntry(
             version=cache_version,
             options=result,
         )

@@ -31,7 +31,6 @@ from ..db import (
     _connect,
     _ensure_database,
     _gallery_entry_from_row,
-    _gallery_file_write_lock,
     _gallery_row_values,
     _increment_gallery_filter_options_on_conn,
     _invalidate_filter_options_cache,
@@ -41,7 +40,6 @@ from ..db import (
     _normalize_gallery_entry,
     _normalize_gallery_favorite,
     _remove_verified_thumbnail,
-    _storage_lock,
     _transaction,
     _unique_sqlite_values,
     logger,
@@ -80,6 +78,7 @@ import hashlib
 import sqlite3
 import time
 from ...runtime.blocking import run_db_operation, run_image_operation
+from ..db import state as db_state
 
 
 def _insert_gallery_entries_on_conn(
@@ -193,8 +192,8 @@ def _save_images_and_insert_gallery_entries(
                     prepared.thumbnail_filename
                 )
 
-        with _gallery_file_write_lock:
-            with _storage_lock:
+        with db_state._gallery_file_write_lock:
+            with db_state._storage_lock:
                 _promote_prepared_images(prepared_files)
                 with _connect() as conn:
                     with _transaction(conn):
@@ -245,13 +244,13 @@ def _import_gallery_entries_batch(
         if not normalized_entries:
             return 0
 
-        with _gallery_file_write_lock:
+        with db_state._gallery_file_write_lock:
             with _connect() as conn:
                 _dedupe_import_entries_on_conn(conn, normalized_entries, prepared_files)
 
             _promote_prepared_images(prepared_files)
 
-            with _storage_lock:
+            with db_state._storage_lock:
                 with _connect() as conn:
                     with _transaction(conn):
                         with observe_job_stage("db_insert"):
@@ -299,8 +298,8 @@ async def add_to_gallery_async(
 
     def commit() -> None:
         _ensure_database()
-        with _gallery_file_write_lock:
-            with _storage_lock:
+        with db_state._gallery_file_write_lock:
+            with db_state._storage_lock:
                 with _connect() as conn:
                     with _transaction(conn):
                         _promote_prepared_images([prepared])
@@ -584,7 +583,7 @@ def update_gallery_entries_favorite_by_filters(
 
 def sync_gallery_with_image_files() -> int:
     _ensure_database()
-    with _storage_lock:
+    with db_state._storage_lock:
         image_filenames = _scan_image_files()
 
         # Read-only scan: collect stale rows without holding the write lock.
@@ -832,7 +831,7 @@ def delete_gallery_images(image_ids: Sequence[str]) -> tuple[int, int]:
     if not image_ids:
         return 0, 0
 
-    with _storage_lock:
+    with db_state._storage_lock:
         with _connect() as conn:
             with _transaction(conn):
                 removed_ids, filenames_to_delete = _delete_gallery_entries_by_ids(conn, image_ids)
@@ -847,7 +846,7 @@ def delete_gallery_images_by_filters(
     batch_size: int = 500,
 ) -> tuple[int, int]:
     _ensure_database()
-    with _storage_lock:
+    with db_state._storage_lock:
         with _connect() as conn:
             with _transaction(conn):
                 removed_count, filenames_to_delete = _delete_gallery_entries_by_filters(
@@ -881,7 +880,7 @@ def is_gallery_filename_referenced(filename: str) -> bool:
 
 
 def _delete_gallery_file_if_unreferenced(filename: str) -> bool:
-    with _storage_lock:
+    with db_state._storage_lock:
         with _connect() as conn:
             if _is_gallery_filename_referenced_on_conn(conn, filename):
                 return False
@@ -926,7 +925,7 @@ def cleanup_orphan_gallery_files(
     failed = 0
     scanned = 0
 
-    with _storage_lock:
+    with db_state._storage_lock:
         with _connect() as conn:
             referenced_filenames = set(_get_all_filenames_on_conn(conn))
         referenced_thumbnails = {
@@ -1012,7 +1011,7 @@ def delete_all_gallery_images() -> tuple[int, int]:
     transaction short; failed file deletes are logged for later cleanup.
     """
     _ensure_database()
-    with _storage_lock:
+    with db_state._storage_lock:
         disk_filenames = _scan_image_files()
         with _connect() as conn:
             with _transaction(conn):

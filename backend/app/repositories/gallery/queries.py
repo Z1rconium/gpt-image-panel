@@ -21,12 +21,8 @@ from ..db import (
     _build_gallery_filter_where,
     _connect,
     _ensure_database,
-    _gallery_count_cache,
-    _gallery_count_cache_lock,
     _gallery_entry_from_row,
     _gallery_query_key_from_components,
-    _gallery_total_bytes_cache,
-    _gallery_total_bytes_cache_lock,
     _get_gallery_version_on_conn,
     _iter_sqlite_in_chunks,
     _open_connection,
@@ -46,6 +42,7 @@ import sqlite3
 import time
 from ..thumbnail_jobs import _attach_gallery_thumbnail_url
 from .filters import _get_gallery_filter_options_on_conn
+from ..db import state as db_state
 
 
 def _get_gallery_count_on_conn(
@@ -55,13 +52,13 @@ def _get_gallery_count_on_conn(
 ) -> int:
     cache_key = (config.DATABASE_FILE, where_sql, tuple(params))
     now = time.monotonic()
-    with _gallery_count_cache_lock:
-        cached = _gallery_count_cache.get(cache_key)
+    with db_state._gallery_count_cache_lock:
+        cached = db_state._gallery_count_cache.get(cache_key)
         if cached and (now - cached[0]) < GALLERY_COUNT_CACHE_SECONDS:
-            _gallery_count_cache.move_to_end(cache_key)
+            db_state._gallery_count_cache.move_to_end(cache_key)
             return cached[1]
         if cached:
-            _gallery_count_cache.pop(cache_key, None)
+            db_state._gallery_count_cache.pop(cache_key, None)
 
     row = conn.execute(
         f"SELECT COUNT(*) FROM gallery_entries{where_sql}",
@@ -69,11 +66,11 @@ def _get_gallery_count_on_conn(
     ).fetchone()
     total = int(row[0]) if row else 0
 
-    with _gallery_count_cache_lock:
-        _gallery_count_cache[cache_key] = (now, total)
-        _gallery_count_cache.move_to_end(cache_key)
-        while len(_gallery_count_cache) > _GALLERY_COUNT_CACHE_MAX_SIZE:
-            _gallery_count_cache.popitem(last=False)
+    with db_state._gallery_count_cache_lock:
+        db_state._gallery_count_cache[cache_key] = (now, total)
+        db_state._gallery_count_cache.move_to_end(cache_key)
+        while len(db_state._gallery_count_cache) > _GALLERY_COUNT_CACHE_MAX_SIZE:
+            db_state._gallery_count_cache.popitem(last=False)
 
     return total
 
@@ -185,13 +182,13 @@ def _get_gallery_total_bytes_on_conn(
 ) -> int:
     cache_key = (config.DATABASE_FILE, where_sql, tuple(params))
     now = time.monotonic()
-    with _gallery_total_bytes_cache_lock:
-        cached = _gallery_total_bytes_cache.get(cache_key)
+    with db_state._gallery_total_bytes_cache_lock:
+        cached = db_state._gallery_total_bytes_cache.get(cache_key)
         if cached and (now - cached[0]) < GALLERY_TOTAL_BYTES_CACHE_SECONDS:
-            _gallery_total_bytes_cache.move_to_end(cache_key)
+            db_state._gallery_total_bytes_cache.move_to_end(cache_key)
             return cached[1]
         if cached:
-            _gallery_total_bytes_cache.pop(cache_key, None)
+            db_state._gallery_total_bytes_cache.pop(cache_key, None)
 
     row = conn.execute(
         f"""
@@ -208,11 +205,11 @@ def _get_gallery_total_bytes_on_conn(
     ).fetchone()
     total_bytes = int(row["total_bytes"] or 0) if row else 0
 
-    with _gallery_total_bytes_cache_lock:
-        _gallery_total_bytes_cache[cache_key] = (now, total_bytes)
-        _gallery_total_bytes_cache.move_to_end(cache_key)
-        while len(_gallery_total_bytes_cache) > _GALLERY_BYTES_CACHE_MAX_SIZE:
-            _gallery_total_bytes_cache.popitem(last=False)
+    with db_state._gallery_total_bytes_cache_lock:
+        db_state._gallery_total_bytes_cache[cache_key] = (now, total_bytes)
+        db_state._gallery_total_bytes_cache.move_to_end(cache_key)
+        while len(db_state._gallery_total_bytes_cache) > _GALLERY_BYTES_CACHE_MAX_SIZE:
+            db_state._gallery_total_bytes_cache.popitem(last=False)
 
     return total_bytes
 
