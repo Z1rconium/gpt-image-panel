@@ -94,6 +94,7 @@ def test_multi_image_job_returns_all_results(client, monkeypatch):
         api_preset_name=None,
         progress=None,
         socks5_proxy=None,
+        persist_gallery_entry=None,
     ):
         with calls_lock:
             calls.append(payload)
@@ -177,6 +178,7 @@ def test_multi_image_job_succeeds_with_partial_upstream_failures(client, monkeyp
         api_preset_name=None,
         progress=None,
         socks5_proxy=None,
+        persist_gallery_entry=None,
     ):
         calls.append(payload)
         if len(calls) == 2:
@@ -245,6 +247,7 @@ def test_multi_image_job_publishes_and_persists_incremental_results(client, monk
         api_preset_name=None,
         progress=None,
         socks5_proxy=None,
+        persist_gallery_entry=None,
     ):
         nonlocal call_count
         with calls_lock:
@@ -362,6 +365,7 @@ def test_failed_unit_advances_incremental_parent_progress(client, monkeypatch):
         api_preset_name=None,
         progress=None,
         socks5_proxy=None,
+        persist_gallery_entry=None,
     ):
         nonlocal call_count
         with calls_lock:
@@ -425,6 +429,7 @@ def test_multi_image_job_reports_upstream_error_when_all_children_fail(client, m
         api_preset_name=None,
         progress=None,
         socks5_proxy=None,
+        persist_gallery_entry=None,
     ):
         calls.append(payload)
         raise backend_main.proxy.UpstreamApiError("quota exhausted")
@@ -474,6 +479,7 @@ def test_upstream_errors_are_reported_as_detailed_job_status(client, monkeypatch
         api_preset_name=None,
         progress=None,
         socks5_proxy=None,
+        persist_gallery_entry=None,
     ):
         raise backend_main.proxy.UpstreamApiError("upstream quota exhausted")
 
@@ -571,6 +577,7 @@ def test_generate_job_reports_usage_and_cost_when_upstream_provides_it(client, m
         api_preset_name=None,
         progress=None,
         socks5_proxy=None,
+        persist_gallery_entry=None,
     ):
         record_upstream_usage(
             {
@@ -769,6 +776,7 @@ def test_edit_upload_accepts_multiple_sources(client, monkeypatch):
         api_preset_name=None,
         progress=None,
         socks5_proxy=None,
+        persist_gallery_entry=None,
     ):
         seen["filenames"] = [source.filename for source in image_sources]
         for source in image_sources:
@@ -821,6 +829,7 @@ def test_edit_from_gallery_combines_uploaded_sources(client, monkeypatch):
         api_preset_name=None,
         progress=None,
         socks5_proxy=None,
+        persist_gallery_entry=None,
     ):
         seen["filenames"] = [source.filename for source in image_sources]
         assert len(image_sources) == 2
@@ -910,6 +919,7 @@ def test_upstream_edit_api_sends_multiple_sources_as_image_array(client, tmp_pat
             "test-key",
             EditRequest(prompt="field test", model="gpt-image-2"),
             sources,
+            persist_gallery_entry=gallery_mutations.add_to_gallery_async,
         )
     )
 
@@ -932,6 +942,7 @@ def test_edit_source_temp_path_is_cleaned_after_success(client, monkeypatch):
         api_preset_name=None,
         progress=None,
         socks5_proxy=None,
+        persist_gallery_entry=None,
     ):
         assert len(image_sources) == 2
         seen["paths"] = [source.temp_path for source in image_sources]
@@ -997,6 +1008,7 @@ def test_cancelled_edit_job_cleans_temp_source(tmp_path, monkeypatch):
         api_preset_name=None,
         progress=None,
         socks5_proxy=None,
+        persist_gallery_entry=None,
     ):
         assert len(image_sources) == 1
         source_path = image_sources[0].temp_path
@@ -1058,6 +1070,7 @@ def test_edit_queue_capacity_uses_pending_source_bytes(tmp_path, monkeypatch):
         api_preset_name=None,
         progress=None,
         socks5_proxy=None,
+        persist_gallery_entry=None,
     ):
         assert len(image_sources) == 1
         assert image_sources[0].temp_path.exists()
@@ -1276,6 +1289,7 @@ def test_batch_generate_counts_image_units_and_bounds_upstream_calls(tmp_path, m
         api_preset_name=None,
         progress=None,
         socks5_proxy=None,
+        persist_gallery_entry=None,
     ):
         nonlocal active_calls, max_active_calls
         active_calls += 1
@@ -1436,6 +1450,7 @@ def test_running_progress_persists_only_terminal_states(tmp_path, monkeypatch):
         api_preset_name=None,
         progress=None,
         socks5_proxy=None,
+        persist_gallery_entry=None,
     ):
         if progress:
             for index in range(5):
@@ -1859,6 +1874,7 @@ def test_streaming_generation_job_delivers_previews_and_completes(client, monkey
         stream: bool = False,
         partial_images: int = 2,
         preview=None,
+        persist_gallery_entry=None,
     ):
         captured["stream"] = stream
         captured["partial_images"] = partial_images
@@ -2042,6 +2058,7 @@ def test_multi_unit_concurrent_completion_keeps_success(tmp_path, monkeypatch):
         api_preset_name=None,
         progress=None,
         socks5_proxy=None,
+        persist_gallery_entry=None,
     ):
         await asyncio.to_thread(barrier.wait)
         return [await _add_generated_gallery_entry(payload, api_path, api_preset_name)]

@@ -23,7 +23,7 @@ from ..core.observability import (
 )
 from ..core.utils import beijing_now, utc_now
 from ..integrations.upstream import generation as proxy
-from ..repositories.gallery.mutations import update_gallery_entry
+from ..repositories.gallery.mutations import add_to_gallery_async, update_gallery_entry
 from ..repositories.image_jobs import (
     complete_image_job_unit,
     fail_image_job_unit,
@@ -683,6 +683,7 @@ async def run_claimed_image_unit(unit: dict, worker_id: str):
                         api_preset_name,
                         progress,
                         socks5_proxy=socks5_proxy,
+                        persist_gallery_entry=add_to_gallery_async,
                         **stream_kwargs,
                     )
                 return await proxy.call_image_generation_api(
@@ -693,6 +694,7 @@ async def run_claimed_image_unit(unit: dict, worker_id: str):
                     api_preset_name,
                     progress,
                     socks5_proxy=socks5_proxy,
+                    persist_gallery_entry=add_to_gallery_async,
                     **stream_kwargs,
                 )
 

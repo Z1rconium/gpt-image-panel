@@ -1,4 +1,5 @@
 from backend.tests.support.contract import *  # noqa: F403
+from backend.app.repositories.gallery.mutations import add_to_gallery_async
 
 def test_import_archive(client):
     resp = _post_import_archive(client, _import_archive_bytes())
@@ -512,6 +513,7 @@ def test_socks5_upstream_private_dns_logs_trust_boundary_warning(tmp_path, monke
                 "/v1/images/generations",
                 GenerateRequest(prompt="private dns"),
                 socks5_proxy="socks5://127.0.0.1:1080",
+                persist_gallery_entry=add_to_gallery_async,
             )
         )
 
@@ -651,6 +653,7 @@ def test_upstream_returned_image_url_download_stays_direct(tmp_path, monkeypatch
             "/v1/images/generations",
             GenerateRequest(prompt="url result"),
             socks5_proxy="socks5://127.0.0.1:1080",
+            persist_gallery_entry=add_to_gallery_async,
         )
     )
 
@@ -734,6 +737,7 @@ def test_chat_completions_sse_markdown_image_url_is_saved(tmp_path, monkeypatch)
                 prompt="draw a red square",
                 model="grok-imagine-image-lite",
             ),
+            persist_gallery_entry=add_to_gallery_async,
         )
     )
 

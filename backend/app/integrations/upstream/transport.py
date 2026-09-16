@@ -20,7 +20,6 @@ from ...core.api_paths import (
 )
 from ...core.observability import observe_job_stage
 from ...core import validators as ssrf
-from ...repositories.gallery.mutations import add_to_gallery_async
 from ...core.media import (
     detect_image_format,
     generate_image_id,

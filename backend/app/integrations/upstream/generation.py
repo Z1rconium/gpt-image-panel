@@ -5,7 +5,7 @@ import json
 import logging
 import re
 from contextlib import asynccontextmanager
-from collections.abc import Callable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -20,7 +20,6 @@ from ...core.api_paths import (
 )
 from ...core.observability import observe_job_stage, record_upstream_usage
 from ...core import validators as ssrf
-from ...repositories.gallery.mutations import add_to_gallery_async
 from ...core.media import (
     detect_image_format,
     generate_image_id,
@@ -35,6 +34,9 @@ ProgressCallback = Callable[[str, str], None]
 # Called with (partial_image_index, mime_type, image_bytes) as each streamed
 # partial image arrives. Never called for non-streaming requests.
 PreviewCallback = Callable[[int, str, bytes], None]
+# Persists one decoded image and returns the stored gallery entry. The caller
+# supplies it so this module stays free of the persistence layer.
+PersistGalleryEntry = Callable[..., Awaitable[GalleryEntry]]
 logger = logging.getLogger(__name__)
 
 
@@ -108,6 +110,7 @@ async def save_gallery_entries_from_upstream_data(
     gallery_metadata: dict[str, Any],
     save_message: str,
     progress: ProgressCallback | None,
+    persist_gallery_entry: PersistGalleryEntry,
 ) -> list[GalleryEntry]:
     data = validate_upstream_image_data(data, payload.n)
     max_bytes = config.MAX_FILE_SIZE_MB * 1024 * 1024
@@ -165,7 +168,7 @@ async def save_gallery_entries_from_upstream_data(
                     "saving_images",
                     f"{save_message} ({image_index + 1}/{total})",
                 )
-            entry = await add_to_gallery_async(
+            entry = await persist_gallery_entry(
                 image_bytes=image_bytes,
                 image_id=image_id,
                 prompt=payload.prompt,
@@ -295,6 +298,7 @@ async def call_image_generation_api(
     stream: bool = False,
     partial_images: int = 2,
     preview: "PreviewCallback | None" = None,
+    persist_gallery_entry: PersistGalleryEntry,
 ) -> list[GalleryEntry]:
     api_path = normalize_api_path(api_path)
     payload.normalize_model_options(api_path)
@@ -407,6 +411,7 @@ async def call_image_generation_api(
             gallery_metadata=gallery_metadata,
             save_message="Saving generated images",
             progress=progress,
+            persist_gallery_entry=persist_gallery_entry,
         )
     finally:
         await memory_lease.__aexit__(None, None, None)
@@ -483,6 +488,7 @@ async def call_image_edit_api(
     stream: bool = False,
     partial_images: int = 2,
     preview: "PreviewCallback | None" = None,
+    persist_gallery_entry: PersistGalleryEntry,
 ) -> list[GalleryEntry]:
     if not image_sources:
         raise UpstreamApiError("At least one edit source image is required")
@@ -572,6 +578,7 @@ async def call_image_edit_api(
             gallery_metadata=gallery_metadata,
             save_message="Saving edited images",
             progress=progress,
+            persist_gallery_entry=persist_gallery_entry,
         )
     finally:
         if memory_lease is not None:

@@ -36,17 +36,15 @@ ALLOWED_TARGET_LAYERS = {
 # Frozen debt: every entry is a mapping the matrix forbids.
 # Frozen debt: every entry is a mapping the matrix forbids.
 # Frozen debt: every entry is a mapping the matrix forbids.
+# Frozen debt: every entry is a mapping the matrix forbids.
 ALLOWED_VIOLATIONS: frozenset[str] = frozenset(
     {
-        "backend/app/integrations/upstream/errors.py:22 -> backend.app.repositories.gallery.mutations",
-        "backend/app/integrations/upstream/generation.py:23 -> backend.app.repositories.gallery.mutations",
-        "backend/app/integrations/upstream/payloads.py:21 -> backend.app.repositories.gallery.mutations",
-        "backend/app/integrations/upstream/transport.py:23 -> backend.app.repositories.gallery.mutations",
     }
 )
 
 # Project imports inside function bodies. Some are deliberate cycle breaks that
 # Python requires; new entries need a documented reason to be added.
+# Project imports inside function bodies. Some are
 # Project imports inside function bodies. Some are
 # Project imports inside function bodies. Some are
 # Project imports inside function bodies. Some are
