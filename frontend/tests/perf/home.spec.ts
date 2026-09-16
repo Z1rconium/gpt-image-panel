@@ -14,6 +14,14 @@ type HomeMetrics = {
   transferBytes: number;
 };
 
+/**
+ * Script bytes transferred on cold navigation. Calibrated against the served
+ * build (homepage JS gzip budget is enforced separately by check:bundle);
+ * 1.15x headroom over the measured baseline catches accidental homepage-graph
+ * regressions without being flaky.
+ */
+const SCRIPT_TRANSFER_BUDGET_BYTES = 600_000;
+
 async function installVitals(page: import('@playwright/test').Page) {
   await page.addInitScript(() => {
     const perf = { lcp: 0, cls: 0 };
@@ -65,6 +73,7 @@ test.describe('homepage performance', () => {
     expect(metrics.lcp).toBeGreaterThan(0);
     expect(metrics.lcp).toBeLessThan(4000);
     expect(metrics.cls).toBeLessThan(0.2);
+    expect(metrics.transferBytes).toBeLessThan(SCRIPT_TRANSFER_BUDGET_BYTES);
   });
 
   test('language switch stays interactive without a blank frame', async ({ page }) => {
