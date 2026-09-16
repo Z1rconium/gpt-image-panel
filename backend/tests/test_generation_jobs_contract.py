@@ -1195,7 +1195,8 @@ def test_partial_failure_webhook_payload_includes_results_counts_and_summary():
 
 
 def test_upstream_image_data_is_bounded_and_schema_checked():
-    from backend.app.integrations.upstream.errors import UpstreamApiError, validate_upstream_image_data
+    from backend.app.integrations.upstream.errors import UpstreamApiError
+    from backend.app.integrations.upstream.payloads import validate_upstream_image_data
 
     assert validate_upstream_image_data([{"url": "a"}, {"url": "b"}], 1) == [{"url": "a"}]
     with pytest.raises(UpstreamApiError, match="must be an array"):

@@ -6,29 +6,23 @@ import logging
 import os
 import re
 import tempfile
-from collections.abc import AsyncIterator, Callable, Sequence
+from collections.abc import (
+    AsyncIterator,
+    Callable,
+)
 from pathlib import Path
-from typing import Any, Protocol
-from urllib.parse import urljoin, urlsplit
+from typing import Any
+from urllib.parse import urljoin
 
 from ...core import settings as config
-from ...core.api_paths import (
-    CHAT_COMPLETIONS_API_PATH,
-    RESPONSES_API_PATH,
-    build_upstream_url,
-    normalize_api_path,
-)
-from ...core.observability import observe_job_stage
+from ...core.api_paths import build_upstream_url
 from ...core import validators as ssrf
-from ...core.media import (
-    detect_image_format,
-    generate_image_id,
-    validate_image_bytes,
-)
-from ...schemas.gallery import GalleryEntry
-from ...schemas.generation import EditRequest, GenerateRequest
+from ...core.media import validate_image_bytes
 from ...runtime.blocking import run_file_operation, run_image_operation
-from ..session_pool import TIMEOUT_PROBE, TIMEOUT_UPSTREAM, get_pool
+from ..session_pool import (
+    TIMEOUT_PROBE,
+    get_pool,
+)
 
 ProgressCallback = Callable[[str, str], None]
 logger = logging.getLogger(__name__)
@@ -37,12 +31,14 @@ logger = logging.getLogger(__name__)
 from .errors import (
     UpstreamApiError,
     UpstreamImageDownloadError,
-    _sanitize_upstream_error_text,
 )
 from .payloads import (
     is_json_content_type,
     looks_like_json_body,
     parse_sse_events,
+)
+from .errors import (
+    raise_upstream_error,
 )
 
 MAX_IMAGE_REDIRECTS = 3
@@ -394,49 +390,6 @@ async def probe_upstream_endpoint(
     }
 
 
-def get_upstream_error_message(
-    status: int,
-    response_text: str,
-    is_json_response: bool,
-) -> str:
-    if is_json_response:
-        try:
-            error_body = json.loads(response_text)
-            if isinstance(error_body, dict):
-                error = error_body.get("error")
-                if isinstance(error, dict):
-                    return _sanitize_upstream_error_text(error.get("message", response_text))
-            return _sanitize_upstream_error_text(response_text)
-        except Exception:
-            return _sanitize_upstream_error_text(response_text)
-    return f"HTTP {status}: {_sanitize_upstream_error_text(response_text[:200])}"
-
-
-def raise_upstream_error(
-    status: int,
-    response_text: str,
-    is_json_response: bool,
-    api_path: str,
-):
-    error_msg = get_upstream_error_message(status, response_text, is_json_response)
-    unsupported_markers = (
-        "not support",
-        "not_supported",
-        "unsupported",
-        "not found",
-        "unknown endpoint",
-        "no route",
-    )
-    if api_path == "/v1/images/edits" and (
-        status in {404, 405, 501}
-        or any(marker in error_msg.lower() for marker in unsupported_markers)
-    ):
-        raise UpstreamApiError(
-            f"Upstream API does not support /v1/images/edits ({status}): {error_msg}"
-        )
-    raise UpstreamApiError(f"Upstream API error ({status}): {error_msg}")
-
-
 async def parse_upstream_json_response(
     resp: aiohttp.ClientResponse,
     api_path: str,
@@ -563,4 +516,4 @@ async def parse_upstream_chat_completion_response(
         response_path.unlink(missing_ok=True)
 
 
-__all__ = [name for name in globals() if not name.startswith("__")]
+DOWNLOAD_CONCURRENCY = 3

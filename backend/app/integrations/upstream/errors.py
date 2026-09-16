@@ -1,42 +1,12 @@
-import aiohttp
-import asyncio
-import base64
 import json
 import logging
-import re
-from collections.abc import Callable, Sequence
-from pathlib import Path
-from typing import Any, Protocol
-from urllib.parse import urljoin, urlsplit
+from typing import Any
+from urllib.parse import urlsplit
 
-from ...core import settings as config
 from ...core.redaction import redact_sensitive_text
-from ...core.api_paths import (
-    CHAT_COMPLETIONS_API_PATH,
-    RESPONSES_API_PATH,
-    build_upstream_url,
-    normalize_api_path,
-)
-from ...core.observability import observe_job_stage
 from ...core import validators as ssrf
-from ...core.media import (
-    detect_image_format,
-    generate_image_id,
-    validate_image_bytes,
-)
-from ...schemas.gallery import GalleryEntry
-from ...schemas.generation import EditRequest, GenerateRequest
-from ..session_pool import TIMEOUT_PROBE, TIMEOUT_UPSTREAM, get_pool
 
-ProgressCallback = Callable[[str, str], None]
 logger = logging.getLogger(__name__)
-
-
-
-class ImageEditSource(Protocol):
-    temp_path: Path
-    filename: str
-    content_type: str
 
 
 class UpstreamApiError(Exception):
@@ -47,47 +17,11 @@ class UpstreamImageDownloadError(UpstreamApiError):
     pass
 
 
-OUTPUT_FORMATS = {
-    "png": {"extension": "png", "media_type": "image/png"},
-    "jpeg": {"extension": "jpg", "media_type": "image/jpeg"},
-    "webp": {"extension": "webp", "media_type": "image/webp"},
-}
-DETECTED_FORMAT_EXTENSIONS = {
-    "avif": "avif",
-    "bmp": "bmp",
-    "gif": "gif",
-    "heif": "heif",
-    "ico": "ico",
-    "jpeg": "jpg",
-    "png": "png",
-    "tiff": "tiff",
-    "webp": "webp",
-}
-DATA_IMAGE_URL_RE = re.compile(
-    r"data:image/(?:png|jpe?g|webp|gif|avif|bmp);base64,(?P<data>[A-Za-z0-9+/=\s]+)",
-    re.IGNORECASE,
-)
-MARKDOWN_IMAGE_RE = re.compile(
-    r"!\[[^\]]*\]\((?P<target><[^>]+>|[^\s)]+)(?:\s+[\"'][^\"']*[\"'])?\)"
-)
-HTTP_IMAGE_URL_RE = re.compile(r"https?://[^\s<>'\")]+")
-
-
-DOWNLOAD_CONCURRENCY = 3
 MAX_PERSISTABLE_UPSTREAM_ERROR_CHARS = 2000
 
 
 def _sanitize_upstream_error_text(value: Any) -> str:
     return redact_sensitive_text(value)[:MAX_PERSISTABLE_UPSTREAM_ERROR_CHARS]
-
-
-def validate_upstream_image_data(value: Any, requested_n: int) -> list[dict[str, Any]]:
-    if not isinstance(value, list):
-        raise UpstreamApiError("Upstream image data must be an array")
-    bounded = value[: max(1, int(requested_n))]
-    if any(not isinstance(item, dict) for item in bounded):
-        raise UpstreamApiError("Upstream image data entries must be objects")
-    return bounded
 
 
 async def _warn_if_socks5_upstream_resolves_private(
@@ -117,4 +51,44 @@ async def _warn_if_socks5_upstream_resolves_private(
     )
 
 
-__all__ = [name for name in globals() if not name.startswith("__")]
+def get_upstream_error_message(
+    status: int,
+    response_text: str,
+    is_json_response: bool,
+) -> str:
+    if is_json_response:
+        try:
+            error_body = json.loads(response_text)
+            if isinstance(error_body, dict):
+                error = error_body.get("error")
+                if isinstance(error, dict):
+                    return _sanitize_upstream_error_text(error.get("message", response_text))
+            return _sanitize_upstream_error_text(response_text)
+        except Exception:
+            return _sanitize_upstream_error_text(response_text)
+    return f"HTTP {status}: {_sanitize_upstream_error_text(response_text[:200])}"
+
+
+def raise_upstream_error(
+    status: int,
+    response_text: str,
+    is_json_response: bool,
+    api_path: str,
+):
+    error_msg = get_upstream_error_message(status, response_text, is_json_response)
+    unsupported_markers = (
+        "not support",
+        "not_supported",
+        "unsupported",
+        "not found",
+        "unknown endpoint",
+        "no route",
+    )
+    if api_path == "/v1/images/edits" and (
+        status in {404, 405, 501}
+        or any(marker in error_msg.lower() for marker in unsupported_markers)
+    ):
+        raise UpstreamApiError(
+            f"Upstream API does not support /v1/images/edits ({status}): {error_msg}"
+        )
+    raise UpstreamApiError(f"Upstream API error ({status}): {error_msg}")

@@ -3,13 +3,13 @@ import asyncio
 import base64
 import json
 import logging
-import re
 from contextlib import asynccontextmanager
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import (
+    Callable,
+    Sequence,
+)
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any, Protocol
-from urllib.parse import urljoin, urlsplit
+from typing import Any
 
 from ...core import settings as config
 from ...core.api_paths import (
@@ -28,15 +28,16 @@ from ...core.media import (
 from ...runtime.blocking import run_image_operation, upstream_memory_lease
 from ...schemas.gallery import GalleryEntry
 from ...schemas.generation import EditRequest, GenerateRequest
-from ..session_pool import TIMEOUT_PROBE, TIMEOUT_UPSTREAM, get_pool
+from ..session_pool import (
+    TIMEOUT_UPSTREAM,
+    get_pool,
+)
 
 ProgressCallback = Callable[[str, str], None]
 # Called with (partial_image_index, mime_type, image_bytes) as each streamed
 # partial image arrives. Never called for non-streaming requests.
-PreviewCallback = Callable[[int, str, bytes], None]
 # Persists one decoded image and returns the stored gallery entry. The caller
 # supplies it so this module stays free of the persistence layer.
-PersistGalleryEntry = Callable[..., Awaitable[GalleryEntry]]
 logger = logging.getLogger(__name__)
 
 
@@ -49,14 +50,16 @@ def upstream_task_memory_weight(response_format: str | None) -> int:
 
 
 from .errors import (
-    DETECTED_FORMAT_EXTENSIONS,
-    DOWNLOAD_CONCURRENCY,
-    ImageEditSource,
     UpstreamApiError,
     UpstreamImageDownloadError,
     _warn_if_socks5_upstream_resolves_private,
+)
+from .contracts import ImageEditSource
+from .payloads import (
+    DETECTED_FORMAT_EXTENSIONS,
     validate_upstream_image_data,
 )
+from .transport import DOWNLOAD_CONCURRENCY
 from .payloads import (
     _build_image_params,
     build_chat_completions_request_data,
@@ -75,9 +78,12 @@ from .transport import (
     iter_bounded_sse_json_events,
     parse_upstream_chat_completion_response,
     parse_upstream_json_response,
-    raise_upstream_error,
     read_limited_text_response,
     validate_generated_image_bytes,
+)
+from .errors import raise_upstream_error
+from .contracts import (
+    PersistGalleryEntry,
 )
 
 
