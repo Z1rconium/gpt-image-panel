@@ -10,11 +10,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import APIRouter, Body, File, Form, UploadFile
 
 from ..core.image_models import MAX_PROMPT_CHARS, image_qualities
 from . import presets
-from .uploads import is_image_upload, resolve_upload_content_type
 from ..core.errors import (
     DomainError,
     NotFoundError,
@@ -86,7 +84,7 @@ from .assistant_runtime import (
     _warnings,
 )
 
-async def assistant_health(req: AIAssistantSettingsRequest | None = Body(default=None)):
+async def assistant_health(req: AIAssistantSettingsRequest | None = None):
     settings = presets.effective_ai_assistant_settings(_assistant_settings(req))
     model = str(settings.get("model") or "").strip() or "gpt-4o-mini"
     try:

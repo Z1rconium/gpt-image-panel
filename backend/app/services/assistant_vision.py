@@ -13,11 +13,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import APIRouter, Body, File, Form, UploadFile
 
 from ..core.image_models import MAX_PROMPT_CHARS
 from . import presets
-from .uploads import is_image_upload, resolve_upload_content_type
 from ..core.errors import (
     DomainError,
     InvalidRequestError,
@@ -86,7 +84,6 @@ from ..schemas.settings import AIAssistantSettingsRequest
 
 logger = logging.getLogger(__name__)
 from .assistant_runtime import (
-    ASSISTANT_IMAGE_UPLOAD_CHUNK_BYTES,
     AssistantRuntime,
     _assistant_json,
     _assistant_request_limit,
@@ -100,38 +97,20 @@ from .assistant_runtime import (
     _warnings,
 )
 
-async def _read_image_prompt_upload(image: UploadFile) -> bytes:
-    if not is_image_upload(image):
-        raise InvalidRequestError("Upload must be a supported raster image file")
-
-    max_bytes = config.MAX_FILE_SIZE_MB * 1024 * 1024
-    image_bytes = bytearray()
-    while True:
-        chunk = await image.read(ASSISTANT_IMAGE_UPLOAD_CHUNK_BYTES)
-        if not chunk:
-            break
-        if len(image_bytes) + len(chunk) > max_bytes:
-            raise DomainError(f"Uploaded image is too large. Max size is {config.MAX_FILE_SIZE_MB} MB", status_code=413)
-        image_bytes.extend(chunk)
-
-    if not image_bytes:
-        raise InvalidRequestError("Uploaded image is empty")
-
-    return bytes(image_bytes)
-
-
 async def prompt_from_uploaded_image(
-    image: UploadFile = File(...),
-    target_language: Literal["en", "zh-CN"] = Form("en"),
+    *,
+    image_bytes: bytes,
+    filename: str,
+    content_type: str,
+    target_language: Literal["en", "zh-CN"],
 ):
     runtime = await _resolve_runtime_async(vision=True)
-    image_bytes = await _read_image_prompt_upload(image)
     try:
         preview = await asyncio.to_thread(
             assistant_client.prepare_vision_preview_bytes,
             image_bytes,
-            filename=image.filename or "image",
-            content_type=resolve_upload_content_type(image),
+            filename=filename or "image",
+            content_type=content_type,
         )
     except assistant_client.AssistantError as e:
         raise DomainError(str(e), status_code=400 if e.status == 400 else 502) from e
@@ -241,9 +220,12 @@ def _generated_image_mime_type(image_bytes: bytes) -> str:
 
 
 async def optimize_uploaded_image_prompt(
-    image: UploadFile = File(...),
-    prompt: str = Form(..., min_length=1, max_length=MAX_PROMPT_CHARS),
-    target_language: Literal["en", "zh-CN"] = Form("en"),
+    *,
+    image_bytes: bytes,
+    filename: str,
+    content_type: str,
+    prompt: str,
+    target_language: Literal["en", "zh-CN"],
 ):
     normalized_prompt = prompt.strip()
     if not normalized_prompt:
@@ -253,13 +235,12 @@ async def optimize_uploaded_image_prompt(
     api_url, api_key, model, response_format, socks5_proxy = await asyncio.to_thread(
         _prompt_preview_generation_config
     )
-    image_bytes = await _read_image_prompt_upload(image)
     try:
         target_preview = await asyncio.to_thread(
             assistant_client.prepare_vision_preview_bytes,
             image_bytes,
-            filename=image.filename or "image",
-            content_type=resolve_upload_content_type(image),
+            filename=filename or "image",
+            content_type=content_type,
         )
     except assistant_client.AssistantError as e:
         raise DomainError(str(e), status_code=400 if e.status == 400 else 502) from e

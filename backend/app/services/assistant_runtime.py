@@ -9,7 +9,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import APIRouter, Body, File, Form, UploadFile
 
 from ..core.image_models import MAX_PROMPT_CHARS
 from . import presets
@@ -20,7 +19,6 @@ from ..core.errors import (
     UpstreamTimeoutError,
 )
 from ..runtime.state import state, utc_lease_expires_at
-from .uploads import is_image_upload, resolve_upload_content_type
 from ..core import settings as config
 from ..core import validators as ssrf
 from ..core.utils import utc_now

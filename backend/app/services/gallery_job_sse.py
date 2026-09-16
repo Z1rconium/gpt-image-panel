@@ -11,7 +11,6 @@ picked up by polling each job's updated_at edge (see job_events)."""
 import asyncio
 import time
 
-from fastapi import Request
 from fastapi.responses import StreamingResponse
 
 from ..core.errors import (
@@ -142,7 +141,8 @@ async def stream_gallery_job(
     *,
     kind: str,
     job_id: str,
-    request: Request,
+    client_ip: str,
+    is_disconnected,
     event_name: str,
     terminal_statuses: set[str],
     payload_builder,
@@ -152,7 +152,6 @@ async def stream_gallery_job(
     if not job:
         raise NotFoundError(not_found_detail)
 
-    client_ip = auth.get_client_ip(request)
     sse_lease = await sse_limiter.acquire(client_ip)
     if not sse_lease:
         raise RateLimitedError("Too many SSE connections")
@@ -178,7 +177,7 @@ async def stream_gallery_job(
                 return
 
             while True:
-                if await request.is_disconnected():
+                if await is_disconnected():
                     break
                 now = time.monotonic()
                 refreshed_at = await sse_limiter.refresh_if_needed(

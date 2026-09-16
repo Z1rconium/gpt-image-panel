@@ -217,7 +217,8 @@ async def stream_gallery_export_job(job_id: str, request: Request):
     return await stream_gallery_job(
         kind="export",
         job_id=job_id,
-        request=request,
+        client_ip=auth.get_client_ip(request),
+        is_disconnected=request.is_disconnected,
         event_name="export",
         terminal_statuses=GALLERY_EXPORT_TERMINAL_STATUSES,
         payload_builder=_gallery_export_payload,
@@ -230,7 +231,8 @@ async def stream_gallery_direct_export_job(job_id: str, request: Request):
     return await stream_gallery_job(
         kind="export_direct",
         job_id=job_id,
-        request=request,
+        client_ip=auth.get_client_ip(request),
+        is_disconnected=request.is_disconnected,
         event_name="export",
         terminal_statuses=GALLERY_EXPORT_TERMINAL_STATUSES,
         payload_builder=_gallery_export_payload,
@@ -346,7 +348,8 @@ async def stream_gallery_sync_job(job_id: str, request: Request):
     return await stream_gallery_job(
         kind="sync",
         job_id=job_id,
-        request=request,
+        client_ip=auth.get_client_ip(request),
+        is_disconnected=request.is_disconnected,
         event_name="sync",
         terminal_statuses=GALLERY_SYNC_TERMINAL_STATUSES,
         payload_builder=_gallery_sync_payload,
@@ -367,7 +370,8 @@ async def stream_gallery_import_job(job_id: str, request: Request):
     return await stream_gallery_job(
         kind="import",
         job_id=job_id,
-        request=request,
+        client_ip=auth.get_client_ip(request),
+        is_disconnected=request.is_disconnected,
         event_name="import",
         terminal_statuses=GALLERY_IMPORT_TERMINAL_STATUSES,
         payload_builder=_gallery_import_payload,
@@ -388,7 +392,8 @@ async def stream_gallery_nodeimage_upload_job(job_id: str, request: Request):
     return await stream_gallery_job(
         kind=NODEIMAGE_UPLOAD_JOB_KIND,
         job_id=job_id,
-        request=request,
+        client_ip=auth.get_client_ip(request),
+        is_disconnected=request.is_disconnected,
         event_name="nodeimage_upload",
         terminal_statuses=NODEIMAGE_UPLOAD_TERMINAL_STATUSES,
         payload_builder=_nodeimage_upload_payload,

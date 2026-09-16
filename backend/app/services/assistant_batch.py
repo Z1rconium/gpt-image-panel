@@ -9,7 +9,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import APIRouter, Body, File, Form, Request, UploadFile
 
 from . import presets
 from ..core.errors import (
@@ -18,7 +17,6 @@ from ..core.errors import (
     RateLimitedError,
 )
 from ..runtime.state import state, utc_lease_expires_at
-from .uploads import is_image_upload, resolve_upload_content_type
 from ..core import settings as config
 from ..core import validators as ssrf
 from ..core.utils import utc_now
@@ -185,11 +183,17 @@ async def get_batch_analyze_job(job_id: str):
     return AssistantGalleryBatchJobStatus(**_ai_analyze_payload(job))
 
 
-async def stream_batch_analyze_job(job_id: str, request: Request):
+async def stream_batch_analyze_job(
+    job_id: str,
+    *,
+    client_ip: str,
+    is_disconnected,
+):
     return await stream_gallery_job(
         kind=AI_ANALYZE_JOB_KIND,
         job_id=job_id,
-        request=request,
+        client_ip=client_ip,
+        is_disconnected=is_disconnected,
         event_name="analysis",
         terminal_statuses={"success", "error"},
         payload_builder=_ai_analyze_payload,
