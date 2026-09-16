@@ -7,7 +7,7 @@ import aiohttp
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
-from ..app_state import FRONTEND_BUILD_DIR
+from ..app import FRONTEND_BUILD_DIR
 from ...runtime.state import state
 from ..csp import frontend_index_response
 from ...core import settings as config

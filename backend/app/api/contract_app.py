@@ -1,4 +1,4 @@
-from .app_state import app
+from .app import app
 from .body_limit import BodyLimitMiddleware
 from .middleware import TextOnlyGZipMiddleware, register_exception_handlers, register_middleware
 from .routers import routers

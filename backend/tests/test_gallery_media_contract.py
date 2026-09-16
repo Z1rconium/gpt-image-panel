@@ -588,7 +588,7 @@ def test_gallery_export_startup_cleanup_preserves_tracked_finished_zip(client):
     orphan_path = Path(config.DATA_DIR) / "exports" / "orphan-export.zip"
     orphan_path.write_bytes(b"orphan")
 
-    app_state.cleanup_stale_gallery_export_files()
+    startup_maintenance.cleanup_stale_gallery_export_files()
 
     assert export_path.exists()
     assert not orphan_path.exists()

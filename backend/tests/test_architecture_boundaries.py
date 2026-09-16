@@ -46,13 +46,6 @@ ALLOWED_VIOLATIONS: frozenset[str] = frozenset(
 # Python requires; new entries need a documented reason to be added.
 ALLOWED_DEFERRED_IMPORTS: frozenset[str] = frozenset(
     {
-        "backend/app/api/app_state.py:205 -> backend.app.services",
-        "backend/app/api/app_state.py:206 -> backend.app.services",
-        "backend/app/api/app_state.py:235 -> backend.app.services",
-        "backend/app/api/app_state.py:343 -> backend.app.integrations.session_pool",
-        "backend/app/api/app_state.py:344 -> backend.app.runtime.blocking",
-        "backend/app/api/app_state.py:85 -> backend.app.services",
-        "backend/app/api/app_state.py:86 -> backend.app.services",
         "backend/app/api/routers/settings.py:322 -> backend.app.services.presets",
         "backend/app/api/routers/settings.py:331 -> backend.app.services.presets",
         "backend/app/api/routers/settings.py:336 -> backend.app.services.presets",

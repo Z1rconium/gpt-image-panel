@@ -2,7 +2,7 @@ import asyncio
 
 from backend.tests.support.contract import *  # noqa: F403
 
-from backend.app.api.app_state import app
+from backend.app.api.app import app
 from backend.app.api.routers import generate as generate_router
 from backend.app.services.poll_backoff import next_poll_delay
 

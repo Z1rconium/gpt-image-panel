@@ -20,7 +20,7 @@ from fastapi.testclient import TestClient
 
 from backend.app import main as backend_main
 from backend.app.runtime import state as runtime_state
-from backend.app.api import app_state
+from backend.app.services import startup_maintenance
 from backend.app.api import body_limit
 from backend.app.services import assistant_batch as assistant_router
 from backend.app.services import assistant_runtime

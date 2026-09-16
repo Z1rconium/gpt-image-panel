@@ -345,7 +345,7 @@ def test_access_token_signature_requires_configured_secret(monkeypatch):
 def test_allow_unauthenticated_startup_logs_error(tmp_path, caplog):
     _configure_runtime(tmp_path, access_key="", allow_unauthenticated=True)
 
-    caplog.set_level(logging.ERROR, logger="backend.app.api.app_state")
+    caplog.set_level(logging.ERROR, logger="backend.app.api.app")
     with _test_client():
         pass
 
@@ -356,7 +356,7 @@ def test_allow_unauthenticated_startup_logs_error(tmp_path, caplog):
 def test_access_key_startup_has_no_admin_key_warning(tmp_path, caplog):
     _configure_runtime(tmp_path, access_key="secret", allow_unauthenticated=False)
 
-    caplog.set_level(logging.WARNING, logger="backend.app.api.app_state")
+    caplog.set_level(logging.WARNING, logger="backend.app.api.app")
     with _test_client():
         pass
 
