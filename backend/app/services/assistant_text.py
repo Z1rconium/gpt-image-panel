@@ -10,11 +10,16 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import APIRouter, Body, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Body, File, Form, UploadFile
 
 from ..core.image_models import MAX_PROMPT_CHARS, image_qualities
 from . import presets
 from .uploads import is_image_upload, resolve_upload_content_type
+from ..core.errors import (
+    DomainError,
+    NotFoundError,
+    UpstreamError,
+)
 from ..core import settings as config
 from ..core import validators as ssrf
 from ..core.utils import utc_now
@@ -87,7 +92,7 @@ async def assistant_health(req: AIAssistantSettingsRequest | None = Body(default
     try:
         runtime = await _resolve_runtime_async(settings=settings)
         model = runtime.model
-    except HTTPException as e:
+    except DomainError as e:
         return AssistantHealthResponse(
             status="error",
             message=str(e.detail),
@@ -157,7 +162,7 @@ async def rewrite_prompt(req: AssistantPromptRewriteRequest):
     )
     rewritten = str(data.get("rewritten_prompt") or "").strip()
     if not rewritten:
-        raise HTTPException(status_code=502, detail="AI Assistant returned no rewritten prompt")
+        raise UpstreamError("AI Assistant returned no rewritten prompt")
     return AssistantPromptRewriteResponse(
         rewritten_prompt=rewritten[:MAX_PROMPT_CHARS],
         warnings=_warnings(data.get("warnings")),
@@ -237,7 +242,7 @@ async def prompt_variants(req: AssistantPromptVariantsRequest):
         if len(variants) >= req.count:
             break
     if not variants:
-        raise HTTPException(status_code=502, detail="AI Assistant returned no variants")
+        raise UpstreamError("AI Assistant returned no variants")
     return AssistantPromptVariantsResponse(
         variants=variants,
         warnings=_warnings(data.get("warnings")),
@@ -374,7 +379,7 @@ def _redact_diagnostic_value(key: str, value: Any) -> object:
 async def diagnose_job(job_id: str, req: AssistantJobDiagnoseRequest | None = None):
     job = await asyncio.to_thread(get_generate_job, job_id)
     if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
+        raise NotFoundError("Job not found")
     safe_job = _safe_job_snapshot(job, include_prompt=(req.include_prompt if req else False))
     data, model, duration_ms = await _assistant_json(
         system_prompt="You diagnose failed or slow image generation/edit jobs. Never mention or infer secrets.",

@@ -38,6 +38,8 @@ ALLOWED_TARGET_LAYERS = {
 # Frozen debt: every entry is a mapping the matrix forbids.
 # Frozen debt: every entry is a mapping the matrix forbids.
 # Frozen debt: every entry is a mapping the matrix forbids.
+# Frozen debt: every entry is a mapping the matrix forbids.
+# Frozen debt: every entry is a mapping the matrix forbids.
 ALLOWED_VIOLATIONS: frozenset[str] = frozenset(
     {
     }
@@ -45,6 +47,8 @@ ALLOWED_VIOLATIONS: frozenset[str] = frozenset(
 
 # Project imports inside function bodies. Some are deliberate cycle breaks that
 # Python requires; new entries need a documented reason to be added.
+# Project imports inside function bodies. Some are
+# Project imports inside function bodies. Some are
 # Project imports inside function bodies. Some are
 # Project imports inside function bodies. Some are
 # Project imports inside function bodies. Some are

@@ -1,5 +1,5 @@
-from fastapi import HTTPException
 
+from ..core.errors import UnprocessableRequestError
 from ..runtime.state import state
 from ..core import secrets
 from ..core import settings as config
@@ -126,21 +126,15 @@ def secret_response_fields(value: str, prefix: str) -> dict:
 def get_effective_preset_api_key(preset: dict) -> str:
     secret_id = str(preset.get("api_key") or "").strip()
     if not secret_id:
-        raise HTTPException(status_code=422, detail="API credential is not configured")
+        raise UnprocessableRequestError("API credential is not configured")
     env_var = get_api_key_env_var(secret_id)
     if secret_id not in secrets.configured_secret_ids():
         resolved_key = resolve_api_key(secret_id)
         if resolved_key:
             return resolved_key
         if env_var:
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    f"API Key environment variable {env_var} is not set or empty. "
-                    "Set it in the server environment."
-                ),
-            )
-        raise HTTPException(status_code=422, detail="API credential is not configured")
+            raise UnprocessableRequestError(f"API Key environment variable {env_var} is not set or empty. Set it in the server environment.")
+        raise UnprocessableRequestError("API credential is not configured")
     try:
         return secrets.resolve_secret(
             secret_id,
@@ -149,7 +143,7 @@ def get_effective_preset_api_key(preset: dict) -> str:
             host_allowlist=config.UPSTREAM_HOST_ALLOWLIST,
         )
     except secrets.SecretRegistryError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise UnprocessableRequestError(str(exc)) from exc
 
 
 def _default_prompt_optimizer_settings() -> dict:
@@ -371,7 +365,7 @@ def get_upstream_socks5_proxy(*, raw: bool = False) -> str:
             host_allowlist=config.UPSTREAM_PROXY_HOST_ALLOWLIST,
         )
     except secrets.SecretRegistryError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise UnprocessableRequestError(str(exc)) from exc
 
 
 def apply_upstream_socks5_proxy(value: str | None):
@@ -401,7 +395,7 @@ def get_webhook_url(*, raw: bool = False) -> str:
             host_allowlist=config.WEBHOOK_HOST_ALLOWLIST,
         )
     except secrets.SecretRegistryError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise UnprocessableRequestError(str(exc)) from exc
 
 
 def apply_webhook_url(value: str | None):
@@ -566,13 +560,7 @@ def resolve_prompt_optimizer_api_key(raw: dict | None) -> str:
         if resolved_key:
             return resolved_key
         if env_var:
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    f"Prompt optimizer API Key environment variable {env_var} "
-                    "is not set or empty. Set it in the server environment."
-                ),
-            )
+            raise UnprocessableRequestError(f"Prompt optimizer API Key environment variable {env_var} is not set or empty. Set it in the server environment.")
         return secret_id
     try:
         return secrets.resolve_secret(
@@ -582,7 +570,7 @@ def resolve_prompt_optimizer_api_key(raw: dict | None) -> str:
             host_allowlist=config.PROMPT_OPTIMIZER_HOST_ALLOWLIST,
         )
     except secrets.SecretRegistryError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise UnprocessableRequestError(str(exc)) from exc
 
 
 def resolve_ai_assistant_api_key(raw: dict | None) -> str:
@@ -596,13 +584,7 @@ def resolve_ai_assistant_api_key(raw: dict | None) -> str:
         if resolved_key:
             return resolved_key
         if env_var:
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    f"Prompt Optimizer API Key environment variable {env_var} "
-                    "is not set or empty for AI Assistant. Set it in the server environment."
-                ),
-            )
+            raise UnprocessableRequestError(f"Prompt Optimizer API Key environment variable {env_var} is not set or empty for AI Assistant. Set it in the server environment.")
         return secret_id
     try:
         return secrets.resolve_secret(
@@ -612,7 +594,7 @@ def resolve_ai_assistant_api_key(raw: dict | None) -> str:
             host_allowlist=config.PROMPT_OPTIMIZER_HOST_ALLOWLIST,
         )
     except secrets.SecretRegistryError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise UnprocessableRequestError(str(exc)) from exc
 
 
 def get_prompt_optimizer_settings() -> dict:

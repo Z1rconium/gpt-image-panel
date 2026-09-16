@@ -22,9 +22,9 @@ from urllib.parse import quote
 
 from .gallery_job_payloads import _missing_gallery_ids
 
-from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 
+from ..core.errors import RateLimitedError
 from ..runtime.state import state
 from .gallery_archive_export import (
     iter_gallery_zip_chunks,
@@ -338,11 +338,7 @@ async def _reserve_gallery_export_direct_slot(
                 count_active_gallery_jobs,
                 "export_direct",
             )
-            raise HTTPException(
-                status_code=429,
-                detail=f"Too many active export jobs ({active_count}). "
-                "Please wait for existing exports to complete.",
-            )
+            raise RateLimitedError(f"Too many active export jobs ({active_count}). Please wait for existing exports to complete.")
         return slot
 
 
@@ -419,11 +415,7 @@ async def _create_reserved_gallery_export_job(
                 count_active_gallery_jobs,
                 "export_direct",
             )
-            raise HTTPException(
-                status_code=429,
-                detail=f"Too many active export jobs ({active_count}). "
-                "Please wait for existing exports to complete.",
-            )
+            raise RateLimitedError(f"Too many active export jobs ({active_count}). Please wait for existing exports to complete.")
         return job
 
 

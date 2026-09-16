@@ -18,9 +18,9 @@ from .gallery_job_sse import (
     _publish_gallery_job_sse,
 )
 
-from fastapi import HTTPException
 
 from ..runtime.blocking import run_db_operation
+from ..core.errors import RateLimitedError
 from ..core import settings as config
 from ..core.utils import utc_now
 from ..repositories.coordination import (
@@ -134,11 +134,7 @@ async def _create_reserved_nodeimage_upload_job(
             count_active_gallery_jobs,
             NODEIMAGE_UPLOAD_JOB_KIND,
         )
-        raise HTTPException(
-            status_code=429,
-            detail=f"Too many active NodeImage upload jobs ({active_count}). "
-            "Please wait for the existing upload to complete.",
-        )
+        raise RateLimitedError(f"Too many active NodeImage upload jobs ({active_count}). Please wait for the existing upload to complete.")
     return job
 
 

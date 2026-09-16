@@ -13,11 +13,19 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import APIRouter, Body, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Body, File, Form, UploadFile
 
 from ..core.image_models import MAX_PROMPT_CHARS
 from . import presets
 from .uploads import is_image_upload, resolve_upload_content_type
+from ..core.errors import (
+    DomainError,
+    InvalidRequestError,
+    NotFoundError,
+    UnprocessableRequestError,
+    UpstreamError,
+    UpstreamTimeoutError,
+)
 from ..core import settings as config
 from ..core import validators as ssrf
 from ..core.utils import utc_now
@@ -94,7 +102,7 @@ from .assistant_runtime import (
 
 async def _read_image_prompt_upload(image: UploadFile) -> bytes:
     if not is_image_upload(image):
-        raise HTTPException(status_code=400, detail="Upload must be a supported raster image file")
+        raise InvalidRequestError("Upload must be a supported raster image file")
 
     max_bytes = config.MAX_FILE_SIZE_MB * 1024 * 1024
     image_bytes = bytearray()
@@ -103,14 +111,11 @@ async def _read_image_prompt_upload(image: UploadFile) -> bytes:
         if not chunk:
             break
         if len(image_bytes) + len(chunk) > max_bytes:
-            raise HTTPException(
-                status_code=413,
-                detail=f"Uploaded image is too large. Max size is {config.MAX_FILE_SIZE_MB} MB",
-            )
+            raise DomainError(f"Uploaded image is too large. Max size is {config.MAX_FILE_SIZE_MB} MB", status_code=413)
         image_bytes.extend(chunk)
 
     if not image_bytes:
-        raise HTTPException(status_code=400, detail="Uploaded image is empty")
+        raise InvalidRequestError("Uploaded image is empty")
 
     return bytes(image_bytes)
 
@@ -129,7 +134,7 @@ async def prompt_from_uploaded_image(
             content_type=resolve_upload_content_type(image),
         )
     except assistant_client.AssistantError as e:
-        raise HTTPException(status_code=400 if e.status == 400 else 502, detail=str(e)) from e
+        raise DomainError(str(e), status_code=400 if e.status == 400 else 502) from e
     finally:
         del image_bytes
 
@@ -152,7 +157,7 @@ async def prompt_from_uploaded_image(
     )
     prompt = _clamp_text(data.get("prompt"), MAX_PROMPT_CHARS)
     if not prompt:
-        raise HTTPException(status_code=502, detail="AI Assistant returned an empty image prompt")
+        raise UpstreamError("AI Assistant returned an empty image prompt")
     return AssistantImagePromptResponse(
         prompt=prompt,
         warnings=_warnings(data.get("warnings")),
@@ -207,17 +212,14 @@ def _prompt_preview_generation_config() -> tuple[str, str, str, str | None, str 
     active_preset = presets.get_active_preset()
     api_path = str(active_preset.get("api_path") or "").strip()
     if api_path != "/v1/images/generations":
-        raise HTTPException(
-            status_code=400,
-            detail="Prompt optimization preview requires the active preset to use /v1/images/generations",
-        )
+        raise InvalidRequestError("Prompt optimization preview requires the active preset to use /v1/images/generations")
     api_url = str(active_preset.get("api_url") or "").strip()
     if not api_url:
-        raise HTTPException(status_code=400, detail="Active image generation preset API URL is not configured")
+        raise InvalidRequestError("Active image generation preset API URL is not configured")
     api_key = presets.get_effective_preset_api_key(active_preset)
     model = str(active_preset.get("default_model") or "").strip()
     if not model:
-        raise HTTPException(status_code=400, detail="Active image generation preset model is not configured")
+        raise InvalidRequestError("Active image generation preset model is not configured")
     response_format = str(active_preset.get("default_response_format") or "").strip() or None
     return api_url, api_key, model, response_format, presets.get_upstream_socks5_proxy() or None
 
@@ -245,7 +247,7 @@ async def optimize_uploaded_image_prompt(
 ):
     normalized_prompt = prompt.strip()
     if not normalized_prompt:
-        raise HTTPException(status_code=422, detail="prompt must not be empty")
+        raise UnprocessableRequestError("prompt must not be empty")
 
     runtime = await _resolve_runtime_async(vision=True)
     api_url, api_key, model, response_format, socks5_proxy = await asyncio.to_thread(
@@ -260,7 +262,7 @@ async def optimize_uploaded_image_prompt(
             content_type=resolve_upload_content_type(image),
         )
     except assistant_client.AssistantError as e:
-        raise HTTPException(status_code=400 if e.status == 400 else 502, detail=str(e)) from e
+        raise DomainError(str(e), status_code=400 if e.status == 400 else 502) from e
     finally:
         del image_bytes
 
@@ -270,7 +272,7 @@ async def optimize_uploaded_image_prompt(
             int(target_preview.get("source_height") or target_preview["height"]),
         )
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+        raise InvalidRequestError(str(e)) from e
 
     generation_payload = GenerateRequest(
         prompt=normalized_prompt,
@@ -291,14 +293,14 @@ async def optimize_uploaded_image_prompt(
             socks5_proxy=socks5_proxy,
         )
     except (asyncio.TimeoutError, TimeoutError) as e:
-        raise HTTPException(status_code=504, detail="Prompt optimization preview generation timed out") from e
+        raise UpstreamTimeoutError("Prompt optimization preview generation timed out") from e
     except UpstreamApiError as e:
-        raise HTTPException(status_code=502, detail=f"Prompt optimization preview generation failed: {e}") from e
+        raise UpstreamError(f"Prompt optimization preview generation failed: {e}") from e
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=f"Prompt optimization preview configuration is invalid: {e}") from e
+        raise InvalidRequestError(f"Prompt optimization preview configuration is invalid: {e}") from e
     except Exception as e:
         logger.warning("Prompt optimization preview generation failed", exc_info=True)
-        raise HTTPException(status_code=502, detail="Prompt optimization preview generation failed") from e
+        raise UpstreamError("Prompt optimization preview generation failed") from e
     generation_duration_ms = int((time.monotonic() - generation_started) * 1000)
 
     try:
@@ -309,7 +311,7 @@ async def optimize_uploaded_image_prompt(
             content_type="",
         )
     except assistant_client.AssistantError as e:
-        raise HTTPException(status_code=502, detail=f"Generated preview image is invalid: {e}") from e
+        raise UpstreamError(f"Generated preview image is invalid: {e}") from e
 
     data, vision_model, comparison_duration_ms = await _assistant_json(
         system_prompt=_prompt_optimization_system_prompt(target_language),
@@ -345,10 +347,10 @@ async def optimize_uploaded_image_prompt(
     )
     optimized_prompt = _clamp_text(data.get("prompt"), MAX_PROMPT_CHARS)
     if not optimized_prompt:
-        raise HTTPException(status_code=502, detail="AI Assistant returned an empty optimized prompt")
+        raise UpstreamError("AI Assistant returned an empty optimized prompt")
     comparison_summary = _clamp_text(data.get("comparison_summary"), 2000)
     if not comparison_summary:
-        raise HTTPException(status_code=502, detail="AI Assistant returned an empty comparison summary")
+        raise UpstreamError("AI Assistant returned an empty comparison summary")
 
     generated_width = int(generated_preview.get("source_width") or generated_preview["width"])
     generated_height = int(generated_preview.get("source_height") or generated_preview["height"])
@@ -372,12 +374,12 @@ async def optimize_uploaded_image_prompt(
 async def _gallery_entry_and_preview(image_id: str) -> tuple[Any, dict[str, Any]]:
     entry = await asyncio.to_thread(get_gallery_entry, image_id)
     if not entry:
-        raise HTTPException(status_code=404, detail="Gallery entry not found")
+        raise NotFoundError("Gallery entry not found")
     path = await asyncio.to_thread(safe_image_path, entry.filename)
     if not path or not Path(path).is_file():
-        raise HTTPException(status_code=404, detail="Gallery image file not found")
+        raise NotFoundError("Gallery image file not found")
     if not await asyncio.to_thread(is_gallery_filename_referenced, entry.filename):
-        raise HTTPException(status_code=404, detail="Gallery image file is not referenced")
+        raise NotFoundError("Gallery image file is not referenced")
     preview = await asyncio.to_thread(assistant_client.prepare_vision_preview, Path(path))
     return entry, preview  # type: ignore[return-value]
 
@@ -422,12 +424,12 @@ async def _assistant_vision_json(
                 prevalidated_endpoint=runtime.endpoint,
             )
         except assistant_client.AssistantTimeoutError as e:
-            raise HTTPException(status_code=504, detail=str(e)) from e
+            raise UpstreamTimeoutError(str(e)) from e
         except assistant_client.AssistantError as e:
             status_code = 400 if e.status == 400 else 502
-            raise HTTPException(status_code=status_code, detail=str(e)) from e
+            raise DomainError(str(e), status_code=status_code) from e
         except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e)) from e
+            raise InvalidRequestError(str(e)) from e
         return entry, preview, _truncate_assistant_data(data), model_used, duration_ms
 
 
@@ -509,7 +511,7 @@ async def _analyze_gallery_image(
         analysis=data.get("analysis"),
     )
     if not prompt:
-        raise HTTPException(status_code=502, detail="AI Assistant returned an empty image prompt")
+        raise UpstreamError("AI Assistant returned an empty image prompt")
     if persist:
         await asyncio.to_thread(
             upsert_gallery_ai_metadata,
@@ -567,7 +569,7 @@ async def _prompt_gallery_image(
     )
     prompt = _clamp_text(data.get("prompt"), MAX_PROMPT_CHARS)
     if not prompt:
-        raise HTTPException(status_code=502, detail="AI Assistant returned an empty image prompt")
+        raise UpstreamError("AI Assistant returned an empty image prompt")
     return AssistantGalleryImageResponse(
         image_id=image_id,
         description="",
@@ -596,7 +598,7 @@ def _assistant_metadata_response(image_id: str, row: dict[str, Any] | None) -> A
 async def get_gallery_metadata(image_id: str):
     entry = await asyncio.to_thread(get_gallery_entry, image_id)
     if not entry:
-        raise HTTPException(status_code=404, detail="Gallery entry not found")
+        raise NotFoundError("Gallery entry not found")
     row = await asyncio.to_thread(get_gallery_ai_metadata, image_id)
     return _assistant_metadata_response(image_id, row)
 

@@ -11,10 +11,11 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from fastapi import HTTPException, UploadFile
+from fastapi import UploadFile
 from zipstream import ZipStream
 from ..runtime.blocking import run_file_operation
 
+from ..core.errors import InvalidRequestError
 from ..core import settings as config
 from ..core.utils import utc_now
 from ..core.media import safe_image_path, validate_image_bytes
@@ -67,10 +68,7 @@ def is_safe_zip_member_name(filename: str) -> bool:
 def validate_import_zip_infos(zf: zipfile.ZipFile) -> ImportZipManifest:
     file_infos = [info for info in zf.infolist() if not info.is_dir()]
     if len(file_infos) > config.IMPORT_MAX_FILES:
-        raise HTTPException(
-            status_code=400,
-            detail="Import archive contains too many files",
-        )
+        raise InvalidRequestError("Import archive contains too many files")
 
     names: set[str] = set()
     total_uncompressed = 0
@@ -79,24 +77,21 @@ def validate_import_zip_infos(zf: zipfile.ZipFile) -> ImportZipManifest:
     metadata_ndjson_info: zipfile.ZipInfo | None = None
     for info in file_infos:
         if not is_safe_zip_member_name(info.filename):
-            raise HTTPException(status_code=400, detail="Import archive contains unsafe paths")
+            raise InvalidRequestError("Import archive contains unsafe paths")
         if info.filename in names:
-            raise HTTPException(status_code=400, detail="Import archive contains duplicate paths")
+            raise InvalidRequestError("Import archive contains duplicate paths")
         if info.filename == "metadata.json":
             metadata_info = info
         elif info.filename == "metadata.ndjson":
             metadata_ndjson_info = info
         elif Path(info.filename).suffix.lower() in IMAGE_UPLOAD_EXTENSIONS:
             if info.file_size > max_upload_bytes():
-                raise HTTPException(status_code=400, detail="Imported image is too large")
+                raise InvalidRequestError("Imported image is too large")
 
         total_uncompressed += info.file_size
         total_compressed += info.compress_size
         if total_uncompressed > import_max_uncompressed_bytes():
-            raise HTTPException(
-                status_code=400,
-                detail="Import archive uncompressed size exceeds limit",
-            )
+            raise InvalidRequestError("Import archive uncompressed size exceeds limit")
         if (
             info.file_size > 0
             and (
@@ -104,24 +99,18 @@ def validate_import_zip_infos(zf: zipfile.ZipFile) -> ImportZipManifest:
                 or info.file_size / info.compress_size > config.IMPORT_MAX_COMPRESSION_RATIO
             )
         ):
-            raise HTTPException(
-                status_code=400,
-                detail="Import archive compression ratio exceeds limit",
-            )
+            raise InvalidRequestError("Import archive compression ratio exceeds limit")
         names.add(info.filename)
 
     if total_compressed > 0 and total_uncompressed / total_compressed > config.IMPORT_MAX_COMPRESSION_RATIO:
-        raise HTTPException(
-            status_code=400,
-            detail="Import archive aggregate compression ratio exceeds limit",
-        )
+        raise InvalidRequestError("Import archive aggregate compression ratio exceeds limit")
 
     if metadata_info is None and metadata_ndjson_info is None:
-        raise HTTPException(status_code=400, detail="metadata.json is required")
+        raise InvalidRequestError("metadata.json is required")
     selected_metadata = metadata_ndjson_info or metadata_info
     if selected_metadata and selected_metadata.file_size > config.IMPORT_MAX_METADATA_BYTES:
         metadata_name = "metadata.ndjson" if metadata_ndjson_info else "metadata.json"
-        raise HTTPException(status_code=400, detail=f"{metadata_name} is too large")
+        raise InvalidRequestError(f"{metadata_name} is too large")
 
     return ImportZipManifest(
         names=names,
@@ -137,7 +126,7 @@ def iter_import_gallery_entries(
     try:
         zf = zipfile.ZipFile(zip_path)
     except zipfile.BadZipFile as e:
-        raise HTTPException(status_code=400, detail="Import file must be a valid ZIP") from e
+        raise InvalidRequestError("Import file must be a valid ZIP") from e
 
     with zf:
         yield from _iter_zip_import_entries(zf, progress=progress)
@@ -147,7 +136,7 @@ def count_import_gallery_entries(zip_path: Path) -> int:
     try:
         zf = zipfile.ZipFile(zip_path)
     except zipfile.BadZipFile as e:
-        raise HTTPException(status_code=400, detail="Import file must be a valid ZIP") from e
+        raise InvalidRequestError("Import file must be a valid ZIP") from e
 
     with zf:
         manifest = validate_import_zip_infos(zf)
@@ -157,9 +146,9 @@ def count_import_gallery_entries(zip_path: Path) -> int:
             metadata = _read_import_metadata_json(zf)
             raw_images_value = metadata.get("images")
             if not isinstance(raw_images_value, list):
-                raise HTTPException(status_code=400, detail="metadata.json images must be a list")
+                raise InvalidRequestError("metadata.json images must be a list")
             if len(raw_images_value) > config.IMPORT_MAX_ENTRIES:
-                raise HTTPException(status_code=400, detail="Import metadata contains too many entries")
+                raise InvalidRequestError("Import metadata contains too many entries")
             raw_images = raw_images_value
 
         count = 0
@@ -171,14 +160,11 @@ def count_import_gallery_entries(zip_path: Path) -> int:
                 continue
             zip_name = _metadata_entry_zip_name(raw_entry, manifest.names)
             if zip_name in seen_members:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Import metadata references an image more than once",
-                )
+                raise InvalidRequestError("Import metadata references an image more than once")
             seen_members.add(zip_name)
             count += 1
             if count > config.IMPORT_MAX_ENTRIES:
-                raise HTTPException(status_code=400, detail="Import metadata contains too many entries")
+                raise InvalidRequestError("Import metadata contains too many entries")
         return count
 
 
@@ -208,10 +194,7 @@ async def stream_upload_to_tempfile(
                         break
                     total += len(chunk)
                     if total > max_bytes:
-                        raise HTTPException(
-                            status_code=400,
-                            detail="Uploaded archive is too large",
-                        )
+                        raise InvalidRequestError("Uploaded archive is too large")
                     out.write(chunk)
         except BaseException:
             tmp_path.unlink(missing_ok=True)
@@ -225,7 +208,7 @@ async def stream_upload_to_tempfile(
 
     if total == 0:
         tmp_path.unlink(missing_ok=True)
-        raise HTTPException(status_code=400, detail="Uploaded archive is empty")
+        raise InvalidRequestError("Uploaded archive is empty")
 
     return tmp_path
 
@@ -235,17 +218,17 @@ def _read_import_metadata_json(zf: zipfile.ZipFile) -> dict[str, Any]:
         with zf.open("metadata.json") as stream:
             raw_metadata = stream.read(config.IMPORT_MAX_METADATA_BYTES + 1)
     except KeyError as e:
-        raise HTTPException(status_code=400, detail="metadata.json is required") from e
+        raise InvalidRequestError("metadata.json is required") from e
 
     if len(raw_metadata) > config.IMPORT_MAX_METADATA_BYTES:
-        raise HTTPException(status_code=400, detail="metadata.json is too large")
+        raise InvalidRequestError("metadata.json is too large")
 
     try:
         metadata = json.loads(raw_metadata.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as e:
-        raise HTTPException(status_code=400, detail="metadata.json is invalid") from e
+        raise InvalidRequestError("metadata.json is invalid") from e
     if not isinstance(metadata, dict):
-        raise HTTPException(status_code=400, detail="metadata.json is invalid")
+        raise InvalidRequestError("metadata.json is invalid")
     return metadata
 
 
@@ -253,7 +236,7 @@ def _iter_import_metadata_ndjson(zf: zipfile.ZipFile) -> Iterator[dict[str, Any]
     try:
         stream = zf.open("metadata.ndjson")
     except KeyError as e:
-        raise HTTPException(status_code=400, detail="metadata.ndjson is required") from e
+        raise InvalidRequestError("metadata.ndjson is required") from e
 
     with stream:
         total_bytes = 0
@@ -264,16 +247,16 @@ def _iter_import_metadata_ndjson(zf: zipfile.ZipFile) -> Iterator[dict[str, Any]
                 break
             total_bytes += len(raw_line)
             if len(raw_line) > config.IMPORT_MAX_METADATA_BYTES:
-                raise HTTPException(status_code=400, detail="metadata.ndjson line is too large")
+                raise InvalidRequestError("metadata.ndjson line is too large")
             if total_bytes > config.IMPORT_MAX_METADATA_BYTES:
-                raise HTTPException(status_code=400, detail="metadata.ndjson is too large")
+                raise InvalidRequestError("metadata.ndjson is too large")
             line = raw_line.strip()
             if not line:
                 continue
             try:
                 record = json.loads(line.decode("utf-8"))
             except (UnicodeDecodeError, json.JSONDecodeError) as e:
-                raise HTTPException(status_code=400, detail="metadata.ndjson is invalid") from e
+                raise InvalidRequestError("metadata.ndjson is invalid") from e
             if not isinstance(record, dict):
                 continue
             if str(record.get("type") or "") != "image":
@@ -282,10 +265,7 @@ def _iter_import_metadata_ndjson(zf: zipfile.ZipFile) -> Iterator[dict[str, Any]
             if isinstance(image, dict):
                 image_records += 1
                 if image_records > config.IMPORT_MAX_ENTRIES:
-                    raise HTTPException(
-                        status_code=400,
-                        detail="Import metadata contains too many entries",
-                    )
+                    raise InvalidRequestError("Import metadata contains too many entries")
                 yield image
 
 
@@ -329,9 +309,9 @@ def _iter_zip_import_entries(
         metadata = _read_import_metadata_json(zf)
         raw_metadata_images = metadata.get("images")
         if not isinstance(raw_metadata_images, list):
-            raise HTTPException(status_code=400, detail="metadata.json images must be a list")
+            raise InvalidRequestError("metadata.json images must be a list")
         if len(raw_metadata_images) > config.IMPORT_MAX_ENTRIES:
-            raise HTTPException(status_code=400, detail="Import metadata contains too many entries")
+            raise InvalidRequestError("Import metadata contains too many entries")
         raw_images = raw_metadata_images
 
     used_names: set[str] = set()
@@ -348,7 +328,7 @@ def _iter_zip_import_entries(
             continue
         processed_count += 1
         if processed_count > config.IMPORT_MAX_ENTRIES:
-            raise HTTPException(status_code=400, detail="Import metadata contains too many entries")
+            raise InvalidRequestError("Import metadata contains too many entries")
 
         exported_filename = str(raw_entry.get("filename") or "")
         zip_name = _metadata_entry_zip_name(raw_entry, names)
@@ -361,10 +341,7 @@ def _iter_zip_import_entries(
             _emit_import_progress(progress, processed_count, importable_count, skipped_count)
             continue
         if zip_name in seen_members:
-            raise HTTPException(
-                status_code=400,
-                detail="Import metadata references an image more than once",
-            )
+            raise InvalidRequestError("Import metadata references an image more than once")
         seen_members.add(zip_name)
 
         try:
@@ -380,16 +357,10 @@ def _iter_zip_import_entries(
             _emit_import_progress(progress, processed_count, importable_count, skipped_count)
             continue
         if len(image_bytes) > limit:
-            raise HTTPException(
-                status_code=400,
-                detail="Imported image is too large",
-            )
+            raise InvalidRequestError("Imported image is too large")
         output_bytes += len(image_bytes)
         if output_bytes > import_max_output_bytes():
-            raise HTTPException(
-                status_code=400,
-                detail="Imported image output size exceeds limit",
-            )
+            raise InvalidRequestError("Imported image output size exceeds limit")
         try:
             validate_image_bytes(
                 image_bytes,

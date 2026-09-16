@@ -9,10 +9,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import APIRouter, Body, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Body, File, Form, UploadFile
 
 from ..core.image_models import MAX_PROMPT_CHARS
 from . import presets
+from ..core.errors import (
+    DomainError,
+    InvalidRequestError,
+    RateLimitedError,
+    UpstreamTimeoutError,
+)
 from ..runtime.state import state, utc_lease_expires_at
 from .uploads import is_image_upload, resolve_upload_content_type
 from ..core import settings as config
@@ -212,7 +218,7 @@ async def _acquire_assistant_slot(timeout_seconds: int) -> tuple[str, str]:
         now=utc_now(),
     )
     if not slot_name:
-        raise HTTPException(status_code=429, detail="AI Assistant is at its concurrency limit")
+        raise RateLimitedError("AI Assistant is at its concurrency limit")
     return slot_name, owner
 
 
@@ -237,7 +243,7 @@ async def _assistant_request_limit(timeout_seconds: int, *, wait_for_slot: bool 
         async with semaphore:
             try:
                 slot_name, slot_owner = await _acquire_assistant_slot(timeout_seconds)
-            except HTTPException as e:
+            except DomainError as e:
                 if not wait_for_slot or e.status_code != 429:
                     raise
             else:
@@ -282,22 +288,22 @@ def _assistant_settings(draft: AIAssistantSettingsRequest | None = None) -> dict
 def _resolve_runtime(*, vision: bool = False, settings: dict | None = None) -> AssistantRuntime:
     settings = presets.effective_ai_assistant_settings(settings if settings is not None else _assistant_settings())
     if not settings.get("enabled"):
-        raise HTTPException(status_code=400, detail="AI Assistant is not enabled")
+        raise InvalidRequestError("AI Assistant is not enabled")
     api_url = str(settings.get("api_url") or "").strip()
     if not api_url:
-        raise HTTPException(status_code=400, detail="Prompt Optimizer endpoint URL is not configured for AI Assistant")
+        raise InvalidRequestError("Prompt Optimizer endpoint URL is not configured for AI Assistant")
     api_key = presets.resolve_ai_assistant_api_key(settings)
     if not api_key:
-        raise HTTPException(status_code=400, detail="Prompt Optimizer API key is not configured for AI Assistant")
+        raise InvalidRequestError("Prompt Optimizer API key is not configured for AI Assistant")
     api_path = assistant_client.normalize_assistant_api_path(settings.get("api_path"))
     try:
         endpoint = assistant_client.validate_assistant_endpoint(api_url, api_path)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+        raise InvalidRequestError(str(e)) from e
     model_key = "vision_model" if vision else "model"
     model = str(settings.get(model_key) or settings.get("model") or "").strip()
     if not model:
-        raise HTTPException(status_code=400, detail="AI Assistant model is not configured")
+        raise InvalidRequestError("AI Assistant model is not configured")
     timeout_seconds = int(settings.get("timeout_seconds") or 60)
     return AssistantRuntime(api_url, api_key, api_path, endpoint, model, timeout_seconds)
 
@@ -338,12 +344,12 @@ async def _assistant_json(
             )
             return _truncate_assistant_data(data), model_used, duration_ms
     except assistant_client.AssistantTimeoutError as e:
-        raise HTTPException(status_code=504, detail=str(e)) from e
+        raise UpstreamTimeoutError(str(e)) from e
     except assistant_client.AssistantError as e:
         status_code = 400 if e.status == 400 else 502
-        raise HTTPException(status_code=status_code, detail=str(e)) from e
+        raise DomainError(str(e), status_code=status_code) from e
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+        raise InvalidRequestError(str(e)) from e
 
 
 

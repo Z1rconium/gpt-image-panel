@@ -9,9 +9,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import APIRouter, Body, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Body, File, Form, Request, UploadFile
 
 from . import presets
+from ..core.errors import (
+    DomainError,
+    NotFoundError,
+    RateLimitedError,
+)
 from ..runtime.state import state, utc_lease_expires_at
 from .uploads import is_image_upload, resolve_upload_content_type
 from ..core import settings as config
@@ -133,12 +138,9 @@ async def batch_analyze_gallery(req: AssistantGalleryBatchRequest):
         snapshot = await asyncio.to_thread(get_gallery_selection_snapshot, filters)
         requested_count = int(snapshot.get("count") or 0)
         if requested_count <= 0:
-            raise HTTPException(status_code=404, detail="Gallery entries not found")
+            raise NotFoundError("Gallery entries not found")
         if requested_count > config.AI_ASSISTANT_BATCH_MAX_IMAGES:
-            raise HTTPException(
-                status_code=413,
-                detail=f"Gallery AI analysis is limited to {config.AI_ASSISTANT_BATCH_MAX_IMAGES} images per batch",
-            )
+            raise DomainError(f"Gallery AI analysis is limited to {config.AI_ASSISTANT_BATCH_MAX_IMAGES} images per batch", status_code=413)
         payload = {
             "filters": filters,
             "checkpoint": None,
@@ -150,15 +152,12 @@ async def batch_analyze_gallery(req: AssistantGalleryBatchRequest):
     else:
         ids = req.ids or []
         if len(ids) > config.AI_ASSISTANT_BATCH_MAX_IMAGES:
-            raise HTTPException(
-                status_code=413,
-                detail=f"Gallery AI analysis is limited to {config.AI_ASSISTANT_BATCH_MAX_IMAGES} images per batch",
-            )
+            raise DomainError(f"Gallery AI analysis is limited to {config.AI_ASSISTANT_BATCH_MAX_IMAGES} images per batch", status_code=413)
         entries = await asyncio.to_thread(get_gallery_entries_by_ids, ids)
         found_ids = {entry.id for entry in entries}
         requested_ids = [image_id for image_id in ids if image_id in found_ids]
         if not requested_ids:
-            raise HTTPException(status_code=404, detail="Gallery entries not found")
+            raise NotFoundError("Gallery entries not found")
         payload = {"ids": requested_ids, "target_language": req.target_language}
         job_requested_count = len(ids)
         missing_count = max(0, len(ids) - len(requested_ids))
@@ -174,7 +173,7 @@ async def batch_analyze_gallery(req: AssistantGalleryBatchRequest):
         max_active=MAX_ACTIVE_AI_ANALYZE_JOBS,
     )
     if not job:
-        raise HTTPException(status_code=429, detail="A gallery AI analysis job is already queued or running")
+        raise RateLimitedError("A gallery AI analysis job is already queued or running")
     _kick_ai_analyze_dispatcher()
     return AssistantGalleryBatchJobStatus(**_ai_analyze_payload(job))
 
@@ -182,7 +181,7 @@ async def batch_analyze_gallery(req: AssistantGalleryBatchRequest):
 async def get_batch_analyze_job(job_id: str):
     job = await asyncio.to_thread(get_gallery_job, AI_ANALYZE_JOB_KIND, job_id)
     if not job:
-        raise HTTPException(status_code=404, detail="Gallery AI analysis job not found")
+        raise NotFoundError("Gallery AI analysis job not found")
     return AssistantGalleryBatchJobStatus(**_ai_analyze_payload(job))
 
 
@@ -430,7 +429,7 @@ async def _run_ai_analyze_job(job: dict[str, Any]) -> None:
                 except AIAnalyzeJobLeaseLost:
                     logger.warning("Stopping gallery AI analysis job %s after losing its lease", job_id)
                     return
-                except HTTPException as e:
+                except DomainError as e:
                     if e.status_code == 429:
                         try:
                             await _wait_for_ai_analyze_backpressure(job_id, lease_owner)

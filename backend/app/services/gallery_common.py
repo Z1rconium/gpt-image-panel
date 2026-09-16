@@ -10,10 +10,14 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote
 
-from fastapi import APIRouter, Body, File, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Body, File, Query, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from starlette.background import BackgroundTask
 
+from ..core.errors import (
+    NotFoundError,
+    UnprocessableRequestError,
+)
 from ..runtime.state import state
 from .gallery_archive_export import (
     iter_gallery_zip_chunks,
@@ -294,10 +298,7 @@ def normalize_gallery_date_filter(value: str | None, end_of_day: bool = False) -
         try:
             parsed_date = datetime.strptime(raw_value, "%Y-%m-%d")
         except ValueError as e:
-            raise HTTPException(
-                status_code=422,
-                detail="Gallery date filters must use YYYY-MM-DD or ISO datetime",
-            ) from e
+            raise UnprocessableRequestError("Gallery date filters must use YYYY-MM-DD or ISO datetime") from e
         parsed = parsed_date.replace(
             hour=23 if end_of_day else 0,
             minute=59 if end_of_day else 0,
@@ -310,10 +311,7 @@ def normalize_gallery_date_filter(value: str | None, end_of_day: bool = False) -
     try:
         parsed = datetime.fromisoformat(raw_value.replace("Z", "+00:00"))
     except ValueError as e:
-        raise HTTPException(
-            status_code=422,
-            detail="Gallery date filters must use YYYY-MM-DD or ISO datetime",
-        ) from e
+        raise UnprocessableRequestError("Gallery date filters must use YYYY-MM-DD or ISO datetime") from e
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc).isoformat()
@@ -382,7 +380,7 @@ async def _cleanup_gallery_selection_tokens() -> None:
 async def _gallery_filters_from_selection_token(selection_token: str | None) -> dict:
     token = str(selection_token or "").strip()
     if not token:
-        raise HTTPException(status_code=422, detail="selection_token is required")
+        raise UnprocessableRequestError("selection_token is required")
 
     job = await asyncio.to_thread(
         get_gallery_job,
@@ -390,18 +388,18 @@ async def _gallery_filters_from_selection_token(selection_token: str | None) -> 
         token,
     )
     if not job:
-        raise HTTPException(status_code=404, detail="Gallery selection token not found")
+        raise NotFoundError("Gallery selection token not found")
 
     payload = job.get("payload") or {}
     expires_at = _parse_gallery_token_timestamp(payload.get("expires_at"))
     if not expires_at or expires_at <= datetime.now(timezone.utc):
         await asyncio.to_thread(delete_gallery_job, GALLERY_SELECTION_TOKEN_KIND, token)
-        raise HTTPException(status_code=404, detail="Gallery selection token expired")
+        raise NotFoundError("Gallery selection token expired")
 
     filters = payload.get("filters")
     if not isinstance(filters, dict):
         await asyncio.to_thread(delete_gallery_job, GALLERY_SELECTION_TOKEN_KIND, token)
-        raise HTTPException(status_code=404, detail="Gallery selection token not found")
+        raise NotFoundError("Gallery selection token not found")
     return filters
 
 

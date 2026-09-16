@@ -12,6 +12,7 @@ from starlette.middleware.gzip import GZipMiddleware, GZipResponder
 from starlette.types import Message, Receive, Scope, Send
 
 from .csp import CONTENT_SECURITY_POLICY
+from ..core.errors import DomainError
 from ..core.redaction import redact_sensitive_text
 from ..core import security as auth
 from ..core import settings as config
@@ -525,6 +526,25 @@ def register_middleware(app):
 def register_exception_handlers(app):
     @app.exception_handler(HTTPException)
     async def http_exception_handler(request: Request, exc: HTTPException):
+        logger.warning(
+            "Request rejected path=%s client=%s status=%s detail=%s correlation_id=%s",
+            request.url.path,
+            auth.get_client_ip(request),
+            exc.status_code,
+            exc.detail,
+            _correlation_id(request),
+        )
+        return error_response(
+            request,
+            exc.status_code,
+            _error_code_for_status(exc.status_code),
+            exc.detail,
+        )
+
+    @app.exception_handler(DomainError)
+    async def domain_error_handler(request: Request, exc: DomainError):
+        # Services raise DomainError; the status and envelope stay here, so the
+        # response is identical to the HTTPException path.
         logger.warning(
             "Request rejected path=%s client=%s status=%s detail=%s correlation_id=%s",
             request.url.path,

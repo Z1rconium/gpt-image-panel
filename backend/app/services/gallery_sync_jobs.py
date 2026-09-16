@@ -12,8 +12,8 @@ import logging
 import os
 
 
-from fastapi import HTTPException
 
+from ..core.errors import RateLimitedError
 from ..core import settings as config
 from ..core.utils import utc_now
 from ..integrations.r2 import config as r2_config
@@ -103,10 +103,7 @@ async def _create_reserved_gallery_sync_job(
 ) -> dict:
     active_count = await asyncio.to_thread(count_active_gallery_jobs, "sync")
     if active_count >= MAX_ACTIVE_SYNC_JOBS:
-        raise HTTPException(
-            status_code=429,
-            detail="A gallery R2 sync job is already queued or running.",
-        )
+        raise RateLimitedError("A gallery R2 sync job is already queued or running.")
     return await asyncio.to_thread(_create_gallery_sync_job, total_count, payload)
 
 

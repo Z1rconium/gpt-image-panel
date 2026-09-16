@@ -12,11 +12,14 @@ import os
 from pathlib import Path
 
 
-from fastapi import HTTPException
 
 from .gallery_archive_import import iter_import_gallery_entries
 from .job_queue import kick_thumbnail_dispatcher
 from ..core.utils import utc_now
+from ..core.errors import (
+    DomainError,
+    RateLimitedError,
+)
 from ..repositories.coordination import (
     release_import_upload_reservation,
     reserve_gallery_job_capacity,
@@ -70,10 +73,7 @@ async def _create_reserved_gallery_import_job(
         max_active=MAX_ACTIVE_IMPORT_JOBS,
     )
     if not job:
-        raise HTTPException(
-            status_code=429,
-            detail="A gallery import job is already queued or running.",
-        )
+        raise RateLimitedError("A gallery import job is already queued or running.")
     return job
 
 
@@ -167,7 +167,7 @@ async def _run_gallery_import_job(job: dict) -> None:
         kick_thumbnail_dispatcher()
     except asyncio.CancelledError:
         raise
-    except HTTPException as e:
+    except DomainError as e:
         detail = str(e.detail)
         logger.warning("Gallery import job %s failed: %s", job_id, detail)
         await _publish_gallery_job(

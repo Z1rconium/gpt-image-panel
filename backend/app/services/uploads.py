@@ -1,6 +1,7 @@
 from pathlib import Path
 
-from fastapi import HTTPException, UploadFile
+from ..core.errors import InvalidRequestError
+from fastapi import UploadFile
 
 from ..core.media import (
     IMAGE_CONTENT_TYPE_FORMATS,
@@ -45,4 +46,4 @@ def validate_upload_image_bytes(image_bytes: bytes, filename: str, content_type:
             content_type=content_type,
         )
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+        raise InvalidRequestError(str(e)) from e

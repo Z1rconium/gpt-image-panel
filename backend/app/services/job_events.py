@@ -5,13 +5,13 @@ import json
 import logging
 import time
 
-from fastapi import HTTPException
 
 from ..runtime.state import (
     GENERATE_JOB_PERSIST_INTERVAL_SECONDS,
     GENERATE_JOBS_BROADCAST_DEBOUNCE_SECONDS,
     state,
 )
+from ..core.errors import UnprocessableRequestError
 from ..core import settings as config
 from ..core import validators as ssrf
 from ..core.constants import ACTIVE_GENERATE_JOB_STATUSES
@@ -346,12 +346,9 @@ def validate_job_webhook_url(webhook_url: str | None) -> str | None:
     try:
         ssrf.validate_webhook_url(normalized_url, config.WEBHOOK_HOST_ALLOWLIST)
     except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e)) from e
+        raise UnprocessableRequestError(str(e)) from e
     if len(config.WEBHOOK_SIGNING_SECRET.encode("utf-8")) < 32:
-        raise HTTPException(
-            status_code=422,
-            detail="WEBHOOK_SIGNING_SECRET must contain at least 32 bytes",
-        )
+        raise UnprocessableRequestError("WEBHOOK_SIGNING_SECRET must contain at least 32 bytes")
     return normalized_url
 
 

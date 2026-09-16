@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from fastapi import HTTPException
 
 from ..runtime.state import MAX_GENERATE_JOBS, state
 from .presets import (
@@ -17,6 +16,11 @@ from .presets import (
     get_upstream_socks5_proxy,
     get_webhook_url,
     load_api_settings,
+)
+from ..core.errors import (
+    InvalidRequestError,
+    RateLimitedError,
+    UnprocessableRequestError,
 )
 from ..core import settings as config
 from ..core import validators as ssrf
@@ -314,7 +318,7 @@ def build_edit_request_from_form(
             webhook_url=webhook_url,
         )
     except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e)) from e
+        raise UnprocessableRequestError(str(e)) from e
 
 
 async def queue_image_job(
@@ -350,32 +354,26 @@ async def queue_image_job(
     try:
         req.normalize_model_options(resolved_api_path)
     except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e)) from e
+        raise UnprocessableRequestError(str(e)) from e
     if operation == "edit" and is_image_25(req.model):
         for source in edit_sources_payload or []:
             if source.get("content_type") not in {"image/png", "image/jpeg", "image/webp"}:
-                raise HTTPException(status_code=422, detail="GPT Image 2.5 edit inputs must be PNG, JPEG or WebP; convert this image before editing")
+                raise UnprocessableRequestError("GPT Image 2.5 edit inputs must be PNG, JPEG or WebP; convert this image before editing")
             if int(source.get("byte_size") or 0) >= 50 * 1024 * 1024:
-                raise HTTPException(status_code=422, detail="GPT Image 2.5 edit inputs must be smaller than 50 MB")
+                raise UnprocessableRequestError("GPT Image 2.5 edit inputs must be smaller than 50 MB")
 
     if getattr(req, "stream", False) and resolved_api_path not in {
         "/v1/images/generations",
         "/v1/images/edits",
     }:
-        raise HTTPException(
-            status_code=422,
-            detail="Streaming preview requires /v1/images/generations or /v1/images/edits",
-        )
+        raise UnprocessableRequestError("Streaming preview requires /v1/images/generations or /v1/images/edits")
 
     if not api_url:
-        raise HTTPException(
-            status_code=400,
-            detail="API URL not configured. Please set it in Settings.",
-        )
+        raise InvalidRequestError("API URL not configured. Please set it in Settings.")
     try:
         ssrf.normalize_upstream_base_url(api_url)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+        raise InvalidRequestError(str(e)) from e
     get_effective_preset_api_key(active_preset)
     get_upstream_socks5_proxy()
 
@@ -414,10 +412,10 @@ async def queue_image_job(
         )
     except ImageJobQueueFullError as e:
         metrics.increment("image_jobs.rejected.queue_full")
-        raise HTTPException(status_code=429, detail="Generation job queue is full") from e
+        raise RateLimitedError("Generation job queue is full") from e
     except EditSourceQueueFullError as e:
         metrics.increment("image_jobs.rejected.edit_source_full")
-        raise HTTPException(status_code=429, detail="Edit source queue is full") from e
+        raise RateLimitedError("Edit source queue is full") from e
     except Exception:
         raise
 

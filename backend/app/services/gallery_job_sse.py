@@ -11,12 +11,13 @@ picked up by polling each job's updated_at edge (see job_events)."""
 import asyncio
 import time
 
-from fastapi import (
-    HTTPException,
-    Request,
-)
+from fastapi import Request
 from fastapi.responses import StreamingResponse
 
+from ..core.errors import (
+    NotFoundError,
+    RateLimitedError,
+)
 from ..runtime.state import state
 from .job_events import publish_job_edges, publish_queue, serialize_sse_event
 from .poll_backoff import next_poll_delay
@@ -149,12 +150,12 @@ async def stream_gallery_job(
 ):
     job = await asyncio.to_thread(get_gallery_job, kind, job_id)
     if not job:
-        raise HTTPException(status_code=404, detail=not_found_detail)
+        raise NotFoundError(not_found_detail)
 
     client_ip = auth.get_client_ip(request)
     sse_lease = await sse_limiter.acquire(client_ip)
     if not sse_lease:
-        raise HTTPException(status_code=429, detail="Too many SSE connections")
+        raise RateLimitedError("Too many SSE connections")
 
     async def event_stream():
         start = time.monotonic()

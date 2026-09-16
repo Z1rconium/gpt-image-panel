@@ -1,4 +1,5 @@
 from backend.tests.support.contract import *  # noqa: F403
+from backend.app.core.errors import RateLimitedError
 
 def test_ai_assistant_health_reports_success_and_config_errors(client, monkeypatch):
     settings = client.get("/api/settings").json()
@@ -995,7 +996,7 @@ def test_ai_assistant_gallery_batch_analysis_retries_assistant_slot_backpressure
         nonlocal calls
         calls += 1
         if calls == 1:
-            raise assistant_router.HTTPException(status_code=429, detail="AI Assistant is at its concurrency limit")
+            raise RateLimitedError("AI Assistant is at its concurrency limit")
 
     monkeypatch.setattr(assistant_router, "AI_ASSISTANT_SLOT_RETRY_SECONDS", 0)
     monkeypatch.setattr(assistant_router, "_analyze_gallery_image_with_lease_renewal", fake_analyze_with_lease)
