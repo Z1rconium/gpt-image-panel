@@ -20,14 +20,14 @@ from pathlib import Path
 from typing import Any, Iterable, Iterator, Sequence
 from urllib.parse import quote
 
-from ..core import settings as config
-from ..core.api_paths import default_model_for_api_path, normalize_api_preset
-from ..core.cdn import signed_media_url
-from ..core.constants import ACTIVE_GENERATE_JOB_STATUSES
-from ..core.observability import metrics, observe_job_stage
-from ..core.secrets import configured_secret_ids
-from ..core.utils import utc_now
-from ..core.validators import (
+from ...core import settings as config
+from ...core.api_paths import default_model_for_api_path, normalize_api_preset
+from ...core.cdn import signed_media_url
+from ...core.constants import ACTIVE_GENERATE_JOB_STATUSES
+from ...core.observability import metrics, observe_job_stage
+from ...core.secrets import configured_secret_ids
+from ...core.utils import utc_now
+from ...core.validators import (
     get_env_var_ref_name,
     is_malformed_env_var_ref,
     normalize_secret_env_ref_or_plaintext,
@@ -35,9 +35,9 @@ from ..core.validators import (
     normalize_socks5_proxy_url,
     normalize_webhook_url,
 )
-from ..schemas.gallery import GalleryEntry, GalleryFilterOptions
-from ..schemas.snippets import PromptSnippet
-from ..core.media import (
+from ...schemas.gallery import GalleryEntry, GalleryFilterOptions
+from ...schemas.snippets import PromptSnippet
+from ...core.media import (
     IMAGE_CONTENT_TYPE_FORMATS,
     IMAGE_EXTENSION_FORMATS,
     IMAGE_FILE_EXTENSIONS,
@@ -53,7 +53,7 @@ from ..core.media import (
     validate_image_header_bytes,
     validate_image_bytes,
 )
-from .image_files import (
+from ..image_files import (
     delete_image_from_disk as _delete_image_unlocked,
     promote_image_temp as _promote_image_temp_unlocked,
     save_image_to_temp as _save_image_temp_unlocked,
@@ -61,7 +61,7 @@ from .image_files import (
     scan_image_files as _scan_image_files,
     validate_image_file,
 )
-from .thumbnails import (
+from ..thumbnails import (
     create_thumbnail_temp as _create_thumbnail_temp_unlocked,
     create_thumbnail_temp_from_path as _create_thumbnail_temp_from_path_unlocked,
     delete_thumbnail as _delete_thumbnail_unlocked,
@@ -81,208 +81,52 @@ _current_db_metric: ContextVar[str | None] = ContextVar(
 )
 
 
-class ImageJobQueueFullError(RuntimeError):
-    """Raised when the SQLite-backed image unit queue has no remaining capacity."""
+from .constants import (
+    AI_ASSISTANT_SETTINGS_KEY,
+    DATA_DIR_MODE,
+    DATA_FILE_MODE,
+    DATA_PERMISSION_CHECK_INTERVAL_SECONDS,
+    EditSourceQueueFullError,
+    GALLERY_COLUMNS,
+    GALLERY_COUNT_CACHE_SECONDS,
+    GALLERY_FTS_MIN_QUERY_LENGTH,
+    GALLERY_FTS_VERSION,
+    GALLERY_FTS_VERSION_KEY,
+    GALLERY_IMPORT_BATCH_SIZE,
+    GALLERY_JOB_COLUMNS,
+    GALLERY_ORPHAN_FILE_TTL_SECONDS,
+    GALLERY_ORPHAN_GC_BATCH_SIZE,
+    GALLERY_PAGE_ANCHOR_INTERVAL_PAGES,
+    GALLERY_PAGE_ANCHOR_INVALIDATING_UPDATE_FIELDS,
+    GALLERY_PAGE_ANCHOR_MAX_PER_QUERY,
+    GALLERY_PAGE_ANCHOR_SMALL_OFFSET_THRESHOLD,
+    GALLERY_SYNC_BATCH_SIZE,
+    GALLERY_TOTAL_BYTES_CACHE_SECONDS,
+    GENERATE_JOB_COLUMNS,
+    IMAGE_JOB_UNIT_COLUMNS,
+    INTEGER_GALLERY_COLUMNS,
+    INTEGER_GENERATE_JOB_COLUMNS,
+    ImageJobQueueFullError,
+    MAX_PERSISTED_JOB_TEXT_CHARS,
+    NODEIMAGE_SETTINGS_KEY,
+    PROMPT_OPTIMIZER_SETTINGS_KEY,
+    PROMPT_SNIPPET_COLUMNS,
+    R2_BACKUP_SETTINGS_KEY,
+    REQUIRED_GALLERY_COLUMNS,
+    SETTINGS_ACTIVE_PRESET_KEY,
+    SQLITE_IN_CLAUSE_CHUNK_SIZE,
+    SQLITE_TIMEOUT_SECONDS,
+    THUMBNAIL_CPU_SLOT_LEASE_SECONDS,
+    THUMBNAIL_JOB_LEASE_SECONDS,
+    THUMBNAIL_JOB_MAX_ATTEMPTS,
+    UPSTREAM_SOCKS5_PROXY_KEY,
+    WEBHOOK_URL_KEY,
+    WORKER_METRIC_SNAPSHOT_TTL_SECONDS,
+    _GALLERY_BYTES_CACHE_MAX_SIZE,
+    _GALLERY_COUNT_CACHE_MAX_SIZE,
+    _GALLERY_INTERNAL_COLUMNS,
+)
 
-
-class EditSourceQueueFullError(RuntimeError):
-    """Raised when pending edit source byte reservations exceed the configured cap."""
-
-
-GALLERY_COLUMNS = (
-    "id",
-    "prompt",
-    "size",
-    "filename",
-    "thumbnail_filename",
-    "created_at",
-    "completed_at",
-    "image_width",
-    "image_height",
-    "model",
-    "quality",
-    "output_format",
-    "output_compression",
-    "background",
-    "response_format",
-    "n",
-    "api_path",
-    "api_preset_name",
-    "duration",
-    "favorite",
-    "bytes",
-    "sha256",
-    "sort_seq",
-)
-REQUIRED_GALLERY_COLUMNS = {"id", "prompt", "size", "filename", "created_at"}
-_GALLERY_INTERNAL_COLUMNS = {"sort_seq"}
-INTEGER_GALLERY_COLUMNS = {
-    "image_width",
-    "image_height",
-    "output_compression",
-    "n",
-    "favorite",
-    "bytes",
-    "sort_seq",
-}
-GENERATE_JOB_COLUMNS = (
-    "job_id",
-    "status",
-    "stage",
-    "message",
-    "operation",
-    "prompt",
-    "size",
-    "created_at",
-    "started_at",
-    "completed_at",
-    "updated_at",
-    "model",
-    "quality",
-    "output_format",
-    "output_compression",
-    "background",
-    "response_format",
-    "n",
-    "completed_count",
-    "success_count",
-    "failure_count",
-    "api_path",
-    "api_preset_name",
-    "duration",
-    "stage_timings_json",
-    "image_id",
-    "image_url",
-    "images_json",
-    "image_width",
-    "image_height",
-    "usage_json",
-    "cost_json",
-    "streaming",
-    "partial_images",
-    "error",
-    "webhook_url",
-)
-IMAGE_JOB_UNIT_COLUMNS = (
-    "unit_id",
-    "parent_job_id",
-    "operation",
-    "unit_index",
-    "status",
-    "claimed_by",
-    "claim_expires_at",
-    "stage",
-    "message",
-    "error",
-    "result_json",
-    "stage_timings_json",
-    "usage_json",
-    "cost_json",
-    "duration",
-    "created_at",
-    "started_at",
-    "completed_at",
-    "updated_at",
-    "request_json",
-    "edit_sources_json",
-    "api_preset_id",
-    "api_preset_name",
-    "api_path",
-    "claim_token",
-    "attempts",
-)
-GALLERY_JOB_COLUMNS = (
-    "job_id",
-    "kind",
-    "status",
-    "stage",
-    "message",
-    "progress",
-    "filename",
-    "download_url",
-    "path",
-    "requested_count",
-    "processed_count",
-    "exported_count",
-    "missing_count",
-    "total_count",
-    "compared_count",
-    "uploaded_count",
-    "pending_upload_count",
-    "skipped_existing_count",
-    "missing_local_count",
-    "failed_count",
-    "bytes_total",
-    "bytes_written",
-    "bytes_uploaded",
-    "created_at",
-    "started_at",
-    "completed_at",
-    "updated_at",
-    "error",
-    "lease_owner",
-    "lease_expires_at",
-    "payload_json",
-)
-PROMPT_SNIPPET_COLUMNS = (
-    "id",
-    "title",
-    "prompt",
-    "favorite",
-    "created_at",
-    "updated_at",
-)
-INTEGER_GENERATE_JOB_COLUMNS = {
-    "output_compression",
-    "n",
-    "completed_count",
-    "success_count",
-    "failure_count",
-    "image_width",
-    "image_height",
-    "streaming",
-    "partial_images",
-}
-SETTINGS_ACTIVE_PRESET_KEY = "active_preset_id"
-UPSTREAM_SOCKS5_PROXY_KEY = "upstream_socks5_proxy"
-WEBHOOK_URL_KEY = "webhook_url"
-PROMPT_OPTIMIZER_SETTINGS_KEY = "prompt_optimizer_settings"
-AI_ASSISTANT_SETTINGS_KEY = "ai_assistant_settings"
-R2_BACKUP_SETTINGS_KEY = "r2_backup_settings"
-NODEIMAGE_SETTINGS_KEY = "nodeimage_settings"
-SQLITE_TIMEOUT_SECONDS = 30.0
-DATA_DIR_MODE = 0o700
-DATA_FILE_MODE = 0o600
-DATA_PERMISSION_CHECK_INTERVAL_SECONDS = 60.0
-GALLERY_SYNC_BATCH_SIZE = 500
-GALLERY_FTS_VERSION_KEY = "gallery_fts_version"
-GALLERY_FTS_VERSION = "trigram-v1"
-GALLERY_FTS_MIN_QUERY_LENGTH = 3
-SQLITE_IN_CLAUSE_CHUNK_SIZE = 900
-GALLERY_COUNT_CACHE_SECONDS = 2.0
-GALLERY_TOTAL_BYTES_CACHE_SECONDS = 2.0
-GALLERY_PAGE_ANCHOR_INTERVAL_PAGES = 100
-GALLERY_PAGE_ANCHOR_SMALL_OFFSET_THRESHOLD = 10_000
-GALLERY_PAGE_ANCHOR_MAX_PER_QUERY = 256
-GALLERY_PAGE_ANCHOR_INVALIDATING_UPDATE_FIELDS = {
-    "prompt",
-    "model",
-    "api_preset_name",
-    "size",
-    "favorite",
-    "created_at",
-    "sort_seq",
-}
-GALLERY_ORPHAN_FILE_TTL_SECONDS = 300
-GALLERY_ORPHAN_GC_BATCH_SIZE = 500
-GALLERY_IMPORT_BATCH_SIZE = 50
-MAX_PERSISTED_JOB_TEXT_CHARS = 2000
-_GALLERY_COUNT_CACHE_MAX_SIZE = 512
-_GALLERY_BYTES_CACHE_MAX_SIZE = 512
-THUMBNAIL_CPU_SLOT_LEASE_SECONDS = 600
-THUMBNAIL_JOB_LEASE_SECONDS = 600
-THUMBNAIL_JOB_MAX_ATTEMPTS = 3
-WORKER_METRIC_SNAPSHOT_TTL_SECONDS = 300
 
 _initialized_database_file: Path | None = None
 _resolved_database_file_raw: str = ""
@@ -2173,7 +2017,7 @@ def _overall_config_rows(conn: sqlite3.Connection) -> dict[str, dict[str, Any]]:
 
 
 def sync_overall_config_env_values(env_values: dict[str, tuple[str, bool]]) -> dict[str, dict[str, Any]]:
-    from ..core.overall_config import OVERALL_CONFIG_BY_NAME
+    from ...core.overall_config import OVERALL_CONFIG_BY_NAME
 
     _ensure_database()
     now = utc_now()
@@ -2241,7 +2085,7 @@ def list_overall_config_values() -> dict[str, dict[str, Any]]:
 def save_overall_config_overrides(
     updates: dict[str, str | None],
 ) -> dict[str, dict[str, Any]]:
-    from ..core.overall_config import OVERALL_CONFIG_BY_NAME
+    from ...core.overall_config import OVERALL_CONFIG_BY_NAME
 
     _ensure_database()
     now = utc_now()
