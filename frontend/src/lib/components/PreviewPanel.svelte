@@ -1,90 +1,113 @@
 <script lang="ts">
-import type { GenerateJobImage, GenerateJobStatus } from '$lib/api/types/jobs';
   import { onDestroy, tick } from 'svelte';
+  import type { GenerateJobImage, GenerateJobStatus } from '$lib/api/types/jobs';
   import { t } from '$lib/i18n';
-  import { displayImageSize, downloadUrl, filenameFromImageUrl, formatBeijingTime, stageLabel, statusLabel } from '$lib/utils/format';
+  import { previewStore } from '$lib/stores/preview';
+  import { displayImageSize, downloadUrl, filenameFromImageUrl, formatBeijingTime, stageLabel, statusLabel, thumbnailUrl } from '$lib/utils/format';
   import { canRunExposure, runExposure, type ExposureHandle } from '$lib/webgl/exposureScene';
 
-  export let loading = false;
-  export let error = '';
-  export let job: GenerateJobStatus | null = null;
-  export let imageUrl = '';
-  export let filename = '';
-  export let prompt = '';
-  export let streamingPreviewDataUrl = '';
-  export let onRegenerate: () => void = () => {};
-  export let onClear: () => void = () => {};
+  interface Props {
+    onRegenerate?: () => void;
+    onClear?: () => void;
+  }
 
-  let activeJobId = '';
-  let selectedImageId = '';
-  let loadedPreviewSrc = '';
-  let failedPreviewSrc = '';
+  let { onRegenerate = () => {}, onClear = () => {} }: Props = $props();
 
-  function normalizePreviewImages(currentJob: GenerateJobStatus | null, fallbackUrl: string, fallbackFilename: string): GenerateJobImage[] {
+  const loading = $derived($previewStore.loading);
+  const error = $derived($previewStore.error);
+  const job = $derived($previewStore.job);
+  const imageUrl = $derived($previewStore.imageUrl);
+  const filename = $derived($previewStore.filename);
+  const prompt = $derived($previewStore.prompt);
+  const streamingPreviewDataUrl = $derived($previewStore.streamingPreviewDataUrl);
+
+  let activeJobId = $state('');
+  let selectedImageId = $state('');
+  let loadedPreviewSrc = $state('');
+  let failedPreviewSrc = $state('');
+  let failedStripThumbs = $state<Record<string, boolean>>({});
+
+  type PreviewImage = GenerateJobImage & { thumb_url: string };
+
+  function normalizePreviewImages(currentJob: GenerateJobStatus | null, fallbackUrl: string, fallbackFilename: string): PreviewImage[] {
     const jobImages = currentJob?.images?.filter((image) => image.image_url || image.filename) || [];
     if (jobImages.length) {
       return jobImages.map((image, index) => {
         const image_url = image.image_url || `/api/image/${encodeURIComponent(image.filename)}`;
-        const filename = image.filename || filenameFromImageUrl(image_url);
+        const imageFilename = image.filename || filenameFromImageUrl(image_url);
         return {
-          image_id: image.image_id || filename || `${currentJob?.job_id || 'image'}-${index}`,
+          image_id: image.image_id || imageFilename || `${currentJob?.job_id || 'image'}-${index}`,
           image_url,
-          filename,
+          filename: imageFilename,
+          thumb_url: imageFilename ? thumbnailUrl(imageFilename) : image_url,
           image_width: image.image_width ?? null,
           image_height: image.image_height ?? null
         };
       });
     }
     if (!fallbackUrl) return [];
+    const imageFilename = fallbackFilename || filenameFromImageUrl(fallbackUrl);
     return [
       {
         image_id: currentJob?.image_id || fallbackFilename || fallbackUrl,
         image_url: fallbackUrl,
-        filename: fallbackFilename || filenameFromImageUrl(fallbackUrl),
+        filename: imageFilename,
+        thumb_url: imageFilename ? thumbnailUrl(imageFilename) : fallbackUrl,
         image_width: currentJob?.image_width ?? null,
         image_height: currentJob?.image_height ?? null
       }
     ];
   }
 
-  $: resultImages = normalizePreviewImages(job, imageUrl, filename);
-  $: if ((job?.job_id || '') !== activeJobId) {
-    activeJobId = job?.job_id || '';
-    selectedImageId = resultImages[0]?.image_id || '';
-  }
-  $: if (resultImages.length && !resultImages.some((image) => image.image_id === selectedImageId)) {
-    selectedImageId = resultImages[0].image_id;
-  }
-  $: selectedImage = resultImages.find((image) => image.image_id === selectedImageId) || resultImages[0] || null;
-  $: selectedImageUrl = selectedImage?.image_url || imageUrl;
-  $: selectedFilename = selectedImage?.filename || filename;
-  $: selectedImageIndex = selectedImage ? resultImages.findIndex((image) => image.image_id === selectedImage.image_id) : -1;
-  $: previewWidth = selectedImage?.image_width || job?.image_width || undefined;
-  $: previewHeight = selectedImage?.image_height || job?.image_height || undefined;
-  // The result seats into the well once it has actually arrived and decoded.
-  $: seated = Boolean(selectedImageUrl) && loadedPreviewSrc === selectedImageUrl && failedPreviewSrc !== selectedImageUrl;
-  $: previewFailed = Boolean(selectedImageUrl) && failedPreviewSrc === selectedImageUrl;
-  $: previewSize = displayImageSize({
-    size: job?.size || null,
-    image_width: selectedImage?.image_width ?? job?.image_width ?? null,
-    image_height: selectedImage?.image_height ?? job?.image_height ?? null
+  const resultImages = $derived(normalizePreviewImages(job, imageUrl, filename));
+
+  $effect(() => {
+    if ((job?.job_id || '') !== activeJobId) {
+      activeJobId = job?.job_id || '';
+      selectedImageId = resultImages[0]?.image_id || '';
+      failedStripThumbs = {};
+    }
   });
+  $effect(() => {
+    if (resultImages.length && !resultImages.some((image) => image.image_id === selectedImageId)) {
+      selectedImageId = resultImages[0].image_id;
+    }
+  });
+  const selectedImage = $derived(resultImages.find((image) => image.image_id === selectedImageId) || resultImages[0] || null);
+  const selectedImageUrl = $derived(selectedImage?.image_url || imageUrl);
+  const selectedFilename = $derived(selectedImage?.filename || filename);
+  const selectedImageIndex = $derived(selectedImage ? resultImages.findIndex((image) => image.image_id === selectedImage.image_id) : -1);
+  const previewWidth = $derived(selectedImage?.image_width || job?.image_width || undefined);
+  const previewHeight = $derived(selectedImage?.image_height || job?.image_height || undefined);
+  // The result seats into the well once it has actually arrived and decoded.
+  const seated = $derived(Boolean(selectedImageUrl) && loadedPreviewSrc === selectedImageUrl && failedPreviewSrc !== selectedImageUrl);
+  const previewFailed = $derived(Boolean(selectedImageUrl) && failedPreviewSrc === selectedImageUrl);
+  const previewSize = $derived(
+    displayImageSize({
+      size: job?.size || null,
+      image_width: selectedImage?.image_width ?? job?.image_width ?? null,
+      image_height: selectedImage?.image_height ?? job?.image_height ?? null
+    })
+  );
 
   // The exposure: DESIGN.md's one WebGL moment. Runs once per result, over
   // the plain CSS fade+scale below, and falls back to it entirely when
   // motion is reduced or WebGL is unavailable.
-  let previewImageEl: HTMLImageElement | null = null;
-  let exposureCanvasEl: HTMLCanvasElement | null = null;
-  let showExposureCanvas = false;
+  let previewImageEl = $state<HTMLImageElement | null>(null);
+  let exposureCanvasEl = $state<HTMLCanvasElement | null>(null);
+  let showExposureCanvas = $state(false);
   let exposedKey = '';
   let exposureRunId = 0;
   let exposureHandle: ExposureHandle | null = null;
 
-  $: activeExposureKey = seated && selectedImage ? `${job?.job_id || ''}::${selectedImage.image_id}` : '';
-  $: if (activeExposureKey && activeExposureKey !== exposedKey) {
-    exposedKey = activeExposureKey;
-    void triggerExposure(activeExposureKey);
-  }
+  const activeExposureKey = $derived(seated && selectedImage ? `${job?.job_id || ''}::${selectedImage.image_id}` : '');
+
+  $effect(() => {
+    if (activeExposureKey && activeExposureKey !== exposedKey) {
+      exposedKey = activeExposureKey;
+      void triggerExposure(activeExposureKey);
+    }
+  });
 
   function signatureDurationMs(): number {
     const fallback = 380;
@@ -139,10 +162,10 @@ import type { GenerateJobImage, GenerateJobStatus } from '$lib/api/types/jobs';
       {#if selectedFilename}
         <a href={downloadUrl(selectedFilename)} class="control-focus rounded-lg border border-stone-300 px-3 py-2 text-xs font-medium text-stone-700 hover:bg-stone-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800">{$t.common.download}</a>
       {/if}
-      <button type="button" class="control-focus rounded-lg border border-stone-300 px-3 py-2 text-xs font-medium text-stone-700 hover:bg-stone-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800" disabled={!job && !imageUrl} on:click={onRegenerate}>
+      <button type="button" class="control-focus rounded-lg border border-stone-300 px-3 py-2 text-xs font-medium text-stone-700 hover:bg-stone-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800" disabled={!job && !imageUrl} onclick={onRegenerate}>
         {$t.preview.regenerate}
       </button>
-      <button type="button" class="control-focus rounded-lg border border-stone-300 px-3 py-2 text-xs font-medium text-stone-700 hover:bg-stone-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800" on:click={onClear}>
+      <button type="button" class="control-focus rounded-lg border border-stone-300 px-3 py-2 text-xs font-medium text-stone-700 hover:bg-stone-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800" onclick={onClear}>
         {$t.common.clear}
       </button>
     </div>
@@ -184,11 +207,11 @@ import type { GenerateJobImage, GenerateJobStatus } from '$lib/api/types/jobs';
               decoding="async"
               width={previewWidth}
               height={previewHeight}
-              on:load={() => {
+              onload={() => {
                 loadedPreviewSrc = selectedImageUrl;
                 failedPreviewSrc = '';
               }}
-              on:error={() => {
+              onerror={() => {
                 failedPreviewSrc = selectedImageUrl;
               }}
             />
@@ -212,9 +235,16 @@ import type { GenerateJobImage, GenerateJobStatus } from '$lib/api/types/jobs';
                   type="button"
                   aria-label={$t.preview.selectResult(index + 1)}
                   class={`control-focus relative aspect-square overflow-hidden rounded-lg border ${result.image_id === selectedImage?.image_id ? 'border-emerald-400 ring-1 ring-emerald-400/40' : 'border-stone-200 hover:border-stone-400 dark:border-zinc-800 dark:hover:border-zinc-600'}`}
-                  on:click={() => (selectedImageId = result.image_id)}
+                  onclick={() => (selectedImageId = result.image_id)}
                 >
-                  <img src={result.image_url} alt={$t.preview.resultThumbAlt(index + 1)} class="h-full w-full object-cover" loading="lazy" decoding="async" />
+                  <img
+                    src={failedStripThumbs[result.image_id] ? result.image_url : result.thumb_url}
+                    alt={$t.preview.resultThumbAlt(index + 1)}
+                    class="h-full w-full object-cover"
+                    loading="lazy"
+                    decoding="async"
+                    onerror={() => (failedStripThumbs = { ...failedStripThumbs, [result.image_id]: true })}
+                  />
                   <span class="absolute left-1.5 top-1.5 rounded bg-white/90 px-1.5 py-0.5 text-xs font-semibold text-stone-700 dark:bg-zinc-950/80 dark:text-zinc-200">{index + 1}</span>
                 </button>
               {/each}
