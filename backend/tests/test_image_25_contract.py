@@ -238,7 +238,7 @@ def test_25_preview_uses_base64_memory_budget(client, monkeypatch):
 
 @pytest.mark.parametrize("kind", ["optimizer", "assistant-chat", "assistant-responses"])
 def test_assistant_upstream_truncation_is_reported(client, monkeypatch, kind):
-    from backend.app.integrations import assistant_client, prompt_optimizer_client
+    from backend.app.integrations import assistant_client, json_client, prompt_optimizer_client
 
     data = ({"status": "incomplete", "output": []} if kind == "assistant-responses" else {
         "choices": [{"message": {"content": '{"rewritten_prompt":"partial"}'}, "finish_reason": "length"}],
@@ -247,8 +247,8 @@ def test_assistant_upstream_truncation_is_reported(client, monkeypatch, kind):
         200, headers={"Content-Type": "application/json"},
         chunks=[json.dumps(data).encode()], peer_ip="93.184.216.34",
     ))
-    module = prompt_optimizer_client if kind == "optimizer" else assistant_client
-    monkeypatch.setattr(module, "get_pool", lambda: _FakePool(session))
+    # Both clients send their request through the shared JSON client.
+    monkeypatch.setattr(json_client, "get_pool", lambda: _FakePool(session))
     if kind == "optimizer":
         with pytest.raises(prompt_optimizer_client.UpstreamOptimizerError, match="truncated"):
             asyncio.run(prompt_optimizer_client.optimize_prompt(

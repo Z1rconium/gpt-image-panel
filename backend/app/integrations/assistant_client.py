@@ -10,7 +10,6 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-import aiohttp
 
 from ..core import settings as config
 from ..core import validators as ssrf
@@ -20,9 +19,8 @@ from ..core.api_paths import (
     build_upstream_url,
 )
 from ..core.media import configure_pillow_image_limits, validate_image_header_bytes
-from .session_pool import TIMEOUT_PROMPT_OPTIMIZER, get_pool
-from .upstream.errors import UpstreamApiError
-from .upstream.transport import classify_probe_status, read_limited_text_response
+from .json_client import UpstreamJsonError, json_headers, post_json
+from .upstream.transport import classify_probe_status
 
 try:
     from PIL import Image, ImageOps, UnidentifiedImageError
@@ -282,46 +280,22 @@ async def request_assistant_json(
             temperature=temperature,
         )
 
-    headers = {"Content-Type": "application/json"}
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
+    headers = json_headers(api_key)
 
     start = time.monotonic()
     try:
-        session = get_pool().get(timeout_kind=TIMEOUT_PROMPT_OPTIMIZER)
-        async with session.post(
-            endpoint,
-            json=payload,
+        data = await post_json(
+            url=endpoint,
+            payload=payload,
             headers=headers,
-            allow_redirects=False,
-            timeout=aiohttp.ClientTimeout(
-                total=timeout_seconds,
-                connect=min(timeout_seconds, 10.0),
-                sock_connect=min(timeout_seconds, 10.0),
-                sock_read=timeout_seconds,
-            ),
-        ) as resp:
-            ssrf.validate_response_peer_ip(resp, "AI Assistant endpoint")
-            if resp.status != 200:
-                raise AssistantError(
-                    f"AI Assistant upstream returned HTTP {resp.status}",
-                    status=resp.status,
-                )
-            try:
-                response_text = await read_limited_text_response(
-                    resp,
-                    config.AI_ASSISTANT_MAX_RESPONSE_MB * 1024 * 1024,
-                    label="AI Assistant response",
-                )
-                data = json.loads(response_text)
-            except UpstreamApiError as e:
-                raise AssistantError(str(e)) from e
-            except Exception as e:
-                raise AssistantError("AI Assistant returned non-JSON response") from e
-    except (aiohttp.ServerTimeoutError, TimeoutError, asyncio.TimeoutError) as e:
-        raise AssistantTimeoutError("AI Assistant request timed out") from e
-    except aiohttp.ClientError as e:
-        raise AssistantError(f"AI Assistant connection error: {e}") from e
+            prefix="AI Assistant",
+            timeout_seconds=timeout_seconds,
+            max_response_bytes=config.AI_ASSISTANT_MAX_RESPONSE_MB * 1024 * 1024,
+        )
+    except UpstreamJsonError as e:
+        if e.timed_out:
+            raise AssistantTimeoutError("AI Assistant request timed out") from e
+        raise AssistantError(str(e), status=e.status or 502) from e
 
     if data.get("status") == "incomplete" or any(
         choice.get("finish_reason") == "length"

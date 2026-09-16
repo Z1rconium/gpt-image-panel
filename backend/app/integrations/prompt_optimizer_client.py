@@ -1,5 +1,4 @@
 import asyncio
-import json
 import logging
 import os
 import re
@@ -12,9 +11,8 @@ import aiohttp
 
 from ..core import settings as config
 from ..core import validators as ssrf
-from .upstream.errors import UpstreamApiError
-from .upstream.transport import classify_probe_status, read_limited_text_response
-from .session_pool import TIMEOUT_PROMPT_OPTIMIZER, get_pool
+from .upstream.transport import classify_probe_status
+from .json_client import UpstreamJsonError, json_headers, post_json
 
 logger = logging.getLogger(__name__)
 
@@ -280,9 +278,7 @@ async def optimize_prompt(
 
     api_url = await validate_optimizer_endpoint_async(api_url)
 
-    headers = {"Content-Type": "application/json"}
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
+    headers = json_headers(api_key)
 
     payload = _build_prompt_optimizer_payload(
         model,
@@ -305,44 +301,19 @@ async def optimize_prompt(
     start = time.monotonic()
 
     try:
-        session = get_pool().get(timeout_kind=TIMEOUT_PROMPT_OPTIMIZER)
-        async with session.post(
-            api_url,
-            json=payload,
+        data = await post_json(
+            url=api_url,
+            payload=payload,
             headers=headers,
-            allow_redirects=False,
-            timeout=aiohttp.ClientTimeout(
-                total=timeout_seconds,
-                connect=min(float(timeout_seconds), 10.0),
-                sock_connect=min(float(timeout_seconds), 10.0),
-                sock_read=timeout_seconds,
-            ),
-        ) as resp:
-            ssrf.validate_response_peer_ip(resp, "Prompt optimizer endpoint")
-            if resp.status != 200:
-                logger.warning(
-                    "Prompt optimizer upstream error: status=%d",
-                    resp.status,
-                )
-                raise UpstreamOptimizerError(
-                    f"Optimizer upstream returned HTTP {resp.status}",
-                    status=resp.status,
-                )
-            try:
-                response_text = await read_limited_text_response(
-                    resp,
-                    config.PROMPT_OPTIMIZER_MAX_RESPONSE_MB * 1024 * 1024,
-                    label="Prompt optimizer response",
-                )
-                data = json.loads(response_text)
-            except UpstreamApiError as e:
-                raise UpstreamOptimizerError(str(e)) from e
-            except Exception as e:
-                raise UpstreamOptimizerError("Optimizer returned non-JSON response") from e
-    except (aiohttp.ServerTimeoutError, TimeoutError, asyncio.TimeoutError) as e:
-        raise OptimizerTimeoutError("Prompt optimizer request timed out") from e
-    except aiohttp.ClientError as e:
-        raise UpstreamOptimizerError(f"Prompt optimizer connection error: {e}") from e
+            prefix="Optimizer",
+            peer_label="Prompt optimizer endpoint",
+            timeout_seconds=timeout_seconds,
+            max_response_bytes=config.PROMPT_OPTIMIZER_MAX_RESPONSE_MB * 1024 * 1024,
+        )
+    except UpstreamJsonError as e:
+        if e.timed_out:
+            raise OptimizerTimeoutError("Prompt optimizer request timed out") from e
+        raise UpstreamOptimizerError(str(e), status=e.status or 502) from e
 
     duration_ms = int((time.monotonic() - start) * 1000)
 
