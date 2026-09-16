@@ -85,7 +85,7 @@ from .assistant_runtime import (
 )
 from .assistant_vision import _analyze_gallery_image
 from .gallery_common import _gallery_filters_from_selection_token
-from .gallery_jobs import stream_gallery_job
+from .gallery_job_sse import stream_gallery_job
 
 AI_ANALYZE_DISPATCH_INTERVAL_SECONDS = 1.0
 AI_ANALYZE_DISPATCH_MAX_IDLE_BACKOFF_SECONDS = 5.0

@@ -1,18 +1,24 @@
 import asyncio
-import hashlib
 import inspect
 import logging
 import os
 import time
-import uuid
 from collections.abc import Iterable, Iterator
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote
 
+from .gallery_job_payloads import (
+    _missing_gallery_ids,
+    _nodeimage_result_counts,
+    _nodeimage_result_item,
+)
+from .gallery_job_sse import (
+    _publish_gallery_job_sse,
+)
+
 from fastapi import APIRouter, Body, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
-from starlette.background import BackgroundTask
 
 from ..runtime.state import state
 from .gallery_archive_export import (
@@ -30,11 +36,7 @@ from .gallery_archive_shared import (
     import_archive_max_bytes,
 )
 from ..runtime.blocking import run_db_operation, run_db_operation_in_current_thread
-from .job_events import publish_job_edges, publish_queue, serialize_sse_event
 from .job_queue import kick_thumbnail_dispatcher
-from .poll_backoff import next_poll_delay
-from ..repositories.sse_limiter import sse_limiter
-from ..core import security as auth
 from ..core import settings as config
 from ..core.observability import metrics
 from ..core.utils import utc_now
@@ -92,15 +94,6 @@ from ..core.media import (
     safe_thumbnail_path,
 )
 from ..repositories.settings import load_nodeimage_settings, load_r2_backup_settings
-from ..repositories.thumbnail_jobs import (
-    claim_next_thumbnail_job,
-    complete_thumbnail_job,
-    ensure_thumbnail_for_image,
-    fail_thumbnail_job,
-    generate_thumbnail_for_image,
-)
-from ..repositories.db import THUMBNAIL_JOB_LEASE_SECONDS
-from ..schemas.common import MessageResponse
 from ..schemas.gallery import (
     GalleryBatchFavoriteRequest,
     GalleryBatchRequest,
@@ -116,7 +109,6 @@ from ..schemas.gallery import (
     GallerySyncRequest,
     GallerySyncJobStatus,
 )
-from ..schemas.nodeimage import NodeImageBatchUploadItem
 from ..integrations.nodeimage.client import (
     NodeImageAuthError,
     NodeImageConfigurationError,
@@ -369,9 +361,6 @@ async def _gallery_zip_response(
     )
 
 
-def _missing_gallery_ids(requested_ids: list[str], entries: list[GalleryEntry]) -> list[str]:
-    found_ids = {entry.id for entry in entries}
-    return [image_id for image_id in requested_ids if image_id not in found_ids]
 
 
 
@@ -457,374 +446,34 @@ async def _reserve_gallery_export_direct_slot(
         return slot
 
 
-def _gallery_export_payload(job: dict) -> dict:
-    keys = (
-        "job_id",
-        "status",
-        "stage",
-        "message",
-        "progress",
-        "filename",
-        "download_url",
-        "requested_count",
-        "processed_count",
-        "exported_count",
-        "missing_count",
-        "bytes_total",
-        "bytes_written",
-        "created_at",
-        "updated_at",
-        "error",
-    )
-    return {key: job.get(key) for key in keys}
 
 
-def _gallery_sync_payload(job: dict) -> dict:
-    payload = job.get("payload") or {}
-    keys = (
-        "job_id",
-        "status",
-        "stage",
-        "message",
-        "progress",
-        "created_at",
-        "updated_at",
-        "error",
-        "total_count",
-        "compared_count",
-        "uploaded_count",
-        "pending_upload_count",
-        "skipped_existing_count",
-        "missing_local_count",
-        "failed_count",
-        "bytes_total",
-        "bytes_uploaded",
-    )
-    data = {key: job.get(key) for key in keys}
-    data["dry_run"] = bool(payload.get("dry_run"))
-    data["checkpoint_filename"] = str(payload.get("start_after_filename") or "") or None
-    return data
 
 
-def _gallery_import_payload(job: dict) -> dict:
-    payload = {
-        "job_id": job.get("job_id"),
-        "status": job.get("status"),
-        "stage": job.get("stage"),
-        "message": job.get("message"),
-        "progress": job.get("progress"),
-        "requested_count": job.get("requested_count") or 0,
-        "processed_count": job.get("processed_count") or 0,
-        "imported_count": job.get("exported_count") or 0,
-        "skipped_count": job.get("missing_count") or 0,
-        "created_at": job.get("created_at"),
-        "updated_at": job.get("updated_at"),
-        "error": job.get("error"),
-    }
-    return payload
 
 
-def _nodeimage_result_item(
-    image_id: str,
-    filename: str | None,
-    status: str,
-    *,
-    url: str | None = None,
-    markdown: str | None = None,
-    error: str | None = None,
-) -> dict:
-    return NodeImageBatchUploadItem(
-        image_id=str(image_id),
-        filename=filename,
-        status=status,
-        url=url,
-        markdown=markdown,
-        error=error,
-    ).model_dump()
 
 
-def _nodeimage_result_counts(results: Iterable[dict]) -> tuple[int, int, int, int]:
-    normalized = list(results)
-    uploaded_count = sum(item.get("status") == "ok" for item in normalized)
-    failed_count = sum(item.get("status") == "error" for item in normalized)
-    cancelled_count = sum(item.get("status") == "cancelled" for item in normalized)
-    return len(normalized), uploaded_count, failed_count, cancelled_count
 
 
-def _nodeimage_upload_payload(job: dict) -> dict:
-    stored_payload = job.get("payload") or {}
-    job_id = str(job.get("job_id") or "")
-    encoded_job_id = quote(job_id, safe="") if job_id else ""
-    ids = [str(value) for value in stored_payload.get("ids") or [] if str(value)]
-    results_by_id: dict[str, dict] = {}
-    for value in stored_payload.get("results") or []:
-        if not isinstance(value, dict):
-            continue
-        image_id = str(value.get("image_id") or "")
-        if image_id and image_id not in results_by_id:
-            results_by_id[image_id] = value
-    results = [results_by_id[image_id] for image_id in ids if image_id in results_by_id]
-    _, uploaded_count, failed_count, cancelled_count = _nodeimage_result_counts(results)
-    return {
-        "job_id": job_id,
-        "status": job.get("status"),
-        "stage": job.get("stage"),
-        "message": job.get("message"),
-        "progress": job.get("progress") or 0,
-        "requested_count": job.get("requested_count") or len(ids),
-        "processed_count": job.get("processed_count") or len(results),
-        "uploaded_count": job.get("uploaded_count") or uploaded_count,
-        "failed_count": job.get("failed_count") or failed_count,
-        "cancelled_count": cancelled_count,
-        "results": results,
-        "created_at": job.get("created_at"),
-        "started_at": job.get("started_at"),
-        "completed_at": job.get("completed_at"),
-        "updated_at": job.get("updated_at"),
-        "error": job.get("error"),
-        "status_url": f"/api/gallery/nodeimage-upload-jobs/{encoded_job_id}" if encoded_job_id else None,
-        "events_url": f"/api/gallery/nodeimage-upload-jobs/{encoded_job_id}/events" if encoded_job_id else None,
-        "cancel_url": f"/api/gallery/nodeimage-upload-jobs/{encoded_job_id}/cancel" if encoded_job_id else None,
-    }
 
 
-def _gallery_job_event_name(kind: str) -> str:
-    if kind == "sync":
-        return "sync"
-    if kind == "import":
-        return "import"
-    if kind == "ai_analyze":
-        return "analysis"
-    if kind == NODEIMAGE_UPLOAD_JOB_KIND:
-        return "nodeimage_upload"
-    return "export"
 
 
-def _gallery_ai_analyze_payload(job: dict) -> dict:
-    return {
-        "job_id": job.get("job_id"),
-        "status": job.get("status"),
-        "stage": job.get("stage"),
-        "message": job.get("message"),
-        "progress": job.get("progress") or 0,
-        "requested_count": job.get("requested_count") or 0,
-        "processed_count": job.get("processed_count") or 0,
-        "analyzed_count": job.get("exported_count") or 0,
-        "missing_count": job.get("missing_count") or 0,
-        "failed_count": job.get("failed_count") or 0,
-        "created_at": job.get("created_at"),
-        "updated_at": job.get("updated_at"),
-        "error": job.get("error"),
-    }
 
 
-def _gallery_job_payload(kind: str, job: dict) -> dict:
-    if kind == "sync":
-        return _gallery_sync_payload(job)
-    if kind == "import":
-        return _gallery_import_payload(job)
-    if kind == "ai_analyze":
-        return _gallery_ai_analyze_payload(job)
-    if kind == NODEIMAGE_UPLOAD_JOB_KIND:
-        return _nodeimage_upload_payload(job)
-    return _gallery_export_payload(job)
 
 
-def _get_gallery_job_subscribers(kind: str) -> dict[str, set[asyncio.Queue]]:
-    all_subscribers = getattr(state, "gallery_job_subscribers", None)
-    if not isinstance(all_subscribers, dict):
-        all_subscribers = {}
-        state.gallery_job_subscribers = all_subscribers
-    subscribers = all_subscribers.get(kind)
-    if not isinstance(subscribers, dict):
-        subscribers = {}
-        all_subscribers[kind] = subscribers
-    return subscribers
 
 
-def _get_gallery_job_sse_poller_tasks() -> dict[str, asyncio.Task]:
-    tasks = getattr(state, "gallery_job_sse_poller_tasks", None)
-    if not isinstance(tasks, dict):
-        tasks = {}
-        state.gallery_job_sse_poller_tasks = tasks
-    return tasks
 
 
-def _publish_gallery_job_sse(job: dict) -> None:
-    kind = str(job.get("kind") or "")
-    job_id = str(job.get("job_id") or "")
-    if not kind or not job_id:
-        return
-    subscribers = _get_gallery_job_subscribers(kind).get(job_id, set())
-    if not subscribers:
-        return
-    event = {
-        "event": _gallery_job_event_name(kind),
-        "data": _gallery_job_payload(kind, job),
-    }
-    for queue in list(subscribers):
-        publish_queue(queue, event)
 
 
-def _start_gallery_job_sse_poller(kind: str) -> None:
-    tasks = _get_gallery_job_sse_poller_tasks()
-    task = tasks.get(kind)
-    if task and not task.done():
-        return
-    tasks[kind] = asyncio.create_task(_poll_gallery_job_sse(kind))
 
 
-async def _poll_gallery_job_sse(kind: str) -> None:
-    last_edges: dict[str, str] = {}
-    delay = GALLERY_JOB_DISPATCH_INTERVAL_SECONDS
-    try:
-        while True:
-            subscribers_by_job = {
-                job_id: list(subscribers)
-                for job_id, subscribers in _get_gallery_job_subscribers(kind).items()
-                if subscribers
-            }
-            if not subscribers_by_job:
-                break
-
-            current_edges = await asyncio.to_thread(
-                get_gallery_jobs_updated_at_edges,
-                kind,
-                set(subscribers_by_job),
-            )
-            metrics.increment(f"sse.poll_queries.gallery_{kind}")
-
-            async def read_event(job_id: str) -> dict:
-                job = await asyncio.to_thread(get_gallery_job, kind, job_id)
-                return (
-                    {
-                        "event": _gallery_job_event_name(kind),
-                        "data": _gallery_job_payload(kind, job),
-                    }
-                    if job
-                    else {"event": "_missing", "data": None}
-                )
-
-            changed = await publish_job_edges(
-                subscribers_by_job=subscribers_by_job,
-                edges=current_edges,
-                last_edges=last_edges,
-                read_event=read_event,
-            )
-
-            delay = next_poll_delay(
-                base_interval=GALLERY_JOB_DISPATCH_INTERVAL_SECONDS,
-                current_delay=delay,
-                changed=changed,
-                max_backoff_seconds=config.SSE_IDLE_BACKOFF_MAX_SECONDS,
-            )
-            if delay > GALLERY_JOB_DISPATCH_INTERVAL_SECONDS:
-                metrics.increment("sse.poll_idle_backoff")
-            await asyncio.sleep(delay)
-    except asyncio.CancelledError:
-        raise
-    except Exception:
-        logger.warning("Gallery %s SSE poller stopped after error", kind, exc_info=True)
-    finally:
-        tasks = _get_gallery_job_sse_poller_tasks()
-        if tasks.get(kind) is asyncio.current_task():
-            tasks.pop(kind, None)
 
 
-async def stream_gallery_job(
-    *,
-    kind: str,
-    job_id: str,
-    request: Request,
-    event_name: str,
-    terminal_statuses: set[str],
-    payload_builder,
-    not_found_detail: str,
-):
-    job = await asyncio.to_thread(get_gallery_job, kind, job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail=not_found_detail)
-
-    client_ip = auth.get_client_ip(request)
-    sse_lease = await sse_limiter.acquire(client_ip)
-    if not sse_lease:
-        raise HTTPException(status_code=429, detail="Too many SSE connections")
-
-    async def event_stream():
-        start = time.monotonic()
-        last_refresh_at = start
-        last_updated_at: str | None = None
-        last_sent = 0.0
-        queue: asyncio.Queue = asyncio.Queue(maxsize=GALLERY_JOB_SSE_QUEUE_MAXSIZE)
-        subscribers = _get_gallery_job_subscribers(kind).setdefault(job_id, set())
-        subscribers.add(queue)
-        _start_gallery_job_sse_poller(kind)
-        try:
-            current_job = await asyncio.to_thread(get_gallery_job, kind, job_id)
-            if not current_job:
-                return
-            payload = payload_builder(current_job)
-            last_updated_at = str(payload.get("updated_at") or "")
-            last_sent = time.monotonic()
-            yield serialize_sse_event(event_name, payload)
-            if payload.get("status") in terminal_statuses:
-                return
-
-            while True:
-                if await request.is_disconnected():
-                    break
-                now = time.monotonic()
-                refreshed_at = await sse_limiter.refresh_if_needed(
-                    sse_lease,
-                    last_refresh_at,
-                )
-                if refreshed_at is None:
-                    break
-                last_refresh_at = refreshed_at
-                if now - start > config.SSE_CONNECTION_TTL_SECONDS:
-                    break
-                if now - last_sent >= 15:
-                    last_sent = now
-                    yield ": keep-alive\n\n"
-                    continue
-                wait_seconds = min(
-                    GALLERY_JOB_SSE_IDLE_CHECK_SECONDS,
-                    max(0.1, 15 - (now - last_sent)),
-                    max(0.1, config.SSE_CONNECTION_TTL_SECONDS - (now - start)),
-                )
-                try:
-                    event = await asyncio.wait_for(queue.get(), timeout=wait_seconds)
-                except asyncio.TimeoutError:
-                    continue
-                if event.get("event") == "_missing":
-                    break
-                if event.get("event") != event_name:
-                    continue
-                payload = event.get("data")
-                if not isinstance(payload, dict):
-                    break
-                updated_at = str(payload.get("updated_at") or "")
-                if updated_at == last_updated_at:
-                    continue
-                last_updated_at = updated_at
-                last_sent = time.monotonic()
-                yield serialize_sse_event(event_name, payload)
-                if payload.get("status") in terminal_statuses:
-                    break
-        finally:
-            subscribers.discard(queue)
-            if not subscribers:
-                _get_gallery_job_subscribers(kind).pop(job_id, None)
-            await sse_limiter.release(sse_lease)
-
-    return StreamingResponse(
-        event_stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": PRIVATE_GALLERY_CACHE_CONTROL,
-            "X-Accel-Buffering": "no",
-        },
-    )
 
 
 def _gallery_job_lease_expires_at() -> str:

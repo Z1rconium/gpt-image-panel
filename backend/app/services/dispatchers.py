@@ -21,6 +21,8 @@ from . import (
 
 logger = logging.getLogger(__name__)
 
+SHUTDOWN_GRACE_SECONDS = 5.0
+
 DISPATCHER_TASKS = (
     (
         "image_unit_dispatcher_task",
@@ -97,7 +99,19 @@ async def shutdown() -> None:
     for task in tasks:
         task.cancel()
     if tasks:
-        await asyncio.gather(*tasks, return_exceptions=True)
+        # Bounded wait: a task blocked in a thread (SQLite lock, socket read)
+        # cannot observe cancellation, and waiting on it forever would hang
+        # shutdown instead of finishing it.
+        done, still_running = await asyncio.wait(tasks, timeout=SHUTDOWN_GRACE_SECONDS)
+        for task in still_running:
+            logger.warning(
+                "Shutdown left a background task running after %ss: %s",
+                SHUTDOWN_GRACE_SECONDS,
+                task.get_name(),
+            )
+        for task in done:
+            if not task.cancelled() and task.exception():
+                logger.warning("Background task failed during shutdown", exc_info=task.exception())
 
     await close_pool()
     await close_blocking_executors()
