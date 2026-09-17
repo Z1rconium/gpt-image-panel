@@ -12,7 +12,6 @@ from ..repositories.coordination import (
     acquire_background_lease,
     cleanup_expired_gallery_jobs,
     cleanup_stale_gallery_jobs,
-    count_active_gallery_jobs,
     list_gallery_job_ids_with_files,
     release_background_lease,
 )
@@ -38,7 +37,6 @@ from .gallery_common import (
     EXPORT_JOB_TTL_SECONDS,
     GALLERY_FILE_GC_INTERVAL_SECONDS,
     IMPORT_JOB_TTL_SECONDS,
-    MAX_ACTIVE_SYNC_JOBS,
     NODEIMAGE_UPLOAD_JOB_KIND,
     NODEIMAGE_UPLOAD_JOB_TTL_SECONDS,
     NODEIMAGE_UPLOAD_TERMINAL_STATUSES,
@@ -59,7 +57,7 @@ from .gallery_jobs import (
     run_gallery_nodeimage_upload_dispatcher,
     run_gallery_sync_dispatcher,
 )
-from .gallery_sync_jobs import _create_gallery_sync_job
+from .gallery_sync_jobs import _reserve_gallery_sync_job
 
 logger = logging.getLogger(__name__)
 
@@ -235,14 +233,13 @@ async def _run_scheduled_gallery_r2_sync_once() -> dict[str, object]:
     if total_count <= 0:
         return {"started": False, "reason": "no_changes"}
 
-    active_count = await asyncio.to_thread(count_active_gallery_jobs, "sync")
-    if active_count >= MAX_ACTIVE_SYNC_JOBS:
-        return {"started": False, "reason": "active_sync"}
     job = await asyncio.to_thread(
-        _create_gallery_sync_job,
+        _reserve_gallery_sync_job,
         total_count,
         {"full_reconcile": False, "dry_run": False},
     )
+    if not job:
+        return {"started": False, "reason": "active_sync"}
     kick_gallery_job_dispatchers()
     logger.info("Queued scheduled R2 gallery sync job %s", job["job_id"])
     return {"started": True, "job_id": job["job_id"]}

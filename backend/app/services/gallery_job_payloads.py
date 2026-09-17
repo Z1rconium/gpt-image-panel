@@ -12,11 +12,6 @@ from ..schemas.nodeimage import NodeImageBatchUploadItem
 from .gallery_common import NODEIMAGE_UPLOAD_JOB_KIND
 
 
-def _missing_gallery_ids(requested_ids: list[str], entries: list[GalleryEntry]) -> list[str]:
-    found_ids = {entry.id for entry in entries}
-    return [image_id for image_id in requested_ids if image_id not in found_ids]
-
-
 def _gallery_export_payload(job: dict) -> dict:
     keys = (
         "job_id",

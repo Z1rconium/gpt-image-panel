@@ -19,7 +19,6 @@ from .nodeimage_upload_jobs import (
 )
 
 
-
 from ..core.observability import metrics
 from ..core.utils import utc_now
 from ..repositories.coordination import (
@@ -38,115 +37,6 @@ from .gallery_common import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-class _NodeImageLeaseLost(RuntimeError):
-    pass
-
-
-
-
 
 
 async def _run_gallery_job_dispatcher(kind: str, worker_id: str, running_limit: int) -> None:
@@ -212,7 +102,6 @@ async def run_gallery_nodeimage_upload_dispatcher(worker_id: str) -> None:
         worker_id,
         MAX_ACTIVE_NODEIMAGE_UPLOAD_JOBS,
     )
-
 
 
 __all__ = [name for name in globals() if not name.startswith("__")]

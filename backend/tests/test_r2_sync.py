@@ -150,6 +150,16 @@ def insert_gallery_row(image_id: str, filename: str, *, byte_size: int, sha256: 
             )
 
 
+def test_reserve_gallery_sync_job_denies_second_concurrent_reservation(storage_runtime):
+    from backend.app.services import gallery_sync_jobs
+
+    first = gallery_sync_jobs._reserve_gallery_sync_job(3)
+    assert first is not None
+
+    second = gallery_sync_jobs._reserve_gallery_sync_job(3)
+    assert second is None
+
+
 def test_r2_sync_state_filters_incremental_candidates(storage_runtime):
     insert_gallery_row("image-a", "a.png", byte_size=4, sha256="sha-a")
 

@@ -217,9 +217,10 @@ def _check_directory_writable(path: Path):
     finally:
         try:
             probe.unlink()
-        except OSError:
-            # Someone else removing our probe is not a writability problem.
+        except FileNotFoundError:
             pass
+        except OSError as e:
+            logger.warning("Failed to remove writability probe %s: %s", probe, e)
 
 
 def _open_connection(

@@ -2,8 +2,8 @@
 
 from .gallery_job_shared import (
     _gallery_job_lease_expires_at,
+    _gallery_job_progress_throttler,
     _publish_gallery_job,
-    _publish_gallery_job_progress_from_worker,
 )
 
 import asyncio
@@ -19,8 +19,7 @@ from ..core.utils import utc_now
 from ..integrations.r2 import config as r2_config
 from ..integrations.r2 import sync as r2_algorithm
 from ..repositories.coordination import (
-    count_active_gallery_jobs,
-    create_gallery_job,
+    reserve_gallery_job_capacity,
 )
 from ..repositories.gallery.sync_state import (
     count_gallery_r2_sync_rows,
@@ -30,7 +29,6 @@ from ..repositories.gallery.sync_state import (
 from ..repositories.settings import load_r2_backup_settings
 from .gallery_common import (
     MAX_ACTIVE_SYNC_JOBS,
-    GalleryProgressThrottler,
 )
 logger = logging.getLogger(__name__)
 
@@ -71,29 +69,37 @@ def _call_gallery_r2_sync(
     return r2_algorithm.sync_gallery_to_r2(r2_settings, entries, **supported_kwargs)
 
 
-def _create_gallery_sync_job(total_count: int, payload: dict | None = None) -> dict:
+def _build_gallery_sync_job(total_count: int, payload: dict | None = None) -> dict:
     job_id = os.urandom(16).hex()
     now = utc_now()
-    return create_gallery_job(
-        job_id=job_id,
-        kind="sync",
-        status="queued",
-        stage="queued",
-        message="Queued R2 gallery sync",
-        progress=0,
-        created_at=now,
-        updated_at=now,
-        error=None,
-        total_count=total_count,
-        compared_count=0,
-        uploaded_count=0,
-        pending_upload_count=0,
-        skipped_existing_count=0,
-        missing_local_count=0,
-        failed_count=0,
-        bytes_total=0,
-        bytes_uploaded=0,
-        payload=payload or {},
+    return {
+        "job_id": job_id,
+        "kind": "sync",
+        "status": "queued",
+        "stage": "queued",
+        "message": "Queued R2 gallery sync",
+        "progress": 0,
+        "created_at": now,
+        "updated_at": now,
+        "error": None,
+        "total_count": total_count,
+        "compared_count": 0,
+        "uploaded_count": 0,
+        "pending_upload_count": 0,
+        "skipped_existing_count": 0,
+        "missing_local_count": 0,
+        "failed_count": 0,
+        "bytes_total": 0,
+        "bytes_uploaded": 0,
+        "payload": payload or {},
+    }
+
+
+def _reserve_gallery_sync_job(total_count: int, payload: dict | None = None) -> dict | None:
+    return reserve_gallery_job_capacity(
+        job=_build_gallery_sync_job(total_count, payload),
+        counted_kinds=("sync",),
+        max_active=MAX_ACTIVE_SYNC_JOBS,
     )
 
 
@@ -101,10 +107,10 @@ async def _create_reserved_gallery_sync_job(
     total_count: int,
     payload: dict | None = None,
 ) -> dict:
-    active_count = await asyncio.to_thread(count_active_gallery_jobs, "sync")
-    if active_count >= MAX_ACTIVE_SYNC_JOBS:
+    job = await asyncio.to_thread(_reserve_gallery_sync_job, total_count, payload)
+    if not job:
         raise RateLimitedError("A gallery R2 sync job is already queued or running.")
-    return await asyncio.to_thread(_create_gallery_sync_job, total_count, payload)
+    return job
 
 
 async def _run_gallery_sync_job(job: dict) -> None:
@@ -114,11 +120,7 @@ async def _run_gallery_sync_job(job: dict) -> None:
     dry_run = bool(payload.get("dry_run"))
     start_after_filename = str(payload.get("start_after_filename") or "")
 
-    def publish_progress(updates: dict):
-        updates = {**updates, "lease_expires_at": _gallery_job_lease_expires_at()}
-        _publish_gallery_job_progress_from_worker(job_id, updates)
-
-    throttler = GalleryProgressThrottler(publish_progress)
+    throttler = _gallery_job_progress_throttler(job_id)
 
     def progress(updates: dict):
         last_filename = str(updates.pop("last_filename", "") or "")

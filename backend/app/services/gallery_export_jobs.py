@@ -4,6 +4,7 @@ export runner (including its R2 mirror when backup is configured)."""
 from .gallery_job_shared import (
     _direct_export_slot_expires_at,
     _gallery_job_lease_expires_at,
+    _gallery_job_progress_throttler,
     _publish_gallery_job,
     _publish_gallery_job_from_worker,
     _publish_gallery_job_progress_from_worker,
@@ -20,7 +21,6 @@ from datetime import (
 from pathlib import Path
 from urllib.parse import quote
 
-from .gallery_job_payloads import _missing_gallery_ids
 
 
 from ..core.errors import RateLimitedError
@@ -52,6 +52,7 @@ from .gallery_common import (
     MAX_ACTIVE_EXPORT_JOBS,
     PRIVATE_GALLERY_CACHE_CONTROL,
     GalleryProgressThrottler,
+    _missing_gallery_ids,
     _resolve_trusted_gallery_job_path,
     _unlink_trusted_gallery_job_path,
 )
@@ -423,11 +424,7 @@ async def _run_gallery_export_job(job: dict) -> None:
     job_id = job["job_id"]
     export_path = _resolve_trusted_gallery_job_path(job.get("path"), kind="export")
 
-    def publish_progress(updates: dict):
-        updates = {**updates, "lease_expires_at": _gallery_job_lease_expires_at()}
-        _publish_gallery_job_progress_from_worker(job_id, updates)
-
-    throttler = GalleryProgressThrottler(publish_progress)
+    throttler = _gallery_job_progress_throttler(job_id)
 
     def progress(updates: dict):
         force = updates.get("stage") in {"preparing", "packing"} and (

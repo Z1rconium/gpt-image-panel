@@ -50,6 +50,10 @@ from .gallery_common import (
 logger = logging.getLogger(__name__)
 
 
+class _NodeImageLeaseLost(RuntimeError):
+    pass
+
+
 NODEIMAGE_UPLOAD_SEMAPHORE = asyncio.Semaphore(
     max(1, int(getattr(config, "NODEIMAGE_UPLOAD_CONCURRENCY", 4) or 1))
 )

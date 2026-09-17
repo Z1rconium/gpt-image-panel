@@ -1974,6 +1974,36 @@ def test_prompt_optimizer_health_reports_connectivity_and_errors(client, monkeyp
     assert failed.json()["status_code"] == 500
 
 
+def test_prompt_optimizer_health_reports_domain_error_as_200(client, monkeypatch):
+    from backend.app.api.routers import prompt as prompt_router
+    from backend.app.core.errors import UnprocessableRequestError
+
+    settings = client.get("/api/settings").json()
+    configured = client.post(
+        "/api/settings",
+        json=_settings_payload(
+            settings,
+            prompt_optimizer={
+                "enabled": True,
+                "api_url": "https://example.com/v1/chat/completions",
+                "model": "prompt-model",
+                "api_key": "${TEST_PROMPT_OPTIMIZER_API_KEY}",
+            },
+        ),
+    )
+    assert configured.status_code == 200
+
+    def fail_resolve(_settings):
+        raise UnprocessableRequestError("Prompt optimizer API Key environment variable TEST_PROMPT_OPTIMIZER_API_KEY is not set or empty.")
+
+    monkeypatch.setattr(prompt_router, "resolve_prompt_optimizer_api_key", fail_resolve)
+    response = client.post("/api/prompt/optimizer-health", json={"use_credentials": True})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "error"
+    assert body["status_code"] == 422
+
+
 def test_prompt_snippets_crud_search_and_validation(client):
     empty = client.get("/api/prompt-snippets")
     assert empty.status_code == 200

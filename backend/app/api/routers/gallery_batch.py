@@ -113,6 +113,7 @@ from ...services.gallery_common import (
     _cleanup_gallery_selection_tokens,
     _gallery_filters_from_selection_token,
     _gallery_selection_token_expires_at,
+    _missing_gallery_ids,
     _resolve_batch_download_entries,
     _resolve_gallery_batch_ids,
     build_gallery_filters_from_selection_request,
@@ -122,7 +123,6 @@ from ...integrations.nodeimage.client import (
     resolve_nodeimage_settings,
 )
 from ...services.gallery_job_payloads import (
-    _missing_gallery_ids,
     _nodeimage_upload_payload,
 )
 from ...services.gallery_export_jobs import _gallery_zip_response

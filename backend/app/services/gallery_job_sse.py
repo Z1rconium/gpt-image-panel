@@ -1,10 +1,5 @@
 """Per-process SSE fan-out for gallery jobs.
 
-from .gallery_job_payloads import (
-    _gallery_job_event_name,
-    _gallery_job_payload,
-)
-
 Subscribers are per worker process; updates written by another worker are
 picked up by polling each job's updated_at edge (see job_events)."""
 
@@ -12,6 +7,10 @@ import asyncio
 import time
 
 
+from .gallery_job_payloads import (
+    _gallery_job_event_name,
+    _gallery_job_payload,
+)
 from ..core.errors import (
     NotFoundError,
     RateLimitedError,

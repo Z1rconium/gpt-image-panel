@@ -63,6 +63,26 @@ def _env_or_derived(
     return cast(raw) if raw is not None else derive()
 
 
+# Formulas for settings derived from other settings. Each lambda is looked up
+# by name in module globals when called, so it is safe to reference a setting
+# defined later in this file as long as it exists by the time the formula
+# actually runs (both at import, via ``_env_or_derived``, and later, via
+# ``recompute_derived``). This is the single source of truth for each
+# formula — do not re-derive the value inline elsewhere.
+DERIVED_CONFIG_NAMES: dict[str, Callable[[], object]] = {
+    "MAX_UPSTREAM_IMAGE_BYTES_PER_TASK_MB": lambda: max(1, MAX_FILE_SIZE_MB),
+    "UPSTREAM_MEMORY_BUDGET_MB": lambda: max(MAX_UPSTREAM_IMAGE_BYTES_PER_TASK_MB, 256),
+    "MAX_PENDING_EDIT_SOURCE_MB": lambda: max(0, MAX_FILE_SIZE_MB * 4),
+    "IMPORT_ARCHIVE_MAX_MB": lambda: MAX_FILE_SIZE_MB * 20,
+    "IMPORT_TEMP_RESERVATION_MAX_MB": lambda: max(1, IMPORT_ARCHIVE_MAX_MB * 2),
+    "DB_EXECUTOR_WORKERS": lambda: max(4, MAX_ACTIVE_GENERATE_JOBS // 2 + 2),
+    "AI_ASSISTANT_MAX_CONCURRENCY": lambda: max(1, MAX_ACTIVE_GENERATE_JOBS),
+    "IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS": lambda: max(
+        5.0, IMAGE_JOB_UNIT_LEASE_SECONDS / 3
+    ),
+}
+
+
 def _clamp_lease_renew(value: float) -> float:
     """Keep the image-unit lease renewal cadence below half the lease."""
     lease = float(IMAGE_JOB_UNIT_LEASE_SECONDS)
@@ -140,28 +160,25 @@ MAX_JSON_BODY_MB = max(1, int(os.getenv("MAX_JSON_BODY_MB", "1")))
 MAX_UPSTREAM_JSON_MB = max(1, int(os.getenv("MAX_UPSTREAM_JSON_MB", "128")))
 MAX_UPSTREAM_IMAGE_BYTES_PER_TASK_MB = _env_or_derived(
     "MAX_UPSTREAM_IMAGE_BYTES_PER_TASK_MB",
-    lambda: max(1, MAX_FILE_SIZE_MB),
+    DERIVED_CONFIG_NAMES["MAX_UPSTREAM_IMAGE_BYTES_PER_TASK_MB"],
     lambda raw: max(1, int(raw)),
 )
 UPSTREAM_MEMORY_BUDGET_MB = _env_or_derived(
     "UPSTREAM_MEMORY_BUDGET_MB",
-    lambda: max(MAX_UPSTREAM_IMAGE_BYTES_PER_TASK_MB, 256),
+    DERIVED_CONFIG_NAMES["UPSTREAM_MEMORY_BUDGET_MB"],
     lambda raw: max(MAX_UPSTREAM_IMAGE_BYTES_PER_TASK_MB, int(raw)),
 )
 MAX_IMAGE_PIXELS = max(1, int(os.getenv("MAX_IMAGE_PIXELS", "100000000")))
 IMAGE_CPU_CONCURRENCY = max(1, int(os.getenv("IMAGE_CPU_CONCURRENCY", "2")))
 FILE_IO_CONCURRENCY = max(1, int(os.getenv("FILE_IO_CONCURRENCY", "4")))
-_max_active_generate_jobs_default = max(
-    1, int(os.getenv("MAX_ACTIVE_GENERATE_JOBS", "2"))
-)
+MAX_ACTIVE_GENERATE_JOBS = max(1, int(os.getenv("MAX_ACTIVE_GENERATE_JOBS", "2")))
 # The DB executor runs short polling reads and the occasional critical write
 # (claim/renew/complete/fail/finalize/cancel). A critical write can occupy one
 # worker for up to the critical busy budget, so size the pool from generation
 # concurrency rather than a fixed constant.
-_default_db_executor_workers = max(4, _max_active_generate_jobs_default // 2 + 2)
 DB_EXECUTOR_WORKERS = _env_or_derived(
     "DB_EXECUTOR_WORKERS",
-    lambda: _default_db_executor_workers,
+    DERIVED_CONFIG_NAMES["DB_EXECUTOR_WORKERS"],
     lambda raw: max(1, int(raw)),
 )
 SQLITE_BUSY_TIMEOUT_MS = max(10, int(os.getenv("SQLITE_BUSY_TIMEOUT_MS", "250")))
@@ -221,12 +238,12 @@ EVENT_LOOP_LAG_SAMPLE_SECONDS = max(
 )
 MAX_PENDING_EDIT_SOURCE_MB = _env_or_derived(
     "MAX_PENDING_EDIT_SOURCE_MB",
-    lambda: max(0, MAX_FILE_SIZE_MB * 4),
+    DERIVED_CONFIG_NAMES["MAX_PENDING_EDIT_SOURCE_MB"],
     lambda raw: max(0, int(raw)),
 )
 IMPORT_ARCHIVE_MAX_MB = _env_or_derived(
     "IMPORT_ARCHIVE_MAX_MB",
-    lambda: MAX_FILE_SIZE_MB * 20,
+    DERIVED_CONFIG_NAMES["IMPORT_ARCHIVE_MAX_MB"],
     int,
 )
 IMPORT_MAX_FILES = int(os.getenv("IMPORT_MAX_FILES", "500"))
@@ -237,7 +254,7 @@ IMPORT_MAX_OUTPUT_MB = max(1, int(os.getenv("IMPORT_MAX_OUTPUT_MB", "1024")))
 IMPORT_MAX_COMPRESSION_RATIO = float(os.getenv("IMPORT_MAX_COMPRESSION_RATIO", "20"))
 IMPORT_TEMP_RESERVATION_MAX_MB = _env_or_derived(
     "IMPORT_TEMP_RESERVATION_MAX_MB",
-    lambda: max(1, IMPORT_ARCHIVE_MAX_MB * 2),
+    DERIVED_CONFIG_NAMES["IMPORT_TEMP_RESERVATION_MAX_MB"],
     lambda raw: max(1, int(raw)),
 )
 IMPORT_UPLOAD_RESERVATION_TTL_SECONDS = max(
@@ -251,16 +268,14 @@ IMPORT_UPLOADS_PER_IP_PER_MINUTE = max(
 # Granian worker processes. Each process runs its own image-unit dispatcher;
 # the per-worker claim share below spreads a job's `n` units across them.
 GRANIAN_WORKERS = max(1, int(os.getenv("GRANIAN_WORKERS", "1")))
-MAX_ACTIVE_GENERATE_JOBS = max(1, int(os.getenv("MAX_ACTIVE_GENERATE_JOBS", "2")))
 MAX_QUEUED_GENERATE_JOBS = max(0, int(os.getenv("MAX_QUEUED_GENERATE_JOBS", "20")))
 IMAGE_JOB_UNIT_LEASE_SECONDS = max(30, int(os.getenv("IMAGE_JOB_UNIT_LEASE_SECONDS", "120")))
 # Lease renewal cadence. Defaults to lease/3 and is clamped below lease/2 so the
 # renewal loop can always extend the lease before it can expire.
-_image_job_unit_renew_default = max(5.0, IMAGE_JOB_UNIT_LEASE_SECONDS / 3)
 IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS = _clamp_lease_renew(
     _env_or_derived(
         "IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS",
-        lambda: _image_job_unit_renew_default,
+        DERIVED_CONFIG_NAMES["IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS"],
         float,
     )
 )
@@ -332,7 +347,7 @@ AI_ASSISTANT_MAX_RESPONSE_MB = max(
 )
 AI_ASSISTANT_MAX_CONCURRENCY = _env_or_derived(
     "AI_ASSISTANT_MAX_CONCURRENCY",
-    lambda: max(1, MAX_ACTIVE_GENERATE_JOBS),
+    DERIVED_CONFIG_NAMES["AI_ASSISTANT_MAX_CONCURRENCY"],
     lambda raw: max(1, int(raw)),
 )
 AI_ASSISTANT_BATCH_MAX_IMAGES = max(
@@ -384,24 +399,8 @@ def per_worker_generate_limit() -> int:
     return max(1, -(-int(MAX_ACTIVE_GENERATE_JOBS) // workers))
 
 
-# Settings computed from other settings. Each follows its base value unless the
-# name itself is configured (env at import, or an override applied later), which
-# is what ``explicit`` carries. Order matters: a later entry may read an earlier
-# derived value.
-DERIVED_CONFIG_NAMES: dict[str, Callable[[], object]] = {
-    "MAX_UPSTREAM_IMAGE_BYTES_PER_TASK_MB": lambda: max(1, MAX_FILE_SIZE_MB),
-    "UPSTREAM_MEMORY_BUDGET_MB": lambda: max(MAX_UPSTREAM_IMAGE_BYTES_PER_TASK_MB, 256),
-    "MAX_PENDING_EDIT_SOURCE_MB": lambda: max(0, MAX_FILE_SIZE_MB * 4),
-    "IMPORT_ARCHIVE_MAX_MB": lambda: MAX_FILE_SIZE_MB * 20,
-    "IMPORT_TEMP_RESERVATION_MAX_MB": lambda: max(1, IMPORT_ARCHIVE_MAX_MB * 2),
-    "DB_EXECUTOR_WORKERS": lambda: max(4, MAX_ACTIVE_GENERATE_JOBS // 2 + 2),
-    "AI_ASSISTANT_MAX_CONCURRENCY": lambda: max(1, MAX_ACTIVE_GENERATE_JOBS),
-    "IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS": lambda: max(
-        5.0, IMAGE_JOB_UNIT_LEASE_SECONDS / 3
-    ),
-}
-
-
+# Order matters when recomputing: a later entry may read an earlier derived
+# value (formulas themselves live in ``DERIVED_CONFIG_NAMES`` above).
 def recompute_derived(explicit: frozenset[str] = frozenset()) -> None:
     """Recompute the settings derived from others.
 

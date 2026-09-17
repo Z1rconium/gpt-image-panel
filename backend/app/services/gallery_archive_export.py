@@ -1,4 +1,3 @@
-import json
 import os
 import re
 import shutil
@@ -25,6 +24,8 @@ from .gallery_archive_shared import (
     _GALLERY_ENTRY_EXPORT_FIELDS,
     _JsonArrayTempWriter,
     _PreparedGalleryZip,
+    _compact_json,
+    _emit_zip_progress,
 )
 
 def _entry_to_dict(entry: GalleryEntry | dict[str, Any]) -> dict[str, Any]:
@@ -75,10 +76,6 @@ def _resolve_export_metadata_for_entry(
 
     data["bytes"] = stat.st_size
     return data
-
-
-def _compact_json(value: Any) -> str:
-    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 
 
 def _export_metadata_header() -> dict[str, Any]:
@@ -181,15 +178,6 @@ def prepare_gallery_zip_chunks(
                 path.unlink(missing_ok=True)
 
     return chunks(), result
-
-
-def _emit_zip_progress(
-    callback: GalleryZipProgressCallback | None,
-    **updates: Any,
-) -> None:
-    if not callback:
-        return
-    callback({key: value for key, value in updates.items() if value is not None})
 
 
 def _build_export_metadata_from_rows(

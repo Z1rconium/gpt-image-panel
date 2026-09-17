@@ -3,6 +3,7 @@ import logging
 
 from fastapi import APIRouter, Body, HTTPException
 
+from ...core.errors import DomainError
 from ...services.presets import (
     get_prompt_optimizer_settings,
     normalize_prompt_optimizer_settings,
@@ -146,7 +147,7 @@ async def prompt_optimizer_health(
             settings,
             include_credentials=bool(req and req.use_credentials),
         )
-    except HTTPException as e:
+    except (HTTPException, DomainError) as e:
         return PromptOptimizerHealthResponse(
             status="error",
             message=str(e.detail),

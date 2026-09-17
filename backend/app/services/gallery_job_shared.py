@@ -23,6 +23,7 @@ from .gallery_common import (
     BACKGROUND_TASK_LEASE_SECONDS,
     DIRECT_EXPORT_SLOT_LEASE_SECONDS,
     GALLERY_JOB_LEASE_SECONDS,
+    GalleryProgressThrottler,
 )
 logger = logging.getLogger(__name__)
 
@@ -111,6 +112,16 @@ def _publish_gallery_job_progress_from_worker(job_id: str, updates: dict) -> boo
             exc_info=True,
         )
         return False
+
+
+def _gallery_job_progress_throttler(job_id: str) -> GalleryProgressThrottler:
+    """Throttler that stamps the current lease expiry onto every update."""
+
+    def publish_progress(updates: dict) -> None:
+        updates = {**updates, "lease_expires_at": _gallery_job_lease_expires_at()}
+        _publish_gallery_job_progress_from_worker(job_id, updates)
+
+    return GalleryProgressThrottler(publish_progress)
 
 
 def _publish_gallery_job_from_worker(job_id: str, updates: dict) -> dict | None:

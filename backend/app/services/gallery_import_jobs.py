@@ -2,8 +2,8 @@
 
 from .gallery_job_shared import (
     _gallery_job_lease_expires_at,
+    _gallery_job_progress_throttler,
     _publish_gallery_job,
-    _publish_gallery_job_progress_from_worker,
 )
 
 import asyncio
@@ -28,7 +28,6 @@ from ..repositories.gallery.mutations import import_gallery_entries
 from .gallery_common import (
     GALLERY_IMPORT_TERMINAL_STATUSES,
     MAX_ACTIVE_IMPORT_JOBS,
-    GalleryProgressThrottler,
     _resolve_trusted_gallery_job_path,
     _unlink_trusted_gallery_job_path,
 )
@@ -89,11 +88,7 @@ async def _run_gallery_import_job(job: dict) -> None:
         "missing_count": 0,
     }
 
-    def publish_progress(updates: dict):
-        updates = {**updates, "lease_expires_at": _gallery_job_lease_expires_at()}
-        _publish_gallery_job_progress_from_worker(job_id, updates)
-
-    throttler = GalleryProgressThrottler(publish_progress)
+    throttler = _gallery_job_progress_throttler(job_id)
 
     def progress(updates: dict):
         for key in last_counts:

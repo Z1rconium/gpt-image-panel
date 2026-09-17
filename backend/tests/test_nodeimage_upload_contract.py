@@ -649,6 +649,39 @@ def test_nodeimage_batch_recovery_skips_persisted_completed_items(client, monkey
     assert [item["image_id"] for item in recovered["payload"]["results"]] == ids
 
 
+def test_nodeimage_upload_job_stops_cleanly_after_losing_its_lease(client, monkeypatch, caplog):
+    image_id = "node-lease-lost"
+    _fake_gallery_entry(image_id, image_id, "1024x1024", f"{image_id}.png")
+    _enable_nodeimage()
+
+    job = nodeimage_upload_jobs._build_nodeimage_upload_job([image_id], 1, [])
+    job.update(
+        status="running",
+        stage="uploading",
+        lease_owner="current-worker",
+        lease_expires_at=gallery_jobs._gallery_job_lease_expires_at(),
+    )
+    stored_job = create_gallery_job(**job)
+    # A different lease_owner simulates another worker having reclaimed the
+    # lease: every conditional update in the runner will now find no row to
+    # update and must raise _NodeImageLeaseLost instead of NameError.
+    stale_job = {**stored_job, "lease_owner": "stale-worker"}
+
+    async def fake_upload(_path, filename, _effective):
+        return nodeimage_client.NodeImageUploadResult(
+            url=f"https://cdn.nodeimage.com/{filename}",
+            markdown=f"![image](https://cdn.nodeimage.com/{filename})",
+        )
+
+    monkeypatch.setattr(nodeimage_upload_jobs, "upload_image_file", fake_upload)
+    with caplog.at_level(logging.INFO):
+        asyncio.run(gallery_jobs._run_nodeimage_upload_job(stale_job))
+
+    assert "stopped after losing its lease" in caplog.text
+    current = get_gallery_job("nodeimage_upload", stored_job["job_id"])
+    assert current["lease_owner"] == "current-worker"
+
+
 def test_nodeimage_settings_round_trip_and_secret_origin_binding(client):
     current = client.get("/api/settings").json()
     assert current["nodeimage"]["enabled"] is False
