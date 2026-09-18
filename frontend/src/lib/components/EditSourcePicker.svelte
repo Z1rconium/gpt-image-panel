@@ -1,15 +1,25 @@
 <script lang="ts">
+  import Brush from 'lucide-svelte/icons/brush';
   import Upload from 'lucide-svelte/icons/upload';
   import X from 'lucide-svelte/icons/x';
   import { t } from '$lib/i18n';
   import { MAX_EDIT_SOURCE_IMAGES } from '$lib/stores/editSource';
 
-  export let sources: { id: string; label: string; previewUrl: string; kind: 'upload' | 'gallery' }[] = [];
+  export let sources: {
+    id: string;
+    label: string;
+    previewUrl: string;
+    kind: 'upload' | 'gallery';
+    isPrimary?: boolean;
+    maskCoverage?: number | null;
+  }[] = [];
   export let onChange: (event: Event) => void = () => {};
   export let onDropFiles: (files: File[]) => void = () => {};
   export let onPreview: (sourceId: string) => void = () => {};
   export let onRemove: (sourceId: string) => void = () => {};
   export let onClear: () => void = () => {};
+  export let onEditMask: (sourceId: string) => void = () => {};
+  export let onRemoveMask: () => void = () => {};
 
   let input: HTMLInputElement;
   let dragDepth = 0;
@@ -21,6 +31,10 @@
 
   export function reset() {
     if (input) input.value = '';
+  }
+
+  function maskBadgeLabel(coverage: number) {
+    return $t.promptForm.maskBadge(`${(coverage * 100).toFixed(1)}%`);
   }
 
   function hasFiles(event: DragEvent) {
@@ -132,11 +146,62 @@
             <img src={source.previewUrl} alt="" class="h-12 w-12 shrink-0 rounded-md object-cover ring-1 ring-black/5 dark:ring-white/10" />
             <span class="min-w-0">
               <span class="block truncate text-xs font-medium text-stone-800 dark:text-zinc-200" title={source.label}>{source.label}</span>
-              <span class="mt-0.5 inline-block rounded bg-stone-100 px-1.5 py-0.5 text-[10px] font-medium text-stone-600 dark:bg-zinc-800 dark:text-zinc-400">
-                {source.kind === 'gallery' ? $t.promptForm.gallerySourceBadge : $t.promptForm.uploadSourceBadge}
+              <span class="mt-0.5 flex flex-wrap items-center gap-1">
+                <span class="inline-block rounded bg-stone-100 px-1.5 py-0.5 text-[10px] font-medium text-stone-600 dark:bg-zinc-800 dark:text-zinc-400">
+                  {source.kind === 'gallery' ? $t.promptForm.gallerySourceBadge : $t.promptForm.uploadSourceBadge}
+                </span>
+                {#if source.isPrimary}
+                  <span class="inline-block rounded bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-300">
+                    {$t.promptForm.primarySourceBadge}
+                  </span>
+                {/if}
               </span>
             </span>
           </button>
+          <div class="flex items-center gap-1 border-t border-stone-200/80 px-1.5 py-1 dark:border-zinc-800/80">
+            {#if source.isPrimary}
+              <button
+                type="button"
+                class={`control-focus flex min-h-7 min-w-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium transition-colors ${
+                  source.maskCoverage != null
+                    ? 'bg-emerald-500/10 text-emerald-700 hover:bg-emerald-500/20 dark:text-emerald-300'
+                    : 'text-stone-600 hover:bg-stone-200/60 hover:text-stone-950 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100'
+                }`}
+                aria-label={$t.promptForm.maskEditLabel(source.label)}
+                title={$t.promptForm.maskEditLabel(source.label)}
+                on:click={() => onEditMask(source.id)}
+              >
+                <Brush size={12} strokeWidth={2} aria-hidden="true" />
+                <span class="truncate">
+                  {source.maskCoverage != null ? maskBadgeLabel(source.maskCoverage) : $t.promptForm.editMask}
+                </span>
+              </button>
+              {#if source.maskCoverage != null}
+                <button
+                  type="button"
+                  class="control-focus ml-auto shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-medium text-stone-500 hover:bg-red-50 hover:text-red-600 dark:text-zinc-500 dark:hover:bg-red-950/40 dark:hover:text-red-400"
+                  aria-label={$t.promptForm.removeMask}
+                  title={$t.promptForm.removeMask}
+                  on:click={onRemoveMask}
+                >
+                  {$t.promptForm.removeMask}
+                </button>
+              {/if}
+            {:else}
+              <span title={$t.promptForm.maskOnlyPrimaryHint}>
+                <button
+                  type="button"
+                  class="flex min-h-7 cursor-not-allowed items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium text-stone-400 opacity-70 dark:text-zinc-600"
+                  disabled
+                  aria-label={$t.promptForm.maskOnlyPrimaryHint}
+                  title={$t.promptForm.maskOnlyPrimaryHint}
+                >
+                  <Brush size={12} strokeWidth={2} aria-hidden="true" />
+                  <span>{$t.promptForm.editMask}</span>
+                </button>
+              </span>
+            {/if}
+          </div>
           <button
             type="button"
             class="control-focus absolute right-1.5 top-1.5 flex h-8 w-8 items-center justify-center rounded-md text-stone-400 hover:bg-red-50 hover:text-red-600 dark:text-zinc-500 dark:hover:bg-red-950/40 dark:hover:text-red-400"

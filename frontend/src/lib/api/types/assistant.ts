@@ -104,6 +104,7 @@ export type AssistantJobDiagnoseResponse = AssistantBaseResponse & {
 export type AssistantEditPlanRequest = {
   goal: string;
   source_count?: number;
+  has_mask?: boolean;
   current_prompt?: string | null;
   target_size?: string | null;
 };

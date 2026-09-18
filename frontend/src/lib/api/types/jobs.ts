@@ -76,6 +76,7 @@ export type GenerateJobStatus = GenerateJobResponse & {
   cost?: CostEstimate | null;
   streaming?: boolean | null;
   partial_images?: number | null;
+  mask_applied?: boolean | null;
   error?: string | null;
 };
 

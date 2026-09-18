@@ -1,7 +1,7 @@
 import { get, writable } from 'svelte/store';
 import { apiFetch } from '$lib/api/client';
 import { t } from '$lib/i18n';
-import { MAX_EDIT_SOURCE_IMAGES, editSourceCount, editSourceStore, type EditSourceState } from '$lib/stores/editSource';
+import { MAX_EDIT_SOURCE_IMAGES, editSourceCount, editSourceStore, isMaskValid, type EditSourceState } from '$lib/stores/editSource';
 import type { ApiPath, ResponseFormatDefault } from '$lib/api/types/common';
 import type { GenerateRequestBody } from '$lib/api/types/generation';
 import type { GeneratePreviewEvent, GenerateJobResponse, GenerateJobStatus } from '$lib/api/types/jobs';
@@ -190,6 +190,10 @@ function createPreviewStore() {
       setError(get(t).messages.editSourceLimit(MAX_EDIT_SOURCE_IMAGES));
       return;
     }
+    if (editSource.mask && !isMaskValid(editSource)) {
+      setError(get(t).messages.editMaskStale);
+      return;
+    }
 
     const body = buildRequestBody(form);
     const error = submissionError(body, true);
@@ -217,6 +221,9 @@ function createPreviewStore() {
     editSource.files.forEach((source) => {
       formData.append(uploadFieldName, source.file, source.file.name);
     });
+    if (editSource.mask) {
+      formData.append('mask', editSource.mask.blob, 'mask.png');
+    }
 
     try {
       const job = await apiFetch<GenerateJobResponse>(

@@ -11,12 +11,25 @@ export type EditUploadSource = {
   previewLabel: string;
 };
 
+export type EditMaskOrigin = 'painted' | 'uploaded';
+
+export type EditMask = {
+  sourceId: string;
+  blob: Blob;
+  width: number;
+  height: number;
+  coverage: number;
+  previewUrl: string;
+  origin: EditMaskOrigin;
+};
+
 export type EditSourceState = {
   files: EditUploadSource[];
   selectedGalleryImageId: string;
   galleryLabel: string;
   galleryPreviewUrl: string;
   galleryPreviewLabel: string;
+  mask: EditMask | null;
 };
 
 const initialEditSourceState: EditSourceState = {
@@ -24,10 +37,24 @@ const initialEditSourceState: EditSourceState = {
   selectedGalleryImageId: '',
   galleryLabel: '',
   galleryPreviewUrl: '',
-  galleryPreviewLabel: ''
+  galleryPreviewLabel: '',
+  mask: null
 };
 
 let nextEditSourceId = 0;
+
+// Bumped whenever a mutation invalidates the mask by moving the primary image.
+// Workspace subscribes so it can warn once without every caller threading a
+// return flag through its own signature.
+export const editMaskDiscards = writable(0);
+
+export function primaryEditSourceId(source: EditSourceState) {
+  return source.selectedGalleryImageId || source.files[0]?.id || '';
+}
+
+export function isMaskValid(source: EditSourceState) {
+  return Boolean(source.mask && source.mask.sourceId === primaryEditSourceId(source));
+}
 
 function isImageFile(file: File) {
   if (file.type.startsWith('image/') && file.type !== 'image/svg+xml') return true;
@@ -36,6 +63,21 @@ function isImageFile(file: File) {
 
 function revokeEditSourceUrls(source: EditSourceState) {
   source.files.forEach((upload) => URL.revokeObjectURL(upload.previewUrl));
+}
+
+function revokeMaskUrl(mask: EditMask | null) {
+  if (mask) URL.revokeObjectURL(mask.previewUrl);
+}
+
+// The mask is bound to the primary image: only a change of primary invalidates
+// it, so adding or removing a reference image must not discard the user's work.
+function dropStaleMask(next: EditSourceState): EditSourceState {
+  if (next.mask && next.mask.sourceId !== primaryEditSourceId(next)) {
+    revokeMaskUrl(next.mask);
+    editMaskDiscards.update((count) => count + 1);
+    return { ...next, mask: null };
+  }
+  return next;
 }
 
 function makeUploadSource(file: File): EditUploadSource {
@@ -83,10 +125,12 @@ function createEditSourceStore() {
     if (overLimitCount > 0) setError(get(t).messages.editSourceSomeSkipped(MAX_EDIT_SOURCE_IMAGES));
 
     const nextUploads = acceptedFiles.map(makeUploadSource);
-    update((source) => ({
-      ...source,
-      files: [...source.files, ...nextUploads]
-    }));
+    update((source) =>
+      dropStaleMask({
+        ...source,
+        files: [...source.files, ...nextUploads]
+      })
+    );
     return nextUploads.length;
   }
 
@@ -97,6 +141,8 @@ function createEditSourceStore() {
     addFiles,
     clear(input?: HTMLInputElement) {
       revokeEditSourceUrls(state);
+      if (state.mask) editMaskDiscards.update((count) => count + 1);
+      revokeMaskUrl(state.mask);
       set({ ...initialEditSourceState, files: [] });
       if (input) input.value = '';
     },
@@ -120,51 +166,66 @@ function createEditSourceStore() {
         return false;
       }
 
-      update((source) => ({
-        ...source,
-        selectedGalleryImageId: imageId,
-        galleryLabel: label,
-        galleryPreviewUrl: previewUrl,
-        galleryPreviewLabel: previewLabel
-      }));
+      update((source) =>
+        dropStaleMask({
+          ...source,
+          selectedGalleryImageId: imageId,
+          galleryLabel: label,
+          galleryPreviewUrl: previewUrl,
+          galleryPreviewLabel: previewLabel
+        })
+      );
       return true;
     },
     clearGallerySource(imageId?: string) {
       update((source) => {
         if (imageId && source.selectedGalleryImageId !== imageId) return source;
-        return {
+        return dropStaleMask({
           ...source,
           selectedGalleryImageId: '',
           galleryLabel: '',
           galleryPreviewUrl: '',
           galleryPreviewLabel: ''
-        };
+        });
       });
     },
     remove(sourceId: string) {
       const upload = state.files.find((source) => source.id === sourceId);
       if (upload) {
         URL.revokeObjectURL(upload.previewUrl);
-        update((source) => ({
-          ...source,
-          files: source.files.filter((item) => item.id !== sourceId)
-        }));
+        update((source) =>
+          dropStaleMask({
+            ...source,
+            files: source.files.filter((item) => item.id !== sourceId)
+          })
+        );
         return true;
       }
       if (state.selectedGalleryImageId === sourceId) {
-        update((source) => ({
-          ...source,
-          selectedGalleryImageId: '',
-          galleryLabel: '',
-          galleryPreviewUrl: '',
-          galleryPreviewLabel: ''
-        }));
+        update((source) =>
+          dropStaleMask({
+            ...source,
+            selectedGalleryImageId: '',
+            galleryLabel: '',
+            galleryPreviewUrl: '',
+            galleryPreviewLabel: ''
+          })
+        );
         return true;
       }
       return false;
     },
+    setMask(mask: EditMask) {
+      revokeMaskUrl(state.mask);
+      update((source) => ({ ...source, mask }));
+    },
+    removeMask() {
+      revokeMaskUrl(state.mask);
+      update((source) => ({ ...source, mask: null }));
+    },
     cleanup() {
       revokeEditSourceUrls(state);
+      revokeMaskUrl(state.mask);
     }
   };
 }

@@ -17,7 +17,7 @@
   import { accessStore } from '$lib/stores/access';
   import { assistantStore, isAbortError } from '$lib/stores/assistant';
   import { confirmStore } from '$lib/stores/confirm';
-  import { editSourceCount, editSourceStore, MAX_EDIT_SOURCE_IMAGES } from '$lib/stores/editSource';
+  import { editMaskDiscards, editSourceCount, editSourceStore, isMaskValid, MAX_EDIT_SOURCE_IMAGES, primaryEditSourceId, type EditMask } from '$lib/stores/editSource';
   import { galleryActivityStore, galleryStore } from '$lib/stores/gallery';
   import { jobsStore } from '$lib/stores/jobs';
   import { lightboxStore } from '$lib/stores/lightbox';
@@ -39,6 +39,7 @@
     imagePromptPanel,
     jobsPanel,
     lightboxPanel,
+    maskEditorPanel,
     nodeImageResultPanel,
     optimizerPanel,
     settingsPanel,
@@ -70,24 +71,46 @@
   const handledTerminalJobIds = new Set<string>();
 
   const hasEditSource = $derived(editSourceCount($editSourceStore) > 0);
-  const editSources = $derived.by(() => [
-    ...($editSourceStore.selectedGalleryImageId
-      ? [
-          {
-            id: $editSourceStore.selectedGalleryImageId,
-            label: $editSourceStore.galleryLabel || $editSourceStore.galleryPreviewLabel,
-            previewUrl: $editSourceStore.galleryPreviewUrl,
-            kind: 'gallery' as const
-          }
-        ]
-      : []),
-    ...$editSourceStore.files.map((source) => ({
-      id: source.id,
-      label: source.label,
-      previewUrl: source.previewUrl,
-      kind: 'upload' as const
-    }))
-  ]);
+  const editSources = $derived.by(() => {
+    const state = $editSourceStore;
+    const primaryId = primaryEditSourceId(state);
+    const mask = state.mask;
+    return [
+      ...(state.selectedGalleryImageId
+        ? [
+            {
+              id: state.selectedGalleryImageId,
+              label: state.galleryLabel || state.galleryPreviewLabel,
+              previewUrl: state.galleryPreviewUrl,
+              kind: 'gallery' as const
+            }
+          ]
+        : []),
+      ...state.files.map((source) => ({
+        id: source.id,
+        label: source.label,
+        previewUrl: source.previewUrl,
+        kind: 'upload' as const
+      }))
+    ].map((source) => ({
+      ...source,
+      isPrimary: source.id === primaryId,
+      maskCoverage: mask && mask.sourceId === source.id ? mask.coverage : null
+    }));
+  });
+  const primaryEditSource = $derived.by(() => {
+    const state = $editSourceStore;
+    if (state.selectedGalleryImageId) {
+      return {
+        id: state.selectedGalleryImageId,
+        label: state.galleryLabel || state.galleryPreviewLabel,
+        previewUrl: state.galleryPreviewUrl
+      };
+    }
+    const first = state.files[0];
+    return first ? { id: first.id, label: first.label, previewUrl: first.previewUrl } : null;
+  });
+  const activeEditMask = $derived(isMaskValid($editSourceStore) ? $editSourceStore.mask : null);
   const activeJobsCount = $derived($jobsStore.jobs.length);
   const optimizerSettings = $derived($settingsStore.settings?.prompt_optimizer || null);
   const promptOptimizerConfigAvailable = $derived(
@@ -108,6 +131,7 @@
       !$uiStore.jobsOpen &&
       !$uiStore.editPreviewOpen &&
       !$uiStore.sizeDialogOpen &&
+      !$uiStore.maskEditorOpen &&
       !$confirmStore.request &&
       !Boolean($lightboxStore.image)
   );
@@ -186,6 +210,16 @@
   $effect(() => {
     if (optimizerAssistantEnabled) void ensurePanel('optimizer', false);
   });
+  // A mask discarded by a primary-image change happens inside the store; the
+  // store only bumps a counter, so the warning lives here.
+  let maskDiscardCount = 0;
+  $effect(() => {
+    const count = $editMaskDiscards;
+    if (count > maskDiscardCount) {
+      maskDiscardCount = count;
+      showToast($t.messages.editMaskDiscarded);
+    }
+  });
 
   async function loadInitialData() {
     await Promise.all([settingsStore.loadSettings(), jobsStore.loadJobs(), applyUrlStateToApp()]);
@@ -245,6 +279,7 @@
       $confirmStore.request ||
         $uiStore.editPreviewOpen ||
         $uiStore.sizeDialogOpen ||
+        $uiStore.maskEditorOpen ||
         galleryEditDialogOpen ||
         $uiStore.promptSnippetsOpen ||
         $uiStore.imagePromptOpen ||
@@ -470,6 +505,7 @@
       const plan = await assistantStore.planEdit({
         goal,
         source_count: $editSourceStore.files.length + ($editSourceStore.selectedGalleryImageId ? 1 : 0),
+        has_mask: Boolean(activeEditMask),
         current_prompt: promptForm.prompt,
         target_size: promptForm.size
       });
@@ -780,6 +816,27 @@
     restorePanelFocus('editPreview');
   }
 
+  async function openMaskEditor(sourceId: string) {
+    if (sourceId !== primaryEditSourceId($editSourceStore)) return;
+    rememberPanelFocus('maskEditor');
+    if (!(await ensurePanel('maskEditor'))) return;
+    setUi('maskEditorOpen', true);
+  }
+
+  function closeMaskEditor() {
+    closeUiPanel('maskEditor', 'maskEditorOpen');
+  }
+
+  function applyEditMask(mask: EditMask) {
+    editSourceStore.setMask(mask);
+    showToast($t.messages.editMaskApplied((mask.coverage * 100).toFixed(1)));
+    closeMaskEditor();
+  }
+
+  function removeEditMask() {
+    editSourceStore.removeMask();
+  }
+
   function clearEditSource() {
     editSourceStore.clear();
     editPicker?.reset();
@@ -984,6 +1041,9 @@
         showToast($t.messages.editRetryNeedsSource, 'error');
         return;
       }
+      if (job.mask_applied && !isMaskValid($editSourceStore)) {
+        showToast($t.messages.editRetryMaskMissing);
+      }
       editImage();
       return;
     }
@@ -1023,6 +1083,7 @@
       $uiStore.promptSnippetsOpen ||
       $uiStore.imagePromptOpen ||
       $uiStore.sizeDialogOpen ||
+      $uiStore.maskEditorOpen ||
       galleryEditDialogOpen ||
       Boolean($lightboxStore.image);
 
@@ -1240,6 +1301,8 @@
         onPreview={openEditPreview}
         onRemove={removeEditSource}
         onClear={clearEditSource}
+        onEditMask={openMaskEditor}
+        onRemoveMask={removeEditMask}
       />
     {/snippet}
   </PromptForm>
@@ -1330,6 +1393,21 @@
   label={editPreviewLabel}
   onClose={closeEditPreview}
 />
+{/if}
+
+{#if $maskEditorPanel.component && primaryEditSource}
+  {@const Panel = $maskEditorPanel.component}
+  <Panel
+    open={$uiStore.maskEditorOpen}
+    sourceId={primaryEditSource.id}
+    imageUrl={primaryEditSource.previewUrl}
+    label={primaryEditSource.label}
+    size={promptForm.size}
+    existingMask={activeEditMask}
+    onApply={applyEditMask}
+    onClose={closeMaskEditor}
+    onError={(message: string) => showToast(message, 'error')}
+  />
 {/if}
 
 {#if $editGalleryDialogPanel.component}

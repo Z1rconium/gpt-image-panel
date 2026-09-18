@@ -218,6 +218,9 @@
             {#if showExposureCanvas}
               <canvas bind:this={exposureCanvasEl} class="preview-exposure-canvas rounded-lg" aria-hidden="true"></canvas>
             {/if}
+            {#if job?.mask_applied}
+              <span class="absolute left-2 top-2 rounded border border-emerald-500/40 bg-black/60 px-2 py-1 text-xs font-medium text-emerald-300">{$t.jobs.maskedBadge}</span>
+            {/if}
             {#if previewFailed}
               <div class="preview-image-error" role="status">{$t.lightbox.originalLoadFailed}</div>
             {/if}

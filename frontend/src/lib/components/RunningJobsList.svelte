@@ -94,7 +94,12 @@
           />
           <div class="min-w-0 flex-1">
             <div class="flex items-center justify-between gap-3">
-              <span class="rounded-md border border-stone-300 px-2 py-0.5 text-xs text-stone-500 dark:border-zinc-700 dark:text-zinc-400">{operationLabel(job.operation, $t.operations)}</span>
+              <span class="flex items-center gap-1.5">
+                <span class="rounded-md border border-stone-300 px-2 py-0.5 text-xs text-stone-500 dark:border-zinc-700 dark:text-zinc-400">{operationLabel(job.operation, $t.operations)}</span>
+                {#if job.mask_applied}
+                  <span class="rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:text-emerald-300">{$t.jobs.maskedBadge}</span>
+                {/if}
+              </span>
               <span class={`text-xs font-medium ${statusClass(job)}`}>{statusLabel(job.status, $t.statuses)}</span>
             </div>
             <p class="mt-2 truncate text-sm text-stone-800 dark:text-zinc-200">{job.prompt || $t.common.untitledJob}</p>
