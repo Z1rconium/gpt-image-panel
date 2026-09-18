@@ -8,6 +8,7 @@ from ..core.api_paths import (
     normalize_api_preset,
     normalize_default_model,
     normalize_default_response_format,
+    normalize_supports_mask,
 )
 from ..core.validators import (
     get_env_var_ref_name,
@@ -438,6 +439,7 @@ def serialize_api_preset(preset: dict) -> ApiPresetResponse:
         default_response_format=normalize_default_response_format(
             preset.get("default_response_format")
         ),
+        supports_mask=normalize_supports_mask(preset.get("supports_mask")),
         **key_fields,
     )
 
@@ -461,6 +463,7 @@ def build_settings_response() -> SettingsResponse:
         default_response_format=normalize_default_response_format(
             active_preset.get("default_response_format")
         ),
+        supports_mask=normalize_supports_mask(active_preset.get("supports_mask")),
         **upstream_socks5_proxy_response_fields(),
         **webhook_url_response_fields(),
         presets=[serialize_api_preset(preset) for preset in get_api_presets()],

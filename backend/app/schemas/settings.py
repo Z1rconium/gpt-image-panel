@@ -28,6 +28,7 @@ class ApiPresetResponse(BaseModel):
     api_path: ApiPath
     default_model: str
     default_response_format: ResponseFormatDefault = "url"
+    supports_mask: bool = True
     api_key_masked: str
     has_api_key: bool
     api_key_source: ApiKeySource = "empty"
@@ -48,6 +49,7 @@ class PresetCreateRequest(StrictRequestModel):
     api_path: Optional[ApiPath] = None
     default_model: Optional[str] = Field(default=None, max_length=200)
     default_response_format: Optional[ResponseFormatDefault] = None
+    supports_mask: Optional[bool] = None
     source_preset_id: Optional[str] = Field(default=None, max_length=128)
 
     @field_validator("api_url")
@@ -88,6 +90,7 @@ class SettingsRequest(StrictRequestModel):
     api_path: ApiPath = "/v1/images/generations"
     default_model: Optional[str] = Field(default=None, max_length=200)
     default_response_format: Optional[ResponseFormatDefault] = None
+    supports_mask: Optional[bool] = None
     upstream_socks5_proxy: Optional[str] = Field(
         default=None,
         max_length=2048,
@@ -165,6 +168,7 @@ class SettingsResponse(BaseModel):
     api_path: ApiPath
     default_model: str
     default_response_format: ResponseFormatDefault = "url"
+    supports_mask: bool = True
     has_upstream_socks5_proxy: bool = False
     upstream_socks5_proxy_masked: str = ""
     has_webhook_url: bool = False

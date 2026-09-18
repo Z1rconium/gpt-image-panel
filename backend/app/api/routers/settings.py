@@ -301,6 +301,8 @@ async def update_settings(req: SettingsRequest):
             preset["default_response_format"] = normalize_default_response_format(
                 req.default_response_format
             )
+        if req.supports_mask is not None:
+            preset["supports_mask"] = bool(req.supports_mask)
         if req.upstream_socks5_proxy is not None:
             current_proxy = get_upstream_socks5_proxy(raw=True)
             requested_proxy = req.upstream_socks5_proxy.strip()
@@ -438,6 +440,11 @@ async def create_settings_preset(req: PresetCreateRequest):
         req.default_response_format
         if req.default_response_format is not None
         else source.get("default_response_format")
+    )
+    preset["supports_mask"] = (
+        bool(req.supports_mask)
+        if req.supports_mask is not None
+        else bool(source.get("supports_mask", True))
     )
     begin_api_settings_write()
     try:

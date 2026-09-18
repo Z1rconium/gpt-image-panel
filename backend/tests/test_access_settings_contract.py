@@ -903,6 +903,54 @@ def test_settings_and_presets(client):
     assert all(preset["name"] != "Alt" for preset in reloaded.json()["presets"])
 
 
+def test_preset_supports_mask_round_trip(client):
+    settings = client.get("/api/settings").json()
+    preset_id = settings["active_preset_id"]
+    assert settings["supports_mask"] is True
+    assert settings["presets"][0]["supports_mask"] is True
+
+    disabled = client.post(
+        "/api/settings",
+        json={
+            "active_preset_id": preset_id,
+            "preset_name": "Primary",
+            "api_url": "https://api.example.com",
+            "api_path": "/v1/images/generations",
+            "supports_mask": False,
+        },
+    )
+    assert disabled.status_code == 200
+    assert disabled.json()["supports_mask"] is False
+    assert disabled.json()["presets"][0]["supports_mask"] is False
+
+    reloaded = client.get("/api/settings").json()
+    assert reloaded["supports_mask"] is False
+    assert reloaded["presets"][0]["supports_mask"] is False
+
+    created = client.post("/api/settings/presets", json={"name": "Copy"})
+    assert created.status_code == 200
+    created_body = created.json()
+    copied = next(
+        preset
+        for preset in created_body["presets"]
+        if preset["id"] == created_body["active_preset_id"]
+    )
+    assert copied["supports_mask"] is False
+
+    enabled = client.post(
+        "/api/settings",
+        json={
+            "active_preset_id": created_body["active_preset_id"],
+            "preset_name": "Copy",
+            "api_url": "https://api.example.com",
+            "api_path": "/v1/images/generations",
+            "supports_mask": True,
+        },
+    )
+    assert enabled.status_code == 200
+    assert enabled.json()["supports_mask"] is True
+
+
 def test_build_upstream_url_accepts_openai_style_v1_base():
     from backend.app.core.api_paths import build_upstream_url
 

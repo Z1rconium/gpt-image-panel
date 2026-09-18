@@ -66,10 +66,10 @@ ALLOWED_VIOLATIONS: frozenset[str] = frozenset(
 # Project imports inside function bodies. Some are
 ALLOWED_DEFERRED_IMPORTS: frozenset[str] = frozenset(
     {
-        "backend/app/api/routers/settings.py:325 -> backend.app.services.presets",
-        "backend/app/api/routers/settings.py:334 -> backend.app.services.presets",
-        "backend/app/api/routers/settings.py:339 -> backend.app.services.presets",
-        "backend/app/api/routers/settings.py:371 -> backend.app.services.presets",
+        "backend/app/api/routers/settings.py:327 -> backend.app.services.presets",
+        "backend/app/api/routers/settings.py:336 -> backend.app.services.presets",
+        "backend/app/api/routers/settings.py:341 -> backend.app.services.presets",
+        "backend/app/api/routers/settings.py:373 -> backend.app.services.presets",
         "backend/app/core/overall_config.py:352 -> backend.app.core.secrets",
         "backend/app/core/overall_config.py:359 -> backend.app.core.security",
         "backend/app/core/redaction.py:63 -> backend.app.core.secrets",
@@ -79,12 +79,12 @@ ALLOWED_DEFERRED_IMPORTS: frozenset[str] = frozenset(
         "backend/app/core/validators.py:38 -> backend.app.core.secrets",
         "backend/app/core/validators.py:446 -> backend.app.core.secrets",
         "backend/app/core/validators.py:500 -> backend.app.core.secrets",
-        "backend/app/repositories/db/settings_store.py:489 -> backend.app.core.overall_config",
-        "backend/app/repositories/db/settings_store.py:557 -> backend.app.core.overall_config",
+        "backend/app/repositories/db/settings_store.py:490 -> backend.app.core.overall_config",
+        "backend/app/repositories/db/settings_store.py:558 -> backend.app.core.overall_config",
         "backend/app/runtime/blocking.py:175 -> backend.app.repositories",
         "backend/app/runtime/blocking.py:218 -> backend.app.repositories",
         "backend/app/runtime/blocking.py:341 -> backend.app.repositories",
-        "backend/app/services/presets.py:46 -> backend.app.core.redaction",
+        "backend/app/services/presets.py:47 -> backend.app.core.redaction",
         "backend/app/services/runtime_metrics.py:71 -> backend.app.services.job_events",
     }
 )

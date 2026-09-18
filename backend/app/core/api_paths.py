@@ -48,7 +48,15 @@ def build_upstream_url(api_url: str, api_path: str) -> str:
     return f"{base_url}{path}"
 
 
-def normalize_api_preset(raw: dict[str, Any] | None, fallback_id: str = "default") -> dict[str, str]:
+def normalize_supports_mask(value: Any | None) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return value.strip().lower() not in {"0", "false", "no", "off"}
+    return bool(value)
+
+
+def normalize_api_preset(raw: dict[str, Any] | None, fallback_id: str = "default") -> dict[str, Any]:
     preset = raw if isinstance(raw, dict) else {}
     preset_id = str(preset.get("id") or fallback_id)
     api_path = normalize_api_path(str(preset.get("api_path") or config.DEFAULT_API_PATH))
@@ -62,4 +70,5 @@ def normalize_api_preset(raw: dict[str, Any] | None, fallback_id: str = "default
         "default_response_format": normalize_default_response_format(
             preset.get("default_response_format")
         ),
+        "supports_mask": normalize_supports_mask(preset.get("supports_mask")),
     }

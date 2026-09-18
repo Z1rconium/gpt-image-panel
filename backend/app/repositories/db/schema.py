@@ -239,6 +239,7 @@ def _ensure_database():
                     api_path TEXT NOT NULL,
                     default_model TEXT NOT NULL,
                     default_response_format TEXT NOT NULL DEFAULT 'url',
+                    supports_mask INTEGER NOT NULL DEFAULT 1,
                     position INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
@@ -1015,6 +1016,14 @@ def _migration_generate_job_mask_column(conn: sqlite3.Connection):
         conn.execute("ALTER TABLE generate_jobs ADD COLUMN mask_applied INTEGER")
 
 
+def _migration_api_preset_supports_mask(conn: sqlite3.Connection):
+    preset_columns = _table_columns(conn, "api_presets")
+    if "supports_mask" not in preset_columns:
+        conn.execute(
+            "ALTER TABLE api_presets ADD COLUMN supports_mask INTEGER NOT NULL DEFAULT 1"
+        )
+
+
 def _migration_image_job_unit_lease_fencing(conn: sqlite3.Connection):
     unit_columns = _table_columns(conn, "image_job_units")
     if "claim_token" not in unit_columns:
@@ -1091,4 +1100,5 @@ SCHEMA_MIGRATIONS = (
     (19, "image_job_unit_lease_fencing", _migration_image_job_unit_lease_fencing),
     (20, "performance_indexes", _migration_performance_indexes),
     (21, "generate_job_mask_column", _migration_generate_job_mask_column),
+    (22, "api_preset_supports_mask", _migration_api_preset_supports_mask),
 )

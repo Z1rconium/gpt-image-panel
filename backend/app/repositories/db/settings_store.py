@@ -187,6 +187,7 @@ def _default_settings() -> dict:
                 "api_path": config.DEFAULT_API_PATH,
                 "default_model": default_model_for_api_path(config.DEFAULT_API_PATH),
                 "default_response_format": "url",
+                "supports_mask": True,
             }
         ],
         "prompt_optimizer": _default_prompt_optimizer_settings(),
@@ -710,11 +711,12 @@ def _replace_settings_on_conn(conn: sqlite3.Connection, settings: dict):
                 api_path,
                 default_model,
                 default_response_format,
+                supports_mask,
                 position,
                 created_at,
                 updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 preset["id"],
@@ -724,6 +726,7 @@ def _replace_settings_on_conn(conn: sqlite3.Connection, settings: dict):
                 preset["api_path"],
                 preset["default_model"],
                 preset["default_response_format"],
+                1 if preset.get("supports_mask", True) else 0,
                 position,
                 now,
                 now,
@@ -762,7 +765,7 @@ def _replace_settings_on_conn(conn: sqlite3.Connection, settings: dict):
 def _load_settings_from_conn(conn: sqlite3.Connection) -> dict | None:
     rows = conn.execute(
         """
-        SELECT id, name, api_url, api_key, api_path, default_model, default_response_format
+        SELECT id, name, api_url, api_key, api_path, default_model, default_response_format, supports_mask
         FROM api_presets
         ORDER BY position ASC, id ASC
         """
@@ -779,6 +782,7 @@ def _load_settings_from_conn(conn: sqlite3.Connection) -> dict | None:
             "api_path": row["api_path"],
             "default_model": row["default_model"],
             "default_response_format": row["default_response_format"],
+            "supports_mask": bool(row["supports_mask"]),
         }
         for row in rows
     ]
