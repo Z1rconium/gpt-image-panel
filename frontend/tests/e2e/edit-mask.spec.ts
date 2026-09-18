@@ -89,6 +89,16 @@ test('removing the primary image discards the mask and warns', async ({ page }) 
   await expect(page.getByRole('status')).toContainText('Mask cleared because the primary image changed');
 });
 
+function pngFromMultipart(body: Buffer, fieldName: string): Buffer | null {
+  const headerIndex = body.indexOf(Buffer.from(`name="${fieldName}"`, 'latin1'));
+  if (headerIndex < 0) return null;
+  const signature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const start = body.indexOf(signature, headerIndex);
+  if (start < 0) return null;
+  const end = body.indexOf(Buffer.from('\r\n--'), start);
+  return end < 0 ? null : body.subarray(start, end);
+}
+
 test('submitting an edit attaches the applied mask as mask.png', async ({ page }) => {
   await loadApp(page);
   await uploadPrimary(page);
@@ -99,11 +109,40 @@ test('submitting an edit attaches the applied mask as mask.png', async ({ page }
   await page.getByRole('textbox', { name: 'Prompt', exact: true }).fill('masked edit prompt');
   const editRequestPromise = page.waitForRequest((request) => new URL(request.url()).pathname === '/api/edits');
   await page.getByRole('button', { name: 'Edits' }).click();
-  const body = (await editRequestPromise).postDataBuffer()?.toString('latin1') || '';
+  const requestBody = (await editRequestPromise).postDataBuffer();
+  const body = requestBody?.toString('latin1') || '';
 
   expect(body).toContain('name="mask"');
   expect(body).toContain('filename="mask.png"');
   expect(body).toContain('filename="mask-source.png"');
+
+  // Decode the uploaded mask: the painted region must be fully transparent
+  // (the upstream edits alpha==0 pixels) and the rest must stay opaque black.
+  const maskPng = requestBody ? pngFromMultipart(requestBody, 'mask') : null;
+  expect(maskPng).not.toBeNull();
+  const layout = await page.evaluate(async (base64: string) => {
+    const bytes = Uint8Array.from(atob(base64), (character) => character.charCodeAt(0));
+    const bitmap = await createImageBitmap(new Blob([bytes], { type: 'image/png' }));
+    const canvas = document.createElement('canvas');
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('no 2d context');
+    context.drawImage(bitmap, 0, 0);
+    const data = context.getImageData(0, 0, canvas.width, canvas.height).data;
+    const alphaAt = (x: number, y: number) => data[(y * canvas.width + x) * 4 + 3];
+    return {
+      width: bitmap.width,
+      height: bitmap.height,
+      painted: alphaAt(32, 32),
+      kept: alphaAt(2, 2)
+    };
+  }, maskPng!.toString('base64'));
+
+  expect(layout.width).toBe(64);
+  expect(layout.height).toBe(64);
+  expect(layout.painted).toBe(0);
+  expect(layout.kept).toBe(255);
 });
 
 test('uploading a valid mask PNG imports its transparent area', async ({ page }) => {
