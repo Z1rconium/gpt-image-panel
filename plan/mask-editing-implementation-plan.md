@@ -336,7 +336,7 @@ createMaskDocument(width, height) → {
 - **矩形 / 套索工具**，**笔刷羽化**（导出前对 alpha 做高斯模糊再二值化）
 - **蒙版持久化**：入队时把蒙版复制到 `images/masks/<job_id>.png`，`generate_jobs` 记录路径；history 可预览蒙版、重试可带回；纳入 gallery 导出/导入与 R2 同步策略
 - **gallery 元数据**：`mask_coverage` 写入 `gallery_entries`（需 migration），筛选"仅蒙版编辑"
-- **预设级能力开关** `supports_mask`，对已知不支持 `mask` 的网关在 UI 隐藏入口
+- **预设级能力开关** `supports_mask`，对已知不支持 `mask` 的网关在 UI 隐藏入口 —— **已实现**：`api_presets.supports_mask`（migration 22，默认 1），设置抽屉内可开关；关闭后主图卡片不再显示蒙版入口，已应用的蒙版会被清除并提示，切换预设时同样生效。（实测 `https://688.qzz.io` 会丢弃 `mask` 字段，属于该开关的目标场景。）
 
 ---
 
@@ -385,6 +385,7 @@ createMaskDocument(width, height) → {
 - [x] 视觉符合 `DESIGN.md`（单一信号色、扁平层级、WCAG 2.2 AA 对比度；焦点环沿用 `control-focus`）
 - [x] 追加：`/api/edits` 请求体上限计入 `MAX_EDIT_MASK_BYTES`（否则 16 张满额图 + 蒙版会被 413 误拦）
 - [x] 追加：`planEdit()` 请求带 `has_mask`，系统提示词约束"只描述蒙版区域内变化"
+- [x] 追加：预设级 `supports_mask` 开关（migration 22、设置 UI、入口隐藏、切换预设清理 + 提示）
 
 ---
 
