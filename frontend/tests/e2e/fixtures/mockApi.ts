@@ -87,6 +87,7 @@ type MockOptions = {
   runningJobs?: unknown[];
   historyJobs?: unknown[];
   language?: 'en' | 'zh-CN' | null;
+  maskSupported?: boolean;
   reversePrompt?: string;
   optimizedPrompts?: string[];
   optimizeFailureAt?: number;
@@ -154,6 +155,7 @@ const settingsResponse = {
   api_path: '/v1/images/generations',
   default_model: 'preset-default-model',
   default_response_format: 'url',
+  supports_mask: true,
   has_upstream_socks5_proxy: false,
   upstream_socks5_proxy_masked: '',
   has_webhook_url: true,
@@ -215,7 +217,8 @@ const settingsResponse = {
       api_key_source: 'stored',
       api_path: '/v1/images/generations',
       default_model: 'preset-default-model',
-      default_response_format: 'url'
+      default_response_format: 'url',
+      supports_mask: true
     }
   ]
 };
@@ -466,7 +469,8 @@ function applyActivePresetFields(settings: typeof settingsResponse) {
     api_key_source: active.api_key_source,
     api_path: active.api_path,
     default_model: active.default_model,
-    default_response_format: active.default_response_format
+    default_response_format: active.default_response_format,
+    supports_mask: active.supports_mask
   };
 }
 
@@ -487,6 +491,13 @@ async function mockApi(page: Page, options: MockOptions = {}) {
   let promptSnippets = [...(options.promptSnippets ?? basePromptSnippets)];
   let promptSnippetCounter = promptSnippets.length + 1;
   let mockedSettings = cloneSettings(options.settings ?? settingsResponse);
+  if (options.maskSupported === false) {
+    mockedSettings = {
+      ...mockedSettings,
+      supports_mask: false,
+      presets: mockedSettings.presets.map((preset) => ({ ...preset, supports_mask: false }))
+    };
+  }
   let mockedOverallConfig: any = structuredClone(overallConfigResponse);
   let optimizerSystemPrompt = 'Default optimizer system prompt';
   let selectionTokenSeq = 0;
@@ -759,6 +770,20 @@ async function mockApi(page: Page, options: MockOptions = {}) {
       return;
     }
     if (url.pathname === '/api/settings') {
+      if (request.method() === 'POST') {
+        const body = JSON.parse(request.postData() || '{}');
+        if (typeof body.supports_mask === 'boolean') {
+          mockedSettings = applyActivePresetFields({
+            ...mockedSettings,
+            supports_mask: body.supports_mask,
+            presets: mockedSettings.presets.map((preset) =>
+              preset.id === mockedSettings.active_preset_id
+                ? { ...preset, supports_mask: body.supports_mask }
+                : preset
+            )
+          });
+        }
+      }
       await route.fulfill(json(mockedSettings));
       return;
     }

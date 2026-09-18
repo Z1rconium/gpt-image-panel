@@ -7,6 +7,7 @@ export type ApiPreset = {
   api_path: ApiPath;
   default_model: string;
   default_response_format: ResponseFormatDefault;
+  supports_mask: boolean;
   api_key_masked: string;
   has_api_key: boolean;
   api_key_source: ApiKeySource;
@@ -25,6 +26,7 @@ export type SettingsResponse = {
   api_path: ApiPath;
   default_model: string;
   default_response_format: ResponseFormatDefault;
+  supports_mask: boolean;
   has_upstream_socks5_proxy: boolean;
   upstream_socks5_proxy_masked: string;
   has_webhook_url: boolean;
@@ -156,6 +158,7 @@ export type SettingsInput = {
   api_path: ApiPath;
   default_model?: string | null;
   default_response_format?: ResponseFormatDefault | null;
+  supports_mask?: boolean | null;
   upstream_socks5_proxy?: string | null;
   webhook_url?: string | null;
   prompt_optimizer?: PromptOptimizerSettingsInput | null;

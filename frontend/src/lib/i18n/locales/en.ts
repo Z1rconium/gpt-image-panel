@@ -123,6 +123,8 @@ const en = {
     apiPath: 'API path',
     defaultModel: 'Default model',
     defaultResponseFormat: 'Default response format',
+    supportsMask: 'Supports mask inpainting',
+    supportsMaskHint: 'Turn off for gateways that ignore the mask field; the mask editor is hidden for this preset.',
     apiKey: 'API key',
     apiKeyHint: 'Use ${OPENAI_API_KEY} to store only an environment-variable reference in SQLite. Literal keys are saved as plaintext.',
     upstreamSocks5Proxy: 'SOCKS5 proxy',
@@ -649,6 +651,7 @@ const en = {
     editMaskUploadSizeMismatch: (width: number, height: number, expectedWidth: number, expectedHeight: number) =>
       `The mask is ${width}x${height} but the primary image is ${expectedWidth}x${expectedHeight}`,
     editMaskUploadTooLarge: 'The mask must be smaller than 4 MB',
+    editMaskPresetUnsupported: 'The active preset does not support masks; the applied mask was removed',
     editSourceLimit: (max: number) => `At most ${max} edit source images are supported`,
     editSourceSomeSkipped: (max: number) => `Some selected files were skipped because the edit source limit is ${max}`,
     sessionExpired: 'Session expired. Please enter the access key.',

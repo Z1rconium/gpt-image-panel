@@ -200,6 +200,37 @@ test('switching between overlay and mask-only re-renders the canvas', async ({ p
   await expect.poll(async () => (await canvasPixel(page, 3, 3))[3]).toBe(0);
 });
 
+test('hides the mask entry when the active preset does not support masks', async ({ page }) => {
+  await loadApp(page, { maskSupported: false });
+  await uploadPrimary(page);
+
+  await expect(page.getByText('Primary')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Edit mask for mask-source.png' })).toHaveCount(0);
+});
+
+test('disabling mask support on the active preset clears the applied mask', async ({ page }) => {
+  await loadApp(page);
+  await uploadPrimary(page);
+  await openMaskEditor(page);
+  await paintStroke(page);
+  await page.getByRole('button', { name: 'Apply mask' }).click();
+  await expect(page.getByText(/^Mask \d+\.\d%$/)).toBeVisible();
+
+  await page.getByRole('button', { name: 'Settings' }).click();
+  const drawer = page.getByRole('dialog', { name: 'Settings' });
+  await drawer.getByLabel('Supports mask inpainting').uncheck();
+  const saveRequest = page.waitForRequest(
+    (request) => new URL(request.url()).pathname === '/api/settings' && request.method() === 'POST'
+  );
+  await drawer.getByRole('button', { name: 'Save Preset' }).click();
+  const body = (await saveRequest).postDataJSON() as Record<string, unknown>;
+  expect(body.supports_mask).toBe(false);
+
+  await expect(page.getByText(/^Mask \d+\.\d%$/)).toHaveCount(0);
+  await expect(page.getByRole('status')).toContainText('does not support masks');
+  await expect(page.getByRole('button', { name: 'Edit mask for mask-source.png' })).toHaveCount(0);
+});
+
 test('rejects an uploaded mask whose size differs from the primary image', async ({ page }) => {
   await loadApp(page);
   await uploadPrimary(page);

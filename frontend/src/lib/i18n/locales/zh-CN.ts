@@ -125,6 +125,8 @@ const zh: Translation = {
     apiPath: 'API 路径',
     defaultModel: '默认模型',
     defaultResponseFormat: '默认响应格式',
+    supportsMask: '支持蒙版编辑',
+    supportsMaskHint: '对会忽略 mask 字段的网关请关闭；关闭后该预设不再显示蒙版入口。',
     apiKey: 'API 密钥',
     apiKeyHint: '可填写 ${OPENAI_API_KEY}，SQLite 里只保存环境变量引用。直接填写的 key 会以明文保存。',
     upstreamSocks5Proxy: 'SOCKS5 代理',
@@ -651,6 +653,7 @@ const zh: Translation = {
     editMaskUploadSizeMismatch: (width, height, expectedWidth, expectedHeight) =>
       `蒙版尺寸为 ${width}x${height}，主图尺寸为 ${expectedWidth}x${expectedHeight}`,
     editMaskUploadTooLarge: '蒙版必须小于 4 MB',
+    editMaskPresetUnsupported: '当前预设不支持蒙版，已移除已应用的蒙版',
     editSourceLimit: (max) => `最多支持 ${max} 张编辑源图片`,
     editSourceSomeSkipped: (max) => `部分已选文件被跳过，因为编辑源上限是 ${max} 张`,
     sessionExpired: '会话已过期，请输入访问密钥。',

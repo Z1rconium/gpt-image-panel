@@ -71,6 +71,7 @@ function pristineDraft(): SettingsDraft {
     apiUrl: 'https://api.example.com',
     defaultModel: 'gpt-image-2',
     defaultResponseFormat: 'url',
+    supportsMask: true,
     apiKey: MASKED_API_KEY_VALUE,
     apiPath: '/v1/images/generations',
     upstreamSocks5Proxy: '',
@@ -114,6 +115,12 @@ describe('buildSettingsPayload', () => {
   it('forwards a newly entered secret', () => {
     const payload = buildSettingsPayload({ ...pristineDraft(), apiKey: 'sk-new' }, settings);
     expect(payload.api_key).toBe('sk-new');
+  });
+
+  it('detects and forwards a mask capability change', () => {
+    const draft = { ...pristineDraft(), supportsMask: false };
+    expect(hasSettingsChanges(draft, settings, activePreset)).toBe(true);
+    expect(buildSettingsPayload(draft, settings).supports_mask).toBe(false);
   });
 });
 

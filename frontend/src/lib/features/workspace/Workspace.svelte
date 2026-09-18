@@ -111,6 +111,7 @@
     return first ? { id: first.id, label: first.label, previewUrl: first.previewUrl } : null;
   });
   const activeEditMask = $derived(isMaskValid($editSourceStore) ? $editSourceStore.mask : null);
+  const maskSupported = $derived($settingsStore.settings?.supports_mask !== false);
   const activeJobsCount = $derived($jobsStore.jobs.length);
   const optimizerSettings = $derived($settingsStore.settings?.prompt_optimizer || null);
   const promptOptimizerConfigAvailable = $derived(
@@ -218,6 +219,14 @@
     if (count > maskDiscardCount) {
       maskDiscardCount = count;
       showToast($t.messages.editMaskDiscarded);
+    }
+  });
+  // The active preset can be switched to one whose gateway ignores masks; drop
+  // any stored mask so it cannot be submitted against a preset that ignores it.
+  $effect(() => {
+    if (!maskSupported && $editSourceStore.mask) {
+      editSourceStore.removeMask();
+      showToast($t.messages.editMaskPresetUnsupported, 'status');
     }
   });
 
@@ -817,6 +826,7 @@
   }
 
   async function openMaskEditor(sourceId: string) {
+    if (!maskSupported) return;
     if (sourceId !== primaryEditSourceId($editSourceStore)) return;
     rememberPanelFocus('maskEditor');
     if (!(await ensurePanel('maskEditor'))) return;
@@ -1303,6 +1313,7 @@
         onClear={clearEditSource}
         onEditMask={openMaskEditor}
         onRemoveMask={removeEditMask}
+        {maskSupported}
       />
     {/snippet}
   </PromptForm>

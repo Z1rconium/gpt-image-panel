@@ -20,6 +20,7 @@
   export let onClear: () => void = () => {};
   export let onEditMask: (sourceId: string) => void = () => {};
   export let onRemoveMask: () => void = () => {};
+  export let maskSupported = true;
 
   let input: HTMLInputElement;
   let dragDepth = 0;
@@ -158,7 +159,8 @@
               </span>
             </span>
           </button>
-          <div class="flex items-center gap-1 border-t border-stone-200/80 px-1.5 py-1 dark:border-zinc-800/80">
+          {#if maskSupported}
+            <div class="flex items-center gap-1 border-t border-stone-200/80 px-1.5 py-1 dark:border-zinc-800/80">
             {#if source.isPrimary}
               <button
                 type="button"
@@ -202,6 +204,7 @@
               </span>
             {/if}
           </div>
+          {/if}
           <button
             type="button"
             class="control-focus absolute right-1.5 top-1.5 flex h-8 w-8 items-center justify-center rounded-md text-stone-400 hover:bg-red-50 hover:text-red-600 dark:text-zinc-500 dark:hover:bg-red-950/40 dark:hover:text-red-400"

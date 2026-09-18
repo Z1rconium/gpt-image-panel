@@ -23,6 +23,7 @@
   export let apiPath: ApiPath = '/v1/images/generations';
   export let defaultModel = '';
   export let defaultResponseFormat: ResponseFormatDefault = 'url';
+  export let supportsMask = true;
   export let apiKey = '';
   export let apiKeyInputType = 'password';
   export let upstreamSocks5Proxy = '';
@@ -148,6 +149,13 @@
             </select>
           </label>
           {#if isImage25(defaultModel)}<p class="text-xs text-stone-500">{$t.promptForm.base64Automatic}</p>{/if}
+          <label class="flex items-start gap-2.5 rounded-lg border border-stone-300 bg-stone-50 px-3 py-2.5 dark:border-zinc-700 dark:bg-zinc-950">
+            <input type="checkbox" class="control-focus mt-0.5 accent-emerald-500" bind:checked={supportsMask} />
+            <span class="min-w-0">
+              <span class="block text-sm text-stone-800 dark:text-zinc-200">{$t.settings.supportsMask}</span>
+              <span class="mt-1 block text-xs text-stone-500 dark:text-zinc-500">{$t.settings.supportsMaskHint}</span>
+            </span>
+          </label>
           <label class="block">
             <span class="mb-1.5 block text-xs font-medium text-stone-600 dark:text-zinc-400">{$t.settings.apiKey}</span>
             <input bind:value={apiKey} type={apiKeyInputType} class="control-focus w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-2.5 font-mono text-sm text-stone-900 focus:border-emerald-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100" />
