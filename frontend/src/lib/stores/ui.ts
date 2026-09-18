@@ -22,6 +22,7 @@ export type UiState = {
   imagePromptOpen: boolean;
   sizeDialogOpen: boolean;
   editPreviewOpen: boolean;
+  maskEditorOpen: boolean;
 };
 
 const initialUiState: UiState = {
@@ -30,7 +31,8 @@ const initialUiState: UiState = {
   promptSnippetsOpen: false,
   imagePromptOpen: false,
   sizeDialogOpen: false,
-  editPreviewOpen: false
+  editPreviewOpen: false,
+  maskEditorOpen: false
 };
 
 function createToastStore() {

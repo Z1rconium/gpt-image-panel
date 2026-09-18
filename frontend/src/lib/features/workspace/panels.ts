@@ -8,6 +8,7 @@ export type LazyPanel =
   | 'lightbox'
   | 'size'
   | 'editPreview'
+  | 'maskEditor'
   | 'optimizer';
 
 export const lazyPanels = {
@@ -18,6 +19,7 @@ export const lazyPanels = {
   lightbox: createLazyComponent(() => import('$lib/components/Lightbox.svelte')),
   size: createLazyComponent(() => import('$lib/components/SizeDialog.svelte')),
   editPreview: createLazyComponent(() => import('$lib/components/EditPreviewModal.svelte')),
+  maskEditor: createLazyComponent(() => import('$lib/components/MaskEditorDialog.svelte')),
   optimizer: createLazyComponent(() => import('$lib/components/PromptOptimizerAssistant.svelte'))
 } satisfies Record<LazyPanel, ReturnType<typeof createLazyComponent>>;
 
@@ -28,6 +30,7 @@ export const imagePromptPanel = lazyPanels.imagePrompt;
 export const lightboxPanel = lazyPanels.lightbox;
 export const sizePanel = lazyPanels.size;
 export const editPreviewPanel = lazyPanels.editPreview;
+export const maskEditorPanel = lazyPanels.maskEditor;
 export const optimizerPanel = lazyPanels.optimizer;
 
 // Not a modal panel, but the assistant is below the fold and heavy enough that

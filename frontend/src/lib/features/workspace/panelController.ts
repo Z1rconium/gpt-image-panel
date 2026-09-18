@@ -10,7 +10,8 @@ export type PanelUiKey =
   | 'promptSnippetsOpen'
   | 'imagePromptOpen'
   | 'sizeDialogOpen'
-  | 'editPreviewOpen';
+  | 'editPreviewOpen'
+  | 'maskEditorOpen';
 
 type ShowToast = (message: string, variant?: ToastVariant, options?: ToastOptions) => void;
 
