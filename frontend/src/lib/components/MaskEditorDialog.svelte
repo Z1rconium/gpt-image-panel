@@ -163,6 +163,8 @@
     if (overlayEl.width !== width || overlayEl.height !== height) {
       overlayEl.width = width;
       overlayEl.height = height;
+      // The checkerboard tile is sized in backing pixels.
+      checkerPattern = null;
     }
   }
 
@@ -176,16 +178,20 @@
 
   function ensureCheckerPattern(context: CanvasRenderingContext2D) {
     if (checkerPattern) return;
+    // The pattern lives in backing pixels, so scale the tile by the device
+    // pixel ratio to keep 8 CSS px squares readable on HiDPI displays.
+    const dpr = Math.max(1, Math.round(window.devicePixelRatio || 1));
+    const cell = 8 * dpr;
     const tile = document.createElement('canvas');
-    tile.width = 16;
-    tile.height = 16;
+    tile.width = cell * 2;
+    tile.height = cell * 2;
     const tileContext = tile.getContext('2d');
     if (!tileContext) return;
-    tileContext.fillStyle = '#27272a';
-    tileContext.fillRect(0, 0, 16, 16);
     tileContext.fillStyle = '#3f3f46';
-    tileContext.fillRect(0, 0, 8, 8);
-    tileContext.fillRect(8, 8, 8, 8);
+    tileContext.fillRect(0, 0, cell * 2, cell * 2);
+    tileContext.fillStyle = '#71717a';
+    tileContext.fillRect(0, 0, cell, cell);
+    tileContext.fillRect(cell, cell, cell, cell);
     checkerPattern = context.createPattern(tile, 'repeat');
   }
 

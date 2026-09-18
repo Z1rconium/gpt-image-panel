@@ -150,6 +150,13 @@ test('switching between overlay and mask-only re-renders the canvas', async ({ p
   expect(maskOnlyMark[3]).toBeGreaterThan(0);
   expect(maskOnlyMark[1]).toBeGreaterThan(maskOnlyMark[0]);
 
+  // The unmarked area must read as a transparency checkerboard, not a flat fill.
+  const dpr = await page.evaluate(() => window.devicePixelRatio || 1);
+  const cell = 8 * Math.max(1, Math.round(dpr));
+  const lightSquare = await canvasPixel(page, Math.round(cell / 2), Math.round(cell / 2));
+  const darkSquare = await canvasPixel(page, Math.round(cell * 1.5), Math.round(cell / 2));
+  expect(lightSquare).not.toEqual(darkSquare);
+
   await page.getByRole('button', { name: 'Overlay' }).click();
   await expect.poll(async () => (await canvasPixel(page, 3, 3))[3]).toBe(0);
 });
