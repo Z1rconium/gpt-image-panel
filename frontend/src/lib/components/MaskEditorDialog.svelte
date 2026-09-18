@@ -58,6 +58,7 @@
   let renderHandle: number | null = null;
   let resizeObserver: ResizeObserver | null = null;
   let checkerPattern: CanvasPattern | null = null;
+  let tintLayer: HTMLCanvasElement | null = null;
   let prepareToken = 0;
 
   $: sizeHint = size !== 'auto' && naturalWidth > 0 && size !== `${naturalWidth}x${naturalHeight}`;
@@ -80,6 +81,7 @@
     ready = false;
     drawing = false;
     checkerPattern = null;
+    tintLayer = null;
   }
 
   onDestroy(teardown);
@@ -187,27 +189,53 @@
     checkerPattern = context.createPattern(tile, 'repeat');
   }
 
+  function ensureTintLayer(width: number, height: number) {
+    if (!tintLayer) tintLayer = document.createElement('canvas');
+    if (tintLayer.width !== width || tintLayer.height !== height) {
+      tintLayer.width = width;
+      tintLayer.height = height;
+    }
+    return tintLayer;
+  }
+
   function render() {
     if (!overlayEl || !doc) return;
     const width = overlayEl.width;
     const height = overlayEl.height;
+    if (!width || !height) return;
     const context = overlayEl.getContext('2d');
     if (!context) return;
 
     context.globalCompositeOperation = 'source-over';
     context.globalAlpha = 1;
     context.clearRect(0, 0, width, height);
+
     if (view === 'maskOnly') {
       ensureCheckerPattern(context);
       context.fillStyle = checkerPattern ?? '#27272a';
       context.fillRect(0, 0, width, height);
     }
-    context.drawImage(doc.marks, 0, 0, width, height);
-    context.globalCompositeOperation = 'source-in';
-    context.fillStyle =
-      view === 'maskOnly' ? 'rgba(228, 228, 231, 0.92)' : 'rgba(16, 185, 129, 0.45)';
-    context.fillRect(0, 0, width, height);
-    context.globalCompositeOperation = 'source-over';
+
+    // Tint on its own layer: compositing `source-in` directly on the overlay
+    // would recolor the mask-only checkerboard along with the marks.
+    const layer = ensureTintLayer(width, height);
+    const layerContext = layer.getContext('2d');
+    if (!layerContext) return;
+    layerContext.globalCompositeOperation = 'source-over';
+    layerContext.globalAlpha = 1;
+    layerContext.clearRect(0, 0, width, height);
+    layerContext.drawImage(doc.marks, 0, 0, width, height);
+    layerContext.globalCompositeOperation = 'source-in';
+    layerContext.fillStyle = 'rgba(16, 185, 129, 0.45)';
+    layerContext.fillRect(0, 0, width, height);
+
+    context.drawImage(layer, 0, 0);
+  }
+
+  function setView(next: 'overlay' | 'maskOnly') {
+    if (view === next) return;
+    view = next;
+    scheduleRender();
   }
 
   function overlayRect() {
@@ -613,7 +641,7 @@
               aria-pressed={view === 'overlay'}
               title={$t.maskEditor.viewOverlay}
               aria-label={$t.maskEditor.viewOverlay}
-              on:click={() => (view = 'overlay')}
+              on:click={() => setView('overlay')}
             >
               <Layers size={15} strokeWidth={1.9} aria-hidden="true" />
               <span>{$t.maskEditor.viewOverlay}</span>
@@ -627,7 +655,7 @@
               aria-pressed={view === 'maskOnly'}
               title={$t.maskEditor.viewMaskOnly}
               aria-label={$t.maskEditor.viewMaskOnly}
-              on:click={() => (view = 'maskOnly')}
+              on:click={() => setView('maskOnly')}
             >
               <Eye size={15} strokeWidth={1.9} aria-hidden="true" />
               <span>{$t.maskEditor.viewMaskOnly}</span>

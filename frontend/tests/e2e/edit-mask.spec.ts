@@ -119,6 +119,41 @@ test('uploading a valid mask PNG imports its transparent area', async ({ page })
   await expect(page.getByRole('button', { name: 'Apply mask' })).toBeEnabled();
 });
 
+async function canvasPixel(page: Page, x: number, y: number) {
+  return page.evaluate(
+    ({ px, py }) => {
+      const canvas = document.querySelector('canvas[aria-label="Mask canvas"]') as HTMLCanvasElement | null;
+      if (!canvas) throw new Error('mask canvas missing');
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('mask canvas has no 2d context');
+      return Array.from(context.getImageData(px, py, 1, 1).data);
+    },
+    { px: x, py: y }
+  );
+}
+
+test('switching between overlay and mask-only re-renders the canvas', async ({ page }) => {
+  await loadApp(page);
+  await uploadPrimary(page);
+  await openMaskEditor(page);
+  await paintStroke(page);
+
+  // Overlay leaves the photo visible outside the marked region.
+  expect((await canvasPixel(page, 3, 3))[3]).toBe(0);
+  const overlayMark = await canvasPixel(page, 32, 32);
+  expect(overlayMark[3]).toBeGreaterThan(0);
+  expect(overlayMark[1]).toBeGreaterThan(overlayMark[0]);
+
+  await page.getByRole('button', { name: 'Mask only' }).click();
+  await expect.poll(async () => (await canvasPixel(page, 3, 3))[3]).toBeGreaterThan(0);
+  const maskOnlyMark = await canvasPixel(page, 32, 32);
+  expect(maskOnlyMark[3]).toBeGreaterThan(0);
+  expect(maskOnlyMark[1]).toBeGreaterThan(maskOnlyMark[0]);
+
+  await page.getByRole('button', { name: 'Overlay' }).click();
+  await expect.poll(async () => (await canvasPixel(page, 3, 3))[3]).toBe(0);
+});
+
 test('rejects an uploaded mask whose size differs from the primary image', async ({ page }) => {
   await loadApp(page);
   await uploadPrimary(page);
