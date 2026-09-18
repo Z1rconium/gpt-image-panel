@@ -406,6 +406,8 @@ async def plan_edit(req: AssistantEditPlanRequest):
     data, model, duration_ms = await _assistant_json(
         system_prompt=(
             "You plan image edits. Produce an edit prompt and source requirements. "
+            "When has_mask is true, only the fully transparent mask region is edited: "
+            "describe changes confined to that region and treat everything else as fixed. "
             "The plan is advisory only and should not assume submission."
         ),
         user_prompt=json.dumps(req.model_dump(), ensure_ascii=False, sort_keys=True),

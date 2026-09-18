@@ -176,6 +176,7 @@ class AssistantJobDiagnoseResponse(AssistantBaseResponse):
 class AssistantEditPlanRequest(StrictRequestModel):
     goal: str = Field(..., min_length=1, max_length=2000)
     source_count: int = Field(default=0, ge=0, le=16)
+    has_mask: bool = False
     current_prompt: Optional[str] = Field(default=None, max_length=MAX_PROMPT_CHARS)
     target_size: Optional[str] = Field(default=None, max_length=40)
 

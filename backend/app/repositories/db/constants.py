@@ -79,6 +79,7 @@ GENERATE_JOB_COLUMNS = (
     "cost_json",
     "streaming",
     "partial_images",
+    "mask_applied",
     "error",
     "webhook_url",
 )
@@ -161,6 +162,7 @@ INTEGER_GENERATE_JOB_COLUMNS = {
     "image_height",
     "streaming",
     "partial_images",
+    "mask_applied",
 }
 SETTINGS_ACTIVE_PRESET_KEY = "active_preset_id"
 UPSTREAM_SOCKS5_PROXY_KEY = "upstream_socks5_proxy"

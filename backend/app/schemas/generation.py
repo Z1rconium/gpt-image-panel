@@ -170,4 +170,5 @@ class GenerateJobStatus(GenerateJobResponse):
     cost: Optional[CostEstimate] = None
     streaming: Optional[bool] = None
     partial_images: Optional[int] = None
+    mask_applied: Optional[bool] = None
     error: Optional[str] = None

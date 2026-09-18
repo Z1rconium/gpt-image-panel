@@ -801,6 +801,7 @@ def test_edits_body_limit_matches_source_image_count(client):
 
     assert body_limit._max_body_for_path("/api/edits", "multipart/form-data") == (
         config.MAX_FILE_SIZE_MB * MAX_EDIT_SOURCE_IMAGES * 1024 * 1024
+        + MAX_EDIT_MASK_BYTES
         + EDIT_MULTIPART_METADATA_OVERHEAD_BYTES
     )
 
@@ -2175,6 +2176,7 @@ def test_socks5_proxy_only_flows_to_generation_and_edit(client, monkeypatch):
         progress=None,
         socks5_proxy=None,
         persist_gallery_entry=None,
+        mask_source=None,
     ):
         assert len(image_sources) == 1
         assert image_sources[0].temp_path.exists()

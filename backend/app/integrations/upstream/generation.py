@@ -523,6 +523,7 @@ async def call_image_edit_api(
     partial_images: int = 2,
     preview: "PreviewCallback | None" = None,
     persist_gallery_entry: PersistGalleryEntry,
+    mask_source: ImageEditSource | None = None,
 ) -> list[GalleryEntry]:
     if not image_sources:
         raise UpstreamApiError("At least one edit source image is required")
@@ -556,6 +557,15 @@ async def call_image_edit_api(
                 filename=source.filename or "image.png",
                 content_type=source.content_type or "application/octet-stream",
             )
+        if mask_source is not None:
+            mask_file = mask_source.temp_path.open("rb")
+            image_files.append(mask_file)
+            form.add_field(
+                "mask",
+                mask_file,
+                filename=mask_source.filename or "mask.png",
+                content_type="image/png",
+            )
         for key, value in _build_image_params(payload).items():
             form.add_field(key, str(value))
         if use_streaming:
@@ -573,6 +583,12 @@ async def call_image_edit_api(
                 if len(image_sources) == 1
                 else "Uploading source images and edit parameters"
             )
+            if mask_source is not None:
+                upload_message = (
+                    "Uploading source image, mask and edit parameters"
+                    if len(image_sources) == 1
+                    else "Uploading source images, mask and edit parameters"
+                )
             progress("uploading_edit_image", upload_message)
         with observe_job_stage("upstream_wait"):
             async with prepared_request.post(

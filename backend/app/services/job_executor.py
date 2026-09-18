@@ -667,10 +667,17 @@ async def run_claimed_image_unit(unit: dict, worker_id: str):
         async def run_upstream() -> list:
             with use_job_stage_timer(stage_timer), use_usage_sink(usage_sink):
                 if operation == "edit":
-                    image_sources = [
+                    edit_sources = [
                         edit_source_from_payload(source)
                         for source in unit.get("edit_sources") or []
                     ]
+                    image_sources = [
+                        source for source in edit_sources if source.role == "image"
+                    ]
+                    mask_source = next(
+                        (source for source in edit_sources if source.role == "mask"),
+                        None,
+                    )
                     if not image_sources:
                         raise proxy.UpstreamApiError(
                             "At least one edit source image is required"
@@ -684,6 +691,7 @@ async def run_claimed_image_unit(unit: dict, worker_id: str):
                         progress,
                         socks5_proxy=socks5_proxy,
                         persist_gallery_entry=add_to_gallery_async,
+                        mask_source=mask_source,
                         **stream_kwargs,
                     )
                 return await proxy.call_image_generation_api(

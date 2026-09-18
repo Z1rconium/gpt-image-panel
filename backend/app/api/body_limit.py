@@ -9,6 +9,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from ..core import settings as config
 from .edit_limits import (
     EDIT_MULTIPART_METADATA_OVERHEAD_BYTES,
+    MAX_EDIT_MASK_BYTES,
     MAX_EDIT_SOURCE_IMAGES,
 )
 
@@ -33,6 +34,7 @@ def _max_body_for_path(path: str, content_type: str = "") -> int:
             * MAX_EDIT_SOURCE_IMAGES
             * 1024
             * 1024
+            + MAX_EDIT_MASK_BYTES
             + EDIT_MULTIPART_METADATA_OVERHEAD_BYTES,
         ),
     ]

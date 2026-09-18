@@ -1,12 +1,15 @@
 import asyncio
 import os
 import tempfile
+from dataclasses import replace
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile
+from starlette.datastructures import FormData
 from starlette.datastructures import UploadFile as StarletteUploadFile
 
-from ..edit_limits import MAX_EDIT_SOURCE_IMAGES
+from ..edit_limits import EDIT_MASK_FIELD_NAME, MAX_EDIT_MASK_BYTES, MAX_EDIT_SOURCE_IMAGES
+from ...services.edit_masks import validate_edit_mask_against_primary
 from ...services.gallery_archive_shared import max_upload_bytes
 from ...services.job_queue import (
     EditImageSource,
@@ -28,6 +31,7 @@ router = APIRouter()
 
 EDIT_SOURCE_SNIFF_BYTES = 512
 EDIT_SOURCE_CHUNK_BYTES = 1024 * 1024
+MASK_TOO_LARGE_DETAIL = "Mask is too large. Max size is 4 MB."
 
 
 def edit_request_from_form(
@@ -76,10 +80,12 @@ def validate_edit_source_header(
     *,
     empty_detail: str,
     too_large_detail: str,
+    max_bytes: int | None = None,
 ):
     if byte_size == 0:
         raise HTTPException(status_code=400, detail=empty_detail)
-    if byte_size > max_upload_bytes():
+    limit = max_upload_bytes() if max_bytes is None else max_bytes
+    if byte_size > limit:
         raise HTTPException(status_code=400, detail=too_large_detail)
     validate_upload_image_bytes(image_header, filename, content_type)
 
@@ -103,6 +109,7 @@ def copy_edit_source_file_to_temp(
     empty_detail: str,
     too_large_detail: str,
     read_error_detail: str,
+    max_bytes: int | None = None,
 ) -> EditImageSource:
     try:
         with path.open("rb") as source:
@@ -113,6 +120,7 @@ def copy_edit_source_file_to_temp(
                 empty_detail=empty_detail,
                 too_large_detail=too_large_detail,
                 read_error_detail=read_error_detail,
+                max_bytes=max_bytes,
             )
     except HTTPException:
         raise
@@ -128,7 +136,9 @@ def copy_edit_source_stream_to_temp(
     empty_detail: str,
     too_large_detail: str,
     read_error_detail: str,
+    max_bytes: int | None = None,
 ) -> EditImageSource:
+    limit = max_upload_bytes() if max_bytes is None else max_bytes
     fd, temp_path = create_edit_source_temp_path(filename)
     total = 0
     header = bytearray()
@@ -141,7 +151,7 @@ def copy_edit_source_stream_to_temp(
                 if not chunk:
                     break
                 total += len(chunk)
-                if total > max_upload_bytes():
+                if total > limit:
                     raise HTTPException(status_code=400, detail=too_large_detail)
                 if len(header) < EDIT_SOURCE_SNIFF_BYTES:
                     header.extend(chunk[: EDIT_SOURCE_SNIFF_BYTES - len(header)])
@@ -164,6 +174,7 @@ def copy_edit_source_stream_to_temp(
             content_type,
             empty_detail=empty_detail,
             too_large_detail=too_large_detail,
+            max_bytes=max_bytes,
         )
         validate_edit_source_file(temp_path, filename, content_type)
     except BaseException:
@@ -206,8 +217,7 @@ async def read_upload_edit_source(image: UploadFile) -> EditImageSource:
     )
 
 
-async def read_upload_edit_sources(request: Request) -> list[EditImageSource]:
-    form = await request.form()
+async def read_upload_edit_sources(form: FormData) -> list[EditImageSource]:
     uploads: list[UploadFile] = []
     for field_name in ("image", "image[]"):
         for value in form.getlist(field_name):
@@ -234,6 +244,50 @@ async def read_upload_edit_sources(request: Request) -> list[EditImageSource]:
         cleanup_edit_sources(sources)
         raise error
     return sources
+
+
+async def read_upload_edit_mask(form: FormData) -> EditImageSource | None:
+    values = form.getlist(EDIT_MASK_FIELD_NAME)
+    if not values:
+        return None
+    if len(values) > 1:
+        raise HTTPException(status_code=400, detail="Only one mask is supported.")
+
+    upload = values[0]
+    if not isinstance(upload, StarletteUploadFile):
+        raise HTTPException(status_code=400, detail="Mask must be a PNG file.")
+    if not is_image_upload(upload):
+        raise HTTPException(status_code=400, detail="Mask must be a PNG file.")
+    if resolve_upload_content_type(upload) != "image/png":
+        raise HTTPException(status_code=400, detail="Mask must be a PNG file.")
+
+    filename = upload.filename or "mask.png"
+    source = await run_image_operation(
+        copy_edit_source_stream_to_temp,
+        upload.file,
+        filename,
+        "image/png",
+        empty_detail="Mask file is empty.",
+        too_large_detail=MASK_TOO_LARGE_DETAIL,
+        read_error_detail="Failed to read mask upload",
+        metric_name="copy_validate_edit_mask_upload",
+        max_bytes=MAX_EDIT_MASK_BYTES,
+    )
+    return replace(source, role="mask")
+
+
+async def validate_edit_mask(mask: EditImageSource, primary: EditImageSource):
+    try:
+        await run_image_operation(
+            validate_edit_mask_against_primary,
+            mask.temp_path,
+            primary.temp_path,
+            primary_filename=primary.filename,
+            primary_content_type=primary.content_type,
+            metric_name="validate_edit_mask",
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
 
 
 async def read_gallery_edit_source(image_id: str) -> EditImageSource:
@@ -268,17 +322,23 @@ async def edit_image(
     request: Request,
     req: EditRequest = Depends(edit_request_from_form),
 ):
-    sources = await read_upload_edit_sources(request)
+    form = await request.form()
+    sources = await read_upload_edit_sources(form)
     if not sources:
         raise HTTPException(status_code=422, detail="Upload image is required.")
     validate_edit_source_count(sources)
+    mask = None
     try:
+        mask = await read_upload_edit_mask(form)
+        if mask is not None:
+            await validate_edit_mask(mask, sources[0])
         return await queue_edit_job(
             req=req,
             image_sources=sources,
+            mask_source=mask,
         )
     except BaseException:
-        cleanup_edit_sources(sources)
+        cleanup_edit_sources(sources if mask is None else [*sources, mask])
         raise
 
 
@@ -292,23 +352,25 @@ async def edit_image_from_gallery(
     image_id: str,
     req: EditRequest = Depends(edit_request_from_form),
 ):
-    upload_sources = await read_upload_edit_sources(request)
+    form = await request.form()
+    upload_sources = await read_upload_edit_sources(form)
     try:
         gallery_source = await read_gallery_edit_source(image_id)
     except BaseException:
         cleanup_edit_sources(upload_sources)
         raise
     sources = [gallery_source, *upload_sources]
+    mask = None
     try:
         validate_edit_source_count(sources)
-    except BaseException:
-        cleanup_edit_sources(sources)
-        raise
-    try:
+        mask = await read_upload_edit_mask(form)
+        if mask is not None:
+            await validate_edit_mask(mask, gallery_source)
         return await queue_edit_job(
             req=req,
             image_sources=sources,
+            mask_source=mask,
         )
     except BaseException:
-        cleanup_edit_sources(sources)
+        cleanup_edit_sources(sources if mask is None else [*sources, mask])
         raise

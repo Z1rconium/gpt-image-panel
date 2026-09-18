@@ -68,6 +68,7 @@ class EditImageSource:
     byte_size: int
     filename: str
     content_type: str
+    role: Literal["image", "mask"] = "image"
 
 
 def trim_generate_jobs():
@@ -164,6 +165,7 @@ def build_pending_job(
     api_path: str | None = None,
     api_preset_name: str | None = None,
     image_units: int = 1,
+    mask_applied: bool = False,
 ) -> dict:
     now = utc_now()
     return {
@@ -188,6 +190,7 @@ def build_pending_job(
         "api_preset_name": api_preset_name,
         "streaming": bool(getattr(req, "stream", False)),
         "partial_images": getattr(req, "partial_images", None) if getattr(req, "stream", False) else None,
+        "mask_applied": bool(mask_applied),
     }
 
 
@@ -226,15 +229,18 @@ def edit_source_to_payload(source: EditImageSource) -> dict:
         "byte_size": source.byte_size,
         "filename": source.filename,
         "content_type": source.content_type,
+        "role": source.role,
     }
 
 
 def edit_source_from_payload(payload: dict) -> EditImageSource:
+    role = str(payload.get("role") or "image")
     return EditImageSource(
         temp_path=Path(str(payload.get("temp_path") or "")),
         byte_size=int(payload.get("byte_size") or 0),
         filename=str(payload.get("filename") or "image.png"),
         content_type=str(payload.get("content_type") or "application/octet-stream"),
+        role="mask" if role == "mask" else "image",
     )
 
 
@@ -329,6 +335,7 @@ async def queue_image_job(
     queued_message: str,
     pending_edit_source_bytes: int = 0,
     edit_sources_payload: list[dict] | None = None,
+    mask_applied: bool = False,
 ) -> GenerateJobResponse:
     await run_db_operation(load_api_settings, metric_name="load_api_settings")
     active_preset = get_active_preset()
@@ -391,6 +398,7 @@ async def queue_image_job(
         api_path=resolved_api_path,
         api_preset_name=api_preset_name,
         image_units=image_units,
+        mask_applied=mask_applied,
     )
     pending_job["webhook_url"] = webhook_url
     try:
@@ -437,14 +445,17 @@ async def queue_image_job(
 async def queue_edit_job(
     req: EditRequest,
     image_sources: list[EditImageSource],
+    mask_source: EditImageSource | None = None,
 ) -> GenerateJobResponse:
-    image_source_bytes = sum(source.byte_size for source in image_sources)
+    edit_sources = [*image_sources, mask_source] if mask_source is not None else image_sources
+    edit_source_bytes = sum(source.byte_size for source in edit_sources)
 
     return await queue_image_job(
         req=req,
         operation="edit",
         api_path="/v1/images/edits",
         queued_message="Queued image edit",
-        pending_edit_source_bytes=image_source_bytes,
-        edit_sources_payload=[edit_source_to_payload(source) for source in image_sources],
+        pending_edit_source_bytes=edit_source_bytes,
+        edit_sources_payload=[edit_source_to_payload(source) for source in edit_sources],
+        mask_applied=mask_source is not None,
     )

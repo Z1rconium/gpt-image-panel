@@ -1009,6 +1009,12 @@ def _migration_generate_job_streaming_columns(conn: sqlite3.Connection):
         conn.execute("ALTER TABLE generate_jobs ADD COLUMN partial_images INTEGER")
 
 
+def _migration_generate_job_mask_column(conn: sqlite3.Connection):
+    jobs_columns = _table_columns(conn, "generate_jobs")
+    if "mask_applied" not in jobs_columns:
+        conn.execute("ALTER TABLE generate_jobs ADD COLUMN mask_applied INTEGER")
+
+
 def _migration_image_job_unit_lease_fencing(conn: sqlite3.Connection):
     unit_columns = _table_columns(conn, "image_job_units")
     if "claim_token" not in unit_columns:
@@ -1084,4 +1090,5 @@ SCHEMA_MIGRATIONS = (
     (18, "generate_job_streaming_columns", _migration_generate_job_streaming_columns),
     (19, "image_job_unit_lease_fencing", _migration_image_job_unit_lease_fencing),
     (20, "performance_indexes", _migration_performance_indexes),
+    (21, "generate_job_mask_column", _migration_generate_job_mask_column),
 )
