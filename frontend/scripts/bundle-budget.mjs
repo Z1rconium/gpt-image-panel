@@ -16,7 +16,11 @@ const manifestPath = join(clientDir, '.vite', 'manifest.json');
 
 const BUDGETS = {
   homepageGzipBytes: 102 * 1024,
-  mainCssGzipBytes: 12.3 * 1024,
+  // 12.3 -> 12.9 KiB: the mask editor dialog and the primary-source card
+  // actions add 22 utility rules (+262 B gzip, measured with the Tailwind CLI
+  // against the pre-change tree) and are loaded lazily, but Tailwind's utility
+  // CSS is global, so the main stylesheet carries them.
+  mainCssGzipBytes: 12.9 * 1024,
   oglGzipBytes: 39.4 * 1024,
   oglReduction: 0.2
 };
