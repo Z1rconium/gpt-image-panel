@@ -1,10 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import {
+  MaskCoverageTracker,
   MaskImportError,
   binarizeMaskAlphaData,
+  containsRect,
+  countMarked,
   countMarkedPixels,
   normalizeSmoothPx,
-  pngHasAlphaChannel
+  pngHasAlphaChannel,
+  shapeRectFor,
+  strokeRectFor,
+  subtractRect,
+  unionRect,
+  type MaskRect
 } from '$lib/features/mask/maskDocument';
 
 function pngHeader(colorType: number, extra: number[] = []): Uint8Array {
@@ -13,6 +21,26 @@ function pngHeader(colorType: number, extra: number[] = []): Uint8Array {
   bytes[25] = colorType;
   if (extra.length) bytes.set(extra, 33);
   return bytes;
+}
+
+function mulberry32(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function rectsOverlap(a: MaskRect, b: MaskRect): boolean {
+  return (
+    a.x < b.x + b.width &&
+    b.x < a.x + a.width &&
+    a.y < b.y + b.height &&
+    b.y < a.y + a.height
+  );
 }
 
 describe('binarizeMaskAlphaData', () => {
@@ -36,6 +64,14 @@ describe('countMarkedPixels', () => {
   it('counts fully marked pixels at or above the 128 threshold', () => {
     const data = new Uint8ClampedArray([0, 0, 0, 0, 0, 0, 0, 127, 0, 0, 0, 128, 0, 0, 0, 255]);
     expect(countMarkedPixels(data)).toBe(0.5);
+  });
+});
+
+describe('countMarked', () => {
+  it('counts marked pixels absolutely', () => {
+    const data = new Uint8ClampedArray([0, 0, 0, 0, 0, 0, 0, 128, 0, 0, 0, 127, 0, 0, 0, 255]);
+    expect(countMarked(data)).toBe(2);
+    expect(countMarked(new Uint8ClampedArray(0))).toBe(0);
   });
 });
 
@@ -89,5 +125,247 @@ describe('MaskImportError', () => {
     const error = new MaskImportError('not-png');
     expect(error.width).toBe(0);
     expect(error.height).toBe(0);
+  });
+});
+
+describe('rect helpers', () => {
+  it('unions and containment work on clamped rects', () => {
+    expect(unionRect({ x: 0, y: 0, width: 10, height: 10 }, { x: 5, y: 5, width: 20, height: 2 })).toEqual({
+      x: 0,
+      y: 0,
+      width: 25,
+      height: 10
+    });
+    expect(containsRect({ x: 0, y: 0, width: 10, height: 10 }, { x: 2, y: 2, width: 3, height: 3 })).toBe(true);
+    expect(containsRect({ x: 0, y: 0, width: 10, height: 10 }, { x: 9, y: 2, width: 3, height: 3 })).toBe(false);
+  });
+});
+
+describe('subtractRect', () => {
+  it('covers outer minus hole exactly once with disjoint strips', () => {
+    const outer = { x: 10, y: 10, width: 90, height: 80 };
+    const hole = { x: 40, y: 30, width: 30, height: 25 };
+    const strips = subtractRect(outer, hole);
+    let area = 0;
+    for (const strip of strips) {
+      area += strip.width * strip.height;
+      expect(containsRect(outer, strip)).toBe(true);
+    }
+    for (let i = 0; i < strips.length; i += 1) {
+      for (let j = i + 1; j < strips.length; j += 1) {
+        expect(rectsOverlap(strips[i], strips[j])).toBe(false);
+      }
+    }
+    expect(area).toBe(90 * 80 - 30 * 25);
+  });
+
+  it('handles holes that only partially overlap the outer rect', () => {
+    const outer = { x: 0, y: 0, width: 50, height: 50 };
+    const strips = subtractRect(outer, { x: 40, y: 20, width: 30, height: 10 });
+    let area = 0;
+    for (const strip of strips) area += strip.width * strip.height;
+    expect(area).toBe(50 * 50 - 10 * 10);
+  });
+
+  it('returns the outer rect when the hole does not intersect it', () => {
+    const outer = { x: 0, y: 0, width: 10, height: 10 };
+    expect(subtractRect(outer, { x: 20, y: 20, width: 5, height: 5 })).toEqual([outer]);
+  });
+
+  it('returns nothing for an empty outer rect', () => {
+    expect(subtractRect({ x: 0, y: 0, width: 0, height: 10 }, { x: 0, y: 0, width: 1, height: 1 })).toEqual([]);
+  });
+});
+
+describe('strokeRectFor', () => {
+  it('covers every pixel a stroke of the given size can paint', () => {
+    const width = 128;
+    const height = 96;
+    const points = [
+      { x: 10, y: 10 },
+      { x: 80, y: 12 },
+      { x: 60, y: 70 },
+      { x: 8, y: 80 }
+    ];
+    for (const size of [1, 5, 32, 500]) {
+      const rect = strokeRectFor(points, size, width, height);
+      if (!rect) throw new Error('expected a rect');
+      const radius = Math.max(1, size) / 2;
+      for (const point of points) {
+        for (let y = Math.floor(point.y - radius - 1); y <= Math.ceil(point.y + radius + 1); y += 1) {
+          for (let x = Math.floor(point.x - radius - 1); x <= Math.ceil(point.x + radius + 1); x += 1) {
+            // Pixels outside the canvas can never be painted; the rect may
+            // legitimately clamp them away.
+            if (x < 0 || y < 0 || x >= width || y >= height) continue;
+            if ((x - point.x) ** 2 + (y - point.y) ** 2 > radius ** 2) continue;
+            expect(x).toBeGreaterThanOrEqual(rect.x);
+            expect(x).toBeLessThan(rect.x + rect.width);
+            expect(y).toBeGreaterThanOrEqual(rect.y);
+            expect(y).toBeLessThan(rect.y + rect.height);
+          }
+        }
+      }
+    }
+  });
+
+  it('clamps to the canvas and rejects empty point lists', () => {
+    expect(strokeRectFor([], 8, 64, 64)).toBeNull();
+    // A stroke completely outside the canvas clamps to an empty rect.
+    expect(strokeRectFor([{ x: -20, y: -20 }], 8, 64, 64)).toBeNull();
+    const rect = strokeRectFor([{ x: 0, y: 0 }], 8, 64, 64);
+    expect(rect).toEqual({ x: 0, y: 0, width: 6, height: 6 });
+  });
+});
+
+describe('shapeRectFor', () => {
+  it('bounds shape outlines with a small antialias margin', () => {
+    expect(shapeRectFor([{ x: 10, y: 10 }, { x: 40, y: 30 }], 64, 64)).toEqual({
+      x: 8,
+      y: 8,
+      width: 34,
+      height: 24
+    });
+    expect(shapeRectFor([], 64, 64)).toBeNull();
+  });
+});
+
+/** Minimal software rasterizer standing in for the marks canvas in tests. */
+class MaskBuffer {
+  readonly width: number;
+  readonly height: number;
+  private readonly data: Uint8ClampedArray;
+
+  constructor(width: number, height: number) {
+    this.width = width;
+    this.height = height;
+    this.data = new Uint8ClampedArray(width * height * 4);
+  }
+
+  countRegion = (rect: MaskRect): number => {
+    const x = Math.max(0, Math.min(this.width, Math.floor(rect.x)));
+    const y = Math.max(0, Math.min(this.height, Math.floor(rect.y)));
+    const right = Math.max(x, Math.min(this.width, Math.ceil(rect.x + rect.width)));
+    const bottom = Math.max(y, Math.min(this.height, Math.ceil(rect.y + rect.height)));
+    let marked = 0;
+    for (let row = y; row < bottom; row += 1) {
+      let index = (row * this.width + x) * 4 + 3;
+      for (let column = x; column < right; column += 1, index += 4) {
+        if (this.data[index] >= 128) marked += 1;
+      }
+    }
+    return marked;
+  };
+
+  markedCount(): number {
+    return this.countRegion({ x: 0, y: 0, width: this.width, height: this.height });
+  }
+
+  stampDisc(centerX: number, centerY: number, radius: number, erase: boolean) {
+    const r2 = radius * radius;
+    for (let y = Math.floor(centerY - radius); y <= Math.ceil(centerY + radius); y += 1) {
+      for (let x = Math.floor(centerX - radius); x <= Math.ceil(centerX + radius); x += 1) {
+        if (x < 0 || y < 0 || x >= this.width || y >= this.height) continue;
+        if ((x - centerX) ** 2 + (y - centerY) ** 2 > r2) continue;
+        this.data[(y * this.width + x) * 4 + 3] = erase ? 0 : 255;
+      }
+    }
+  }
+
+  fillRectRegion(rect: MaskRect, erase: boolean) {
+    for (let y = rect.y; y < rect.y + rect.height; y += 1) {
+      for (let x = rect.x; x < rect.x + rect.width; x += 1) {
+        this.data[(y * this.width + x) * 4 + 3] = erase ? 0 : 255;
+      }
+    }
+  }
+
+  invertAll() {
+    for (let index = 3; index < this.data.length; index += 4) {
+      this.data[index] = 255 - this.data[index];
+    }
+  }
+
+  clearAll() {
+    this.data.fill(0);
+  }
+}
+
+describe('MaskCoverageTracker', () => {
+  it('matches full recounts across random strokes, shapes, invert and clear', () => {
+    const width = 96;
+    const height = 64;
+    const total = width * height;
+    const buffer = new MaskBuffer(width, height);
+    const tracker = new MaskCoverageTracker(width, height);
+    const expectConsistent = () => {
+      expect(Math.round(tracker.coverage() * total)).toBe(buffer.markedCount());
+    };
+
+    const random = mulberry32(20260921);
+    const point = () => ({ x: Math.floor(random() * width), y: Math.floor(random() * height) });
+
+    for (let step = 0; step < 40; step += 1) {
+      const erase = random() < 0.3;
+      if (random() < 0.2) {
+        const shape = [point(), point()];
+        const rect = shapeRectFor(shape, width, height);
+        if (rect) {
+          tracker.beginStroke(rect, buffer.countRegion);
+          buffer.fillRectRegion(rect, erase);
+          tracker.endStroke(buffer.countRegion);
+        }
+      } else {
+        const size = 2 + Math.floor(random() * 18);
+        const radius = Math.max(1, size) / 2;
+        const first = point();
+        const rect = strokeRectFor([first], size, width, height);
+        if (rect) tracker.beginStroke(rect, buffer.countRegion);
+        buffer.stampDisc(first.x, first.y, radius, erase);
+        const extra = 1 + Math.floor(random() * 5);
+        for (let index = 0; index < extra; index += 1) {
+          const next = point();
+          const nextRect = strokeRectFor([next], size, width, height);
+          if (nextRect) tracker.extendStroke(nextRect, buffer.countRegion);
+          buffer.stampDisc(next.x, next.y, radius, erase);
+        }
+        tracker.endStroke(buffer.countRegion);
+      }
+      expectConsistent();
+      if (random() < 0.15) {
+        tracker.invert();
+        buffer.invertAll();
+        expectConsistent();
+      }
+      if (random() < 0.1) {
+        tracker.clear();
+        buffer.clearAll();
+        expectConsistent();
+      }
+    }
+  });
+
+  it('cancelStroke discards an in-flight snapshot without touching the total', () => {
+    const buffer = new MaskBuffer(32, 32);
+    const tracker = new MaskCoverageTracker(32, 32);
+    const rect = strokeRectFor([{ x: 8, y: 8 }], 6, 32, 32);
+    if (!rect) throw new Error('expected a rect');
+
+    // Paint between begin and cancel: the snapshot is dropped, so the total
+    // does not pick the pixels up.
+    tracker.beginStroke(rect, buffer.countRegion);
+    buffer.stampDisc(8, 8, 3, false);
+    tracker.cancelStroke();
+    expect(tracker.coverage()).toBe(0);
+
+    // A complete begin/end pair around the same paint does.
+    buffer.clearAll();
+    tracker.beginStroke(rect, buffer.countRegion);
+    buffer.stampDisc(8, 8, 3, false);
+    tracker.endStroke(buffer.countRegion);
+    expect(Math.round(tracker.coverage() * 32 * 32)).toBe(buffer.markedCount());
+  });
+
+  it('reports zero coverage for an empty document', () => {
+    expect(new MaskCoverageTracker(0, 0).coverage()).toBe(0);
   });
 });

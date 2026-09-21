@@ -1,10 +1,11 @@
+import { deflateSync } from 'node:zlib';
 import { expect, test, type Page } from '@playwright/test';
 import { job, loadApp } from './fixtures/mockApi';
 
 // 64x64 source and matching 64x64 mask (transparent 32x32 center), plus a
 // 32x32 mask that intentionally mismatches the primary image.
 const SOURCE_PNG = Buffer.from(
-  'iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAYklEQVR4nO3PMQ0AIADAMEAN/lUgCxEcDcmqYJtn7/GzpQNeNaA1oDWgNaA1oDWgNaA1oDWgNaA1oDWgNaA1oDWgNaA1oDWgNaA1oDWgNaA1oDWgNaA1oDWgNaA1oDWgNaBdCH8BmPRLpIsAAAAASUVORK5CYII=',
+  'iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAYklEQVR4nO3PMQ0AIADAMEAN/lUgCxEcDcmqYJtn7/GzpQNeNaA1oDWgNaA1oDWgNaA1oDWgNaA1oDWgNaA1oDWgNaA1oDWgNaA1oDWgNaA1oDWgNaA1oDWgNaBdCH8BmPRLpIsAAAAASUVORK5CYII=',
   'base64'
 );
 const MASK_PNG = Buffer.from(
@@ -16,8 +17,54 @@ const WRONG_SIZE_MASK_PNG = Buffer.from(
   'base64'
 );
 
+const CRC_TABLE = (() => {
+  const table = new Uint32Array(256);
+  for (let n = 0; n < 256; n += 1) {
+    let c = n;
+    for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    table[n] = c >>> 0;
+  }
+  return table;
+})();
+
+function crc32(buffer: Buffer): number {
+  let crc = 0xffffffff;
+  for (let index = 0; index < buffer.length; index += 1) {
+    crc = CRC_TABLE[(crc ^ buffer[index]) & 0xff] ^ (crc >>> 8);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function pngChunk(type: string, data: Buffer): Buffer {
+  const length = Buffer.alloc(4);
+  length.writeUInt32BE(data.length, 0);
+  const body = Buffer.concat([Buffer.from(type, 'latin1'), data]);
+  const crc = Buffer.alloc(4);
+  crc.writeUInt32BE(crc32(body), 0);
+  return Buffer.concat([length, body, crc]);
+}
+
+/** A solid-color RGB PNG; used to exercise large-image editor sizing. */
+function solidPng(width: number, height: number): Buffer {
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8;
+  ihdr[9] = 2;
+  const raw = Buffer.alloc((1 + width * 3) * height);
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    pngChunk('IHDR', ihdr),
+    pngChunk('IDAT', deflateSync(raw)),
+    pngChunk('IEND', Buffer.alloc(0))
+  ]);
+}
+
+const HUGE_PNG = solidPng(4096, 4096);
+
 const MASK_CANVAS = 'canvas[aria-label="Mask canvas"]';
 const MASK_INPUT = 'input[type="file"][accept="image/png"]';
+const EDITOR_DIALOG = (page: Page) => page.getByRole('dialog', { name: /Repaint area/ });
 
 async function uploadPrimary(page: Page, name = 'mask-source.png') {
   await page
@@ -28,14 +75,22 @@ async function uploadPrimary(page: Page, name = 'mask-source.png') {
 
 async function openMaskEditor(page: Page, label = 'mask-source.png') {
   await page.getByRole('button', { name: `Edit repaint area for ${label}` }).click();
-  await expect(page.getByRole('dialog', { name: /Repaint area/ })).toBeVisible();
+  await expect(EDITOR_DIALOG(page)).toBeVisible();
   await expect(page.locator(MASK_CANVAS)).toBeVisible();
 }
 
+// The overlay canvas is the whole stage viewport now; strokes must be aimed
+// at the image rectangle inside it (fit-centered by the editor).
+async function maskImageBox(page: Page) {
+  const box = await EDITOR_DIALOG(page)
+    .locator('img')
+    .boundingBox();
+  if (!box) throw new Error('mask image has no layout box');
+  return box;
+}
+
 async function paintStroke(page: Page) {
-  const canvas = page.locator(MASK_CANVAS);
-  const box = await canvas.boundingBox();
-  if (!box) throw new Error('mask canvas has no layout box');
+  const box = await maskImageBox(page);
   await page.mouse.move(box.x + box.width * 0.3, box.y + box.height * 0.5);
   await page.mouse.down();
   await page.mouse.move(box.x + box.width * 0.7, box.y + box.height * 0.5, { steps: 8 });
@@ -171,6 +226,20 @@ async function canvasPixel(page: Page, x: number, y: number) {
   );
 }
 
+// The fit-centered image shares its center with the stage-sized canvas, and
+// the default stroke crosses that center, so the center pixel must be marked.
+async function canvasCenterPixel(page: Page) {
+  return page.evaluate(() => {
+    const canvas = document.querySelector('canvas[aria-label="Mask canvas"]') as HTMLCanvasElement | null;
+    if (!canvas) throw new Error('mask canvas missing');
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('mask canvas has no 2d context');
+    return Array.from(
+      context.getImageData(Math.floor(canvas.width / 2), Math.floor(canvas.height / 2), 1, 1).data
+    );
+  });
+}
+
 test('switching between overlay and mask-only re-renders the canvas', async ({ page }) => {
   await loadApp(page);
   await uploadPrimary(page);
@@ -179,13 +248,13 @@ test('switching between overlay and mask-only re-renders the canvas', async ({ p
 
   // Overlay leaves the photo visible outside the marked region.
   expect((await canvasPixel(page, 3, 3))[3]).toBe(0);
-  const overlayMark = await canvasPixel(page, 32, 32);
+  const overlayMark = await canvasCenterPixel(page);
   expect(overlayMark[3]).toBeGreaterThan(0);
   expect(overlayMark[1]).toBeGreaterThan(overlayMark[0]);
 
   await page.getByRole('button', { name: 'Mask only' }).click();
   await expect.poll(async () => (await canvasPixel(page, 3, 3))[3]).toBeGreaterThan(0);
-  const maskOnlyMark = await canvasPixel(page, 32, 32);
+  const maskOnlyMark = await canvasCenterPixel(page);
   expect(maskOnlyMark[3]).toBeGreaterThan(0);
   expect(maskOnlyMark[1]).toBeGreaterThan(maskOnlyMark[0]);
 
@@ -198,6 +267,39 @@ test('switching between overlay and mask-only re-renders the canvas', async ({ p
 
   await page.getByRole('button', { name: 'Overlay' }).click();
   await expect.poll(async () => (await canvasPixel(page, 3, 3))[3]).toBe(0);
+});
+
+test('the overlay canvas is sized to the stage viewport, not the image', async ({ page }) => {
+  await loadApp(page);
+  await page
+    .getByLabel('Upload edit image')
+    .setInputFiles([{ name: 'huge.png', mimeType: 'image/png', buffer: HUGE_PNG }]);
+  await expect(page.getByRole('button', { name: 'Preview huge.png' })).toBeVisible();
+  await openMaskEditor(page, 'huge.png');
+
+  const metrics = await page.evaluate(() => {
+    const canvas = document.querySelector('canvas[aria-label="Mask canvas"]') as HTMLCanvasElement | null;
+    if (!canvas) throw new Error('mask canvas missing');
+    const stage = canvas.parentElement;
+    if (!stage) throw new Error('mask canvas has no stage parent');
+    const rect = stage.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    return {
+      canvasWidth: canvas.width,
+      canvasHeight: canvas.height,
+      stageWidth: rect.width,
+      stageHeight: rect.height,
+      dpr
+    };
+  });
+
+  expect(metrics.canvasWidth).toBeGreaterThan(0);
+  expect(metrics.canvasHeight).toBeGreaterThan(0);
+  expect(metrics.canvasWidth).toBeLessThanOrEqual(Math.round(metrics.stageWidth * metrics.dpr) + 1);
+  expect(metrics.canvasHeight).toBeLessThanOrEqual(Math.round(metrics.stageHeight * metrics.dpr) + 1);
+  // The pre-viewport implementation allocated the canvas at image resolution.
+  expect(metrics.canvasWidth).toBeLessThan(4096);
+  expect(metrics.canvasHeight).toBeLessThan(4096);
 });
 
 test('hides the mask entry when the active preset does not support masks', async ({ page }) => {
@@ -279,8 +381,7 @@ async function canvasStrokePaths(
   page: Page,
   paths: { x: number; y: number }[][]
 ) {
-  const box = await page.locator(MASK_CANVAS).boundingBox();
-  if (!box) throw new Error('mask canvas has no layout box');
+  const box = await maskImageBox(page);
   const start = paths[0][0];
   await page.mouse.move(box.x + box.width * start.x, box.y + box.height * start.y);
   await page.mouse.down();

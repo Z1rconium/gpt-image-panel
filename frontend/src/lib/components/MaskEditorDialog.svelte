@@ -49,6 +49,7 @@
 
   let stageEl: HTMLDivElement | undefined = undefined;
   let overlayEl: HTMLCanvasElement | undefined = undefined;
+  let cursorEl: HTMLSpanElement | undefined = undefined;
   let uploadInput: HTMLInputElement | undefined = undefined;
 
   let doc: MaskDocument | null = null;
@@ -68,12 +69,9 @@
   let naturalWidth = 0;
   let naturalHeight = 0;
   let cursorVisible = false;
-  let cursorX = 0;
-  let cursorY = 0;
   let renderHandle: number | null = null;
   let resizeObserver: ResizeObserver | null = null;
   let checkerPattern: CanvasPattern | null = null;
-  let tintLayer: HTMLCanvasElement | null = null;
   let prepareToken = 0;
   let showHelp = false;
   let smoothTimer: ReturnType<typeof setTimeout> | null = null;
@@ -91,6 +89,8 @@
 
   $: sizeHint = size !== 'auto' && naturalWidth > 0 && size !== `${naturalWidth}x${naturalHeight}`;
   $: hasExistingMask = Boolean(existingMask && existingMask.sourceId === sourceId);
+  $: brushRingSize = brushScreen / viewScale;
+  $: cursorHidden = !cursorVisible || spacePressed || (tool !== 'brush' && tool !== 'eraser');
   $: canvasCursorClass = spacePressed
     ? panning
       ? 'cursor-grabbing'
@@ -125,7 +125,7 @@
     ready = false;
     drawing = false;
     checkerPattern = null;
-    tintLayer = null;
+    cursorVisible = false;
   }
 
   onDestroy(teardown);
@@ -212,10 +212,14 @@
   }
 
   function resizeOverlay() {
-    if (!overlayEl || !doc) return;
+    if (!overlayEl || !stageEl) return;
+    // The overlay covers the stage viewport (not the image), so a 4096px
+    // photo at 2x DPR never allocates two 8192px canvases; the render pass
+    // scales image coordinates into this backing store instead.
+    const rect = stageEl.getBoundingClientRect();
     const dpr = window.devicePixelRatio || 1;
-    const width = Math.max(1, Math.round(doc.width * dpr));
-    const height = Math.max(1, Math.round(doc.height * dpr));
+    const width = Math.max(1, Math.round(rect.width * dpr));
+    const height = Math.max(1, Math.round(rect.height * dpr));
     if (overlayEl.width !== width || overlayEl.height !== height) {
       overlayEl.width = width;
       overlayEl.height = height;
@@ -251,15 +255,6 @@
     checkerPattern = context.createPattern(tile, 'repeat');
   }
 
-  function ensureTintLayer(width: number, height: number) {
-    if (!tintLayer) tintLayer = document.createElement('canvas');
-    if (tintLayer.width !== width || tintLayer.height !== height) {
-      tintLayer.width = width;
-      tintLayer.height = height;
-    }
-    return tintLayer;
-  }
-
   function render() {
     if (!overlayEl || !doc) return;
     const width = overlayEl.width;
@@ -267,7 +262,9 @@
     if (!width || !height) return;
     const context = overlayEl.getContext('2d');
     if (!context) return;
+    const dpr = window.devicePixelRatio || 1;
 
+    context.setTransform(1, 0, 0, 1, 0, 0);
     context.globalCompositeOperation = 'source-over';
     context.globalAlpha = 1;
     context.clearRect(0, 0, width, height);
@@ -278,25 +275,18 @@
       context.fillRect(0, 0, width, height);
     }
 
-    // Tint on its own layer: compositing `source-in` directly on the overlay
-    // would recolor the mask-only checkerboard along with the marks.
-    const layer = ensureTintLayer(width, height);
-    const layerContext = layer.getContext('2d');
-    if (!layerContext) return;
-    layerContext.globalCompositeOperation = 'source-over';
-    layerContext.globalAlpha = 1;
-    layerContext.clearRect(0, 0, width, height);
     // Draw the processed (edge-smoothed, re-binarized) region whenever it is
     // up to date so the preview matches the coverage readout and the export;
-    // raw marks keep mid-stroke feedback instant.
+    // raw marks keep mid-stroke feedback instant. Marks are already emerald
+    // in the document layer, so they are drawn straight into the view
+    // transform — the browser only rasterizes the visible part of the image.
+    context.setTransform(viewScale * dpr, 0, 0, viewScale * dpr, viewX * dpr, viewY * dpr);
+    context.globalAlpha = 0.45;
     const base = doc.processedFresh() ? doc.processed : doc.marks;
-    layerContext.drawImage(base, 0, 0, width, height);
-    layerContext.globalCompositeOperation = 'source-in';
-    layerContext.fillStyle = 'rgba(16, 185, 129, 0.45)';
-    layerContext.fillRect(0, 0, width, height);
-
-    context.drawImage(layer, 0, 0);
-    doc.drawActiveShapePreview(context, width, height);
+    context.drawImage(base, 0, 0);
+    context.globalAlpha = 1;
+    doc.drawActiveShapePreview(context);
+    context.setTransform(1, 0, 0, 1, 0, 0);
   }
 
   function setView(next: 'overlay' | 'maskOnly') {
@@ -312,8 +302,7 @@
     return stageEl?.getBoundingClientRect() ?? null;
   }
 
-  function toLayerPoint(event: { clientX: number; clientY: number }) {
-    const rect = stageRect();
+  function toLayerPoint(event: { clientX: number; clientY: number }, rect: DOMRect | null = stageRect()) {
     if (!rect) return null;
     return {
       x: (event.clientX - rect.left - viewX) / viewScale,
@@ -321,8 +310,11 @@
     };
   }
 
-  function toImagePoint(event: { clientX: number; clientY: number }): MaskPoint | null {
-    const layer = toLayerPoint(event);
+  function toImagePoint(
+    event: { clientX: number; clientY: number },
+    rect: DOMRect | null = stageRect()
+  ): MaskPoint | null {
+    const layer = toLayerPoint(event, rect);
     if (!layer || !doc) return null;
     return {
       x: Math.min(doc.width, Math.max(0, layer.x)),
@@ -335,11 +327,14 @@
     return Math.max(1, brushScreen / viewScale);
   }
 
-  function updateCursor(event: PointerEvent) {
-    const layer = toLayerPoint(event);
+  function updateCursor(event: PointerEvent, rect: DOMRect | null) {
+    if (!cursorEl || !rect) return;
+    const layer = toLayerPoint(event, rect);
     if (!layer) return;
-    cursorX = layer.x;
-    cursorY = layer.y;
+    // Write the position straight to the element: a Svelte state update per
+    // pointermove would re-render the template dozens of times per second.
+    cursorEl.style.left = `${layer.x}px`;
+    cursorEl.style.top = `${layer.y}px`;
     cursorVisible = true;
   }
 
@@ -409,6 +404,7 @@
 
   function handlePointerDown(event: PointerEvent) {
     if (!doc || !overlayEl || busy) return;
+    const rect = stageRect();
     if (event.button === 1 || spacePressed || tool === 'pan') {
       event.preventDefault();
       overlayEl.setPointerCapture(event.pointerId);
@@ -418,7 +414,12 @@
       return;
     }
     if (event.button !== 0) return;
-    const point = toImagePoint(event);
+    // Ignore presses on the stage margins around the image: painting clamps
+    // to the image bounds, and a stray dab on the nearest edge is never what
+    // a click outside the picture means.
+    const layer = toLayerPoint(event, rect);
+    if (!layer || layer.x < 0 || layer.y < 0 || layer.x > doc.width || layer.y > doc.height) return;
+    const point = toImagePoint(event, rect);
     if (!point) return;
     overlayEl.setPointerCapture(event.pointerId);
     drawing = true;
@@ -427,12 +428,14 @@
     paintedAny = true;
     dirty = true;
     updateHistoryFlags();
-    updateCursor(event);
+    updateCursor(event, rect);
     scheduleRender();
   }
 
   function handlePointerMove(event: PointerEvent) {
     if (!doc) return;
+    // One layout read per move; the coalesced events reuse it.
+    const rect = stageRect();
     if (panning) {
       viewX += event.clientX - panLastX;
       viewY += event.clientY - panLastY;
@@ -442,12 +445,12 @@
       scheduleRender();
       return;
     }
-    updateCursor(event);
+    updateCursor(event, rect);
     if (!drawing) return;
     const coalesced =
       typeof event.getCoalescedEvents === 'function' ? event.getCoalescedEvents() : [event];
     const points = coalesced
-      .map((candidate) => toImagePoint(candidate))
+      .map((candidate) => toImagePoint(candidate, rect))
       .filter((point): point is MaskPoint => point !== null);
     if (!points.length) return;
     doc.extendStroke(points);
@@ -499,22 +502,34 @@
     }, delay);
   }
 
-  function undo() {
-    if (!doc || !doc.canUndo()) return;
-    doc.undo();
-    dirty = true;
-    updateHistoryFlags();
-    scheduleRender();
-    scheduleSmoothSync(smoothPx > 0 ? 150 : 0);
+  async function undo() {
+    if (!doc || busy || !doc.canUndo()) return;
+    // Undo replays the command list and import commands decode async, so
+    // guard re-entry with the busy state (pointer events check it too).
+    busy = true;
+    try {
+      await doc.undo();
+      dirty = true;
+      updateHistoryFlags();
+      scheduleRender();
+      scheduleSmoothSync(smoothPx > 0 ? 150 : 0);
+    } finally {
+      busy = false;
+    }
   }
 
-  function redo() {
-    if (!doc || !doc.canRedo()) return;
-    doc.redo();
-    dirty = true;
-    updateHistoryFlags();
-    scheduleRender();
-    scheduleSmoothSync(smoothPx > 0 ? 150 : 0);
+  async function redo() {
+    if (!doc || busy || !doc.canRedo()) return;
+    busy = true;
+    try {
+      await doc.redo();
+      dirty = true;
+      updateHistoryFlags();
+      scheduleRender();
+      scheduleSmoothSync(smoothPx > 0 ? 150 : 0);
+    } finally {
+      busy = false;
+    }
   }
 
   function clearMask() {
@@ -753,28 +768,33 @@
               draggable="false"
             />
             {#if ready}
-              <canvas
-                bind:this={overlayEl}
-                class={`absolute inset-0 h-full w-full touch-none ${canvasCursorClass}`}
-                aria-label={$t.maskEditor.canvasLabel}
-                on:pointerdown={handlePointerDown}
-                on:pointermove={handlePointerMove}
-                on:pointerup={handlePointerUp}
-                on:pointercancel={handlePointerUp}
-                on:pointerenter={() => (pointerOverCanvas = true)}
-                on:pointerleave={handlePointerLeave}
-                on:wheel={handleWheel}
-                on:contextmenu|preventDefault
-              ></canvas>
-              {#if cursorVisible && !spacePressed && (tool === 'brush' || tool === 'eraser')}
-                <span
-                  class="pointer-events-none absolute rounded-full border border-emerald-400/80 bg-emerald-400/10"
-                  style={`left:${cursorX}px;top:${cursorY}px;width:${brushScreen / viewScale}px;height:${brushScreen / viewScale}px;transform:translate(-50%,-50%)`}
-                  aria-hidden="true"
-                ></span>
-              {/if}
+              <span
+                bind:this={cursorEl}
+                class="pointer-events-none absolute rounded-full border border-emerald-400/80 bg-emerald-400/10"
+                class:hidden={cursorHidden}
+                style={`width:${brushRingSize}px;height:${brushRingSize}px;transform:translate(-50%,-50%)`}
+                aria-hidden="true"
+              ></span>
             {/if}
           </div>
+          {#if ready}
+            <!-- The overlay is a viewport-sized sibling of the zoom layer: it
+                covers the whole stage and draws marks through the view
+                transform, so canvas memory tracks the screen, not the image. -->
+            <canvas
+              bind:this={overlayEl}
+              class={`absolute inset-0 h-full w-full touch-none ${canvasCursorClass}`}
+              aria-label={$t.maskEditor.canvasLabel}
+              on:pointerdown={handlePointerDown}
+              on:pointermove={handlePointerMove}
+              on:pointerup={handlePointerUp}
+              on:pointercancel={handlePointerUp}
+              on:pointerenter={() => (pointerOverCanvas = true)}
+              on:pointerleave={handlePointerLeave}
+              on:wheel={handleWheel}
+              on:contextmenu|preventDefault
+            ></canvas>
+          {/if}
         </div>
       </div>
 
