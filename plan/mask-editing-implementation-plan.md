@@ -1,8 +1,8 @@
 # 蒙版编辑（Mask Inpainting）实施计划
 
-> 状态：已实施（Phase 1 + Phase 2 + 可选项 `has_mask` 已落地；Phase 3 未排期）· 2026-09-17
-> 实施结果：后端 539 passed / 前端 e2e 118 passed / `frontend:check` 0 错误 / 新增单测 27 passed / bundle 预算按实测增量将主 CSS 预算由 12.3 → 12.9 KiB
-> 未完成项：Phase 0 的上游网关 `mask` 手工 curl 验证（需要真实网关凭据，交付后手动执行一次即可）
+> 状态：已实施（Phase 1 + Phase 2 + Phase 3；`has_mask` 与预设级 `supports_mask` 已落地）· 2026-09-21
+> 实施结果：Phase 1/2 基线 后端 539 passed / 前端 e2e 118 passed；Phase 3 落地后 后端 546 passed / 前端单测 37 passed / `frontend:check` 0 错误（本次环境未安装 Playwright 浏览器，e2e 未重跑）
+> 未完成项：无（Phase 0 上游 `mask` 验证已于 2026-09-21 完成；Phase 3 增强已实施，仅"导出/导入与 R2 同步"按范围决策未纳入）
 > 范围：为 `/api/edits` 与 `/api/edits/from-gallery/{image_id}` 增加可选的 `mask` 蒙版，前端提供画笔式蒙版编辑器，后端做严格校验并透传到上游 `/v1/images/edits`。
 > 参考实现：[Houtx/gpt-image-playground](https://github.com/Houtx/gpt-image-playground)（`src/components/editing-form.tsx`、`src/app/api/images/route.ts`、`src/app/page.tsx`）。
 
@@ -133,7 +133,7 @@
 
 ### Phase 0 · 准备（0.5 天）
 
-- [ ] 用当前预设跑一次手工 curl：`/v1/images/edits` + `mask` 字段，确认用户所用网关/上游真的支持 `mask`（部分 OpenAI 兼容网关会静默忽略）。
+- [x] 用当前预设跑一次手工 curl：`/v1/images/edits` + `mask` 字段，确认用户所用网关/上游真的支持 `mask`（部分 OpenAI 兼容网关会静默忽略）。**已验证 2026-09-21** · 网关 `https://www.nexotoken.net/v1`、模型 `gpt-image-2`：无蒙版基线整图变绿；左半透明蒙版仅左半变绿、右半保留原色；右半透明蒙版结果对称。该网关真正应用 `mask`，对应预设应保持 `supports_mask=true`（观察：网关返回值把 1024×1024 重采样为 1254×1254，`data[0]` 为 `url` 而非 `b64_json`）。
 - [x] 确认 `generate_jobs` 行的存储方式（`repositories/db/schema.py:334`、`db/rows.py` 的 normalize 白名单），决定 `mask_applied` 是走 JSON 列还是需要一条 `schema_migrations`。
 - [x] 与 `DESIGN.md`/`PRODUCT.md` 对齐蒙版编辑器的视觉：沿用 `EditPreviewModal` 的深色画布容器、`overlay-panel`、`rounded-2xl`、`control-focus`。
 
@@ -330,13 +330,15 @@ createMaskDocument(width, height) → {
   7. 移动端视口（375px）：编辑器全屏，工具条可用，画布可涂抹
 - `npm run frontend:check` 无新增诊断
 
-### Phase 3 · 可选增强（按需排期）
+### Phase 3 · 增强（已实施）
 
-- **缩放/平移**：滚轮缩放 + 空格拖拽/双指手势；`fitScale` 变为变换矩阵，坐标反算走 `DOMMatrix.inverse()`
-- **矩形 / 套索工具**，**笔刷羽化**（导出前对 alpha 做高斯模糊再二值化）
-- **蒙版持久化**：入队时把蒙版复制到 `images/masks/<job_id>.png`，`generate_jobs` 记录路径；history 可预览蒙版、重试可带回；纳入 gallery 导出/导入与 R2 同步策略
-- **gallery 元数据**：`mask_coverage` 写入 `gallery_entries`（需 migration），筛选"仅蒙版编辑"
-- **预设级能力开关** `supports_mask`，对已知不支持 `mask` 的网关在 UI 隐藏入口 —— **已实现**：`api_presets.supports_mask`（migration 22，默认 1），设置抽屉内可开关；关闭后主图卡片不再显示蒙版入口，已应用的蒙版会被清除并提示，切换预设时同样生效。（实测 `https://688.qzz.io` 会丢弃 `mask` 字段，属于该开关的目标场景。）
+- [x] **缩放/平移**：滚轮以光标为锚缩放（1–8×）、空格拖拽/中键拖拽平移、工具条放大/缩小/重置、`0` 重置。实现方式为外层 stage（不参与变换，作为坐标基准）+ 内层缩放层（`translate` + `scale`），屏幕坐标经逆向变换映射回图像坐标；`marks` 保持自然分辨率，缩放不重采样数据。
+- [x] **矩形 / 套索工具**（拖动填充，按住 Alt 擦除；未提交前实时预览，抬起时入命令栈），**笔刷羽化**（导出前对打孔 alpha 高斯模糊再二值化）。注意：上游只认 `alpha == 0`，故羽化实现为**边界平滑**（消除指针锯齿），无法表达真正的渐变软边。
+- [x] **蒙版持久化（仅本地）**：入队时把校验过的蒙版复制到 `images/masks/<job_id>.png`（`MASKS_DIR`）；`GET /api/generate/{job_id}/mask` 取回。清理覆盖三条路径：入队失败回滚、`trim_generate_jobs`/`clear_generate_job_history` 删除、启动孤儿清扫。**不含** gallery 导出/导入与 R2 同步（未纳入本次范围）。
+- [x] **history/重试带回蒙版**：`job.mask_applied` 且当前蒙版无效时，重试自动按 `job_id` 拉取持久化蒙版载入 store（`origin: 'restored'`）；失败才回退到 `editRetryMaskMissing` 提示。
+- [x] **gallery 元数据**：`mask_coverage` 写入 `gallery_entries`（migration 23），来源为 admission 的 `EditMaskInfo.transparent_ratio`；gallery 新增"仅蒙版编辑"筛选（`mask_only`，含 URL 状态与 i18n）。
+- [x] **预设级能力开关** `supports_mask`，对已知不支持 `mask` 的网关在 UI 隐藏入口：`api_presets.supports_mask`（migration 22，默认 1），设置抽屉内可开关；关闭后主图卡片不再显示蒙版入口，已应用的蒙版会被清除并提示，切换预设时同样生效。（实测 `https://688.qzz.io` 会丢弃 `mask` 字段，属于该开关的目标场景。）
+- [x] **补遗**：`EditMask.origin`（painted/uploaded/restored）在主图卡片展示来源；`editSource` 蒙版绑定逻辑补齐独立单测（`frontend/tests/unit/editSource.test.ts`）。
 
 ---
 
