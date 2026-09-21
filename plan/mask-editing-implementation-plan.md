@@ -1,7 +1,7 @@
 # 蒙版编辑（Mask Inpainting）实施计划
 
 > 状态：已实施（Phase 1 + Phase 2 + Phase 3；`has_mask` 与预设级 `supports_mask` 已落地）· 2026-09-21
-> 实施结果：Phase 1/2 基线 后端 539 passed / 前端 e2e 118 passed；Phase 3 落地后 后端 546 passed / 前端单测 37 passed / `frontend:check` 0 错误（本次环境未安装 Playwright 浏览器，e2e 未重跑）
+> 实施结果：Phase 1/2 基线 后端 539 passed / 前端 e2e 118 passed；Phase 3 落地后 后端 546 passed / 前端单测 37 passed / 前端 e2e 121 passed（其中蒙版 14）/ `frontend:check` 0 错误
 > 未完成项：无（Phase 0 上游 `mask` 验证已于 2026-09-21 完成；Phase 3 增强已实施，仅"导出/导入与 R2 同步"按范围决策未纳入）
 > 范围：为 `/api/edits` 与 `/api/edits/from-gallery/{image_id}` 增加可选的 `mask` 蒙版，前端提供画笔式蒙版编辑器，后端做严格校验并透传到上游 `/v1/images/edits`。
 > 参考实现：[Houtx/gpt-image-playground](https://github.com/Houtx/gpt-image-playground)（`src/components/editing-form.tsx`、`src/app/api/images/route.ts`、`src/app/page.tsx`）。
