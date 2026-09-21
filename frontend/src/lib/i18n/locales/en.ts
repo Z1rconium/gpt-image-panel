@@ -711,3 +711,7 @@ const en = {
 type TranslationValue = string | ((...args: any[]) => string) | Record<string, unknown>;
 
 export default en;
+    maskOriginPainted: 'Painted',
+    maskOriginUploaded: 'Uploaded',
+    maskOriginRestored: 'Restored',
+    editMaskRestored: (pct: string) => `Mask restored · ${pct}% editable`,

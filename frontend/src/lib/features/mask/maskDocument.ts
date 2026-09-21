@@ -365,3 +365,28 @@ export function createMaskDocument(width: number, height: number) {
     }
   };
 }
+export type MaskMeasurements = {
+  width: number;
+  height: number;
+  coverage: number;
+};
+
+/**
+ * Measure an exported mask blob (a persisted mask restored from a job): its
+ * pixel size and the editable-area ratio, without drawing it into a document.
+ */
+export async function measureMaskBlob(blob: Blob): Promise<MaskMeasurements> {
+  const decoded = await decodeImage(blob);
+  const canvas = createCanvas(decoded.width, decoded.height);
+  const context = canvas.getContext('2d');
+  if (!context) throw new MaskImportError('decode');
+  context.drawImage(decoded, 0, 0);
+  if (typeof ImageBitmap !== 'undefined' && decoded instanceof ImageBitmap) decoded.close();
+  const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+  return {
+    width: canvas.width,
+    height: canvas.height,
+    coverage: binarizeMaskAlphaData(imageData.data)
+  };
+}
+

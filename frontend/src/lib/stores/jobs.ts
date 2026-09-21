@@ -33,6 +33,28 @@ const initialJobsState: JobsState = {
 const HISTORY_PAGE_SIZE = 50;
 const HISTORY_CACHE_LIMIT = 500;
 
+/**
+ * Fetch the mask persisted for a finished edit job. Mask files are named after
+ * their job, so this needs only the job id.
+ */
+export async function fetchJobMaskBlob(jobId: string): Promise<Blob> {
+  let response: Response;
+  try {
+    response = await fetch(`/api/generate/${encodeURIComponent(jobId)}/mask`, {
+      credentials: 'same-origin',
+      headers: { Accept: 'image/png' }
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : get(t).messages.failedToFetch;
+    throw new Error(get(t).messages.networkError(message));
+  }
+  if (!response.ok) {
+    const message = response.status === 404 ? get(t).messages.editRetryMaskMissing : get(t).messages.requestFailed;
+    throw new ApiError(message, response.status, null, 'loading job mask');
+  }
+  return await response.blob();
+}
+
 function sameJobImage(
   left: NonNullable<GenerateJobStatus['images']>[number],
   right: NonNullable<GenerateJobStatus['images']>[number]

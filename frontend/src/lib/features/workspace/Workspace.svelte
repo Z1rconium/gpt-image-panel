@@ -19,7 +19,7 @@
   import { confirmStore } from '$lib/stores/confirm';
   import { editMaskDiscards, editSourceCount, editSourceStore, isMaskValid, MAX_EDIT_SOURCE_IMAGES, primaryEditSourceId, type EditMask } from '$lib/stores/editSource';
   import { galleryActivityStore, galleryStore } from '$lib/stores/gallery';
-  import { jobsStore } from '$lib/stores/jobs';
+  import { fetchJobMaskBlob, jobsStore } from '$lib/stores/jobs';
   import { lightboxStore } from '$lib/stores/lightbox';
   import { nodeImageResult } from '$lib/stores/nodeImage';
   import { initialPromptFormState, previewStore, type PromptFormState } from '$lib/stores/preview';
@@ -47,6 +47,7 @@
     snippetsPanel
   } from '$lib/features/workspace/panels';
   import { promptForm } from '$lib/features/workspace/formState.svelte';
+  import { measureMaskBlob } from '$lib/features/mask/maskDocument';
   import { createLightboxController } from '$lib/features/workspace/lightbox';
   import { createPanelController } from '$lib/features/workspace/panelController';
   import { installWorkspaceLifecycle } from '$lib/features/workspace/lifecycle';
@@ -95,7 +96,8 @@
     ].map((source) => ({
       ...source,
       isPrimary: source.id === primaryId,
-      maskCoverage: mask && mask.sourceId === source.id ? mask.coverage : null
+      maskCoverage: mask && mask.sourceId === source.id ? mask.coverage : null,
+      maskOrigin: mask && mask.sourceId === source.id ? mask.origin : null
     }));
   });
   const primaryEditSource = $derived.by(() => {
@@ -1042,7 +1044,7 @@
     }
   }
 
-  function retryJob(job: GenerateJobStatus) {
+  async function retryJob(job: GenerateJobStatus) {
     promptForm.replace(jobToPromptForm(job, promptForm.presetDefaultModel));
     closeJobsDrawer();
     if (job.operation === 'edit') {
@@ -1052,12 +1054,35 @@
         return;
       }
       if (job.mask_applied && !isMaskValid($editSourceStore)) {
-        showToast($t.messages.editRetryMaskMissing);
+        const restored = await restoreMaskFromJob(job.job_id);
+        if (!restored) showToast($t.messages.editRetryMaskMissing, 'error');
       }
       editImage();
       return;
     }
     generateImage();
+  }
+
+  async function restoreMaskFromJob(jobId: string) {
+    const sourceId = primaryEditSourceId($editSourceStore);
+    if (!sourceId) return false;
+    try {
+      const blob = await fetchJobMaskBlob(jobId);
+      const { width, height, coverage } = await measureMaskBlob(blob);
+      editSourceStore.setMask({
+        sourceId,
+        blob,
+        width,
+        height,
+        coverage,
+        previewUrl: URL.createObjectURL(blob),
+        origin: 'restored'
+      });
+      showToast($t.messages.editMaskRestored((coverage * 100).toFixed(1)));
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   async function diagnoseJob(job: GenerateJobStatus) {

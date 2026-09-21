@@ -3,7 +3,7 @@
   import Upload from 'lucide-svelte/icons/upload';
   import X from 'lucide-svelte/icons/x';
   import { t } from '$lib/i18n';
-  import { MAX_EDIT_SOURCE_IMAGES } from '$lib/stores/editSource';
+  import { MAX_EDIT_SOURCE_IMAGES, type EditMaskOrigin } from '$lib/stores/editSource';
 
   export let sources: {
     id: string;
@@ -12,6 +12,7 @@
     kind: 'upload' | 'gallery';
     isPrimary?: boolean;
     maskCoverage?: number | null;
+    maskOrigin?: EditMaskOrigin | null;
   }[] = [];
   export let onChange: (event: Event) => void = () => {};
   export let onDropFiles: (files: File[]) => void = () => {};
@@ -36,6 +37,12 @@
 
   function maskBadgeLabel(coverage: number) {
     return $t.promptForm.maskBadge(`${(coverage * 100).toFixed(1)}%`);
+  }
+
+  function maskOriginLabel(origin: EditMaskOrigin) {
+    if (origin === 'uploaded') return $t.promptForm.maskOriginUploaded;
+    if (origin === 'restored') return $t.promptForm.maskOriginRestored;
+    return $t.promptForm.maskOriginPainted;
   }
 
   function hasFiles(event: DragEvent) {
@@ -170,7 +177,7 @@
                     : 'text-stone-600 hover:bg-stone-200/60 hover:text-stone-950 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100'
                 }`}
                 aria-label={$t.promptForm.maskEditLabel(source.label)}
-                title={$t.promptForm.maskEditLabel(source.label)}
+                title={source.maskCoverage != null ? maskBadgeLabel(source.maskCoverage) : $t.promptForm.maskEditLabel(source.label)}
                 on:click={() => onEditMask(source.id)}
               >
                 <Brush size={12} strokeWidth={2} aria-hidden="true" />
@@ -178,6 +185,11 @@
                   {source.maskCoverage != null ? maskBadgeLabel(source.maskCoverage) : $t.promptForm.editMask}
                 </span>
               </button>
+              {#if source.maskCoverage != null && source.maskOrigin}
+                <span class="shrink-0 rounded bg-stone-100 px-1.5 py-0.5 text-[10px] font-medium text-stone-500 dark:bg-zinc-800 dark:text-zinc-400">
+                  {maskOriginLabel(source.maskOrigin)}
+                </span>
+              {/if}
               {#if source.maskCoverage != null}
                 <button
                   type="button"

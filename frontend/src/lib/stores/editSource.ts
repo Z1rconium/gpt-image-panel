@@ -11,7 +11,7 @@ export type EditUploadSource = {
   previewLabel: string;
 };
 
-export type EditMaskOrigin = 'painted' | 'uploaded';
+export type EditMaskOrigin = 'painted' | 'uploaded' | 'restored';
 
 export type EditMask = {
   sourceId: string;
@@ -32,7 +32,7 @@ export type EditSourceState = {
   mask: EditMask | null;
 };
 
-const initialEditSourceState: EditSourceState = {
+export const initialEditSourceState: EditSourceState = {
   files: [],
   selectedGalleryImageId: '',
   galleryLabel: '',

@@ -711,3 +711,7 @@ const zh: Translation = {
 };
 
 export default zh;
+    maskOriginPainted: '手绘',
+    maskOriginUploaded: '上传',
+    maskOriginRestored: '已恢复',
+    editMaskRestored: (pct) => `已恢复蒙版 · 可编辑区域 ${pct}%`,
