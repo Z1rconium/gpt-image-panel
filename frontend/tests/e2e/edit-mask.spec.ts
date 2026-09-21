@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { loadApp } from './fixtures/mockApi';
+import { job, loadApp } from './fixtures/mockApi';
 
 // 64x64 source and matching 64x64 mask (transparent 32x32 center), plus a
 // 32x32 mask that intentionally mismatches the primary image.
@@ -27,8 +27,8 @@ async function uploadPrimary(page: Page, name = 'mask-source.png') {
 }
 
 async function openMaskEditor(page: Page, label = 'mask-source.png') {
-  await page.getByRole('button', { name: `Edit mask for ${label}` }).click();
-  await expect(page.getByRole('dialog', { name: /Edit mask/ })).toBeVisible();
+  await page.getByRole('button', { name: `Edit repaint area for ${label}` }).click();
+  await expect(page.getByRole('dialog', { name: /Repaint area/ })).toBeVisible();
   await expect(page.locator(MASK_CANVAS)).toBeVisible();
 }
 
@@ -48,15 +48,15 @@ test('painting a mask applies it to the primary card', async ({ page }) => {
   await openMaskEditor(page);
 
   await expect(page.getByText('Edit area 0.0%')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Apply mask' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Save selection' })).toBeDisabled();
 
   await paintStroke(page);
   await expect(page.getByText(/Edit area [1-9]/)).toBeVisible();
 
-  await page.getByRole('button', { name: 'Apply mask' }).click();
-  await expect(page.getByRole('dialog', { name: /Edit mask/ })).toHaveCount(0);
-  await expect(page.getByText(/^Mask \d+\.\d%$/)).toBeVisible();
-  await expect(page.getByRole('status')).toContainText('Mask applied');
+  await page.getByRole('button', { name: 'Save selection' }).click();
+  await expect(page.getByRole('dialog', { name: /Repaint area/ })).toHaveCount(0);
+  await expect(page.getByText(/^Repaint \d+\.\d%$/)).toBeVisible();
+  await expect(page.getByRole('status')).toContainText('Selection saved');
 });
 
 test('adding another reference image keeps the applied mask', async ({ page }) => {
@@ -64,15 +64,15 @@ test('adding another reference image keeps the applied mask', async ({ page }) =
   await uploadPrimary(page);
   await openMaskEditor(page);
   await paintStroke(page);
-  await page.getByRole('button', { name: 'Apply mask' }).click();
-  await expect(page.getByText(/^Mask \d+\.\d%$/)).toBeVisible();
+  await page.getByRole('button', { name: 'Save selection' }).click();
+  await expect(page.getByText(/^Repaint \d+\.\d%$/)).toBeVisible();
 
   await page
     .getByLabel('Upload edit image')
     .setInputFiles([{ name: 'second.png', mimeType: 'image/png', buffer: SOURCE_PNG }]);
 
   await expect(page.getByRole('button', { name: 'Preview second.png' })).toBeVisible();
-  await expect(page.getByText(/^Mask \d+\.\d%$/)).toBeVisible();
+  await expect(page.getByText(/^Repaint \d+\.\d%$/)).toBeVisible();
 });
 
 test('removing the primary image discards the mask and warns', async ({ page }) => {
@@ -80,12 +80,12 @@ test('removing the primary image discards the mask and warns', async ({ page }) 
   await uploadPrimary(page);
   await openMaskEditor(page);
   await paintStroke(page);
-  await page.getByRole('button', { name: 'Apply mask' }).click();
-  await expect(page.getByText(/^Mask \d+\.\d%$/)).toBeVisible();
+  await page.getByRole('button', { name: 'Save selection' }).click();
+  await expect(page.getByText(/^Repaint \d+\.\d%$/)).toBeVisible();
 
   await page.getByRole('button', { name: 'Remove mask-source.png' }).click();
 
-  await expect(page.getByText(/^Mask \d+\.\d%$/)).toHaveCount(0);
+  await expect(page.getByText(/^Repaint \d+\.\d%$/)).toHaveCount(0);
   await expect(page.getByRole('status')).toContainText('Mask cleared because the primary image changed');
 });
 
@@ -104,7 +104,7 @@ test('submitting an edit attaches the applied mask as mask.png', async ({ page }
   await uploadPrimary(page);
   await openMaskEditor(page);
   await paintStroke(page);
-  await page.getByRole('button', { name: 'Apply mask' }).click();
+  await page.getByRole('button', { name: 'Save selection' }).click();
 
   await page.getByRole('textbox', { name: 'Prompt', exact: true }).fill('masked edit prompt');
   const editRequestPromise = page.waitForRequest((request) => new URL(request.url()).pathname === '/api/edits');
@@ -155,7 +155,7 @@ test('uploading a valid mask PNG imports its transparent area', async ({ page })
     .setInputFiles([{ name: 'mask.png', mimeType: 'image/png', buffer: MASK_PNG }]);
 
   await expect(page.getByText('Edit area 25.0%')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Apply mask' })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Save selection' })).toBeEnabled();
 });
 
 async function canvasPixel(page: Page, x: number, y: number) {
@@ -205,7 +205,7 @@ test('hides the mask entry when the active preset does not support masks', async
   await uploadPrimary(page);
 
   await expect(page.getByText('Primary')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Edit mask for mask-source.png' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Edit repaint area for mask-source.png' })).toHaveCount(0);
 });
 
 test('disabling mask support on the active preset clears the applied mask', async ({ page }) => {
@@ -213,8 +213,8 @@ test('disabling mask support on the active preset clears the applied mask', asyn
   await uploadPrimary(page);
   await openMaskEditor(page);
   await paintStroke(page);
-  await page.getByRole('button', { name: 'Apply mask' }).click();
-  await expect(page.getByText(/^Mask \d+\.\d%$/)).toBeVisible();
+  await page.getByRole('button', { name: 'Save selection' }).click();
+  await expect(page.getByText(/^Repaint \d+\.\d%$/)).toBeVisible();
 
   await page.getByRole('button', { name: 'Settings' }).click();
   const drawer = page.getByRole('dialog', { name: 'Settings' });
@@ -226,9 +226,9 @@ test('disabling mask support on the active preset clears the applied mask', asyn
   const body = (await saveRequest).postDataJSON() as Record<string, unknown>;
   expect(body.supports_mask).toBe(false);
 
-  await expect(page.getByText(/^Mask \d+\.\d%$/)).toHaveCount(0);
+  await expect(page.getByText(/^Repaint \d+\.\d%$/)).toHaveCount(0);
   await expect(page.getByRole('status')).toContainText('does not support masks');
-  await expect(page.getByRole('button', { name: 'Edit mask for mask-source.png' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Edit repaint area for mask-source.png' })).toHaveCount(0);
 });
 
 test('rejects an uploaded mask whose size differs from the primary image', async ({ page }) => {
@@ -250,7 +250,7 @@ test('escape closes the editor and undo clears the painted coverage', async ({ p
 
   await openMaskEditor(page);
   await page.keyboard.press('Escape');
-  await expect(page.getByRole('dialog', { name: /Edit mask/ })).toHaveCount(0);
+  await expect(page.getByRole('dialog', { name: /Repaint area/ })).toHaveCount(0);
 
   await openMaskEditor(page);
   await paintStroke(page);
@@ -258,7 +258,7 @@ test('escape closes the editor and undo clears the painted coverage', async ({ p
 
   await page.keyboard.press('Control+z');
   await expect(page.getByText('Edit area 0.0%')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Apply mask' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Save selection' })).toBeDisabled();
 });
 
 test('mask editor stays usable at a mobile viewport', async ({ page }) => {
@@ -271,8 +271,8 @@ test('mask editor stays usable at a mobile viewport', async ({ page }) => {
   await paintStroke(page);
   await expect(page.getByText(/Edit area [1-9]/)).toBeVisible();
 
-  await page.getByRole('button', { name: 'Apply mask' }).click();
-  await expect(page.getByText(/^Mask \d+\.\d%$/)).toBeVisible();
+  await page.getByRole('button', { name: 'Save selection' }).click();
+  await expect(page.getByText(/^Repaint \d+\.\d%$/)).toBeVisible();
 });
 
 async function canvasStrokePaths(
@@ -304,8 +304,8 @@ test('the rectangle tool fills a dragged region', async ({ page }) => {
   ]);
 
   await expect(page.getByText(/Edit area [1-9]/)).toBeVisible();
-  await page.getByRole('button', { name: 'Apply mask' }).click();
-  await expect(page.getByText(/^Mask \d+\.\d%$/)).toBeVisible();
+  await page.getByRole('button', { name: 'Save selection' }).click();
+  await expect(page.getByText(/^Repaint \d+\.\d%$/)).toBeVisible();
 });
 
 test('the lasso tool fills a closed region', async ({ page }) => {
@@ -324,8 +324,8 @@ test('the lasso tool fills a closed region', async ({ page }) => {
   ]);
 
   await expect(page.getByText(/Edit area [1-9]/)).toBeVisible();
-  await page.getByRole('button', { name: 'Apply mask' }).click();
-  await expect(page.getByText(/^Mask \d+\.\d%$/)).toBeVisible();
+  await page.getByRole('button', { name: 'Save selection' }).click();
+  await expect(page.getByText(/^Repaint \d+\.\d%$/)).toBeVisible();
 });
 
 test('painting still lands on the image while zoomed in', async ({ page }) => {
@@ -340,8 +340,151 @@ test('painting still lands on the image while zoomed in', async ({ page }) => {
   await paintStroke(page);
   await expect(page.getByText(/Edit area [1-9]/)).toBeVisible();
 
-  await page.getByRole('button', { name: 'Reset view' }).click();
-  await expect(page.getByText('100%')).toBeVisible();
-  await page.getByRole('button', { name: 'Apply mask' }).click();
-  await expect(page.getByText(/^Mask \d+\.\d%$/)).toBeVisible();
+  await page.getByRole('button', { name: 'Fit canvas' }).click();
+  await expect(page.locator('span').filter({ hasText: /^100%$/ })).toBeVisible();
+  await page.getByRole('button', { name: 'Save selection' }).click();
+  await expect(page.getByText(/^Repaint \d+\.\d%$/)).toBeVisible();
+});
+
+test('uploading a mask over an existing selection offers replace or merge', async ({ page }) => {
+  await loadApp(page);
+  await uploadPrimary(page);
+  await openMaskEditor(page);
+  await paintStroke(page);
+  await expect(page.getByText(/Edit area [1-9]/)).toBeVisible();
+
+  // Replace discards the painted stroke: only the imported center square stays.
+  await page
+    .locator(MASK_INPUT)
+    .setInputFiles([{ name: 'mask.png', mimeType: 'image/png', buffer: MASK_PNG }]);
+  await page.getByRole('button', { name: 'Replace selection' }).click();
+  await expect(page.getByText('Edit area 25.0%')).toBeVisible();
+
+  // Undo restores the painted stroke instead of the imported mask.
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await expect(page.getByText(/Edit area [1-9]/)).toBeVisible();
+
+  // Merge keeps both regions: the painted stroke plus the imported square.
+  await page
+    .locator(MASK_INPUT)
+    .setInputFiles([{ name: 'mask.png', mimeType: 'image/png', buffer: MASK_PNG }]);
+  await page.getByRole('button', { name: 'Merge with existing' }).click();
+  const coverageText = await page.getByText(/Edit area \d+\.\d%/).textContent();
+  expect(parseFloat(coverageText!.replace(/[^\d.]/g, ''))).toBeGreaterThan(25);
+});
+
+test('clearing an existing mask can be saved as no mask', async ({ page }) => {
+  await loadApp(page);
+  await uploadPrimary(page);
+  await openMaskEditor(page);
+  await paintStroke(page);
+  await page.getByRole('button', { name: 'Save selection' }).click();
+  await expect(page.getByText(/^Repaint \d+\.\d%$/)).toBeVisible();
+
+  await openMaskEditor(page);
+  const editorDialog = page.getByRole('dialog', { name: /Repaint area/ });
+  await editorDialog.getByRole('button', { name: 'Clear', exact: true }).click();
+  await expect(page.getByText('Edit area 0.0%')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Save selection' })).toHaveCount(0);
+  await editorDialog.getByRole('button', { name: 'Save without mask' }).click();
+
+  await expect(page.getByText(/^Repaint \d+\.\d%$/)).toHaveCount(0);
+  await expect(page.getByRole('status')).toContainText('Saved as no mask');
+});
+
+test('the rectangle tool supports visible add and subtract modes', async ({ page }) => {
+  await loadApp(page);
+  await uploadPrimary(page);
+  await openMaskEditor(page);
+
+  await page.getByRole('button', { name: 'Rectangle' }).click();
+  await expect(page.getByRole('button', { name: 'Add', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Subtract' })).toBeVisible();
+
+  await canvasStrokePaths(page, [
+    [
+      { x: 0.2, y: 0.2 },
+      { x: 0.8, y: 0.8 }
+    ]
+  ]);
+  await expect(page.getByText(/Edit area [1-9]/)).toBeVisible();
+
+  await page.getByRole('button', { name: 'Subtract' }).click();
+  await canvasStrokePaths(page, [
+    [
+      { x: 0.2, y: 0.2 },
+      { x: 0.5, y: 0.5 }
+    ]
+  ]);
+
+  const coverageText = await page.getByText(/Edit area \d+\.\d%/).textContent();
+  expect(parseFloat(coverageText!.replace(/[^\d.]/g, ''))).toBeLessThan(36);
+});
+
+test('the move view tool pans without painting', async ({ page }) => {
+  await loadApp(page);
+  await uploadPrimary(page);
+  await openMaskEditor(page);
+
+  await page.getByRole('button', { name: 'Move view' }).click();
+  const canvas = page.locator(MASK_CANVAS);
+  const box = await canvas.boundingBox();
+  if (!box) throw new Error('mask canvas has no layout box');
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 - 40, box.y + box.height / 2 - 20, { steps: 5 });
+  await page.mouse.up();
+
+  await expect(page.getByText('Edit area 0.0%')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Save selection' })).toBeDisabled();
+});
+
+test('retrying a masked edit job restores the original task mask', async ({ page }) => {
+  await loadApp(page, {
+    historyJobs: [{ ...job('history-mask', 'masked retry prompt'), operation: 'edit', mask_applied: true }]
+  });
+  await uploadPrimary(page);
+
+  await page.getByRole('button', { name: 'Job History' }).click();
+  const jobsDrawer = page.getByRole('dialog', { name: 'Job History' });
+  await jobsDrawer.getByRole('button', { name: 'History', exact: true }).click();
+  const historyJob = jobsDrawer.locator('article').filter({ hasText: 'masked retry prompt' });
+  await historyJob.getByRole('button', { name: 'Retry' }).click();
+
+  // The original task's own mask is restored onto the primary source, and the
+  // retry submits with it attached instead of reusing a current selection.
+  await expect(page.getByText('Repaint 25.0%')).toBeVisible();
+  await expect(page.getByRole('status')).toContainText('Original task selection restored');
+
+  const editRequestPromise = page.waitForRequest((request) => new URL(request.url()).pathname === '/api/edits');
+  await page.getByRole('button', { name: 'Edits' }).click();
+  const body = (await editRequestPromise).postDataBuffer()?.toString('latin1') || '';
+  expect(body).toContain('name="mask"');
+  expect(body).toContain('filename="mask.png"');
+});
+
+test('retrying an edit job that used no mask ignores the current selection', async ({ page }) => {
+  await loadApp(page, {
+    historyJobs: [{ ...job('history-plain', 'plain retry prompt'), operation: 'edit', mask_applied: false }]
+  });
+  await uploadPrimary(page);
+  await openMaskEditor(page);
+  await paintStroke(page);
+  await page.getByRole('button', { name: 'Save selection' }).click();
+  await expect(page.getByText(/^Repaint \d+\.\d%$/)).toBeVisible();
+
+  await page.getByRole('button', { name: 'Job History' }).click();
+  const jobsDrawer = page.getByRole('dialog', { name: 'Job History' });
+  await jobsDrawer.getByRole('button', { name: 'History', exact: true }).click();
+  const historyJob = jobsDrawer.locator('article').filter({ hasText: 'plain retry prompt' });
+  await historyJob.getByRole('button', { name: 'Retry' }).click();
+
+  // The original task had no mask, so the freshly painted selection is dropped.
+  await expect(page.getByText(/^Repaint \d+\.\d%$/)).toHaveCount(0);
+  await expect(page.getByRole('status').filter({ hasText: 'This job used no mask' })).toBeVisible();
+
+  const editRequestPromise = page.waitForRequest((request) => new URL(request.url()).pathname === '/api/edits');
+  await page.getByRole('button', { name: 'Edits' }).click();
+  const body = (await editRequestPromise).postDataBuffer()?.toString('latin1') || '';
+  expect(body).not.toContain('name="mask"');
 });

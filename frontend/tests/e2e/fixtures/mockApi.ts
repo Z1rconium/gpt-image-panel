@@ -4,6 +4,11 @@ const PNG_BYTES = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4//8/AwAI/AL+X1N6AAAAAElFTkSuQmCC',
   'base64'
 );
+// 64x64 mask whose fully transparent 32x32 center marks 25% of the image.
+const MASK_PNG_BYTES = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAAqUlEQVR4nO3bwQnAMAzAQKd0/5XbIRK4R6QBjBB+Gbxm5puLebSApgBaQFMALaApgBbQFEALaAqgBTQF0AKaAmgBzXtgxjowY4ete8b1G1AALaApgBbQFEALaAqgBTQF0AKaAmgBTQG0gKYAWkBTAC2gKYAW0BRAC2gKoAU0BdACmgJoAU0BtIBm9S9wOQXQApoCaAFNAbSApgBaQFMALaApgBbQFEALaH4NOAN/t9r+BwAAAABJRU5ErkJggg==',
+  'base64'
+);
 
 type GalleryImageFixture = {
   id: string;
@@ -1281,6 +1286,10 @@ async function mockApi(page: Page, options: MockOptions = {}) {
       const includeFinished = url.searchParams.get('include_finished') === 'true';
       const failedOnly = url.searchParams.get('failed_only') === 'true';
       await route.fulfill(json(includeFinished ? (failedOnly ? historyJobs.filter(isErrorJob) : historyJobs) : runningJobs));
+      return;
+    }
+    if (url.pathname === '/api/generate/history-mask/mask') {
+      await route.fulfill({ status: 200, contentType: 'image/png', body: MASK_PNG_BYTES });
       return;
     }
     if (url.pathname === '/api/generate/jobs/history' && request.method() === 'DELETE') {
