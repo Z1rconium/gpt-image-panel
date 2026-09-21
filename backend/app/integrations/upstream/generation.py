@@ -524,6 +524,7 @@ async def call_image_edit_api(
     preview: "PreviewCallback | None" = None,
     persist_gallery_entry: PersistGalleryEntry,
     mask_source: ImageEditSource | None = None,
+    mask_coverage: float | None = None,
 ) -> list[GalleryEntry]:
     if not image_sources:
         raise UpstreamApiError("At least one edit source image is required")
@@ -539,7 +540,12 @@ async def call_image_edit_api(
         json_content_type=False,
     )
     format_info = get_output_format_info(payload.output_format)
-    gallery_metadata = build_gallery_metadata(payload, api_path, api_preset_name)
+    gallery_metadata = build_gallery_metadata(
+        payload,
+        api_path,
+        api_preset_name,
+        mask_coverage=mask_coverage,
+    )
 
     if progress:
         progress("building_edit_form", "Building multipart edit request")

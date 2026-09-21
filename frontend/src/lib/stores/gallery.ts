@@ -535,7 +535,7 @@ function createGalleryStore() {
       page: 1,
       filters: {
         ...current.filters,
-        [key]: key === 'favorite' ? Boolean(value) : String(value || '')
+        [key]: key === 'favorite' || key === 'maskOnly' ? Boolean(value) : String(value || '')
       },
       selectedIds: new Set(),
       selectionToken: null,

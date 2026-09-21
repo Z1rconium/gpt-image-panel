@@ -146,6 +146,7 @@ async def _query_gallery(
     date_from: str | None,
     date_to: str | None,
     favorite: bool | None,
+    mask_only: bool | None,
     include_total_bytes: bool,
     include_counts: bool,
     include_filter_options: bool,
@@ -160,6 +161,7 @@ async def _query_gallery(
         date_from=date_from,
         date_to=date_to,
         favorite=favorite,
+        mask_only=mask_only,
     )
     started_at = time.perf_counter()
     try:
@@ -232,6 +234,7 @@ async def get_gallery_handler(
     date_from: str | None = Query(default=None),
     date_to: str | None = Query(default=None),
     favorite: bool | None = Query(default=None),
+    mask_only: bool | None = Query(default=None),
     include_total_bytes: bool = Query(default=False),
     include_counts: bool = Query(default=True),
     include_filter_options: bool = Query(default=True),
@@ -250,6 +253,7 @@ async def get_gallery_handler(
         date_from=date_from,
         date_to=date_to,
         favorite=favorite,
+        mask_only=mask_only,
         include_total_bytes=include_total_bytes,
         include_counts=include_counts,
         include_filter_options=include_filter_options,
@@ -270,6 +274,7 @@ async def search_gallery_handler(req: GallerySearchRequest):
         date_from=req.date_from,
         date_to=req.date_to,
         favorite=req.favorite,
+        mask_only=req.mask_only,
         include_total_bytes=req.include_total_bytes,
         include_counts=req.include_counts,
         include_filter_options=req.include_filter_options,

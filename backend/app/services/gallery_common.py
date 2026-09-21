@@ -323,6 +323,7 @@ def build_gallery_filters(
     date_from: str | None,
     date_to: str | None,
     favorite: bool | None,
+    mask_only: bool | None = None,
 ) -> dict:
     return {
         "prompt": str(prompt or "").strip(),
@@ -332,6 +333,7 @@ def build_gallery_filters(
         "date_from": normalize_gallery_date_filter(date_from),
         "date_to": normalize_gallery_date_filter(date_to, end_of_day=True),
         "favorite": favorite,
+        "mask_only": mask_only,
     }
 
 
@@ -345,6 +347,7 @@ def build_gallery_filters_from_selection_request(req: GallerySelectionTokenReque
         filters.date_from,
         filters.date_to,
         filters.favorite,
+        filters.mask_only,
     )
 
 

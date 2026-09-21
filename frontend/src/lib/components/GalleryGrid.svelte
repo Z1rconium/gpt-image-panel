@@ -136,7 +136,8 @@
         filters.size ||
         filters.dateFrom ||
         filters.dateTo ||
-        filters.favorite
+        filters.favorite ||
+        filters.maskOnly
     )
   );
 

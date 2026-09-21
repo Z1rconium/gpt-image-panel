@@ -8,6 +8,7 @@ export type GalleryFilters = {
   dateFrom: string;
   dateTo: string;
   favorite: boolean;
+  maskOnly: boolean;
 };
 
 export const defaultGalleryFilters: GalleryFilters = {
@@ -17,7 +18,8 @@ export const defaultGalleryFilters: GalleryFilters = {
   size: '',
   dateFrom: '',
   dateTo: '',
-  favorite: false
+  favorite: false,
+  maskOnly: false
 };
 
 export function buildGalleryParams(
@@ -36,6 +38,7 @@ export function buildGalleryParams(
   if (filters.dateFrom) params.set('date_from', filters.dateFrom);
   if (filters.dateTo) params.set('date_to', filters.dateTo);
   if (filters.favorite) params.set('favorite', 'true');
+  if (filters.maskOnly) params.set('mask_only', 'true');
   if (includeTotalBytes) params.set('include_total_bytes', 'true');
   if (!includeCounts) params.set('include_counts', 'false');
   if (!includeFilterOptions) params.set('include_filter_options', 'false');
@@ -57,6 +60,7 @@ export function gallerySearchBody(params: URLSearchParams, filters: GalleryFilte
     date_from: filters.dateFrom,
     date_to: filters.dateTo,
     favorite: filters.favorite ? true : null,
+    mask_only: filters.maskOnly ? true : null,
     include_total_bytes: params.get('include_total_bytes') === 'true',
     include_counts: params.get('include_counts') !== 'false',
     include_filter_options: params.get('include_filter_options') !== 'false',
@@ -73,7 +77,8 @@ export function galleryFiltersToSelectionPayload(filters: GalleryFilters) {
     size: filters.size,
     date_from: filters.dateFrom,
     date_to: filters.dateTo,
-    favorite: filters.favorite ? true : null
+    favorite: filters.favorite ? true : null,
+    mask_only: filters.maskOnly ? true : null
   };
 }
 
@@ -85,7 +90,8 @@ export function sameGalleryFilters(left: GalleryFilters, right: GalleryFilters) 
     left.size === right.size &&
     left.dateFrom === right.dateFrom &&
     left.dateTo === right.dateTo &&
-    left.favorite === right.favorite
+    left.favorite === right.favorite &&
+    left.maskOnly === right.maskOnly
   );
 }
 
@@ -112,6 +118,7 @@ export function pendingImageMatchesFilters(image: GalleryEntry, filters: Gallery
   if (filters.preset && image.api_preset_name !== filters.preset) return false;
   if (filters.size && image.size !== filters.size) return false;
   if (filters.favorite && !image.favorite) return false;
+  if (filters.maskOnly && image.mask_coverage == null) return false;
   if (filters.dateFrom || filters.dateTo) {
     const timestamp = image.completed_at || image.created_at;
     if (filters.dateFrom && timestamp < `${filters.dateFrom}T00:00:00`) return false;

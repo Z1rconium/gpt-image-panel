@@ -25,7 +25,8 @@ export function readGalleryUrlState(searchParams: URLSearchParams): GalleryUrlSt
       size: searchParams.get('size') || '',
       dateFrom: searchParams.get('date_from') || '',
       dateTo: searchParams.get('date_to') || '',
-      favorite: parseBoolean(searchParams.get('favorite'))
+      favorite: parseBoolean(searchParams.get('favorite')),
+      maskOnly: parseBoolean(searchParams.get('mask_only'))
     }
   };
 }
@@ -39,6 +40,7 @@ export function writeGalleryUrlState(searchParams: URLSearchParams, page: number
   searchParams.delete('date_from');
   searchParams.delete('date_to');
   searchParams.delete('favorite');
+  searchParams.delete('mask_only');
 
   if (page > 1) searchParams.set('page', String(page));
   if (filters.model) searchParams.set('model', filters.model);
@@ -47,4 +49,5 @@ export function writeGalleryUrlState(searchParams: URLSearchParams, page: number
   if (filters.dateFrom) searchParams.set('date_from', filters.dateFrom);
   if (filters.dateTo) searchParams.set('date_to', filters.dateTo);
   if (filters.favorite) searchParams.set('favorite', 'true');
+  if (filters.maskOnly) searchParams.set('mask_only', 'true');
 }

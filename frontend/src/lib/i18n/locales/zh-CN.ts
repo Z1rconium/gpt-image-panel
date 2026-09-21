@@ -503,6 +503,7 @@ const zh: Translation = {
     allPresets: '全部预设',
     allSizes: '全部尺寸',
     favorites: '收藏',
+    maskOnly: '蒙版编辑',
     dateRange: '日期范围',
     dateFrom: '起始日期',
     dateTo: '截止日期',

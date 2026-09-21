@@ -36,6 +36,7 @@ class GalleryEntry(BaseModel):
     duration: Optional[str] = None
     favorite: bool = False
     bytes: Optional[int] = None
+    mask_coverage: Optional[float] = None
 
 
 class GalleryFavoriteRequest(StrictRequestModel):
@@ -69,6 +70,7 @@ class GallerySelectionFilterRequest(StrictRequestModel):
     date_from: Optional[str] = Field(default="", max_length=64)
     date_to: Optional[str] = Field(default="", max_length=64)
     favorite: Optional[bool] = None
+    mask_only: Optional[bool] = None
 
 
 class GallerySearchRequest(GallerySelectionFilterRequest):

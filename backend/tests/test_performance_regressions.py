@@ -37,6 +37,7 @@ def _configure_runtime(tmp_path: Path) -> None:
     data_dir.mkdir()
     config.IMAGES_DIR = str(images_dir)
     config.THUMBNAILS_DIR = str(images_dir / "thumbs")
+    config.MASKS_DIR = str(images_dir / "masks")
     config.DATA_DIR = str(data_dir)
     config.DATABASE_FILE = str(data_dir / "app.sqlite3")
     db_repo.close_database_connections()
@@ -296,6 +297,7 @@ def test_gallery_page_query_uses_db_executor(monkeypatch):
             date_from=None,
             date_to=None,
             favorite=None,
+            mask_only=None,
             include_total_bytes=False,
             include_counts=True,
             include_filter_options=True,

@@ -86,6 +86,7 @@ from .constants import (
     NODEIMAGE_SETTINGS_KEY,
     PROMPT_OPTIMIZER_SETTINGS_KEY,
     PROMPT_SNIPPET_COLUMNS,
+    REAL_GALLERY_COLUMNS,
     R2_BACKUP_SETTINGS_KEY,
     REQUIRED_GALLERY_COLUMNS,
     SETTINGS_ACTIVE_PRESET_KEY,
@@ -191,6 +192,11 @@ def _normalize_gallery_entry(entry: dict[str, Any]) -> dict[str, Any] | None:
         if column in INTEGER_GALLERY_COLUMNS:
             try:
                 normalized[column] = int(value)
+            except (TypeError, ValueError):
+                continue
+        elif column in REAL_GALLERY_COLUMNS:
+            try:
+                normalized[column] = float(value)
             except (TypeError, ValueError):
                 continue
         elif column == "thumbnail_filename":
@@ -330,6 +336,10 @@ def _build_gallery_filter_where(filters: dict[str, Any] | None) -> tuple[str, li
     if favorite is not None:
         clauses.append("favorite = ?")
         params.append(favorite)
+
+    mask_only = _normalize_gallery_filter_bool(filters.get("mask_only"))
+    if mask_only == 1:
+        clauses.append("mask_coverage IS NOT NULL")
 
     date_from = str(filters.get("date_from") or "").strip()
     if date_from:

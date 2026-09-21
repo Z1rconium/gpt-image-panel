@@ -32,6 +32,7 @@ GALLERY_COLUMNS = (
     "bytes",
     "sha256",
     "sort_seq",
+    "mask_coverage",
 )
 REQUIRED_GALLERY_COLUMNS = {"id", "prompt", "size", "filename", "created_at"}
 _GALLERY_INTERNAL_COLUMNS = {"sort_seq"}
@@ -44,6 +45,7 @@ INTEGER_GALLERY_COLUMNS = {
     "bytes",
     "sort_seq",
 }
+REAL_GALLERY_COLUMNS = {"mask_coverage"}
 GENERATE_JOB_COLUMNS = (
     "job_id",
     "status",

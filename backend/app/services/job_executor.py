@@ -692,6 +692,7 @@ async def run_claimed_image_unit(unit: dict, worker_id: str):
                         socks5_proxy=socks5_proxy,
                         persist_gallery_entry=add_to_gallery_async,
                         mask_source=mask_source,
+                        mask_coverage=mask_source.coverage if mask_source else None,
                         **stream_kwargs,
                     )
                 return await proxy.call_image_generation_api(

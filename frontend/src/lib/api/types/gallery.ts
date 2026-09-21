@@ -30,6 +30,7 @@ export type GalleryEntry = {
   duration?: string | null;
   favorite: boolean;
   bytes?: number | null;
+  mask_coverage?: number | null;
 };
 
 export type GalleryResponse = {

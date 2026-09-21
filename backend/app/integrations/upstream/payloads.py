@@ -266,8 +266,10 @@ def build_gallery_metadata(
     payload: GenerateRequest,
     api_path: str,
     api_preset_name: str | None,
+    *,
+    mask_coverage: float | None = None,
 ) -> dict[str, Any]:
-    return {
+    metadata: dict[str, Any] = {
         "model": payload.model,
         "quality": payload.quality,
         "output_format": payload.output_format,
@@ -278,6 +280,9 @@ def build_gallery_metadata(
         "api_path": api_path,
         "api_preset_name": api_preset_name,
     }
+    if mask_coverage is not None:
+        metadata["mask_coverage"] = round(mask_coverage, 4)
+    return metadata
 
 
 def build_responses_request_data(payload: GenerateRequest) -> dict[str, Any]:

@@ -501,6 +501,7 @@ const en = {
     allPresets: 'All presets',
     allSizes: 'All sizes',
     favorites: 'Favorites',
+    maskOnly: 'Masked edits',
     dateRange: 'Date range',
     dateFrom: 'From date',
     dateTo: 'To date',

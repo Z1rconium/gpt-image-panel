@@ -9,7 +9,7 @@ import type { GalleryResponse } from '$lib/api/types/gallery';
   export let onReset: () => void = () => {};
 
   $: hasFilters = Boolean(
-    filters.prompt.trim() || filters.model || filters.preset || filters.size || filters.dateFrom || filters.dateTo || filters.favorite
+    filters.prompt.trim() || filters.model || filters.preset || filters.size || filters.dateFrom || filters.dateTo || filters.favorite || filters.maskOnly
   );
 </script>
 
@@ -44,10 +44,16 @@ import type { GalleryResponse } from '$lib/api/types/gallery';
         <span class="px-1 text-xs text-stone-400" aria-hidden="true">-</span>
         <input id="gallery-date-to" type="date" value={filters.dateTo} aria-label={$t.gallery.dateTo} class="control-focus h-10 min-w-0 border-0 bg-transparent px-2 text-sm text-stone-900 dark:text-zinc-100" on:change={(event) => onFilter('dateTo', event.currentTarget.value)} />
       </div>
-      <label class={`control-focus flex min-h-10 min-w-0 items-center justify-center gap-2 rounded-md border px-3 text-sm font-medium ${filters.favorite ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200' : 'border-stone-200 bg-white text-stone-700 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300'}`}>
-        <input type="checkbox" class="accent-emerald-500" checked={filters.favorite} on:change={(event) => onFilter('favorite', event.currentTarget.checked)} />
-        <span class="whitespace-nowrap">{$t.gallery.favorites}</span>
-      </label>
+      <div class="flex min-w-0 gap-2">
+        <label class={`control-focus flex min-h-10 min-w-0 flex-1 items-center justify-center gap-2 rounded-md border px-3 text-sm font-medium ${filters.favorite ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200' : 'border-stone-200 bg-white text-stone-700 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300'}`}>
+          <input type="checkbox" class="accent-emerald-500" checked={filters.favorite} on:change={(event) => onFilter('favorite', event.currentTarget.checked)} />
+          <span class="whitespace-nowrap">{$t.gallery.favorites}</span>
+        </label>
+        <label class={`control-focus flex min-h-10 min-w-0 flex-1 items-center justify-center gap-2 rounded-md border px-3 text-sm font-medium ${filters.maskOnly ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200' : 'border-stone-200 bg-white text-stone-700 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300'}`}>
+          <input type="checkbox" class="accent-emerald-500" checked={filters.maskOnly} on:change={(event) => onFilter('maskOnly', event.currentTarget.checked)} />
+          <span class="whitespace-nowrap">{$t.gallery.maskOnly}</span>
+        </label>
+      </div>
     </div>
   </div>
 </div>

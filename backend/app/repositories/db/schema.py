@@ -272,7 +272,8 @@ def _ensure_database():
                     favorite INTEGER NOT NULL DEFAULT 0,
                     bytes INTEGER,
                     sha256 TEXT,
-                    sort_seq INTEGER
+                    sort_seq INTEGER,
+                    mask_coverage REAL
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_gallery_entries_filename
@@ -1025,6 +1026,12 @@ def _migration_api_preset_supports_mask(conn: sqlite3.Connection):
         )
 
 
+def _migration_gallery_mask_coverage(conn: sqlite3.Connection):
+    gallery_columns = _table_columns(conn, "gallery_entries")
+    if "mask_coverage" not in gallery_columns:
+        conn.execute("ALTER TABLE gallery_entries ADD COLUMN mask_coverage REAL")
+
+
 def _migration_image_job_unit_lease_fencing(conn: sqlite3.Connection):
     unit_columns = _table_columns(conn, "image_job_units")
     if "claim_token" not in unit_columns:
@@ -1102,4 +1109,5 @@ SCHEMA_MIGRATIONS = (
     (20, "performance_indexes", _migration_performance_indexes),
     (21, "generate_job_mask_column", _migration_generate_job_mask_column),
     (22, "api_preset_supports_mask", _migration_api_preset_supports_mask),
+    (23, "gallery_mask_coverage", _migration_gallery_mask_coverage),
 )
