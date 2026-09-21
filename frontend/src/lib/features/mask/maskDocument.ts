@@ -10,12 +10,15 @@
  */
 
 export const MAX_MASK_FILE_BYTES = 4 * 1024 * 1024;
+export const MAX_FEATHER_PX = 64;
 
 const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 const ALPHA_CHANNEL_COLOR_TYPES = new Set([4, 6]);
 const PALETTE_COLOR_TYPE = 3;
 
-export type MaskTool = 'brush' | 'eraser';
+export type MaskTool = 'brush' | 'eraser' | 'rect' | 'lasso';
+
+export type MaskShapeMode = 'add' | 'erase';
 
 export type MaskPoint = {
   x: number;
@@ -68,6 +71,15 @@ export function countMarkedPixels(data: Uint8ClampedArray): number {
   return marked / total;
 }
 
+/**
+ * Clamp a feather radius (in image pixels) to a sane range for the image size.
+ */
+export function normalizeFeatherPx(value: number, width: number): number {
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  const limit = Math.min(MAX_FEATHER_PX, Math.max(0, Math.floor(width / 8)));
+  return Math.min(limit, Math.round(value));
+}
+
 /** True when the PNG uses an alpha channel (color type 4/6, or palette + tRNS). */
 export function pngHasAlphaChannel(bytes: Uint8Array): boolean {
   if (bytes.length < 26) return false;
@@ -92,6 +104,12 @@ type StrokeCommand = {
   points: MaskPoint[];
 };
 
+type ShapeCommand = {
+  kind: 'rect' | 'lasso';
+  mode: MaskShapeMode;
+  points: MaskPoint[];
+};
+
 type ImportCommand = {
   kind: 'import';
   layer: HTMLCanvasElement;
@@ -99,7 +117,7 @@ type ImportCommand = {
 
 type ClearCommand = { kind: 'clear' };
 type InvertCommand = { kind: 'invert' };
-type Command = StrokeCommand | ImportCommand | ClearCommand | InvertCommand;
+type Command = StrokeCommand | ShapeCommand | ImportCommand | ClearCommand | InvertCommand;
 
 function createCanvas(width: number, height: number): HTMLCanvasElement {
   const canvas = document.createElement('canvas');
@@ -147,6 +165,31 @@ async function decodeImage(file: Blob): Promise<CanvasImageSource & { width: num
 
 export type MaskDocument = ReturnType<typeof createMaskDocument>;
 
+export type MaskMeasurements = {
+  width: number;
+  height: number;
+  coverage: number;
+};
+
+/**
+ * Measure an exported mask blob (a persisted mask restored from a job): its
+ * pixel size and the editable-area ratio, without drawing it into a document.
+ */
+export async function measureMaskBlob(blob: Blob): Promise<MaskMeasurements> {
+  const decoded = await decodeImage(blob);
+  const canvas = createCanvas(decoded.width, decoded.height);
+  const context = canvas.getContext('2d');
+  if (!context) throw new MaskImportError('decode');
+  context.drawImage(decoded, 0, 0);
+  if (typeof ImageBitmap !== 'undefined' && decoded instanceof ImageBitmap) decoded.close();
+  const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+  return {
+    width: canvas.width,
+    height: canvas.height,
+    coverage: binarizeMaskAlphaData(imageData.data)
+  };
+}
+
 export function createMaskDocument(width: number, height: number) {
   const marks = createCanvas(width, height);
   const context = context2d(marks);
@@ -156,6 +199,7 @@ export function createMaskDocument(width: number, height: number) {
   let commands: Command[] = [];
   let redoStack: Command[] = [];
   let activeStroke: StrokeCommand | null = null;
+  let activeShape: ShapeCommand | null = null;
 
   function strokeContext(target: CanvasRenderingContext2D) {
     target.save();
@@ -181,6 +225,45 @@ export function createMaskDocument(width: number, height: number) {
     target.restore();
   }
 
+  /** Trace a rect/lasso outline into the current path; false when degenerate. */
+  function traceShape(target: CanvasRenderingContext2D, command: ShapeCommand): boolean {
+    const { points } = command;
+    target.beginPath();
+    if (command.kind === 'rect') {
+      const start = points[0];
+      const end = points[points.length - 1];
+      if (!start || !end || (start.x === end.x && start.y === end.y)) return false;
+      target.rect(
+        Math.min(start.x, end.x),
+        Math.min(start.y, end.y),
+        Math.abs(end.x - start.x),
+        Math.abs(end.y - start.y)
+      );
+      return true;
+    }
+    if (points.length < 3) return false;
+    target.moveTo(points[0].x, points[0].y);
+    for (let index = 1; index < points.length; index += 1) {
+      target.lineTo(points[index].x, points[index].y);
+    }
+    target.closePath();
+    return true;
+  }
+
+  function fillShape(
+    target: CanvasRenderingContext2D,
+    command: ShapeCommand,
+    fillStyle = '#000'
+  ) {
+    if (!traceShape(target, command)) return false;
+    target.save();
+    target.globalCompositeOperation = command.mode === 'erase' ? 'destination-out' : 'source-over';
+    target.fillStyle = fillStyle;
+    target.fill();
+    target.restore();
+    return true;
+  }
+
   function invertMarks() {
     scratchContext.save();
     scratchContext.globalCompositeOperation = 'source-over';
@@ -202,6 +285,10 @@ export function createMaskDocument(width: number, height: number) {
     switch (command.kind) {
       case 'stroke':
         drawStroke(context, command);
+        break;
+      case 'rect':
+      case 'lasso':
+        fillShape(context, command);
         break;
       case 'import':
         context.save();
@@ -236,7 +323,14 @@ export function createMaskDocument(width: number, height: number) {
     height,
     marks,
 
-    beginStroke(tool: MaskTool, size: number, point: MaskPoint) {
+    beginStroke(tool: MaskTool, size: number, point: MaskPoint, mode: MaskShapeMode = 'add') {
+      if (tool === 'rect' || tool === 'lasso') {
+        // Shapes stay uncommitted until the pointer is released so an
+        // accidental drag can be dismissed and undo has a single entry.
+        redoStack = [];
+        activeShape = { kind: tool, mode, points: [point] };
+        return;
+      }
       const command: StrokeCommand = { kind: 'stroke', tool, size, points: [point] };
       commands.push(command);
       redoStack = [];
@@ -245,13 +339,30 @@ export function createMaskDocument(width: number, height: number) {
     },
 
     extendStroke(points: MaskPoint[]) {
-      if (!activeStroke || !points.length) return;
+      if (!points.length) return;
+      if (activeShape) {
+        if (activeShape.kind === 'rect') {
+          activeShape.points = [activeShape.points[0], points[points.length - 1]];
+        } else {
+          activeShape.points.push(...points);
+        }
+        return;
+      }
+      if (!activeStroke) return;
       const fromIndex = activeStroke.points.length;
       activeStroke.points.push(...points);
       drawStroke(context, activeStroke, fromIndex);
     },
 
     endStroke() {
+      if (activeShape) {
+        const command = activeShape;
+        activeShape = null;
+        if (fillShape(context, command)) {
+          commands.push(command);
+          redoStack = [];
+        }
+      }
       activeStroke = null;
       return coverage();
     },
@@ -283,6 +394,8 @@ export function createMaskDocument(width: number, height: number) {
     clear() {
       commands.push({ kind: 'clear' });
       redoStack = [];
+      activeStroke = null;
+      activeShape = null;
       context.clearRect(0, 0, width, height);
       return 0;
     },
@@ -290,6 +403,8 @@ export function createMaskDocument(width: number, height: number) {
     invert() {
       commands.push({ kind: 'invert' });
       redoStack = [];
+      activeStroke = null;
+      activeShape = null;
       invertMarks();
       return coverage();
     },
@@ -337,7 +452,29 @@ export function createMaskDocument(width: number, height: number) {
 
     coverage,
 
-    async exportPng() {
+    hasActiveShape() {
+      return activeShape !== null;
+    },
+
+    /** Draw the in-progress rect/lasso into a display-sized context. */
+    drawActiveShapePreview(
+      target: CanvasRenderingContext2D,
+      targetWidth: number,
+      targetHeight: number
+    ) {
+      if (!activeShape) return;
+      target.save();
+      target.scale(targetWidth / width, targetHeight / height);
+      fillShape(
+        target,
+        activeShape,
+        activeShape.mode === 'erase' ? '#000' : 'rgba(16, 185, 129, 0.45)'
+      );
+      target.restore();
+    },
+
+    async exportPng(options: { feather?: number } = {}) {
+      const feather = normalizeFeatherPx(options.feather ?? 0, width);
       const canvas = createCanvas(width, height);
       const exportContext = canvas.getContext('2d');
       if (!exportContext) throw new MaskImportError('decode');
@@ -347,17 +484,33 @@ export function createMaskDocument(width: number, height: number) {
       exportContext.drawImage(marks, 0, 0);
       exportContext.globalCompositeOperation = 'source-over';
 
-      const imageData = exportContext.getImageData(0, 0, width, height);
-      const ratio = binarizeMaskAlphaData(imageData.data);
-      exportContext.putImageData(imageData, 0, 0);
+      // The upstream contract only edits alpha == 0 pixels, so a soft gradient
+      // cannot survive the round trip. Blurring before binarizing only smooths
+      // the contour (removes pointer jaggies) while keeping the region binary.
+      let output = canvas;
+      if (feather > 0) {
+        const blurred = createCanvas(width, height);
+        const blurredContext = blurred.getContext('2d');
+        if (!blurredContext) throw new MaskImportError('decode');
+        blurredContext.filter = `blur(${feather}px)`;
+        blurredContext.drawImage(canvas, 0, 0);
+        output = blurred;
+      }
 
-      return { blob: await canvasBlob(canvas), coverage: ratio };
+      const outputContext = output.getContext('2d');
+      if (!outputContext) throw new MaskImportError('decode');
+      const imageData = outputContext.getImageData(0, 0, width, height);
+      const ratio = binarizeMaskAlphaData(imageData.data);
+      outputContext.putImageData(imageData, 0, 0);
+
+      return { blob: await canvasBlob(output), coverage: ratio };
     },
 
     dispose() {
       commands = [];
       redoStack = [];
       activeStroke = null;
+      activeShape = null;
       marks.width = 0;
       marks.height = 0;
       scratch.width = 0;
@@ -365,28 +518,3 @@ export function createMaskDocument(width: number, height: number) {
     }
   };
 }
-export type MaskMeasurements = {
-  width: number;
-  height: number;
-  coverage: number;
-};
-
-/**
- * Measure an exported mask blob (a persisted mask restored from a job): its
- * pixel size and the editable-area ratio, without drawing it into a document.
- */
-export async function measureMaskBlob(blob: Blob): Promise<MaskMeasurements> {
-  const decoded = await decodeImage(blob);
-  const canvas = createCanvas(decoded.width, decoded.height);
-  const context = canvas.getContext('2d');
-  if (!context) throw new MaskImportError('decode');
-  context.drawImage(decoded, 0, 0);
-  if (typeof ImageBitmap !== 'undefined' && decoded instanceof ImageBitmap) decoded.close();
-  const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
-  return {
-    width: canvas.width,
-    height: canvas.height,
-    coverage: binarizeMaskAlphaData(imageData.data)
-  };
-}
-

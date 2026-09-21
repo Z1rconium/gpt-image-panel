@@ -6,17 +6,23 @@
   import Eraser from 'lucide-svelte/icons/eraser';
   import Eye from 'lucide-svelte/icons/eye';
   import Layers from 'lucide-svelte/icons/layers';
+  import Lasso from 'lucide-svelte/icons/lasso';
+  import Maximize from 'lucide-svelte/icons/maximize';
   import Redo2 from 'lucide-svelte/icons/redo-2';
+  import Square from 'lucide-svelte/icons/square';
   import Trash2 from 'lucide-svelte/icons/trash-2';
   import Undo2 from 'lucide-svelte/icons/undo-2';
   import Upload from 'lucide-svelte/icons/upload';
   import X from 'lucide-svelte/icons/x';
+  import ZoomIn from 'lucide-svelte/icons/zoom-in';
+  import ZoomOut from 'lucide-svelte/icons/zoom-out';
   import { dialogIn, dialogOut, overlayIn, overlayOut } from '$lib/motion';
   import { t } from '$lib/i18n';
   import { dialog } from '$lib/actions/dialog';
   import { confirmStore } from '$lib/stores/confirm';
   import type { EditMask } from '$lib/stores/editSource';
   import {
+    MAX_FEATHER_PX,
     MaskImportError,
     createMaskDocument,
     type MaskDocument,
@@ -36,6 +42,7 @@
 
   let imageEl: HTMLImageElement | undefined = undefined;
   let overlayEl: HTMLCanvasElement | undefined = undefined;
+  let stageEl: HTMLDivElement | undefined = undefined;
   let uploadInput: HTMLInputElement | undefined = undefined;
 
   let doc: MaskDocument | null = null;
@@ -44,6 +51,7 @@
   let drawing = false;
   let tool: MaskTool = 'brush';
   let brushScreen = 32;
+  let featherPx = 0;
   let view: 'overlay' | 'maskOnly' = 'overlay';
   let coverage = 0;
   let dirty = false;
@@ -61,7 +69,25 @@
   let tintLayer: HTMLCanvasElement | null = null;
   let prepareToken = 0;
 
+  const MIN_ZOOM = 1;
+  const MAX_ZOOM = 8;
+  let viewScale = 1;
+  let viewX = 0;
+  let viewY = 0;
+  let panning = false;
+  let spacePressed = false;
+  let pointerOverCanvas = false;
+  let panLastX = 0;
+  let panLastY = 0;
+
   $: sizeHint = size !== 'auto' && naturalWidth > 0 && size !== `${naturalWidth}x${naturalHeight}`;
+  $: canvasCursorClass = spacePressed
+    ? panning
+      ? 'cursor-grabbing'
+      : 'cursor-grab'
+    : tool === 'brush' || tool === 'eraser'
+      ? 'cursor-none'
+      : 'cursor-crosshair';
   $: if (open && imageUrl) {
     void prepare();
   } else if (!open) {
@@ -116,6 +142,8 @@
     naturalWidth = 0;
     naturalHeight = 0;
     busy = true;
+    featherPx = 0;
+    resetView();
 
     try {
       const image = await loadImageElement(imageUrl);
@@ -236,6 +264,7 @@
     layerContext.fillRect(0, 0, width, height);
 
     context.drawImage(layer, 0, 0);
+    doc.drawActiveShapePreview(context, width, height);
   }
 
   function setView(next: 'overlay' | 'maskOnly') {
@@ -244,31 +273,84 @@
     scheduleRender();
   }
 
-  function overlayRect() {
-    return overlayEl?.getBoundingClientRect() ?? null;
+  // The stage is the untransformed layout box; the zoom layer inside it is
+  // scaled and translated with CSS, so screen coordinates map back through
+  // that transform before becoming image coordinates.
+  function stageRect() {
+    return stageEl?.getBoundingClientRect() ?? null;
+  }
+
+  function toLayerPoint(event: { clientX: number; clientY: number }) {
+    const rect = stageRect();
+    if (!rect) return null;
+    return {
+      x: (event.clientX - rect.left - viewX) / viewScale,
+      y: (event.clientY - rect.top - viewY) / viewScale,
+      rect
+    };
   }
 
   function toImagePoint(event: { clientX: number; clientY: number }): MaskPoint | null {
-    const rect = overlayRect();
-    if (!rect || !doc || rect.width === 0 || rect.height === 0) return null;
+    const layer = toLayerPoint(event);
+    if (!layer || !doc || layer.rect.width === 0 || layer.rect.height === 0) return null;
     return {
-      x: Math.min(doc.width, Math.max(0, ((event.clientX - rect.left) / rect.width) * doc.width)),
-      y: Math.min(doc.height, Math.max(0, ((event.clientY - rect.top) / rect.height) * doc.height))
+      x: Math.min(doc.width, Math.max(0, (layer.x / layer.rect.width) * doc.width)),
+      y: Math.min(doc.height, Math.max(0, (layer.y / layer.rect.height) * doc.height))
     };
   }
 
   function brushImageSize() {
-    const rect = overlayRect();
+    const rect = stageRect();
     if (!rect || !doc || rect.width === 0) return 1;
-    return Math.max(1, (brushScreen / rect.width) * doc.width);
+    return Math.max(1, (brushScreen / (rect.width * viewScale)) * doc.width);
   }
 
   function updateCursor(event: PointerEvent) {
-    const rect = overlayRect();
-    if (!rect) return;
-    cursorX = event.clientX - rect.left;
-    cursorY = event.clientY - rect.top;
+    const layer = toLayerPoint(event);
+    if (!layer) return;
+    cursorX = layer.x;
+    cursorY = layer.y;
     cursorVisible = true;
+  }
+
+  function clampView() {
+    const rect = stageRect();
+    if (!rect) return;
+    viewX = Math.min(0, Math.max(-rect.width * (viewScale - 1), viewX));
+    viewY = Math.min(0, Math.max(-rect.height * (viewScale - 1), viewY));
+  }
+
+  function resetView() {
+    viewScale = 1;
+    viewX = 0;
+    viewY = 0;
+    scheduleRender();
+  }
+
+  function zoomAt(clientX: number, clientY: number, nextScale: number) {
+    const rect = stageRect();
+    if (!rect) return;
+    const scale = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, nextScale));
+    if (scale === viewScale) return;
+    const layerX = (clientX - rect.left - viewX) / viewScale;
+    const layerY = (clientY - rect.top - viewY) / viewScale;
+    viewScale = scale;
+    viewX = clientX - rect.left - layerX * scale;
+    viewY = clientY - rect.top - layerY * scale;
+    clampView();
+    scheduleRender();
+  }
+
+  function zoomAtCenter(factor: number) {
+    const rect = stageRect();
+    if (!rect) return;
+    zoomAt(rect.left + rect.width / 2, rect.top + rect.height / 2, viewScale * factor);
+  }
+
+  function handleWheel(event: WheelEvent) {
+    if (!doc || busy) return;
+    event.preventDefault();
+    zoomAt(event.clientX, event.clientY, viewScale * (event.deltaY < 0 ? 1.15 : 1 / 1.15));
   }
 
   function updateHistoryFlags() {
@@ -277,12 +359,21 @@
   }
 
   function handlePointerDown(event: PointerEvent) {
-    if (!doc || !overlayEl || busy || event.button !== 0) return;
+    if (!doc || !overlayEl || busy) return;
+    if (event.button === 1 || spacePressed) {
+      event.preventDefault();
+      overlayEl.setPointerCapture(event.pointerId);
+      panning = true;
+      panLastX = event.clientX;
+      panLastY = event.clientY;
+      return;
+    }
+    if (event.button !== 0) return;
     const point = toImagePoint(event);
     if (!point) return;
     overlayEl.setPointerCapture(event.pointerId);
     drawing = true;
-    doc.beginStroke(tool, brushImageSize(), point);
+    doc.beginStroke(tool, brushImageSize(), point, event.altKey ? 'erase' : 'add');
     paintedAny = true;
     dirty = true;
     updateHistoryFlags();
@@ -292,6 +383,15 @@
 
   function handlePointerMove(event: PointerEvent) {
     if (!doc) return;
+    if (panning) {
+      viewX += event.clientX - panLastX;
+      viewY += event.clientY - panLastY;
+      panLastX = event.clientX;
+      panLastY = event.clientY;
+      clampView();
+      scheduleRender();
+      return;
+    }
     updateCursor(event);
     if (!drawing) return;
     const coalesced =
@@ -305,6 +405,13 @@
   }
 
   function handlePointerUp(event: PointerEvent) {
+    if (panning) {
+      panning = false;
+      if (overlayEl?.hasPointerCapture(event.pointerId)) {
+        overlayEl.releasePointerCapture(event.pointerId);
+      }
+      return;
+    }
     if (!doc || !drawing) return;
     drawing = false;
     if (overlayEl?.hasPointerCapture(event.pointerId)) {
@@ -313,6 +420,12 @@
     coverage = doc.endStroke();
     updateHistoryFlags();
     scheduleRender();
+  }
+
+  function handlePointerLeave() {
+    cursorVisible = false;
+    pointerOverCanvas = false;
+    spacePressed = false;
   }
 
   function setBrushSize(value: number) {
@@ -392,7 +505,7 @@
     if (!doc || busy || coverage <= 0) return;
     busy = true;
     try {
-      const result = await doc.exportPng();
+      const result = await doc.exportPng({ feather: featherPx });
       if (result.coverage <= 0) {
         onError(get(t).maskEditor.noAreaMarked);
         return;
@@ -447,8 +560,18 @@
     if (meta) return;
     const target = event.target as HTMLElement | null;
     if (target?.closest('textarea, input[type="text"]')) return;
+    if (event.key === ' ' && pointerOverCanvas) {
+      // Hold space to pan; only when the pointer is over the canvas so the key
+      // still activates focused controls.
+      event.preventDefault();
+      spacePressed = true;
+      return;
+    }
     if (key === 'b') tool = 'brush';
     else if (key === 'e') tool = 'eraser';
+    else if (key === 'r') tool = 'rect';
+    else if (key === 'l') tool = 'lasso';
+    else if (key === '0') resetView();
     else if (event.key === '[') {
       event.preventDefault();
       setBrushSize(brushScreen - 8);
@@ -457,9 +580,13 @@
       setBrushSize(brushScreen + 8);
     }
   }
+
+  function handleKeyup(event: KeyboardEvent) {
+    if (event.key === ' ') spacePressed = false;
+  }
 </script>
 
-<svelte:window on:keydown={handleKeydown} />
+<svelte:window on:keydown={handleKeydown} on:keyup={handleKeyup} />
 
 {#if open}
   <div
@@ -515,34 +642,41 @@
             {$t.maskEditor.busy}
           </div>
         {/if}
-        <div class="relative inline-block max-h-full max-w-full">
-          <img
-            bind:this={imageEl}
-            src={imageUrl}
-            alt={label}
-            class="block max-h-[52vh] max-w-full select-none rounded-lg object-contain sm:max-h-[58vh]"
-            draggable="false"
-          />
-          {#if ready}
-            <canvas
-              bind:this={overlayEl}
-              class="absolute inset-0 h-full w-full cursor-none touch-none rounded-lg"
-              aria-label={$t.maskEditor.canvasLabel}
-              on:pointerdown={handlePointerDown}
-              on:pointermove={handlePointerMove}
-              on:pointerup={handlePointerUp}
-              on:pointercancel={handlePointerUp}
-              on:pointerleave={() => (cursorVisible = false)}
-              on:contextmenu|preventDefault
-            ></canvas>
-            {#if cursorVisible}
-              <span
-                class="pointer-events-none absolute rounded-full border border-emerald-400/80 bg-emerald-400/10"
-                style={`left:${cursorX}px;top:${cursorY}px;width:${brushScreen}px;height:${brushScreen}px;transform:translate(-50%,-50%)`}
-                aria-hidden="true"
-              ></span>
+        <div bind:this={stageEl} class="relative max-h-full max-w-full overflow-hidden rounded-lg">
+          <div
+            class="relative inline-block"
+            style={`transform:translate(${viewX}px, ${viewY}px) scale(${viewScale});transform-origin:0 0`}
+          >
+            <img
+              bind:this={imageEl}
+              src={imageUrl}
+              alt={label}
+              class="block max-h-[52vh] max-w-full select-none rounded-lg object-contain sm:max-h-[58vh]"
+              draggable="false"
+            />
+            {#if ready}
+              <canvas
+                bind:this={overlayEl}
+                class={`absolute inset-0 h-full w-full touch-none rounded-lg ${canvasCursorClass}`}
+                aria-label={$t.maskEditor.canvasLabel}
+                on:pointerdown={handlePointerDown}
+                on:pointermove={handlePointerMove}
+                on:pointerup={handlePointerUp}
+                on:pointercancel={handlePointerUp}
+                on:pointerenter={() => (pointerOverCanvas = true)}
+                on:pointerleave={handlePointerLeave}
+                on:wheel={handleWheel}
+                on:contextmenu|preventDefault
+              ></canvas>
+              {#if cursorVisible && !spacePressed && (tool === 'brush' || tool === 'eraser')}
+                <span
+                  class="pointer-events-none absolute rounded-full border border-emerald-400/80 bg-emerald-400/10"
+                  style={`left:${cursorX}px;top:${cursorY}px;width:${brushScreen / viewScale}px;height:${brushScreen / viewScale}px;transform:translate(-50%,-50%)`}
+                  aria-hidden="true"
+                ></span>
+              {/if}
             {/if}
-          {/if}
+          </div>
         </div>
       </div>
 
@@ -579,6 +713,36 @@
               <Eraser size={15} strokeWidth={1.9} aria-hidden="true" />
               <span>{$t.maskEditor.eraser}</span>
             </button>
+            <button
+              type="button"
+              class="mobile-touch-target control-focus flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors"
+              class:bg-emerald-600={tool === 'rect'}
+              class:text-white={tool === 'rect'}
+              class:text-zinc-300={tool !== 'rect'}
+              class:hover:bg-zinc-800={tool !== 'rect'}
+              aria-pressed={tool === 'rect'}
+              aria-label={$t.maskEditor.rect}
+              title={$t.maskEditor.shapeHint}
+              on:click={() => (tool = 'rect')}
+            >
+              <Square size={15} strokeWidth={1.9} aria-hidden="true" />
+              <span>{$t.maskEditor.rect}</span>
+            </button>
+            <button
+              type="button"
+              class="mobile-touch-target control-focus flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors"
+              class:bg-emerald-600={tool === 'lasso'}
+              class:text-white={tool === 'lasso'}
+              class:text-zinc-300={tool !== 'lasso'}
+              class:hover:bg-zinc-800={tool !== 'lasso'}
+              aria-pressed={tool === 'lasso'}
+              aria-label={$t.maskEditor.lasso}
+              title={$t.maskEditor.shapeHint}
+              on:click={() => (tool = 'lasso')}
+            >
+              <Lasso size={15} strokeWidth={1.9} aria-hidden="true" />
+              <span>{$t.maskEditor.lasso}</span>
+            </button>
           </div>
 
           <label class="flex min-w-[168px] flex-1 items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900/60 px-3 py-1.5">
@@ -593,6 +757,22 @@
             />
             <span class="w-[86px] shrink-0 text-xs tabular-nums text-zinc-400">
               {$t.maskEditor.brushSize(brushScreen)}
+            </span>
+          </label>
+
+          <label class="flex min-w-[168px] flex-1 items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900/60 px-3 py-1.5">
+            <input
+              type="range"
+              min="0"
+              max={MAX_FEATHER_PX}
+              step="2"
+              class="control-focus h-1.5 w-full accent-emerald-600"
+              aria-label={$t.maskEditor.feather(featherPx)}
+              title={$t.maskEditor.featherHint}
+              bind:value={featherPx}
+            />
+            <span class="w-[86px] shrink-0 text-xs tabular-nums text-zinc-400">
+              {$t.maskEditor.feather(featherPx)}
             </span>
           </label>
 
@@ -665,6 +845,42 @@
             >
               <Eye size={15} strokeWidth={1.9} aria-hidden="true" />
               <span>{$t.maskEditor.viewMaskOnly}</span>
+            </button>
+          </div>
+
+          <div class="flex items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-900/60 p-1" role="group" aria-label={$t.maskEditor.zoomReset}>
+            <button
+              type="button"
+              class="mobile-touch-target control-focus rounded-md p-1.5 text-zinc-300 transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40"
+              disabled={viewScale <= MIN_ZOOM}
+              aria-label={$t.maskEditor.zoomOut}
+              title={$t.maskEditor.zoomOut}
+              on:click={() => zoomAtCenter(1 / 1.25)}
+            >
+              <ZoomOut size={15} strokeWidth={1.9} aria-hidden="true" />
+            </button>
+            <span class="w-[42px] shrink-0 text-center text-xs tabular-nums text-zinc-400">
+              {Math.round(viewScale * 100)}%
+            </span>
+            <button
+              type="button"
+              class="mobile-touch-target control-focus rounded-md p-1.5 text-zinc-300 transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40"
+              disabled={viewScale >= MAX_ZOOM}
+              aria-label={$t.maskEditor.zoomIn}
+              title={$t.maskEditor.zoomIn}
+              on:click={() => zoomAtCenter(1.25)}
+            >
+              <ZoomIn size={15} strokeWidth={1.9} aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              class="mobile-touch-target control-focus rounded-md p-1.5 text-zinc-300 transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40"
+              disabled={viewScale === 1 && viewX === 0 && viewY === 0}
+              aria-label={$t.maskEditor.zoomReset}
+              title={$t.maskEditor.zoomReset}
+              on:click={resetView}
+            >
+              <Maximize size={15} strokeWidth={1.9} aria-hidden="true" />
             </button>
           </div>
 

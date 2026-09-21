@@ -3,6 +3,7 @@ import {
   MaskImportError,
   binarizeMaskAlphaData,
   countMarkedPixels,
+  normalizeFeatherPx,
   pngHasAlphaChannel
 } from '$lib/features/mask/maskDocument';
 
@@ -57,6 +58,21 @@ describe('pngHasAlphaChannel', () => {
   it('rejects data that is not a PNG', () => {
     expect(pngHasAlphaChannel(new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]))).toBe(false);
     expect(pngHasAlphaChannel(new Uint8Array([0x89, 0x50]))).toBe(false);
+  });
+});
+
+describe('normalizeFeatherPx', () => {
+  it('rounds valid radii and rejects non-positive or non-finite input', () => {
+    expect(normalizeFeatherPx(9.4, 1024)).toBe(9);
+    expect(normalizeFeatherPx(0, 1024)).toBe(0);
+    expect(normalizeFeatherPx(-8, 1024)).toBe(0);
+    expect(normalizeFeatherPx(Number.NaN, 1024)).toBe(0);
+  });
+
+  it('caps the radius at the maximum and at an eighth of the image width', () => {
+    expect(normalizeFeatherPx(500, 1024)).toBe(64);
+    expect(normalizeFeatherPx(64, 64)).toBe(8);
+    expect(normalizeFeatherPx(64, 16)).toBe(2);
   });
 });
 
