@@ -191,6 +191,7 @@ def _configure_runtime(tmp_path: Path, *, access_key: str = "", allow_unauthenti
     config.SLOW_GALLERY_QUERY_MS = 200
     config.ENABLE_NGINX_ACCEL_REDIRECT = False
     config.THUMBNAILS_DIR = str(images_dir / "thumbs")
+    config.MASKS_DIR = str(images_dir / "masks")
     config.THUMBNAIL_MAX_SIDE = 512
     config.THUMBNAIL_CPU_CONCURRENCY = 1
     config.PROMPT_OPTIMIZER_ENABLED = False
@@ -594,6 +595,7 @@ def patch_upstream(monkeypatch):
         socks5_proxy=None,
         persist_gallery_entry=None,
         mask_source=None,
+        mask_coverage=None,
     ):
         assert len(image_sources) == 1
         source_path = image_sources[0].temp_path

@@ -16,6 +16,7 @@ from ..repositories.gallery.mutations import (
     backfill_missing_gallery_bytes,
     sync_gallery_with_image_files,
 )
+from ..repositories.image_jobs import list_persisted_mask_job_ids
 from ..repositories.thumbnail_jobs import cleanup_auxiliary_state
 from ..runtime.state import (
     STARTUP_MAINTENANCE_COMPLETED_TTL_SECONDS,
@@ -71,6 +72,32 @@ def cleanup_stale_gallery_export_files() -> None:
         logger.info("Removed %s stale gallery export temp file(s)", removed)
 
 
+def cleanup_orphan_mask_files() -> None:
+    masks_dir = Path(config.MASKS_DIR)
+    if not masks_dir.exists():
+        return
+
+    try:
+        known_job_ids = list_persisted_mask_job_ids()
+    except Exception:
+        logger.warning("Failed to load generate job ids before mask cleanup", exc_info=True)
+        return
+
+    removed = 0
+    for mask_path in masks_dir.glob("*.png"):
+        if not mask_path.is_file():
+            continue
+        if mask_path.stem in known_job_ids:
+            continue
+        try:
+            mask_path.unlink()
+            removed += 1
+        except OSError:
+            logger.warning("Failed to remove orphan mask file: %s", mask_path)
+    if removed:
+        logger.info("Removed %s orphan mask file(s)", removed)
+
+
 async def _backfill_gallery_bytes(owner: str) -> None:
     await asyncio.sleep(1.0)
     try:
@@ -115,6 +142,7 @@ async def run() -> asyncio.Task | None:
     try:
         await asyncio.to_thread(cleanup_stale_edit_source_files)
         await asyncio.to_thread(cleanup_stale_gallery_export_files)
+        await asyncio.to_thread(cleanup_orphan_mask_files)
         await asyncio.to_thread(verify_storage_writable)
     except Exception:
         await asyncio.to_thread(release_background_lease, name="startup_maintenance", owner=owner)

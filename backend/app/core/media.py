@@ -78,6 +78,8 @@ IMAGE_FORMAT_CONTENT_TYPES = {
 }
 THUMBNAIL_EXTENSION = ".webp"
 THUMBNAIL_CONTENT_TYPE = "image/webp"
+MASK_EXTENSION = ".png"
+MASK_CONTENT_TYPE = "image/png"
 PILLOW_FORMATS = {
     "AVIF": "avif",
     "BMP": "bmp",
@@ -331,3 +333,7 @@ def safe_image_path(filename: str) -> Path | None:
 
 def safe_thumbnail_path(filename: str) -> Path | None:
     return _safe_path(filename, config.THUMBNAILS_DIR, {THUMBNAIL_EXTENSION})
+
+
+def safe_mask_path(filename: str) -> Path | None:
+    return _safe_path(filename, config.MASKS_DIR, {MASK_EXTENSION})

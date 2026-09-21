@@ -4,7 +4,7 @@ import logging
 import time
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 
 from ...runtime.state import state
 from ...services.job_events import (
@@ -30,6 +30,7 @@ from ...core import security as auth
 from ...core import settings as config
 from ...core.api_paths import normalize_api_path
 from ...core.constants import ACTIVE_GENERATE_JOB_STATUSES, ERROR_GENERATE_JOB_STATUSES
+from ...core.media import MASK_CONTENT_TYPE, safe_mask_path
 from ...core.observability import metrics
 from ...repositories.image_jobs import (
     aggregate_image_job_units,
@@ -296,6 +297,21 @@ async def get_generate_job(job_id: str):
     if not job:
         raise HTTPException(status_code=404, detail="Generation job not found")
     return GenerateJobStatus(**job)
+
+
+@router.get("/api/generate/{job_id}/mask")
+async def get_generate_job_mask(job_id: str):
+    job = await run_db_operation(
+        get_persisted_generate_job,
+        job_id,
+        metric_name="get_generate_job_mask",
+    )
+    if not job or not job.get("mask_applied"):
+        raise HTTPException(status_code=404, detail="No mask is stored for this job")
+    path = safe_mask_path(f"{job_id}.png")
+    if not path or not path.is_file():
+        raise HTTPException(status_code=404, detail="Mask file not found")
+    return FileResponse(path, media_type=MASK_CONTENT_TYPE, filename="mask.png")
 
 
 @router.get("/api/generate/{job_id}/events")

@@ -3,7 +3,7 @@
 import asyncio
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal
 
@@ -29,6 +29,7 @@ from ..core.image_models import is_image_25
 from ..core.constants import ACTIVE_GENERATE_JOB_STATUSES
 from ..core.observability import metrics
 from ..core.utils import utc_now
+from ..repositories.image_files import delete_mask_file, promote_mask_file
 from ..repositories.image_jobs import (
     aggregate_image_job_units,
     count_pending_image_job_units,
@@ -69,6 +70,7 @@ class EditImageSource:
     filename: str
     content_type: str
     role: Literal["image", "mask"] = "image"
+    coverage: float | None = None
 
 
 def trim_generate_jobs():
@@ -230,17 +232,20 @@ def edit_source_to_payload(source: EditImageSource) -> dict:
         "filename": source.filename,
         "content_type": source.content_type,
         "role": source.role,
+        "coverage": source.coverage,
     }
 
 
 def edit_source_from_payload(payload: dict) -> EditImageSource:
     role = str(payload.get("role") or "image")
+    coverage = payload.get("coverage")
     return EditImageSource(
         temp_path=Path(str(payload.get("temp_path") or "")),
         byte_size=int(payload.get("byte_size") or 0),
         filename=str(payload.get("filename") or "image.png"),
         content_type=str(payload.get("content_type") or "application/octet-stream"),
         role="mask" if role == "mask" else "image",
+        coverage=float(coverage) if coverage is not None else None,
     )
 
 
@@ -336,6 +341,7 @@ async def queue_image_job(
     pending_edit_source_bytes: int = 0,
     edit_sources_payload: list[dict] | None = None,
     mask_applied: bool = False,
+    job_id: str | None = None,
 ) -> GenerateJobResponse:
     await run_db_operation(load_api_settings, metric_name="load_api_settings")
     active_preset = get_active_preset()
@@ -389,7 +395,7 @@ async def queue_image_job(
         req.webhook_url or get_webhook_url(),
     )
     image_units = request_image_units(req)
-    job_id = str(uuid.uuid4())
+    job_id = job_id or str(uuid.uuid4())
     pending_job = build_pending_job(
         job_id=job_id,
         req=req,
@@ -446,16 +452,31 @@ async def queue_edit_job(
     req: EditRequest,
     image_sources: list[EditImageSource],
     mask_source: EditImageSource | None = None,
+    mask_coverage: float | None = None,
 ) -> GenerateJobResponse:
+    job_id = str(uuid.uuid4())
+    if mask_source is not None:
+        mask_source = replace(mask_source, coverage=mask_coverage)
+        await asyncio.to_thread(
+            promote_mask_file,
+            mask_source.temp_path,
+            f"{job_id}.png",
+        )
     edit_sources = [*image_sources, mask_source] if mask_source is not None else image_sources
     edit_source_bytes = sum(source.byte_size for source in edit_sources)
 
-    return await queue_image_job(
-        req=req,
-        operation="edit",
-        api_path="/v1/images/edits",
-        queued_message="Queued image edit",
-        pending_edit_source_bytes=edit_source_bytes,
-        edit_sources_payload=[edit_source_to_payload(source) for source in edit_sources],
-        mask_applied=mask_source is not None,
-    )
+    try:
+        return await queue_image_job(
+            req=req,
+            operation="edit",
+            api_path="/v1/images/edits",
+            queued_message="Queued image edit",
+            pending_edit_source_bytes=edit_source_bytes,
+            edit_sources_payload=[edit_source_to_payload(source) for source in edit_sources],
+            mask_applied=mask_source is not None,
+            job_id=job_id,
+        )
+    except BaseException:
+        if mask_source is not None:
+            await asyncio.to_thread(delete_mask_file, f"{job_id}.png")
+        raise

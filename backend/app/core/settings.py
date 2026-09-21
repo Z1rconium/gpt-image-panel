@@ -296,6 +296,7 @@ SSE_IDLE_BACKOFF_MAX_SECONDS = max(
 )
 IMAGES_DIR = os.getenv("IMAGES_DIR", "./images")
 THUMBNAILS_DIR = os.getenv("THUMBNAILS_DIR", os.path.join(IMAGES_DIR, "thumbs"))
+MASKS_DIR = os.getenv("MASKS_DIR", os.path.join(IMAGES_DIR, "masks"))
 THUMBNAIL_MAX_SIDE = max(1, int(os.getenv("THUMBNAIL_MAX_SIDE", "512")))
 THUMBNAIL_CPU_CONCURRENCY = max(1, int(os.getenv("THUMBNAIL_CPU_CONCURRENCY", "1")))
 DATA_DIR = os.getenv("DATA_DIR", "./data")

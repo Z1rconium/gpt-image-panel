@@ -80,6 +80,7 @@ def test_edit_accepts_valid_mask_and_marks_job(client, monkeypatch):
         socks5_proxy=None,
         persist_gallery_entry=None,
         mask_source=None,
+        mask_coverage=None,
     ):
         assert len(image_sources) == 1
         seen["image_role"] = image_sources[0].role
@@ -137,6 +138,7 @@ def test_edit_without_mask_reports_mask_not_applied(client, monkeypatch):
         socks5_proxy=None,
         persist_gallery_entry=None,
         mask_source=None,
+        mask_coverage=None,
     ):
         assert mask_source is None
         return [await _fake_entry(payload, api_preset_name)]
@@ -170,6 +172,7 @@ def test_edit_from_gallery_validates_mask_against_gallery_image(client, monkeypa
         socks5_proxy=None,
         persist_gallery_entry=None,
         mask_source=None,
+        mask_coverage=None,
     ):
         assert mask_source is not None
         seen["mask"] = mask_source
@@ -306,6 +309,7 @@ def test_mask_does_not_count_against_edit_source_limit(client, monkeypatch):
         socks5_proxy=None,
         persist_gallery_entry=None,
         mask_source=None,
+        mask_coverage=None,
     ):
         seen["count"] = len(image_sources)
         seen["mask"] = mask_source
@@ -400,6 +404,7 @@ def test_edit_mask_bytes_count_in_pending_reservation_and_cleanup(tmp_path, monk
         socks5_proxy=None,
         persist_gallery_entry=None,
         mask_source=None,
+        mask_coverage=None,
     ):
         assert len(image_sources) == 1
         assert mask_source is not None
@@ -463,6 +468,7 @@ def test_cancelled_masked_edit_cleans_mask_temp_file(tmp_path, monkeypatch):
         socks5_proxy=None,
         persist_gallery_entry=None,
         mask_source=None,
+        mask_coverage=None,
     ):
         assert mask_source is not None
         seen["mask"] = mask_source.temp_path
@@ -522,3 +528,110 @@ def test_legacy_edit_source_payload_without_role_rebuilds_as_image():
 
     masked = job_queue.edit_source_from_payload({**payload, "role": "mask"})
     assert masked.role == "mask"
+
+
+def _mask_path_for(job_id: str) -> Path:
+    return Path(config.MASKS_DIR) / f"{job_id}.png"
+
+
+def _submit_masked_edit(client, monkeypatch, seen: dict | None = None) -> str:
+    async def fake_edit_api(
+        api_url,
+        api_key,
+        payload,
+        image_sources,
+        api_preset_name=None,
+        progress=None,
+        socks5_proxy=None,
+        persist_gallery_entry=None,
+        mask_source=None,
+        mask_coverage=None,
+    ):
+        if seen is not None:
+            seen["mask_source"] = mask_source
+            seen["mask_coverage"] = mask_coverage
+        return [await _fake_entry(payload, api_preset_name)]
+
+    monkeypatch.setattr(backend_main.proxy, "call_image_edit_api", fake_edit_api)
+    edit = client.post(
+        "/api/edits",
+        data=_edit_data(),
+        files={
+            "image": ("input.png", SOURCE_PNG, "image/png"),
+            "mask": ("mask.png", MASK_PNG, "image/png"),
+        },
+    )
+    assert edit.status_code == 202
+    return edit.json()["job_id"]
+
+
+def test_edit_persists_mask_file_and_serves_it(client, monkeypatch):
+    seen: dict[str, object] = {}
+    job_id = _submit_masked_edit(client, monkeypatch, seen)
+    assert _wait_for_job(client, job_id)["status"] == "success"
+
+    # The mask is copied out of DATA_DIR into MASKS_DIR under the job id, so it
+    # stays available after the temp edit sources are cleaned up.
+    mask_path = _mask_path_for(job_id)
+    assert mask_path.exists()
+    assert mask_path.read_bytes() == MASK_PNG
+    assert seen["mask_coverage"] == 1.0
+
+    # The startup sweep keeps masks that still have a job row.
+    startup_maintenance.cleanup_orphan_mask_files()
+    assert mask_path.exists()
+
+    served = client.get(f"/api/generate/{job_id}/mask")
+    assert served.status_code == 200
+    assert served.headers["content-type"] == "image/png"
+    assert served.content == MASK_PNG
+
+
+def test_mask_endpoint_is_missing_for_unmasked_and_unknown_jobs(client, monkeypatch):
+    async def fake_edit_api(
+        api_url,
+        api_key,
+        payload,
+        image_sources,
+        api_preset_name=None,
+        progress=None,
+        socks5_proxy=None,
+        persist_gallery_entry=None,
+        mask_source=None,
+        mask_coverage=None,
+    ):
+        assert mask_source is None
+        return [await _fake_entry(payload, api_preset_name)]
+
+    monkeypatch.setattr(backend_main.proxy, "call_image_edit_api", fake_edit_api)
+    edit = client.post(
+        "/api/edits",
+        data=_edit_data(),
+        files={"image": ("input.png", SOURCE_PNG, "image/png")},
+    )
+    assert edit.status_code == 202
+    job_id = edit.json()["job_id"]
+    _wait_for_job(client, job_id)
+
+    assert client.get(f"/api/generate/{job_id}/mask").status_code == 404
+    assert client.get("/api/generate/unknown-job/mask").status_code == 404
+
+
+def test_clearing_job_history_removes_persisted_mask(client, monkeypatch):
+    job_id = _submit_masked_edit(client, monkeypatch)
+    _wait_for_job(client, job_id)
+    mask_path = _mask_path_for(job_id)
+    assert mask_path.exists()
+
+    assert client.delete("/api/generate/jobs/history").status_code == 200
+    assert not mask_path.exists()
+
+
+def test_orphan_mask_files_are_removed_on_startup(client):
+    masks_dir = Path(config.MASKS_DIR)
+    masks_dir.mkdir(parents=True, exist_ok=True)
+    orphan = masks_dir / "00000000-0000-0000-0000-000000000000.png"
+    orphan.write_bytes(MASK_PNG)
+
+    startup_maintenance.cleanup_orphan_mask_files()
+    assert not orphan.exists()

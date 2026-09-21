@@ -88,6 +88,7 @@ def verify_storage_writable():
     _ensure_directories()
     _check_directory_writable(Path(config.IMAGES_DIR))
     _check_directory_writable(Path(config.THUMBNAILS_DIR))
+    _check_directory_writable(Path(config.MASKS_DIR))
     _check_directory_writable(Path(config.DATA_DIR))
     _ensure_database()
 

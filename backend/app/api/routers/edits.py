@@ -9,7 +9,7 @@ from starlette.datastructures import FormData
 from starlette.datastructures import UploadFile as StarletteUploadFile
 
 from ..edit_limits import EDIT_MASK_FIELD_NAME, MAX_EDIT_MASK_BYTES, MAX_EDIT_SOURCE_IMAGES
-from ...services.edit_masks import validate_edit_mask_against_primary
+from ...services.edit_masks import EditMaskInfo, validate_edit_mask_against_primary
 from ...services.gallery_archive_shared import max_upload_bytes
 from ...services.job_queue import (
     EditImageSource,
@@ -276,9 +276,9 @@ async def read_upload_edit_mask(form: FormData) -> EditImageSource | None:
     return replace(source, role="mask")
 
 
-async def validate_edit_mask(mask: EditImageSource, primary: EditImageSource):
+async def validate_edit_mask(mask: EditImageSource, primary: EditImageSource) -> EditMaskInfo:
     try:
-        await run_image_operation(
+        return await run_image_operation(
             validate_edit_mask_against_primary,
             mask.temp_path,
             primary.temp_path,
@@ -330,12 +330,15 @@ async def edit_image(
     mask = None
     try:
         mask = await read_upload_edit_mask(form)
+        mask_coverage = None
         if mask is not None:
-            await validate_edit_mask(mask, sources[0])
+            mask_info = await validate_edit_mask(mask, sources[0])
+            mask_coverage = mask_info.transparent_ratio
         return await queue_edit_job(
             req=req,
             image_sources=sources,
             mask_source=mask,
+            mask_coverage=mask_coverage,
         )
     except BaseException:
         cleanup_edit_sources(sources if mask is None else [*sources, mask])
@@ -364,12 +367,15 @@ async def edit_image_from_gallery(
     try:
         validate_edit_source_count(sources)
         mask = await read_upload_edit_mask(form)
+        mask_coverage = None
         if mask is not None:
-            await validate_edit_mask(mask, gallery_source)
+            mask_info = await validate_edit_mask(mask, gallery_source)
+            mask_coverage = mask_info.transparent_ratio
         return await queue_edit_job(
             req=req,
             image_sources=sources,
             mask_source=mask,
+            mask_coverage=mask_coverage,
         )
     except BaseException:
         cleanup_edit_sources(sources if mask is None else [*sources, mask])

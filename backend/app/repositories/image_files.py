@@ -4,6 +4,7 @@ Format tables, in-memory validation, and path resolution live in core/media.py
 so integrations can use them without depending on this layer.
 """
 
+import shutil
 import tempfile
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from ..core.media import (
     IMAGE_FILE_EXTENSIONS,
     Image,
     safe_image_path,
+    safe_mask_path,
     validate_image_header_bytes,
     verify_pillow_image,
 )
@@ -112,6 +114,42 @@ def promote_image_temp(filename: str, temp_path: Path) -> Path:
 
 def delete_image_from_disk(filename: str) -> bool:
     path = safe_image_path(filename)
+    if path and path.is_file():
+        path.unlink()
+        return True
+    return False
+
+
+def promote_mask_file(source_path: Path, mask_filename: str) -> Path:
+    """Copy a validated mask into MASKS_DIR with an atomic rename.
+
+    The source lives under DATA_DIR, which is a separate mount from IMAGES_DIR
+    in production, so this copies rather than renames across directories.
+    """
+    path = safe_mask_path(mask_filename)
+    if not path:
+        raise ValueError(f"Invalid mask filename: {mask_filename}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_file = tempfile.NamedTemporaryFile(
+        prefix=f".{path.stem}-",
+        suffix=f"{path.suffix}.tmp",
+        dir=path.parent,
+        delete=False,
+    )
+    temp_path = Path(temp_file.name)
+    try:
+        with temp_file:
+            with source_path.open("rb") as source:
+                shutil.copyfileobj(source, temp_file)
+        temp_path.replace(path)
+    except BaseException:
+        temp_path.unlink(missing_ok=True)
+        raise
+    return path
+
+
+def delete_mask_file(mask_filename: str) -> bool:
+    path = safe_mask_path(mask_filename)
     if path and path.is_file():
         path.unlink()
         return True

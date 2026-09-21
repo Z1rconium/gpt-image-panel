@@ -778,6 +778,7 @@ def test_edit_upload_accepts_multiple_sources(client, monkeypatch):
         socks5_proxy=None,
         persist_gallery_entry=None,
         mask_source=None,
+        mask_coverage=None,
     ):
         seen["filenames"] = [source.filename for source in image_sources]
         for source in image_sources:
@@ -832,6 +833,7 @@ def test_edit_from_gallery_combines_uploaded_sources(client, monkeypatch):
         socks5_proxy=None,
         persist_gallery_entry=None,
         mask_source=None,
+        mask_coverage=None,
     ):
         seen["filenames"] = [source.filename for source in image_sources]
         assert len(image_sources) == 2
@@ -946,6 +948,7 @@ def test_edit_source_temp_path_is_cleaned_after_success(client, monkeypatch):
         socks5_proxy=None,
         persist_gallery_entry=None,
         mask_source=None,
+        mask_coverage=None,
     ):
         assert len(image_sources) == 2
         seen["paths"] = [source.temp_path for source in image_sources]
@@ -1013,6 +1016,7 @@ def test_cancelled_edit_job_cleans_temp_source(tmp_path, monkeypatch):
         socks5_proxy=None,
         persist_gallery_entry=None,
         mask_source=None,
+        mask_coverage=None,
     ):
         assert len(image_sources) == 1
         source_path = image_sources[0].temp_path
@@ -1076,6 +1080,7 @@ def test_edit_queue_capacity_uses_pending_source_bytes(tmp_path, monkeypatch):
         socks5_proxy=None,
         persist_gallery_entry=None,
         mask_source=None,
+        mask_coverage=None,
     ):
         assert len(image_sources) == 1
         assert image_sources[0].temp_path.exists()

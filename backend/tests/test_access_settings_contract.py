@@ -2225,6 +2225,7 @@ def test_socks5_proxy_only_flows_to_generation_and_edit(client, monkeypatch):
         socks5_proxy=None,
         persist_gallery_entry=None,
         mask_source=None,
+        mask_coverage=None,
     ):
         assert len(image_sources) == 1
         assert image_sources[0].temp_path.exists()

@@ -184,6 +184,7 @@ def _ensure_directories():
     storage_paths = (
         Path(config.IMAGES_DIR).resolve(),
         Path(config.THUMBNAILS_DIR).resolve(),
+        Path(config.MASKS_DIR).resolve(),
         Path(config.DATA_DIR).resolve(),
         Path(config.DATABASE_FILE).resolve().parent,
     )
