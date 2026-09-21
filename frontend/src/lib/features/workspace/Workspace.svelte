@@ -47,7 +47,7 @@
     snippetsPanel
   } from '$lib/features/workspace/panels';
   import { promptForm } from '$lib/features/workspace/formState.svelte';
-  import { measureMaskBlob } from '$lib/features/mask/maskDocument';
+  import { measureMaskBlob, type MaskMeasurements } from '$lib/features/mask/maskDocument';
   import { createLightboxController } from '$lib/features/workspace/lightbox';
   import { createPanelController } from '$lib/features/workspace/panelController';
   import { installWorkspaceLifecycle } from '$lib/features/workspace/lifecycle';
@@ -849,6 +849,14 @@
     editSourceStore.removeMask();
   }
 
+  // Saving "no mask" from inside the editor is an explicit removal chosen by
+  // the user, not a stale-mask discard.
+  function removeMaskFromEditor() {
+    editSourceStore.removeMask();
+    showToast($t.messages.editMaskRemoved);
+    closeMaskEditor();
+  }
+
   function clearEditSource() {
     editSourceStore.clear();
     editPicker?.reset();
@@ -1047,42 +1055,96 @@
   async function retryJob(job: GenerateJobStatus) {
     promptForm.replace(jobToPromptForm(job, promptForm.presetDefaultModel));
     closeJobsDrawer();
-    if (job.operation === 'edit') {
-      if (!$editSourceStore.files.length && !$editSourceStore.selectedGalleryImageId) {
-        previewStore.setError($t.messages.editRetryNeedsSource);
-        showToast($t.messages.editRetryNeedsSource, 'error');
-        return;
-      }
-      if (job.mask_applied && !isMaskValid($editSourceStore)) {
-        const restored = await restoreMaskFromJob(job.job_id);
-        if (!restored) showToast($t.messages.editRetryMaskMissing, 'error');
-      }
-      editImage();
+    if (job.operation !== 'edit') {
+      generateImage();
       return;
     }
-    generateImage();
+    if (!$editSourceStore.files.length && !$editSourceStore.selectedGalleryImageId) {
+      previewStore.setError($t.messages.editRetryNeedsSource);
+      showToast($t.messages.editRetryNeedsSource, 'error');
+      return;
+    }
+    if (job.mask_applied) {
+      // A retry always rebuilds the original task's own mask instead of
+      // reusing whatever selection currently sits in the editor.
+      const outcome = await restoreMaskFromJob(job);
+      if (outcome !== 'restored') {
+        const withoutMask = await confirmStore.confirm({
+          title:
+            outcome === 'mismatch'
+              ? $t.messages.editRetryMaskMismatchTitle
+              : $t.messages.editRetryMaskMissingTitle,
+          message:
+            outcome === 'mismatch' ? $t.messages.editRetryMaskMismatch : $t.messages.editRetryMaskMissing,
+          // Enter submits without a mask; closing or cancelling falls back to
+          // the safe path of re-editing the selection instead.
+          confirmLabel: $t.messages.editRetryWithoutMask,
+          cancelLabel: $t.messages.editRetryReeditMask,
+          closeLabel: $t.confirm.cancel,
+          variant: 'default'
+        });
+        if (withoutMask) {
+          editSourceStore.removeMask();
+        } else {
+          const sourceId = primaryEditSourceId($editSourceStore);
+          if (sourceId) await openMaskEditor(sourceId);
+          return;
+        }
+      }
+    } else if (isMaskValid($editSourceStore)) {
+      // The original task had no mask: never ride the current selection along.
+      editSourceStore.removeMask();
+      showToast($t.messages.editRetryMaskCleared, 'status');
+    }
+    editImage();
   }
 
-  async function restoreMaskFromJob(jobId: string) {
+  function measureImageUrlSize(url: string): Promise<{ width: number; height: number } | null> {
+    return new Promise((resolve) => {
+      const image = new Image();
+      image.onload = () =>
+        resolve({ width: image.naturalWidth || image.width, height: image.naturalHeight || image.height });
+      image.onerror = () => resolve(null);
+      image.src = url;
+    });
+  }
+
+  async function restoreMaskFromJob(job: GenerateJobStatus): Promise<'restored' | 'missing' | 'mismatch'> {
     const sourceId = primaryEditSourceId($editSourceStore);
-    if (!sourceId) return false;
+    if (!sourceId) return 'missing';
+    let blob: Blob;
     try {
-      const blob = await fetchJobMaskBlob(jobId);
-      const { width, height, coverage } = await measureMaskBlob(blob);
-      editSourceStore.setMask({
-        sourceId,
-        blob,
-        width,
-        height,
-        coverage,
-        previewUrl: URL.createObjectURL(blob),
-        origin: 'restored'
-      });
-      showToast($t.messages.editMaskRestored((coverage * 100).toFixed(1)));
-      return true;
+      blob = await fetchJobMaskBlob(job.job_id);
     } catch {
-      return false;
+      return 'missing';
     }
+    let measurements: MaskMeasurements;
+    try {
+      measurements = await measureMaskBlob(blob);
+    } catch {
+      return 'missing';
+    }
+    // The job record keeps no hash of its source image, so dimension equality
+    // against the current primary is the only identity check available; a
+    // mismatch means the stored mask cannot belong to this image.
+    const primary = primaryEditSource;
+    if (primary) {
+      const size = await measureImageUrlSize(primary.previewUrl);
+      if (size && (size.width !== measurements.width || size.height !== measurements.height)) {
+        return 'mismatch';
+      }
+    }
+    editSourceStore.setMask({
+      sourceId,
+      blob,
+      width: measurements.width,
+      height: measurements.height,
+      coverage: measurements.coverage,
+      previewUrl: URL.createObjectURL(blob),
+      origin: 'restored'
+    });
+    showToast($t.messages.editMaskRestored((measurements.coverage * 100).toFixed(1)));
+    return 'restored';
   }
 
   async function diagnoseJob(job: GenerateJobStatus) {
@@ -1441,6 +1503,7 @@
     size={promptForm.size}
     existingMask={activeEditMask}
     onApply={applyEditMask}
+    onRemove={removeMaskFromEditor}
     onClose={closeMaskEditor}
     onError={(message: string) => showToast(message, 'error')}
   />
