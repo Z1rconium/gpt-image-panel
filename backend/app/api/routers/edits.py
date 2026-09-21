@@ -368,14 +368,17 @@ async def edit_image(
     try:
         mask = await read_upload_edit_mask(form)
         mask_coverage = None
+        mask_optimized_png = None
         if mask is not None:
             mask_info = await validate_edit_mask(mask, sources[0])
             mask_coverage = mask_info.transparent_ratio
+            mask_optimized_png = mask_info.optimized_png
         return await queue_edit_job(
             req=req,
             image_sources=sources,
             mask_source=mask,
             mask_coverage=mask_coverage,
+            mask_optimized_png=mask_optimized_png,
         )
     except BaseException:
         cleanup_edit_sources(sources if mask is None else [*sources, mask])
@@ -405,14 +408,17 @@ async def edit_image_from_gallery(
         validate_edit_source_count(sources)
         mask = await read_upload_edit_mask(form)
         mask_coverage = None
+        mask_optimized_png = None
         if mask is not None:
             mask_info = await validate_edit_mask(mask, gallery_source)
             mask_coverage = mask_info.transparent_ratio
+            mask_optimized_png = mask_info.optimized_png
         return await queue_edit_job(
             req=req,
             image_sources=sources,
             mask_source=mask,
             mask_coverage=mask_coverage,
+            mask_optimized_png=mask_optimized_png,
         )
     except BaseException:
         cleanup_edit_sources(sources if mask is None else [*sources, mask])

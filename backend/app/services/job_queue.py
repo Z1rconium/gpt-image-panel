@@ -29,7 +29,7 @@ from ..core.image_models import is_image_25
 from ..core.constants import ACTIVE_GENERATE_JOB_STATUSES
 from ..core.observability import metrics
 from ..core.utils import utc_now
-from ..repositories.image_files import delete_mask_file, promote_mask_file
+from ..repositories.image_files import delete_mask_file, write_mask_file
 from ..repositories.image_jobs import (
     aggregate_image_job_units,
     count_pending_image_job_units,
@@ -466,13 +466,22 @@ async def queue_edit_job(
     image_sources: list[EditImageSource],
     mask_source: EditImageSource | None = None,
     mask_coverage: float | None = None,
+    mask_optimized_png: bytes | None = None,
 ) -> GenerateJobResponse:
     job_id = str(uuid.uuid4())
     if mask_source is not None:
         mask_source = replace(mask_source, coverage=mask_coverage)
+        # The retry copy in MASKS_DIR is a re-encoded `LA` PNG built once,
+        # during the mask's single admission-time decode (see
+        # services.edit_masks.validate_edit_mask_file); the raw upload at
+        # mask_source.temp_path is untouched and still what gets sent
+        # upstream. mask_optimized_png is always set alongside mask_source —
+        # both come from the same successful validate_edit_mask() call.
+        if mask_optimized_png is None:
+            raise ValueError("mask_optimized_png is required when mask_source is set")
         await asyncio.to_thread(
-            promote_mask_file,
-            mask_source.temp_path,
+            write_mask_file,
+            mask_optimized_png,
             f"{job_id}.png",
         )
     edit_sources = [*image_sources, mask_source] if mask_source is not None else image_sources

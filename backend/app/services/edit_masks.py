@@ -7,6 +7,7 @@ here runs before a job is queued so bad masks fail fast instead of after
 admission.
 """
 
+import io
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -22,6 +23,14 @@ class EditMaskInfo:
     width: int
     height: int
     transparent_ratio: float
+    # A grayscale+alpha (PNG color type 4) re-encode of the same alpha region,
+    # built off the one decode below. The RGB color never reaches the upstream
+    # contract (only alpha == 0 pixels matter), so this is lossless for our
+    # purposes and typically 6-8x smaller than the uploaded RGBA PNG. Only
+    # used for the persisted retry copy in MASKS_DIR (see
+    # `services.job_queue.write_mask_file`) — the upload sent to upstream is
+    # untouched, since upstream's color-type-4 support is unverified.
+    optimized_png: bytes
 
 
 def validate_edit_mask_file(
@@ -36,7 +45,9 @@ def validate_edit_mask_file(
     fully-transparent ratio) is read off the one decoded `image` object;
     `getchannel("A")` is used directly for modes that already carry an alpha
     band (RGBA/LA/PA) and only falls back to a full `convert("RGBA")` copy for
-    a palette image whose transparency comes from a tRNS chunk.
+    a palette image whose transparency comes from a tRNS chunk. The same
+    decode also produces the `LA` re-encode for `EditMaskInfo.optimized_png`,
+    so promoting the mask to MASKS_DIR later never needs to decode it again.
     """
     try:
         with path.open("rb") as file:
@@ -63,18 +74,29 @@ def validate_edit_mask_file(
                 f"mask is {width}x{height}, image is {expected_width}x{expected_height}"
             )
         if image.mode in MASK_ALPHA_MODES:
-            zeros = image.getchannel("A").histogram()[0]
+            alpha = image.getchannel("A")
         else:
-            zeros = image.convert("RGBA").getchannel("A").histogram()[0]
+            alpha = image.convert("RGBA").getchannel("A")
+        zeros = alpha.histogram()[0]
 
-    total = width * height
-    transparent_ratio = zeros / total if total else 0.0
-    if transparent_ratio <= 0:
-        raise ValueError("Mask has no fully transparent region to edit")
+        total = width * height
+        transparent_ratio = zeros / total if total else 0.0
+        if transparent_ratio <= 0:
+            raise ValueError("Mask has no fully transparent region to edit")
+
+        # The export contract always fills black behind the alpha punch-out
+        # (see maskDocument.ts exportPng), so a flat-black L band round-trips
+        # the same pixels through a much smaller PNG.
+        black = Image.new("L", (width, height), 0)
+        optimized = Image.merge("LA", (black, alpha))
+        buffer = io.BytesIO()
+        optimized.save(buffer, format="PNG", optimize=True)
+
     return EditMaskInfo(
         width=width,
         height=height,
         transparent_ratio=transparent_ratio,
+        optimized_png=buffer.getvalue(),
     )
 
 

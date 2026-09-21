@@ -9,6 +9,11 @@ export type EditUploadSource = {
   label: string;
   previewUrl: string;
   previewLabel: string;
+  // 0 until the async size probe in addFiles() resolves; callers that need
+  // the size (e.g. restoreMaskFromJob's primary/mask dimension check) treat 0
+  // as "unknown" and fall back to decoding the file themselves.
+  width: number;
+  height: number;
 };
 
 export type EditMaskOrigin = 'painted' | 'uploaded' | 'restored';
@@ -29,6 +34,10 @@ export type EditSourceState = {
   galleryLabel: string;
   galleryPreviewUrl: string;
   galleryPreviewLabel: string;
+  // 0 when the gallery entry predates image_width/image_height (legacy rows);
+  // same "unknown, decode if you need it" contract as EditUploadSource above.
+  galleryWidth: number;
+  galleryHeight: number;
   mask: EditMask | null;
 };
 
@@ -38,6 +47,8 @@ export const initialEditSourceState: EditSourceState = {
   galleryLabel: '',
   galleryPreviewUrl: '',
   galleryPreviewLabel: '',
+  galleryWidth: 0,
+  galleryHeight: 0,
   mask: null
 };
 
@@ -88,8 +99,23 @@ function makeUploadSource(file: File): EditUploadSource {
     file,
     label: file.name,
     previewUrl: objectUrl,
-    previewLabel: file.name
+    previewLabel: file.name,
+    width: 0,
+    height: 0
   };
+}
+
+/** Decode just enough to learn the size, without keeping the bitmap around. */
+async function probeImageSize(file: File): Promise<{ width: number; height: number } | null> {
+  if (typeof createImageBitmap !== 'function') return null;
+  try {
+    const bitmap = await createImageBitmap(file);
+    const size = { width: bitmap.width, height: bitmap.height };
+    bitmap.close();
+    return size;
+  } catch {
+    return null;
+  }
 }
 
 export function editSourceCount(source: EditSourceState) {
@@ -131,7 +157,19 @@ function createEditSourceStore() {
         files: [...source.files, ...nextUploads]
       })
     );
+    for (const upload of nextUploads) {
+      void probeImageSize(upload.file).then((size) => {
+        if (size) updateUploadSize(upload.id, size.width, size.height);
+      });
+    }
     return nextUploads.length;
+  }
+
+  function updateUploadSize(sourceId: string, width: number, height: number) {
+    update((source) => ({
+      ...source,
+      files: source.files.map((item) => (item.id === sourceId ? { ...item, width, height } : item))
+    }));
   }
 
   return {
@@ -139,6 +177,7 @@ function createEditSourceStore() {
     set,
     update,
     addFiles,
+    updateUploadSize,
     clear(input?: HTMLInputElement) {
       revokeEditSourceUrls(state);
       if (state.mask) editMaskDiscards.update((count) => count + 1);
@@ -158,7 +197,9 @@ function createEditSourceStore() {
       label: string,
       previewUrl: string,
       previewLabel: string,
-      setError?: (message: string) => void
+      setError?: (message: string) => void,
+      width = 0,
+      height = 0
     ) {
       const current = state;
       if (!current.selectedGalleryImageId && editSourceCount(current) >= MAX_EDIT_SOURCE_IMAGES) {
@@ -172,7 +213,9 @@ function createEditSourceStore() {
           selectedGalleryImageId: imageId,
           galleryLabel: label,
           galleryPreviewUrl: previewUrl,
-          galleryPreviewLabel: previewLabel
+          galleryPreviewLabel: previewLabel,
+          galleryWidth: width,
+          galleryHeight: height
         })
       );
       return true;
@@ -185,7 +228,9 @@ function createEditSourceStore() {
           selectedGalleryImageId: '',
           galleryLabel: '',
           galleryPreviewUrl: '',
-          galleryPreviewLabel: ''
+          galleryPreviewLabel: '',
+          galleryWidth: 0,
+          galleryHeight: 0
         });
       });
     },
@@ -208,7 +253,9 @@ function createEditSourceStore() {
             selectedGalleryImageId: '',
             galleryLabel: '',
             galleryPreviewUrl: '',
-            galleryPreviewLabel: ''
+            galleryPreviewLabel: '',
+            galleryWidth: 0,
+            galleryHeight: 0
           })
         );
         return true;

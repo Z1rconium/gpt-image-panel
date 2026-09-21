@@ -1,4 +1,5 @@
 import io
+import random
 
 from PIL import Image as PILImage
 
@@ -213,6 +214,40 @@ def test_edit_accepts_palette_mask_with_trns_transparency(client, monkeypatch):
     job = _wait_for_job(client, resp.json()["job_id"])
     assert job["status"] == "success"
     assert seen["mask_coverage"] == 1.0
+
+
+def test_mask_optimized_png_is_a_smaller_grayscale_alpha_reencode(tmp_path):
+    """S1: the RGB behind the alpha punch-out never reaches the upstream
+    contract, so re-encoding a mask as flat-black `LA` for the MASKS_DIR retry
+    copy should shrink it a lot whenever the uploaded RGB channel carries real
+    entropy (e.g. an arbitrary user-uploaded PNG, not our own flat export)."""
+    from backend.app.services import edit_masks
+
+    size = (256, 256)
+    rng = random.Random(20260921)
+    image = PILImage.new("RGBA", size)
+    pixels = image.load()
+    for y in range(size[1]):
+        for x in range(size[0]):
+            alpha = 0 if (x // 16 + y // 16) % 2 == 0 else 255
+            pixels[x, y] = (rng.randrange(256), rng.randrange(256), rng.randrange(256), alpha)
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    noisy_mask_bytes = buffer.getvalue()
+
+    mask_path = tmp_path / "mask.png"
+    mask_path.write_bytes(noisy_mask_bytes)
+
+    info = edit_masks.validate_edit_mask_file(
+        mask_path, expected_width=size[0], expected_height=size[1]
+    )
+    assert info.transparent_ratio == pytest.approx(0.5, abs=0.01)
+    assert info.optimized_png[25] == 4  # PNG IHDR color type: grayscale + alpha
+    assert len(info.optimized_png) < len(noisy_mask_bytes) / 3
+
+    with PILImage.open(io.BytesIO(info.optimized_png)) as optimized:
+        assert optimized.mode == "LA"
+        assert optimized.getchannel("A").tobytes() == image.getchannel("A").tobytes()
 
 
 def test_edit_without_mask_reports_mask_not_applied(client, monkeypatch):
@@ -668,11 +703,25 @@ def test_edit_persists_mask_file_and_serves_it(client, monkeypatch):
     job_id = _submit_masked_edit(client, monkeypatch, seen)
     assert _wait_for_job(client, job_id)["status"] == "success"
 
-    # The mask is copied out of DATA_DIR into MASKS_DIR under the job id, so it
-    # stays available after the temp edit sources are cleaned up.
+    # The mask is re-encoded as LA (see EditMaskInfo.optimized_png / S1 in
+    # mask-performance-optimization-plan.md) and copied out of DATA_DIR into
+    # MASKS_DIR under the job id, so it stays available after the temp edit
+    # sources are cleaned up.
     mask_path = _mask_path_for(job_id)
     assert mask_path.exists()
-    assert mask_path.read_bytes() == MASK_PNG
+    persisted_bytes = mask_path.read_bytes()
+    assert persisted_bytes != MASK_PNG
+    # PNG color type byte (IHDR, offset 25); 4 = grayscale + alpha, which is
+    # what maskDocument.ts's pngHasAlphaChannel() and Pillow both accept.
+    assert persisted_bytes[25] == 4
+    with PILImage.open(io.BytesIO(persisted_bytes)) as persisted:
+        assert persisted.mode == "LA"
+        assert persisted.size == (8, 8)
+        # Round-trips the same editable region as the uploaded mask: alpha ==
+        # 0 marks "edit this pixel" and nothing else about the re-encode
+        # changes which pixels those are.
+        with PILImage.open(io.BytesIO(MASK_PNG)) as original:
+            assert persisted.getchannel("A").tobytes() == original.getchannel("A").tobytes()
     assert seen["mask_coverage"] == 1.0
 
     # The startup sweep keeps masks that still have a job row.
@@ -682,7 +731,7 @@ def test_edit_persists_mask_file_and_serves_it(client, monkeypatch):
     served = client.get(f"/api/generate/{job_id}/mask")
     assert served.status_code == 200
     assert served.headers["content-type"] == "image/png"
-    assert served.content == MASK_PNG
+    assert served.content == persisted_bytes
     # job_id is unique and the promoted file is never rewritten, so a retry
     # re-fetching the same job's mask can cache it indefinitely.
     assert served.headers["cache-control"] == "private, max-age=31536000, immutable"

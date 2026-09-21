@@ -33,11 +33,19 @@ const initialJobsState: JobsState = {
 const HISTORY_PAGE_SIZE = 50;
 const HISTORY_CACHE_LIMIT = 500;
 
+export type JobMaskFetch = {
+  blob: Blob;
+  /** From the X-Mask-Coverage response header; null if the server omitted it. */
+  coverage: number | null;
+};
+
 /**
  * Fetch the mask persisted for a finished edit job. Mask files are named after
- * their job, so this needs only the job id.
+ * their job, so this needs only the job id. The server already knows the
+ * coverage (computed once at admission time), so it rides along as a response
+ * header instead of the caller re-deriving it from a full-canvas decode.
  */
-export async function fetchJobMaskBlob(jobId: string): Promise<Blob> {
+export async function fetchJobMaskBlob(jobId: string): Promise<JobMaskFetch> {
   let response: Response;
   try {
     response = await fetch(`/api/generate/${encodeURIComponent(jobId)}/mask`, {
@@ -52,7 +60,12 @@ export async function fetchJobMaskBlob(jobId: string): Promise<Blob> {
     const message = response.status === 404 ? get(t).messages.editRetryMaskMissing : get(t).messages.requestFailed;
     throw new ApiError(message, response.status, null, 'loading job mask');
   }
-  return await response.blob();
+  const coverageHeader = response.headers.get('X-Mask-Coverage');
+  const coverage = coverageHeader !== null ? Number(coverageHeader) : null;
+  return {
+    blob: await response.blob(),
+    coverage: coverage !== null && Number.isFinite(coverage) ? coverage : null
+  };
 }
 
 function sameJobImage(

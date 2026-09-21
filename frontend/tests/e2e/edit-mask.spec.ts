@@ -589,3 +589,43 @@ test('retrying an edit job that used no mask ignores the current selection', asy
   const body = (await editRequestPromise).postDataBuffer()?.toString('latin1') || '';
   expect(body).not.toContain('name="mask"');
 });
+
+async function paintGrowingStroke(page: Page, endFraction: number) {
+  const box = await maskImageBox(page);
+  const y = box.y + box.height * 0.5;
+  await page.mouse.move(box.x + box.width * 0.1, y);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * endFraction, y, { steps: 4 });
+  await page.mouse.up();
+}
+
+test('undo across a checkpoint boundary restores exact prior coverage', async ({ page }) => {
+  // maskDocument.ts snapshots an undo checkpoint every 8 committed commands
+  // (CHECKPOINT_INTERVAL); ten strokes and ten matching undos exercise both
+  // the checkpoint-restore path and the from-scratch path below it.
+  await loadApp(page);
+  await uploadPrimary(page);
+  await openMaskEditor(page);
+
+  const strokeCount = 10;
+  const coverageAfter: string[] = [];
+  for (let index = 0; index < strokeCount; index += 1) {
+    // Each stroke starts at the same point but reaches further right, so
+    // every one adds new, distinguishable coverage instead of repainting an
+    // already-marked area.
+    await paintGrowingStroke(page, 0.15 + index * 0.075);
+    const readout = page.getByText(/^Edit area/);
+    await expect(readout).toBeVisible();
+    coverageAfter.push((await readout.textContent()) ?? '');
+  }
+  // Sanity check: coverage must actually have grown each step, or this test
+  // would pass trivially without ever exercising undo.
+  expect(new Set(coverageAfter).size).toBe(strokeCount);
+
+  for (let index = strokeCount - 1; index >= 0; index -= 1) {
+    await page.keyboard.press('Control+z');
+    const expected = index === 0 ? 'Edit area 0.0%' : coverageAfter[index - 1];
+    await expect(page.getByText(expected)).toBeVisible();
+  }
+  await expect(page.getByRole('button', { name: 'Save selection' })).toBeDisabled();
+});

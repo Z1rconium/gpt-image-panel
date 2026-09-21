@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  MaskCheckpointer,
   MaskCoverageTracker,
   MaskImportError,
   binarizeMaskAlphaData,
@@ -8,6 +9,7 @@ import {
   countMarkedPixels,
   normalizeSmoothPx,
   pngHasAlphaChannel,
+  readPngSize,
   shapeRectFor,
   strokeRectFor,
   subtractRect,
@@ -94,6 +96,32 @@ describe('pngHasAlphaChannel', () => {
   it('rejects data that is not a PNG', () => {
     expect(pngHasAlphaChannel(new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]))).toBe(false);
     expect(pngHasAlphaChannel(new Uint8Array([0x89, 0x50]))).toBe(false);
+  });
+});
+
+function pngHeaderWithSize(width: number, height: number): Uint8Array {
+  const bytes = new Uint8Array(24);
+  bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0);
+  const view = new DataView(bytes.buffer);
+  view.setUint32(16, width, false);
+  view.setUint32(20, height, false);
+  return bytes;
+}
+
+describe('readPngSize', () => {
+  it('reads width/height straight from the IHDR chunk, no decode needed', () => {
+    expect(readPngSize(pngHeaderWithSize(4096, 2048))).toEqual({ width: 4096, height: 2048 });
+    expect(readPngSize(pngHeaderWithSize(1, 1))).toEqual({ width: 1, height: 1 });
+  });
+
+  it('rejects data that is not a PNG or too short to hold an IHDR', () => {
+    expect(readPngSize(new Uint8Array(23))).toBeNull();
+    expect(readPngSize(new Uint8Array([1, 2, 3]))).toBeNull();
+  });
+
+  it('rejects a degenerate zero-sized IHDR', () => {
+    expect(readPngSize(pngHeaderWithSize(0, 100))).toBeNull();
+    expect(readPngSize(pngHeaderWithSize(100, 0))).toBeNull();
   });
 });
 
@@ -367,5 +395,68 @@ describe('MaskCoverageTracker', () => {
 
   it('reports zero coverage for an empty document', () => {
     expect(new MaskCoverageTracker(0, 0).coverage()).toBe(0);
+  });
+});
+
+describe('MaskCheckpointer', () => {
+  it('records a snapshot only at each interval, and only once per length', () => {
+    const checkpointer = new MaskCheckpointer<number>(8, 4);
+    let snapshots = 0;
+    const snapshot = () => {
+      snapshots += 1;
+      return snapshots;
+    };
+
+    for (let length = 1; length <= 7; length += 1) checkpointer.record(length, snapshot);
+    expect(snapshots).toBe(0);
+
+    checkpointer.record(8, snapshot);
+    expect(snapshots).toBe(1);
+    // Re-recording the same length (e.g. a caller invoking record() twice for
+    // one settled command) must not snapshot again.
+    checkpointer.record(8, snapshot);
+    expect(snapshots).toBe(1);
+
+    checkpointer.record(16, snapshot);
+    expect(snapshots).toBe(2);
+    expect(checkpointer.nearestAtOrBelow(16)?.afterIndex).toBe(16);
+    expect(checkpointer.nearestAtOrBelow(20)?.afterIndex).toBe(16);
+    expect(checkpointer.nearestAtOrBelow(15)?.afterIndex).toBe(8);
+    expect(checkpointer.nearestAtOrBelow(7)).toBeNull();
+  });
+
+  it('evicts the oldest checkpoint once past the cap', () => {
+    const checkpointer = new MaskCheckpointer<number>(8, 2);
+    for (const length of [8, 16, 24]) checkpointer.record(length, () => length);
+
+    // Query highest-to-lowest: nearestAtOrBelow() prunes anything past its
+    // own argument, so checking 24 then 16 first avoids that pruning masking
+    // whether 8 was evicted by the cap versus by the queries themselves.
+    expect(checkpointer.nearestAtOrBelow(24)?.afterIndex).toBe(24);
+    expect(checkpointer.nearestAtOrBelow(16)?.afterIndex).toBe(16);
+    // Cap is 2: the checkpoint at 8 should have been evicted already, not
+    // just pruned by the queries above (which only ever remove entries
+    // *past* their argument, never at or below it).
+    expect(checkpointer.nearestAtOrBelow(8)).toBeNull();
+  });
+
+  it('prunes checkpoints past an undo target and keeps shallower ones usable', () => {
+    const checkpointer = new MaskCheckpointer<number>(8, 4);
+    for (const length of [8, 16, 24, 32]) checkpointer.record(length, () => length);
+
+    // Undoing down to 20 commands invalidates the 24/32 checkpoints; the
+    // shallower ones remain valid jump points for the next few undos.
+    expect(checkpointer.nearestAtOrBelow(20)?.afterIndex).toBe(16);
+    // A fresh checkpoint at the same length as a pruned one (e.g. painting
+    // again after the undo) must not resurrect the stale snapshot.
+    checkpointer.record(24, () => 240);
+    expect(checkpointer.nearestAtOrBelow(24)?.snapshot).toBe(240);
+  });
+
+  it('clear() drops every checkpoint', () => {
+    const checkpointer = new MaskCheckpointer<number>(8, 4);
+    checkpointer.record(8, () => 8);
+    checkpointer.clear();
+    expect(checkpointer.nearestAtOrBelow(8)).toBeNull();
   });
 });

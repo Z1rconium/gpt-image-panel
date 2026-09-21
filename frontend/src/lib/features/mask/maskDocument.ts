@@ -105,6 +105,24 @@ export function normalizeSmoothPx(value: number, width: number): number {
   return Math.min(limit, Math.round(value));
 }
 
+/**
+ * Pixel size straight from the IHDR chunk (bytes 16-19 width, 20-23 height,
+ * big-endian), so a caller that only needs dimensions never has to decode the
+ * image through a canvas. Null for anything that isn't a PNG with a complete
+ * IHDR header.
+ */
+export function readPngSize(bytes: Uint8Array): { width: number; height: number } | null {
+  if (bytes.length < 24) return null;
+  for (let index = 0; index < PNG_SIGNATURE.length; index += 1) {
+    if (bytes[index] !== PNG_SIGNATURE[index]) return null;
+  }
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const width = view.getUint32(16, false);
+  const height = view.getUint32(20, false);
+  if (width <= 0 || height <= 0) return null;
+  return { width, height };
+}
+
 /** True when the PNG uses an alpha channel (color type 4/6, or palette + tRNS). */
 export function pngHasAlphaChannel(bytes: Uint8Array): boolean {
   if (bytes.length < 26) return false;
@@ -380,6 +398,50 @@ export async function measureMaskBlob(blob: Blob): Promise<MaskMeasurements> {
   };
 }
 
+/**
+ * Bookkeeping for undo checkpoints: which command-list lengths have a
+ * snapshot, which one is nearest for a given undo target, and eviction once
+ * the cap is reached. Kept free of canvas access (generic over the snapshot
+ * type `T`) so it can be unit-tested directly; `createMaskDocument` supplies
+ * the actual pixel snapshot/restore.
+ */
+export class MaskCheckpointer<T> {
+  private readonly interval: number;
+  private readonly maxCheckpoints: number;
+  private checkpoints: { afterIndex: number; snapshot: T }[] = [];
+
+  constructor(interval: number, maxCheckpoints: number) {
+    this.interval = Math.max(1, interval);
+    this.maxCheckpoints = Math.max(1, maxCheckpoints);
+  }
+
+  /** Record a snapshot for `length` if it lands on the interval and isn't already captured. */
+  record(length: number, snapshot: () => T): void {
+    if (length === 0 || length % this.interval !== 0) return;
+    const last = this.checkpoints[this.checkpoints.length - 1];
+    if (last && last.afterIndex === length) return;
+    this.checkpoints.push({ afterIndex: length, snapshot: snapshot() });
+    if (this.checkpoints.length > this.maxCheckpoints) this.checkpoints.shift();
+  }
+
+  /** Drop checkpoints past `length` — their commands were just undone. */
+  pruneAbove(length: number): void {
+    while (this.checkpoints.length && this.checkpoints[this.checkpoints.length - 1].afterIndex > length) {
+      this.checkpoints.pop();
+    }
+  }
+
+  /** The latest checkpoint at or before `length`, after pruning stale ones. */
+  nearestAtOrBelow(length: number): { afterIndex: number; snapshot: T } | null {
+    this.pruneAbove(length);
+    return this.checkpoints[this.checkpoints.length - 1] ?? null;
+  }
+
+  clear(): void {
+    this.checkpoints = [];
+  }
+}
+
 export function createMaskDocument(width: number, height: number) {
   const marks = createCanvas(width, height);
   const context = context2d(marks, true);
@@ -402,6 +464,47 @@ export function createMaskDocument(width: number, height: number) {
   // Single-slot cache of the binarized layer for the most recent import
   // command, so undo/redo replays do not re-decode the stored PNG every time.
   let importLayerCache: { source: Blob; layer: CanvasImageSource } | null = null;
+
+  // Undo checkpoints: a full-alpha snapshot every CHECKPOINT_INTERVAL
+  // committed commands, so undo replays only the tail since the nearest one
+  // instead of the whole history. Marks are always solid MARK_COLOR wherever
+  // painted (strokes/shapes/import all fill that one color), so the alpha
+  // plane alone is enough to reconstruct the canvas exactly. Capped at
+  // MAX_CHECKPOINTS entries; undoing past the oldest one falls back to a
+  // full replay from empty, same as before this existed.
+  const CHECKPOINT_INTERVAL = 8;
+  const MAX_CHECKPOINTS = 4;
+  const checkpointer = new MaskCheckpointer<Uint8ClampedArray>(CHECKPOINT_INTERVAL, MAX_CHECKPOINTS);
+
+  function captureAlphaSnapshot(): Uint8ClampedArray {
+    const { data } = context.getImageData(0, 0, width, height);
+    const alpha = new Uint8ClampedArray(width * height);
+    for (let index = 0, pixel = 3; index < alpha.length; index += 1, pixel += 4) {
+      alpha[index] = data[pixel];
+    }
+    return alpha;
+  }
+
+  function restoreAlphaSnapshot(alpha: Uint8ClampedArray) {
+    const imageData = context.createImageData(width, height);
+    const data = imageData.data;
+    for (let index = 0, pixel = 0; index < alpha.length; index += 1, pixel += 4) {
+      const value = alpha[index];
+      if (!value) continue;
+      data[pixel] = MARK_RGB.r;
+      data[pixel + 1] = MARK_RGB.g;
+      data[pixel + 2] = MARK_RGB.b;
+      data[pixel + 3] = value;
+    }
+    context.save();
+    context.globalCompositeOperation = 'copy';
+    context.putImageData(imageData, 0, 0);
+    context.restore();
+  }
+
+  function maybeCheckpoint() {
+    checkpointer.record(commands.length, captureAlphaSnapshot);
+  }
 
   function strokeContext(target: CanvasRenderingContext2D) {
     target.save();
@@ -521,13 +624,20 @@ export function createMaskDocument(width: number, height: number) {
     drawImportLayer(await preparedImportLayer(command.source), command.replace);
   }
 
-  async function replay() {
-    context.save();
-    context.globalCompositeOperation = 'copy';
-    context.clearRect(0, 0, width, height);
-    context.restore();
-    for (const command of commands) {
-      await applyCommandAsync(command);
+  /** Rebuild the canvas up to `targetLength` commands, from the nearest checkpoint. */
+  async function replayFrom(targetLength: number) {
+    const checkpoint = checkpointer.nearestAtOrBelow(targetLength);
+    if (checkpoint) {
+      restoreAlphaSnapshot(checkpoint.snapshot);
+    } else {
+      context.save();
+      context.globalCompositeOperation = 'copy';
+      context.clearRect(0, 0, width, height);
+      context.restore();
+    }
+    const startIndex = checkpoint ? checkpoint.afterIndex : 0;
+    for (let index = startIndex; index < targetLength; index += 1) {
+      await applyCommandAsync(commands[index]);
     }
   }
 
@@ -710,6 +820,7 @@ export function createMaskDocument(width: number, height: number) {
           redoStack = [];
           tracker.endStroke(countRegion);
           invalidateProcessed();
+          maybeCheckpoint();
         } else {
           tracker.cancelStroke();
         }
@@ -717,6 +828,7 @@ export function createMaskDocument(width: number, height: number) {
       if (activeStroke) {
         activeStroke = null;
         tracker.endStroke(countRegion);
+        maybeCheckpoint();
       }
     },
 
@@ -732,7 +844,7 @@ export function createMaskDocument(width: number, height: number) {
       const command = commands.pop();
       if (!command) return;
       redoStack.push(command);
-      await replay();
+      await replayFrom(commands.length);
       recountMarkedPixels();
       invalidateProcessed();
     },
@@ -744,6 +856,7 @@ export function createMaskDocument(width: number, height: number) {
       await applyCommandAsync(command);
       recountMarkedPixels();
       invalidateProcessed();
+      maybeCheckpoint();
     },
 
     clear() {
@@ -754,6 +867,7 @@ export function createMaskDocument(width: number, height: number) {
       tracker.clear();
       context.clearRect(0, 0, width, height);
       invalidateProcessed();
+      maybeCheckpoint();
     },
 
     invert() {
@@ -764,6 +878,7 @@ export function createMaskDocument(width: number, height: number) {
       tracker.invert();
       invertMarks();
       invalidateProcessed();
+      maybeCheckpoint();
     },
 
     async importFromPng(file: Blob, mode: MaskImportMode = 'replace') {
@@ -790,6 +905,7 @@ export function createMaskDocument(width: number, height: number) {
       if (typeof ImageBitmap !== 'undefined' && decoded instanceof ImageBitmap) decoded.close();
       recountMarkedPixels();
       invalidateProcessed();
+      maybeCheckpoint();
       return coverage();
     },
 
@@ -866,6 +982,7 @@ export function createMaskDocument(width: number, height: number) {
     dispose() {
       commands = [];
       redoStack = [];
+      checkpointer.clear();
       activeStroke = null;
       activeShape = null;
       tracker.resetTo(0);

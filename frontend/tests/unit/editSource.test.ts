@@ -115,6 +115,35 @@ describe('mask binding', () => {
   });
 });
 
+describe('edit source sizes (F6)', () => {
+  it('records a gallery primary size and clears it when the gallery source is dropped', () => {
+    editSourceStore.setGallerySource('gallery-1', 'Gallery', 'blob:gallery', 'gallery', undefined, 64, 32);
+    expect(get(editSourceStore).galleryWidth).toBe(64);
+    expect(get(editSourceStore).galleryHeight).toBe(32);
+
+    editSourceStore.clearGallerySource('gallery-1');
+    expect(get(editSourceStore).galleryWidth).toBe(0);
+    expect(get(editSourceStore).galleryHeight).toBe(0);
+  });
+
+  it('defaults an unspecified gallery size to 0 (unknown)', () => {
+    editSourceStore.setGallerySource('gallery-1', 'Gallery', 'blob:gallery', 'gallery');
+    expect(get(editSourceStore).galleryWidth).toBe(0);
+    expect(get(editSourceStore).galleryHeight).toBe(0);
+  });
+
+  it('starts an upload at width/height 0 and patches it via updateUploadSize', () => {
+    editSourceStore.addFiles([makeFile('a.png')], () => {});
+    const uploadId = get(editSourceStore).files[0].id;
+    expect(get(editSourceStore).files[0].width).toBe(0);
+    expect(get(editSourceStore).files[0].height).toBe(0);
+
+    editSourceStore.updateUploadSize(uploadId, 128, 96);
+    expect(get(editSourceStore).files[0].width).toBe(128);
+    expect(get(editSourceStore).files[0].height).toBe(96);
+  });
+});
+
 describe('mask lifecycle', () => {
   it('revokes the previous mask preview when replaced or removed', () => {
     editSourceStore.addFiles([makeFile('a.png')], () => {});

@@ -19,7 +19,7 @@
   import { confirmStore } from '$lib/stores/confirm';
   import { editMaskDiscards, editSourceCount, editSourceStore, isMaskValid, MAX_EDIT_SOURCE_IMAGES, primaryEditSourceId, type EditMask } from '$lib/stores/editSource';
   import { galleryActivityStore, galleryStore } from '$lib/stores/gallery';
-  import { fetchJobMaskBlob, jobsStore } from '$lib/stores/jobs';
+  import { fetchJobMaskBlob, type JobMaskFetch, jobsStore } from '$lib/stores/jobs';
   import { lightboxStore } from '$lib/stores/lightbox';
   import { nodeImageResult } from '$lib/stores/nodeImage';
   import { initialPromptFormState, previewStore, type PromptFormState } from '$lib/stores/preview';
@@ -47,7 +47,7 @@
     snippetsPanel
   } from '$lib/features/workspace/panels';
   import { promptForm } from '$lib/features/workspace/formState.svelte';
-  import { measureMaskBlob, type MaskMeasurements } from '$lib/features/mask/maskDocument';
+  import { measureMaskBlob, readPngSize, type MaskMeasurements } from '$lib/features/mask/maskDocument';
   import { createLightboxController } from '$lib/features/workspace/lightbox';
   import { createPanelController } from '$lib/features/workspace/panelController';
   import { installWorkspaceLifecycle } from '$lib/features/workspace/lifecycle';
@@ -106,11 +106,15 @@
       return {
         id: state.selectedGalleryImageId,
         label: state.galleryLabel || state.galleryPreviewLabel,
-        previewUrl: state.galleryPreviewUrl
+        previewUrl: state.galleryPreviewUrl,
+        width: state.galleryWidth,
+        height: state.galleryHeight
       };
     }
     const first = state.files[0];
-    return first ? { id: first.id, label: first.label, previewUrl: first.previewUrl } : null;
+    return first
+      ? { id: first.id, label: first.label, previewUrl: first.previewUrl, width: first.width, height: first.height }
+      : null;
   });
   const activeEditMask = $derived(isMaskValid($editSourceStore) ? $editSourceStore.mask : null);
   const maskSupported = $derived($settingsStore.settings?.supports_mask !== false);
@@ -782,7 +786,17 @@
     const image = galleryEditImage;
     if (!image) return;
     const nextLabel = $t.messages.galleryEditLabel(image.filename);
-    if (!editSourceStore.setGallerySource(image.id, nextLabel, imageUrl(image.filename, image.image_url), nextLabel, previewStore.setError)) {
+    if (
+      !editSourceStore.setGallerySource(
+        image.id,
+        nextLabel,
+        imageUrl(image.filename, image.image_url),
+        nextLabel,
+        previewStore.setError,
+        image.image_width || 0,
+        image.image_height || 0
+      )
+    ) {
       showToast($t.messages.editSourceLimit(MAX_EDIT_SOURCE_IMAGES), 'error');
       closeGalleryEditDialog();
       return;
@@ -1112,24 +1126,40 @@
   async function restoreMaskFromJob(job: GenerateJobStatus): Promise<'restored' | 'missing' | 'mismatch'> {
     const sourceId = primaryEditSourceId($editSourceStore);
     if (!sourceId) return 'missing';
-    let blob: Blob;
+    let fetched: JobMaskFetch;
     try {
-      blob = await fetchJobMaskBlob(job.job_id);
+      fetched = await fetchJobMaskBlob(job.job_id);
     } catch {
       return 'missing';
     }
+    const { blob } = fetched;
+
+    // The server already validated this mask and knows its coverage (see
+    // X-Mask-Coverage on GET .../mask), and its size is a plain IHDR read —
+    // neither needs a canvas decode. Only fall back to the full decode in
+    // measureMaskBlob() when either fast path comes back empty (an older
+    // server build, or an unreadable/never-PNG response).
     let measurements: MaskMeasurements;
-    try {
-      measurements = await measureMaskBlob(blob);
-    } catch {
-      return 'missing';
+    const fastSize = fetched.coverage !== null ? readPngSize(new Uint8Array(await blob.arrayBuffer())) : null;
+    if (fastSize && fetched.coverage !== null) {
+      measurements = { width: fastSize.width, height: fastSize.height, coverage: fetched.coverage };
+    } else {
+      try {
+        measurements = await measureMaskBlob(blob);
+      } catch {
+        return 'missing';
+      }
     }
+
     // The job record keeps no hash of its source image, so dimension equality
     // against the current primary is the only identity check available; a
     // mismatch means the stored mask cannot belong to this image.
     const primary = primaryEditSource;
     if (primary) {
-      const size = await measureImageUrlSize(primary.previewUrl);
+      const size =
+        primary.width > 0 && primary.height > 0
+          ? { width: primary.width, height: primary.height }
+          : await measureImageUrlSize(primary.previewUrl);
       if (size && (size.width !== measurements.width || size.height !== measurements.height)) {
         return 'mismatch';
       }

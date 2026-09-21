@@ -4,7 +4,6 @@ Format tables, in-memory validation, and path resolution live in core/media.py
 so integrations can use them without depending on this layer.
 """
 
-import shutil
 import tempfile
 from pathlib import Path
 
@@ -99,11 +98,13 @@ def delete_image_from_disk(filename: str) -> bool:
     return False
 
 
-def promote_mask_file(source_path: Path, mask_filename: str) -> Path:
-    """Copy a validated mask into MASKS_DIR with an atomic rename.
+def write_mask_file(data: bytes, mask_filename: str) -> Path:
+    """Atomically write a validated mask's bytes into MASKS_DIR.
 
-    The source lives under DATA_DIR, which is a separate mount from IMAGES_DIR
-    in production, so this copies rather than renames across directories.
+    `data` is the already re-encoded `LA` PNG produced by
+    `services.edit_masks.validate_edit_mask_file()`'s single decode
+    (`EditMaskInfo.optimized_png`), so this is a plain atomic write — no
+    image decode/encode happens here.
     """
     path = safe_mask_path(mask_filename)
     if not path:
@@ -118,8 +119,7 @@ def promote_mask_file(source_path: Path, mask_filename: str) -> Path:
     temp_path = Path(temp_file.name)
     try:
         with temp_file:
-            with source_path.open("rb") as source:
-                shutil.copyfileobj(source, temp_file)
+            temp_file.write(data)
         temp_path.replace(path)
     except BaseException:
         temp_path.unlink(missing_ok=True)
