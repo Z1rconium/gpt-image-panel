@@ -2,12 +2,16 @@
   import { get } from 'svelte/store';
   import { onDestroy, tick } from 'svelte';
   import Brush from 'lucide-svelte/icons/brush';
+  import CircleHelp from 'lucide-svelte/icons/circle-help';
   import Contrast from 'lucide-svelte/icons/contrast';
   import Eraser from 'lucide-svelte/icons/eraser';
   import Eye from 'lucide-svelte/icons/eye';
+  import Hand from 'lucide-svelte/icons/hand';
   import Layers from 'lucide-svelte/icons/layers';
   import Lasso from 'lucide-svelte/icons/lasso';
   import Maximize from 'lucide-svelte/icons/maximize';
+  import Minus from 'lucide-svelte/icons/minus';
+  import Plus from 'lucide-svelte/icons/plus';
   import Redo2 from 'lucide-svelte/icons/redo-2';
   import Square from 'lucide-svelte/icons/square';
   import Trash2 from 'lucide-svelte/icons/trash-2';
@@ -22,11 +26,13 @@
   import { confirmStore } from '$lib/stores/confirm';
   import type { EditMask } from '$lib/stores/editSource';
   import {
-    MAX_FEATHER_PX,
+    MAX_SMOOTH_PX,
     MaskImportError,
     createMaskDocument,
     type MaskDocument,
+    type MaskImportMode,
     type MaskPoint,
+    type MaskShapeMode,
     type MaskTool
   } from '$lib/features/mask/maskDocument';
 
@@ -37,12 +43,12 @@
   export let size = 'auto';
   export let existingMask: EditMask | null = null;
   export let onApply: (mask: EditMask) => void = () => {};
+  export let onRemove: () => void = () => {};
   export let onClose: () => void = () => {};
   export let onError: (message: string) => void = () => {};
 
-  let imageEl: HTMLImageElement | undefined = undefined;
-  let overlayEl: HTMLCanvasElement | undefined = undefined;
   let stageEl: HTMLDivElement | undefined = undefined;
+  let overlayEl: HTMLCanvasElement | undefined = undefined;
   let uploadInput: HTMLInputElement | undefined = undefined;
 
   let doc: MaskDocument | null = null;
@@ -50,8 +56,9 @@
   let busy = false;
   let drawing = false;
   let tool: MaskTool = 'brush';
+  let shapeMode: MaskShapeMode = 'add';
   let brushScreen = 32;
-  let featherPx = 0;
+  let smoothPx = 0;
   let view: 'overlay' | 'maskOnly' = 'overlay';
   let coverage = 0;
   let dirty = false;
@@ -68,8 +75,10 @@
   let checkerPattern: CanvasPattern | null = null;
   let tintLayer: HTMLCanvasElement | null = null;
   let prepareToken = 0;
+  let showHelp = false;
+  let smoothTimer: ReturnType<typeof setTimeout> | null = null;
 
-  const MIN_ZOOM = 1;
+  const MIN_ZOOM = 0.1;
   const MAX_ZOOM = 8;
   let viewScale = 1;
   let viewX = 0;
@@ -81,13 +90,18 @@
   let panLastY = 0;
 
   $: sizeHint = size !== 'auto' && naturalWidth > 0 && size !== `${naturalWidth}x${naturalHeight}`;
+  $: hasExistingMask = Boolean(existingMask && existingMask.sourceId === sourceId);
   $: canvasCursorClass = spacePressed
     ? panning
       ? 'cursor-grabbing'
       : 'cursor-grab'
-    : tool === 'brush' || tool === 'eraser'
-      ? 'cursor-none'
-      : 'cursor-crosshair';
+    : tool === 'pan'
+      ? panning
+        ? 'cursor-grabbing'
+        : 'cursor-grab'
+      : tool === 'brush' || tool === 'eraser'
+        ? 'cursor-none'
+        : 'cursor-crosshair';
   $: if (open && imageUrl) {
     void prepare();
   } else if (!open) {
@@ -99,6 +113,10 @@
     if (renderHandle !== null) {
       cancelAnimationFrame(renderHandle);
       renderHandle = null;
+    }
+    if (smoothTimer !== null) {
+      clearTimeout(smoothTimer);
+      smoothTimer = null;
     }
     resizeObserver?.disconnect();
     resizeObserver = null;
@@ -127,6 +145,10 @@
       cancelAnimationFrame(renderHandle);
       renderHandle = null;
     }
+    if (smoothTimer !== null) {
+      clearTimeout(smoothTimer);
+      smoothTimer = null;
+    }
     resizeObserver?.disconnect();
     resizeObserver = null;
     doc?.dispose();
@@ -142,8 +164,12 @@
     naturalWidth = 0;
     naturalHeight = 0;
     busy = true;
-    featherPx = 0;
-    resetView();
+    smoothPx = 0;
+    shapeMode = 'add';
+    showHelp = false;
+    viewScale = 1;
+    viewX = 0;
+    viewY = 0;
 
     try {
       const image = await loadImageElement(imageUrl);
@@ -159,7 +185,7 @@
         try {
           await doc.importFromPng(existingMask.blob);
           if (token !== prepareToken || !open) return;
-          coverage = doc.coverage();
+          coverage = doc.syncProcessed();
           dirty = false;
         } catch {
           // A stale or unreadable stored mask simply starts from a blank canvas.
@@ -173,21 +199,23 @@
     }
 
     await tick();
-    if (token !== prepareToken || !open || !imageEl) return;
+    if (token !== prepareToken || !open || !stageEl) return;
     resizeObserver = new ResizeObserver(() => {
+      clampView();
       resizeOverlay();
       scheduleRender();
     });
-    resizeObserver.observe(imageEl);
+    resizeObserver.observe(stageEl);
     resizeOverlay();
+    fitView();
     scheduleRender();
   }
 
   function resizeOverlay() {
-    if (!overlayEl || !imageEl) return;
+    if (!overlayEl || !doc) return;
     const dpr = window.devicePixelRatio || 1;
-    const width = Math.max(1, Math.round(imageEl.clientWidth * dpr));
-    const height = Math.max(1, Math.round(imageEl.clientHeight * dpr));
+    const width = Math.max(1, Math.round(doc.width * dpr));
+    const height = Math.max(1, Math.round(doc.height * dpr));
     if (overlayEl.width !== width || overlayEl.height !== height) {
       overlayEl.width = width;
       overlayEl.height = height;
@@ -216,7 +244,7 @@
     const tileContext = tile.getContext('2d');
     if (!tileContext) return;
     tileContext.fillStyle = '#3f3f46';
-    tileContext.fillRect(0, 0, cell * 2, cell * 2);
+    tileContext.fillRect(0, 0, cell * 2, tile.height);
     tileContext.fillStyle = '#71717a';
     tileContext.fillRect(0, 0, cell, cell);
     tileContext.fillRect(cell, cell, cell, cell);
@@ -258,7 +286,11 @@
     layerContext.globalCompositeOperation = 'source-over';
     layerContext.globalAlpha = 1;
     layerContext.clearRect(0, 0, width, height);
-    layerContext.drawImage(doc.marks, 0, 0, width, height);
+    // Draw the processed (edge-smoothed, re-binarized) region whenever it is
+    // up to date so the preview matches the coverage readout and the export;
+    // raw marks keep mid-stroke feedback instant.
+    const base = doc.processedFresh() ? doc.processed : doc.marks;
+    layerContext.drawImage(base, 0, 0, width, height);
     layerContext.globalCompositeOperation = 'source-in';
     layerContext.fillStyle = 'rgba(16, 185, 129, 0.45)';
     layerContext.fillRect(0, 0, width, height);
@@ -273,9 +305,9 @@
     scheduleRender();
   }
 
-  // The stage is the untransformed layout box; the zoom layer inside it is
-  // scaled and translated with CSS, so screen coordinates map back through
-  // that transform before becoming image coordinates.
+  // The stage is the visible viewport; the zoom layer inside it is sized to
+  // the image's natural pixels and moved with the view transform, so screen
+  // coordinates map back through that transform into image coordinates.
   function stageRect() {
     return stageEl?.getBoundingClientRect() ?? null;
   }
@@ -285,24 +317,22 @@
     if (!rect) return null;
     return {
       x: (event.clientX - rect.left - viewX) / viewScale,
-      y: (event.clientY - rect.top - viewY) / viewScale,
-      rect
+      y: (event.clientY - rect.top - viewY) / viewScale
     };
   }
 
   function toImagePoint(event: { clientX: number; clientY: number }): MaskPoint | null {
     const layer = toLayerPoint(event);
-    if (!layer || !doc || layer.rect.width === 0 || layer.rect.height === 0) return null;
+    if (!layer || !doc) return null;
     return {
-      x: Math.min(doc.width, Math.max(0, (layer.x / layer.rect.width) * doc.width)),
-      y: Math.min(doc.height, Math.max(0, (layer.y / layer.rect.height) * doc.height))
+      x: Math.min(doc.width, Math.max(0, layer.x)),
+      y: Math.min(doc.height, Math.max(0, layer.y))
     };
   }
 
   function brushImageSize() {
-    const rect = stageRect();
-    if (!rect || !doc || rect.width === 0) return 1;
-    return Math.max(1, (brushScreen / (rect.width * viewScale)) * doc.width);
+    if (!doc || viewScale <= 0) return 1;
+    return Math.max(1, brushScreen / viewScale);
   }
 
   function updateCursor(event: PointerEvent) {
@@ -315,15 +345,34 @@
 
   function clampView() {
     const rect = stageRect();
-    if (!rect) return;
-    viewX = Math.min(0, Math.max(-rect.width * (viewScale - 1), viewX));
-    viewY = Math.min(0, Math.max(-rect.height * (viewScale - 1), viewY));
+    if (!rect || !doc) return;
+    // Keep the image reachable: when it is larger than the stage pin it to the
+    // edges, when it is smaller allow centering it freely.
+    const rangeX = rect.width - doc.width * viewScale;
+    const rangeY = rect.height - doc.height * viewScale;
+    viewX = Math.min(Math.max(0, rangeX), Math.max(Math.min(0, rangeX), viewX));
+    viewY = Math.min(Math.max(0, rangeY), Math.max(Math.min(0, rangeY), viewY));
   }
 
-  function resetView() {
-    viewScale = 1;
-    viewX = 0;
-    viewY = 0;
+  /** Fit the whole image into the stage without upscaling it. */
+  function fitView() {
+    const rect = stageRect();
+    if (!rect || !doc) return;
+    const fit = Math.min(rect.width / doc.width, rect.height / doc.height, 1);
+    viewScale = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, fit));
+    viewX = (rect.width - doc.width * viewScale) / 2;
+    viewY = (rect.height - doc.height * viewScale) / 2;
+    scheduleRender();
+  }
+
+  /** Jump to an exact zoom level (1 = one image pixel per screen pixel). */
+  function zoomTo(scale: number) {
+    const rect = stageRect();
+    if (!rect || !doc) return;
+    viewScale = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, scale));
+    viewX = (rect.width - doc.width * viewScale) / 2;
+    viewY = (rect.height - doc.height * viewScale) / 2;
+    clampView();
     scheduleRender();
   }
 
@@ -360,7 +409,7 @@
 
   function handlePointerDown(event: PointerEvent) {
     if (!doc || !overlayEl || busy) return;
-    if (event.button === 1 || spacePressed) {
+    if (event.button === 1 || spacePressed || tool === 'pan') {
       event.preventDefault();
       overlayEl.setPointerCapture(event.pointerId);
       panning = true;
@@ -373,7 +422,8 @@
     if (!point) return;
     overlayEl.setPointerCapture(event.pointerId);
     drawing = true;
-    doc.beginStroke(tool, brushImageSize(), point, event.altKey ? 'erase' : 'add');
+    const mode: MaskShapeMode = event.altKey ? (shapeMode === 'add' ? 'erase' : 'add') : shapeMode;
+    doc.beginStroke(tool, brushImageSize(), point, mode);
     paintedAny = true;
     dirty = true;
     updateHistoryFlags();
@@ -417,9 +467,10 @@
     if (overlayEl?.hasPointerCapture(event.pointerId)) {
       overlayEl.releasePointerCapture(event.pointerId);
     }
-    coverage = doc.endStroke();
-    updateHistoryFlags();
+    doc.endStroke();
     scheduleRender();
+    scheduleSmoothSync(smoothPx > 0 ? 150 : 0);
+    updateHistoryFlags();
   }
 
   function handlePointerLeave() {
@@ -432,37 +483,57 @@
     brushScreen = Math.min(160, Math.max(4, Math.round(value)));
   }
 
+  function setSmooth(value: number) {
+    smoothPx = Math.min(MAX_SMOOTH_PX, Math.max(0, Math.round(value)));
+    scheduleSmoothSync(120);
+  }
+
+  /** Recompute the processed view (debounced so drags stay smooth). */
+  function scheduleSmoothSync(delay = 150) {
+    if (smoothTimer !== null) clearTimeout(smoothTimer);
+    smoothTimer = setTimeout(() => {
+      smoothTimer = null;
+      if (!doc) return;
+      coverage = doc.setSmoothing(smoothPx);
+      scheduleRender();
+    }, delay);
+  }
+
   function undo() {
     if (!doc || !doc.canUndo()) return;
-    coverage = doc.undo() ?? 0;
+    doc.undo();
     dirty = true;
     updateHistoryFlags();
     scheduleRender();
+    scheduleSmoothSync(smoothPx > 0 ? 150 : 0);
   }
 
   function redo() {
     if (!doc || !doc.canRedo()) return;
-    coverage = doc.redo() ?? 0;
+    doc.redo();
     dirty = true;
     updateHistoryFlags();
     scheduleRender();
+    scheduleSmoothSync(smoothPx > 0 ? 150 : 0);
   }
 
   function clearMask() {
     if (!doc) return;
-    coverage = doc.clear();
-    dirty = true;
+    doc.clear();
     paintedAny = false;
+    dirty = true;
     updateHistoryFlags();
     scheduleRender();
+    scheduleSmoothSync(smoothPx > 0 ? 150 : 0);
   }
 
   function invertMask() {
     if (!doc) return;
-    coverage = doc.invert();
+    doc.invert();
     dirty = true;
     updateHistoryFlags();
     scheduleRender();
+    scheduleSmoothSync(smoothPx > 0 ? 150 : 0);
   }
 
   function maskImportMessage(error: unknown) {
@@ -488,9 +559,25 @@
     const file = input.files?.[0];
     input.value = '';
     if (!file || !doc) return;
+    // An imported mask replaces any existing selection by default; with marks
+    // on the canvas the user picks replace or merge, and either way the import
+    // is a single undoable step.
+    let mode: MaskImportMode = 'replace';
+    if (coverage > 0) {
+      const replace = await confirmStore.confirm({
+        title: get(t).maskEditor.uploadMask,
+        message: get(t).maskEditor.uploadChooseMode,
+        confirmLabel: get(t).maskEditor.uploadReplace,
+        cancelLabel: get(t).maskEditor.uploadMerge,
+        closeLabel: get(t).confirm.cancel,
+        variant: 'default'
+      });
+      mode = replace ? 'replace' : 'merge';
+    }
     busy = true;
     try {
-      coverage = await doc.importFromPng(file);
+      await doc.importFromPng(file, mode);
+      coverage = doc.syncProcessed();
       dirty = true;
       updateHistoryFlags();
       scheduleRender();
@@ -505,7 +592,7 @@
     if (!doc || busy || coverage <= 0) return;
     busy = true;
     try {
-      const result = await doc.exportPng({ feather: featherPx });
+      const result = await doc.exportPng({ smoothing: smoothPx });
       if (result.coverage <= 0) {
         onError(get(t).maskEditor.noAreaMarked);
         return;
@@ -525,6 +612,12 @@
     } finally {
       busy = false;
     }
+  }
+
+  function saveWithoutMask() {
+    if (busy || !hasExistingMask) return;
+    dirty = false;
+    onRemove();
   }
 
   async function requestClose() {
@@ -571,7 +664,8 @@
     else if (key === 'e') tool = 'eraser';
     else if (key === 'r') tool = 'rect';
     else if (key === 'l') tool = 'lasso';
-    else if (key === '0') resetView();
+    else if (key === 'h') tool = 'pan';
+    else if (key === '0') fitView();
     else if (event.key === '[') {
       event.preventDefault();
       setBrushSize(brushScreen - 8);
@@ -613,7 +707,10 @@
           <h2 id="mask-editor-title" class="truncate text-sm font-semibold text-zinc-100">
             {$t.maskEditor.title(label)}
           </h2>
-          <p class="mt-1 text-xs text-zinc-500">{$t.maskEditor.keyboardHint}</p>
+          <p class="mt-1 flex items-center gap-1.5 text-xs text-emerald-400">
+            <span class="inline-block h-2 w-2 shrink-0 rounded-full bg-emerald-400/80" aria-hidden="true"></span>
+            {$t.maskEditor.greenHint}
+          </p>
         </div>
         <button
           type="button"
@@ -642,22 +739,23 @@
             {$t.maskEditor.busy}
           </div>
         {/if}
-        <div bind:this={stageEl} class="relative max-h-full max-w-full overflow-hidden rounded-lg">
+        <!-- The stage needs a definite height of its own: h-full would collapse
+            inside this auto-height flex area and break the fit-to-stage math. -->
+        <div bind:this={stageEl} class="relative h-[52vh] w-full overflow-hidden rounded-lg sm:h-[58vh]">
           <div
-            class="relative inline-block"
-            style={`transform:translate(${viewX}px, ${viewY}px) scale(${viewScale});transform-origin:0 0`}
+            class="absolute left-0 top-0"
+            style={`transform:translate(${viewX}px, ${viewY}px) scale(${viewScale});transform-origin:0 0;width:${naturalWidth || 1}px;height:${naturalHeight || 1}px`}
           >
             <img
-              bind:this={imageEl}
               src={imageUrl}
               alt={label}
-              class="block max-h-[52vh] max-w-full select-none rounded-lg object-contain sm:max-h-[58vh]"
+              class="block h-full w-full select-none"
               draggable="false"
             />
             {#if ready}
               <canvas
                 bind:this={overlayEl}
-                class={`absolute inset-0 h-full w-full touch-none rounded-lg ${canvasCursorClass}`}
+                class={`absolute inset-0 h-full w-full touch-none ${canvasCursorClass}`}
                 aria-label={$t.maskEditor.canvasLabel}
                 on:pointerdown={handlePointerDown}
                 on:pointermove={handlePointerMove}
@@ -681,7 +779,28 @@
       </div>
 
       <div class="space-y-2.5 border-t border-zinc-800 px-3 py-3">
-        <div class="flex flex-wrap items-center gap-2">
+        <div class="relative flex flex-wrap items-center gap-2">
+          {#if showHelp}
+            <div
+              class="absolute bottom-full right-0 z-20 mb-2 w-80 rounded-xl border border-zinc-800 bg-zinc-900 p-3 shadow-xl"
+              role="note"
+              aria-label={$t.maskEditor.shortcutsTitle}
+            >
+              <div class="flex items-center justify-between gap-2">
+                <p class="text-xs font-semibold text-zinc-100">{$t.maskEditor.shortcutsTitle}</p>
+                <button
+                  type="button"
+                  class="control-focus rounded-md p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+                  aria-label={$t.maskEditor.closeLabel}
+                  on:click={() => (showHelp = false)}
+                >
+                  <X size={13} strokeWidth={2} aria-hidden="true" />
+                </button>
+              </div>
+              <p class="mt-2 leading-6 text-zinc-400">{$t.maskEditor.shortcuts}</p>
+            </div>
+          {/if}
+
           <div class="flex items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-900/60 p-1" role="group">
             <button
               type="button"
@@ -722,7 +841,7 @@
               class:hover:bg-zinc-800={tool !== 'rect'}
               aria-pressed={tool === 'rect'}
               aria-label={$t.maskEditor.rect}
-              title={$t.maskEditor.shapeHint}
+              title={$t.maskEditor.rect}
               on:click={() => (tool = 'rect')}
             >
               <Square size={15} strokeWidth={1.9} aria-hidden="true" />
@@ -737,42 +856,99 @@
               class:hover:bg-zinc-800={tool !== 'lasso'}
               aria-pressed={tool === 'lasso'}
               aria-label={$t.maskEditor.lasso}
-              title={$t.maskEditor.shapeHint}
+              title={$t.maskEditor.lasso}
               on:click={() => (tool = 'lasso')}
             >
               <Lasso size={15} strokeWidth={1.9} aria-hidden="true" />
               <span>{$t.maskEditor.lasso}</span>
             </button>
+            <button
+              type="button"
+              class="mobile-touch-target control-focus flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors"
+              class:bg-emerald-600={tool === 'pan'}
+              class:text-white={tool === 'pan'}
+              class:text-zinc-300={tool !== 'pan'}
+              class:hover:bg-zinc-800={tool !== 'pan'}
+              aria-pressed={tool === 'pan'}
+              aria-label={$t.maskEditor.pan}
+              title={$t.maskEditor.pan}
+              on:click={() => (tool = 'pan')}
+            >
+              <Hand size={15} strokeWidth={1.9} aria-hidden="true" />
+              <span>{$t.maskEditor.pan}</span>
+            </button>
           </div>
 
-          <label class="flex min-w-[168px] flex-1 items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900/60 px-3 py-1.5">
-            <input
-              type="range"
-              min="4"
-              max="160"
-              step="2"
-              class="control-focus h-1.5 w-full accent-emerald-600"
-              aria-label={$t.maskEditor.brushSize(brushScreen)}
-              bind:value={brushScreen}
-            />
-            <span class="w-[86px] shrink-0 text-xs tabular-nums text-zinc-400">
-              {$t.maskEditor.brushSize(brushScreen)}
-            </span>
-          </label>
+          {#if tool === 'rect' || tool === 'lasso'}
+            <div
+              class="flex items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-900/60 p-1"
+              role="group"
+              aria-label={$t.maskEditor.modeGroupLabel}
+            >
+              <button
+                type="button"
+                class="mobile-touch-target control-focus flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium transition-colors"
+                class:bg-emerald-600={shapeMode === 'add'}
+                class:text-white={shapeMode === 'add'}
+                class:text-zinc-300={shapeMode !== 'add'}
+                class:hover:bg-zinc-800={shapeMode !== 'add'}
+                aria-pressed={shapeMode === 'add'}
+                aria-label={$t.maskEditor.addMode}
+                title={$t.maskEditor.addMode}
+                on:click={() => (shapeMode = 'add')}
+              >
+                <Plus size={15} strokeWidth={1.9} aria-hidden="true" />
+                <span>{$t.maskEditor.addMode}</span>
+              </button>
+              <button
+                type="button"
+                class="mobile-touch-target control-focus flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium transition-colors"
+                class:bg-emerald-600={shapeMode === 'erase'}
+                class:text-white={shapeMode === 'erase'}
+                class:text-zinc-300={shapeMode !== 'erase'}
+                class:hover:bg-zinc-800={shapeMode !== 'erase'}
+                aria-pressed={shapeMode === 'erase'}
+                aria-label={$t.maskEditor.subtractMode}
+                title={$t.maskEditor.subtractMode}
+                on:click={() => (shapeMode = 'erase')}
+              >
+                <Minus size={15} strokeWidth={1.9} aria-hidden="true" />
+                <span>{$t.maskEditor.subtractMode}</span>
+              </button>
+            </div>
+          {/if}
+
+          {#if tool === 'brush' || tool === 'eraser'}
+            <label class="flex min-w-[168px] flex-1 items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900/60 px-3 py-1.5">
+              <input
+                type="range"
+                min="4"
+                max="160"
+                step="2"
+                class="control-focus h-1.5 w-full accent-emerald-600"
+                aria-label={$t.maskEditor.brushSize(brushScreen)}
+                bind:value={brushScreen}
+              />
+              <span class="w-[86px] shrink-0 text-xs tabular-nums text-zinc-400">
+                {$t.maskEditor.brushSize(brushScreen)}
+              </span>
+            </label>
+          {/if}
 
           <label class="flex min-w-[168px] flex-1 items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900/60 px-3 py-1.5">
             <input
               type="range"
               min="0"
-              max={MAX_FEATHER_PX}
+              max={MAX_SMOOTH_PX}
               step="2"
               class="control-focus h-1.5 w-full accent-emerald-600"
-              aria-label={$t.maskEditor.feather(featherPx)}
-              title={$t.maskEditor.featherHint}
-              bind:value={featherPx}
+              aria-label={$t.maskEditor.smooth(smoothPx)}
+              title={$t.maskEditor.smoothHint}
+              value={smoothPx}
+              on:input={(event) => setSmooth((event.currentTarget as HTMLInputElement).valueAsNumber)}
             />
             <span class="w-[86px] shrink-0 text-xs tabular-nums text-zinc-400">
-              {$t.maskEditor.feather(featherPx)}
+              {$t.maskEditor.smooth(smoothPx)}
             </span>
           </label>
 
@@ -848,7 +1024,7 @@
             </button>
           </div>
 
-          <div class="flex items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-900/60 p-1" role="group" aria-label={$t.maskEditor.zoomReset}>
+          <div class="flex items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-900/60 p-1" role="group" aria-label={$t.maskEditor.zoomLabel}>
             <button
               type="button"
               class="mobile-touch-target control-focus rounded-md p-1.5 text-zinc-300 transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40"
@@ -874,11 +1050,22 @@
             </button>
             <button
               type="button"
-              class="mobile-touch-target control-focus rounded-md p-1.5 text-zinc-300 transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40"
-              disabled={viewScale === 1 && viewX === 0 && viewY === 0}
-              aria-label={$t.maskEditor.zoomReset}
-              title={$t.maskEditor.zoomReset}
-              on:click={resetView}
+              class="mobile-touch-target control-focus rounded-md px-1.5 py-1.5 text-xs font-medium tabular-nums text-zinc-300 transition-colors hover:bg-zinc-800"
+              class:bg-zinc-800={viewScale === 1}
+              class:text-zinc-100={viewScale === 1}
+              aria-pressed={viewScale === 1}
+              aria-label={$t.maskEditor.zoom100}
+              title={$t.maskEditor.zoom100}
+              on:click={() => zoomTo(1)}
+            >
+              100%
+            </button>
+            <button
+              type="button"
+              class="mobile-touch-target control-focus rounded-md p-1.5 text-zinc-300 transition-colors hover:bg-zinc-800"
+              aria-label={$t.maskEditor.fitCanvas}
+              title={$t.maskEditor.fitCanvas}
+              on:click={fitView}
             >
               <Maximize size={15} strokeWidth={1.9} aria-hidden="true" />
             </button>
@@ -902,6 +1089,17 @@
             <Upload size={15} strokeWidth={1.9} aria-hidden="true" />
             <span>{$t.maskEditor.uploadMask}</span>
           </button>
+
+          <button
+            type="button"
+            class="mobile-touch-target control-focus rounded-md p-1.5 text-zinc-300 transition-colors hover:bg-zinc-800"
+            aria-label={$t.maskEditor.shortcutsTitle}
+            title={$t.maskEditor.shortcutsTitle}
+            aria-expanded={showHelp}
+            on:click={() => (showHelp = !showHelp)}
+          >
+            <CircleHelp size={15} strokeWidth={1.9} aria-hidden="true" />
+          </button>
         </div>
 
         <div class="flex flex-wrap items-center justify-between gap-2">
@@ -916,15 +1114,27 @@
             >
               {$t.maskEditor.cancel}
             </button>
-            <button
-              type="button"
-              class="mobile-touch-target control-focus rounded-lg bg-emerald-600 px-3.5 py-2 text-xs font-semibold text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
-              disabled={busy || coverage <= 0}
-              title={coverage <= 0 ? $t.maskEditor.noAreaMarked : $t.maskEditor.apply}
-              on:click={applyMask}
-            >
-              {$t.maskEditor.apply}
-            </button>
+            {#if hasExistingMask && coverage <= 0}
+              <button
+                type="button"
+                class="mobile-touch-target control-focus rounded-lg bg-emerald-600 px-3.5 py-2 text-xs font-semibold text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={busy}
+                title={$t.maskEditor.saveNoMask}
+                on:click={saveWithoutMask}
+              >
+                {$t.maskEditor.saveNoMask}
+              </button>
+            {:else}
+              <button
+                type="button"
+                class="mobile-touch-target control-focus rounded-lg bg-emerald-600 px-3.5 py-2 text-xs font-semibold text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={busy || coverage <= 0}
+                title={coverage <= 0 ? $t.maskEditor.noAreaMarked : $t.maskEditor.apply}
+                on:click={applyMask}
+              >
+                {$t.maskEditor.apply}
+              </button>
+            {/if}
           </div>
         </div>
       </div>

@@ -10,15 +10,17 @@
  */
 
 export const MAX_MASK_FILE_BYTES = 4 * 1024 * 1024;
-export const MAX_FEATHER_PX = 64;
+export const MAX_SMOOTH_PX = 64;
 
 const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 const ALPHA_CHANNEL_COLOR_TYPES = new Set([4, 6]);
 const PALETTE_COLOR_TYPE = 3;
 
-export type MaskTool = 'brush' | 'eraser' | 'rect' | 'lasso';
+export type MaskTool = 'brush' | 'eraser' | 'rect' | 'lasso' | 'pan';
 
 export type MaskShapeMode = 'add' | 'erase';
+
+export type MaskImportMode = 'replace' | 'merge';
 
 export type MaskPoint = {
   x: number;
@@ -72,11 +74,12 @@ export function countMarkedPixels(data: Uint8ClampedArray): number {
 }
 
 /**
- * Clamp a feather radius (in image pixels) to a sane range for the image size.
+ * Clamp an edge-smoothing radius (in image pixels) to a sane range for the
+ * image size.
  */
-export function normalizeFeatherPx(value: number, width: number): number {
+export function normalizeSmoothPx(value: number, width: number): number {
   if (!Number.isFinite(value) || value <= 0) return 0;
-  const limit = Math.min(MAX_FEATHER_PX, Math.max(0, Math.floor(width / 8)));
+  const limit = Math.min(MAX_SMOOTH_PX, Math.max(0, Math.floor(width / 8)));
   return Math.min(limit, Math.round(value));
 }
 
@@ -113,6 +116,7 @@ type ShapeCommand = {
 type ImportCommand = {
   kind: 'import';
   layer: HTMLCanvasElement;
+  replace: boolean;
 };
 
 type ClearCommand = { kind: 'clear' };
@@ -195,11 +199,18 @@ export function createMaskDocument(width: number, height: number) {
   const context = context2d(marks);
   const scratch = createCanvas(width, height);
   const scratchContext = context2d(scratch);
+  // Processed view of the marks (edge-smoothed and re-binarized) used by the
+  // canvas preview, the coverage readout and the export so all three share one
+  // rendering rule.
+  const processed = createCanvas(width, height);
+  const blurLayer = createCanvas(width, height);
 
   let commands: Command[] = [];
   let redoStack: Command[] = [];
   let activeStroke: StrokeCommand | null = null;
   let activeShape: ShapeCommand | null = null;
+  let smoothPx = 0;
+  let processedStale = false;
 
   function strokeContext(target: CanvasRenderingContext2D) {
     target.save();
@@ -292,7 +303,9 @@ export function createMaskDocument(width: number, height: number) {
         break;
       case 'import':
         context.save();
-        context.globalCompositeOperation = 'source-over';
+        // A replacing import wipes everything before drawing, so undo/redo
+        // replay stays a single command and still restores the previous state.
+        context.globalCompositeOperation = command.replace ? 'copy' : 'source-over';
         context.drawImage(command.layer, 0, 0);
         context.restore();
         break;
@@ -318,12 +331,54 @@ export function createMaskDocument(width: number, height: number) {
     return countMarkedPixels(imageData.data);
   }
 
+  function invalidateProcessed() {
+    processedStale = true;
+  }
+
+  // Blur the marks and re-binarize the alpha: the same contour the export
+  // produces, so the on-canvas preview never promises a different region.
+  function repaintProcessed() {
+    const target = context2d(processed);
+    target.save();
+    target.globalCompositeOperation = 'copy';
+    target.clearRect(0, 0, width, height);
+    if (smoothPx > 0) {
+      const blur = context2d(blurLayer);
+      blur.save();
+      blur.globalCompositeOperation = 'copy';
+      blur.clearRect(0, 0, width, height);
+      blur.filter = `blur(${smoothPx}px)`;
+      blur.drawImage(marks, 0, 0);
+      blur.filter = 'none';
+      blur.restore();
+      const imageData = blur.getImageData(0, 0, width, height);
+      binarizeMaskAlphaData(imageData.data);
+      blur.putImageData(imageData, 0, 0);
+      target.drawImage(blurLayer, 0, 0);
+    } else {
+      target.drawImage(marks, 0, 0);
+    }
+    target.restore();
+    processedStale = false;
+  }
+
+  /**
+   * Edited-area ratio of the processed view. The processed canvas keeps the
+   * marks orientation (painted alpha = editable), unlike the exported PNG
+   * where editable pixels end up fully transparent.
+   */
+  function processedEditableRatio() {
+    const data = context2d(processed).getImageData(0, 0, width, height).data;
+    return countMarkedPixels(data);
+  }
+
   return {
     width,
     height,
     marks,
 
     beginStroke(tool: MaskTool, size: number, point: MaskPoint, mode: MaskShapeMode = 'add') {
+      if (tool === 'pan') return;
       if (tool === 'rect' || tool === 'lasso') {
         // Shapes stay uncommitted until the pointer is released so an
         // accidental drag can be dismissed and undo has a single entry.
@@ -336,6 +391,7 @@ export function createMaskDocument(width: number, height: number) {
       redoStack = [];
       activeStroke = command;
       drawStroke(context, command, 0);
+      invalidateProcessed();
     },
 
     extendStroke(points: MaskPoint[]) {
@@ -352,6 +408,7 @@ export function createMaskDocument(width: number, height: number) {
       const fromIndex = activeStroke.points.length;
       activeStroke.points.push(...points);
       drawStroke(context, activeStroke, fromIndex);
+      invalidateProcessed();
     },
 
     endStroke() {
@@ -361,6 +418,7 @@ export function createMaskDocument(width: number, height: number) {
         if (fillShape(context, command)) {
           commands.push(command);
           redoStack = [];
+          invalidateProcessed();
         }
       }
       activeStroke = null;
@@ -380,6 +438,7 @@ export function createMaskDocument(width: number, height: number) {
       if (!command) return null;
       redoStack.push(command);
       replay();
+      invalidateProcessed();
       return coverage();
     },
 
@@ -388,6 +447,7 @@ export function createMaskDocument(width: number, height: number) {
       if (!command) return null;
       commands.push(command);
       applyCommand(command);
+      invalidateProcessed();
       return coverage();
     },
 
@@ -397,6 +457,7 @@ export function createMaskDocument(width: number, height: number) {
       activeStroke = null;
       activeShape = null;
       context.clearRect(0, 0, width, height);
+      invalidateProcessed();
       return 0;
     },
 
@@ -406,10 +467,11 @@ export function createMaskDocument(width: number, height: number) {
       activeStroke = null;
       activeShape = null;
       invertMarks();
+      invalidateProcessed();
       return coverage();
     },
 
-    async importFromPng(file: Blob) {
+    async importFromPng(file: Blob, mode: MaskImportMode = 'replace') {
       if (file.size > MAX_MASK_FILE_BYTES) throw new MaskImportError('too-large');
       const bytes = new Uint8Array(await file.arrayBuffer());
       if (bytes.length < 26 || !pngHasAlphaChannel(bytes)) {
@@ -443,12 +505,38 @@ export function createMaskDocument(width: number, height: number) {
       }
       layerContext.putImageData(imageData, 0, 0);
 
-      const command: ImportCommand = { kind: 'import', layer };
+      const command: ImportCommand = { kind: 'import', layer, replace: mode === 'replace' };
       commands.push(command);
       redoStack = [];
       applyCommand(command);
+      invalidateProcessed();
       return coverage();
     },
+
+    /** Change the edge-smoothing radius and return the processed coverage. */
+    setSmoothing(px: number) {
+      const next = normalizeSmoothPx(px, width);
+      if (next === smoothPx && !processedStale) return processedEditableRatio();
+      smoothPx = next;
+      repaintProcessed();
+      return processedEditableRatio();
+    },
+
+    /** Repaint the processed view after mark changes; returns its coverage. */
+    syncProcessed() {
+      if (processedStale) repaintProcessed();
+      return processedEditableRatio();
+    },
+
+    processedFresh() {
+      return !processedStale;
+    },
+
+    get smoothPx() {
+      return smoothPx;
+    },
+
+    processed,
 
     coverage,
 
@@ -473,37 +561,36 @@ export function createMaskDocument(width: number, height: number) {
       target.restore();
     },
 
-    async exportPng(options: { feather?: number } = {}) {
-      const feather = normalizeFeatherPx(options.feather ?? 0, width);
+    async exportPng(options: { smoothing?: number } = {}) {
+      const smoothing = normalizeSmoothPx(options.smoothing ?? smoothPx, width);
       const canvas = createCanvas(width, height);
       const exportContext = canvas.getContext('2d');
       if (!exportContext) throw new MaskImportError('decode');
       exportContext.fillStyle = '#000';
       exportContext.fillRect(0, 0, width, height);
       exportContext.globalCompositeOperation = 'destination-out';
-      exportContext.drawImage(marks, 0, 0);
-      exportContext.globalCompositeOperation = 'source-over';
 
       // The upstream contract only edits alpha == 0 pixels, so a soft gradient
       // cannot survive the round trip. Blurring before binarizing only smooths
-      // the contour (removes pointer jaggies) while keeping the region binary.
-      let output = canvas;
-      if (feather > 0) {
+      // the contour (removes pointer jaggies) while keeping the region binary —
+      // the exact rule the on-canvas preview and coverage readout use.
+      if (smoothing > 0) {
         const blurred = createCanvas(width, height);
         const blurredContext = blurred.getContext('2d');
         if (!blurredContext) throw new MaskImportError('decode');
-        blurredContext.filter = `blur(${feather}px)`;
-        blurredContext.drawImage(canvas, 0, 0);
-        output = blurred;
+        blurredContext.filter = `blur(${smoothing}px)`;
+        blurredContext.drawImage(marks, 0, 0);
+        exportContext.drawImage(blurred, 0, 0);
+      } else {
+        exportContext.drawImage(marks, 0, 0);
       }
+      exportContext.globalCompositeOperation = 'source-over';
 
-      const outputContext = output.getContext('2d');
-      if (!outputContext) throw new MaskImportError('decode');
-      const imageData = outputContext.getImageData(0, 0, width, height);
+      const imageData = exportContext.getImageData(0, 0, width, height);
       const ratio = binarizeMaskAlphaData(imageData.data);
-      outputContext.putImageData(imageData, 0, 0);
+      exportContext.putImageData(imageData, 0, 0);
 
-      return { blob: await canvasBlob(output), coverage: ratio };
+      return { blob: await canvasBlob(canvas), coverage: ratio };
     },
 
     dispose() {
@@ -515,6 +602,10 @@ export function createMaskDocument(width: number, height: number) {
       marks.height = 0;
       scratch.width = 0;
       scratch.height = 0;
+      processed.width = 0;
+      processed.height = 0;
+      blurLayer.width = 0;
+      blurLayer.height = 0;
     }
   };
 }
