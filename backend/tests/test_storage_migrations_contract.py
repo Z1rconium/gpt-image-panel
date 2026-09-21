@@ -331,6 +331,29 @@ def test_active_unit_count_uses_partial_index(tmp_path):
     assert any("idx_image_job_units_active_status" in detail for detail in plan)
 
 
+def test_gallery_mask_only_filter_uses_partial_index(tmp_path):
+    """gallery_only=mask filters gallery_entries down before the usual
+    (sort_seq DESC, id DESC) keyset page; without a matching partial index
+    this degrades to a full scan + sort once the gallery has many rows."""
+    _configure_runtime(tmp_path)
+    db_repo.verify_storage_writable()
+    with db_repo._connect() as conn:
+        index_names = {
+            row["name"]
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'index'")
+        }
+        assert "idx_gallery_entries_masked_sort_seq_id" in index_names
+
+        plan = [
+            row["detail"]
+            for row in conn.execute(
+                "EXPLAIN QUERY PLAN SELECT * FROM gallery_entries "
+                "WHERE mask_coverage IS NOT NULL ORDER BY sort_seq DESC, id DESC"
+            )
+        ]
+    assert any("idx_gallery_entries_masked_sort_seq_id" in detail for detail in plan)
+
+
 def test_gallery_and_access_migrations_own_only_their_schema():
     with sqlite3.connect(":memory:") as conn:
         conn.row_factory = sqlite3.Row

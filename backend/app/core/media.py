@@ -5,6 +5,7 @@ directories, so repositories and integrations can share it without either layer
 depending on the other. On-disk read/write lives in repositories/image_files.py.
 """
 
+import contextlib
 import io
 import mimetypes
 import struct
@@ -185,21 +186,28 @@ def _decompression_bomb_warning():
     return getattr(Image, "DecompressionBombWarning", Warning)
 
 
-def verify_pillow_image(
-    opener,
-    *,
-    expected_format: str,
-) -> tuple[int, int]:
+@contextlib.contextmanager
+def verified_pillow_image(opener, *, expected_format: str):
+    """Open, fully decode, and format-check a Pillow image; yield it still open.
+
+    Shares the decompression-bomb and format-mismatch guards with
+    `verify_pillow_image()` so callers that need to inspect the decoded image
+    (e.g. mask alpha channel analysis) don't have to decode it a second time.
+    Only the open/decode step runs under those guards — an exception raised by
+    the caller's own code after the yield propagates unchanged, instead of
+    being rewritten into the generic decode-failure message below.
+    """
     if Image is None:
         raise ValueError("Pillow is required to validate image data")
 
     configure_pillow_image_limits()
     warning_type = _decompression_bomb_warning()
     bomb_error_type = getattr(Image, "DecompressionBombError", OSError)
-    try:
-        with warnings.catch_warnings():
-            warnings.simplefilter("error", warning_type)
-            with opener() as image:
+    with contextlib.ExitStack() as stack:
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("error", warning_type)
+                image = stack.enter_context(opener())
                 decoded_format = _pillow_format_key(getattr(image, "format", None))
                 if decoded_format and decoded_format != expected_format:
                     raise ValueError("Image decoder format does not match image data")
@@ -209,11 +217,22 @@ def verify_pillow_image(
                 width, height = image.size
                 if width <= 0 or height <= 0:
                     raise ValueError("Image dimensions must be positive")
-                return int(width), int(height)
-    except warning_type as e:
-        _raise_image_validation_error(e)
-    except (OSError, UnidentifiedImageError, SyntaxError, ValueError, bomb_error_type) as e:
-        _raise_image_validation_error(e)
+        except warning_type as e:
+            _raise_image_validation_error(e)
+        except (OSError, UnidentifiedImageError, SyntaxError, ValueError, bomb_error_type) as e:
+            _raise_image_validation_error(e)
+
+        yield image
+
+
+def verify_pillow_image(
+    opener,
+    *,
+    expected_format: str,
+) -> tuple[int, int]:
+    with verified_pillow_image(opener, expected_format=expected_format) as image:
+        width, height = image.size
+        return int(width), int(height)
 
 
 def validate_image_bytes(

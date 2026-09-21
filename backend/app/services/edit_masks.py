@@ -10,13 +10,11 @@ admission.
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..core.media import Image, configure_pillow_image_limits
-from ..repositories.image_files import (
-    validate_image_file,
-    validate_image_file_details,
-)
+from ..core.media import Image, validate_image_header_bytes, verified_pillow_image
+from ..repositories.image_files import validate_image_file_details
 
 MASK_ALPHA_MODES = {"RGBA", "LA", "PA"}
+MASK_SNIFF_BYTES = 512
 
 
 @dataclass(frozen=True)
@@ -32,10 +30,30 @@ def validate_edit_mask_file(
     expected_width: int,
     expected_height: int,
 ) -> EditMaskInfo:
-    validate_image_file(path, filename="mask.png", content_type="image/png")
+    """Validate a mask PNG with a single decode.
 
-    configure_pillow_image_limits()
-    with Image.open(path) as image:
+    Everything the upstream contract cares about (alpha channel, dimensions,
+    fully-transparent ratio) is read off the one decoded `image` object;
+    `getchannel("A")` is used directly for modes that already carry an alpha
+    band (RGBA/LA/PA) and only falls back to a full `convert("RGBA")` copy for
+    a palette image whose transparency comes from a tRNS chunk.
+    """
+    try:
+        with path.open("rb") as file:
+            header = file.read(MASK_SNIFF_BYTES)
+    except OSError as e:
+        raise ValueError("Mask data could not be read") from e
+
+    detected_format = validate_image_header_bytes(
+        header,
+        filename="mask.png",
+        content_type="image/png",
+    )
+
+    with verified_pillow_image(
+        lambda: Image.open(path),
+        expected_format=detected_format,
+    ) as image:
         if image.mode not in MASK_ALPHA_MODES and "transparency" not in image.info:
             raise ValueError("Mask must be a PNG file with an alpha channel")
         width, height = image.size
@@ -44,7 +62,10 @@ def validate_edit_mask_file(
                 "Mask dimensions must match the primary image: "
                 f"mask is {width}x{height}, image is {expected_width}x{expected_height}"
             )
-        zeros = image.convert("RGBA").getchannel("A").histogram()[0]
+        if image.mode in MASK_ALPHA_MODES:
+            zeros = image.getchannel("A").histogram()[0]
+        else:
+            zeros = image.convert("RGBA").getchannel("A").histogram()[0]
 
     total = width * height
     transparent_ratio = zeros / total if total else 0.0
@@ -59,18 +80,37 @@ def validate_edit_mask_file(
 
 def validate_edit_mask_against_primary(
     mask_path: Path,
+    *,
+    primary_width: int,
+    primary_height: int,
+) -> EditMaskInfo:
+    return validate_edit_mask_file(
+        mask_path,
+        expected_width=primary_width,
+        expected_height=primary_height,
+    )
+
+
+def validate_edit_mask_against_primary_path(
+    mask_path: Path,
     primary_path: Path,
     *,
     primary_filename: str = "",
     primary_content_type: str = "",
 ) -> EditMaskInfo:
+    """Thin wrapper kept for callers that only have the primary's file path.
+
+    Decodes the primary a second time to recover its size; the hot path in
+    `api/routers/edits.py` avoids this by reusing the size already captured
+    when the primary was admitted (see `EditImageSource.width/height`).
+    """
     _format, width, height = validate_image_file_details(
         primary_path,
         filename=primary_filename,
         content_type=primary_content_type,
     )
-    return validate_edit_mask_file(
+    return validate_edit_mask_against_primary(
         mask_path,
-        expected_width=width,
-        expected_height=height,
+        primary_width=width,
+        primary_height=height,
     )

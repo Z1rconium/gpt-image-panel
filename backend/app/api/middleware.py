@@ -35,6 +35,7 @@ _INVALID_HOST_RE = re.compile(r"[\x00-\x1f\x7f]")
 _GZIP_BYPASS_PATHS = {"/api/download-all"}
 _GZIP_BYPASS_PREFIXES = ("/api/image/", "/api/thumb/", "/api/download/")
 _API_CACHE_CONTROL_PRESERVE_PREFIXES = _GZIP_BYPASS_PREFIXES
+_GENERATE_JOB_MASK_RE = re.compile(r"^/api/generate/[^/]+/mask$")
 _GZIP_TEXT_CONTENT_TYPES = {
     "application/javascript",
     "application/json",
@@ -506,7 +507,14 @@ def register_middleware(app):
         preserves_cache_control = (
             response.status_code < 400
             and "Cache-Control" in response.headers
-            and request.url.path.startswith(_API_CACHE_CONTROL_PRESERVE_PREFIXES)
+            and (
+                request.url.path.startswith(_API_CACHE_CONTROL_PRESERVE_PREFIXES)
+                # job_id is unique and its promoted mask file is never
+                # rewritten, so this one route may set its own long-lived
+                # Cache-Control (see get_generate_job_mask); the job_id
+                # segment rules out prefix matching like the routes above.
+                or bool(_GENERATE_JOB_MASK_RE.match(request.url.path))
+            )
         )
         if response.status_code >= 400 or (
             request.url.path.startswith("/api/") and not preserves_cache_control

@@ -71,6 +71,13 @@ class EditImageSource:
     content_type: str
     role: Literal["image", "mask"] = "image"
     coverage: float | None = None
+    # Populated when the source was admitted with Pillow validation (see
+    # `copy_edit_source_stream_to_temp(..., validate=True)`); 0 for sources
+    # admitted with validation skipped (masks) or rebuilt from a payload saved
+    # before this field existed. Callers must treat 0 as "unknown" and fall
+    # back to decoding the file when they need the size.
+    width: int = 0
+    height: int = 0
 
 
 def trim_generate_jobs():
@@ -233,6 +240,8 @@ def edit_source_to_payload(source: EditImageSource) -> dict:
         "content_type": source.content_type,
         "role": source.role,
         "coverage": source.coverage,
+        "width": source.width,
+        "height": source.height,
     }
 
 
@@ -246,6 +255,10 @@ def edit_source_from_payload(payload: dict) -> EditImageSource:
         content_type=str(payload.get("content_type") or "application/octet-stream"),
         role="mask" if role == "mask" else "image",
         coverage=float(coverage) if coverage is not None else None,
+        # Missing on payloads persisted before this field existed; 0 means
+        # "decode to find out" to every reader (see EditImageSource docstring).
+        width=int(payload.get("width") or 0),
+        height=int(payload.get("height") or 0),
     )
 
 

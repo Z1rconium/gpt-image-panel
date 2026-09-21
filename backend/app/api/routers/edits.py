@@ -9,7 +9,11 @@ from starlette.datastructures import FormData
 from starlette.datastructures import UploadFile as StarletteUploadFile
 
 from ..edit_limits import EDIT_MASK_FIELD_NAME, MAX_EDIT_MASK_BYTES, MAX_EDIT_SOURCE_IMAGES
-from ...services.edit_masks import EditMaskInfo, validate_edit_mask_against_primary
+from ...services.edit_masks import (
+    EditMaskInfo,
+    validate_edit_mask_against_primary,
+    validate_edit_mask_against_primary_path,
+)
 from ...services.gallery_archive_shared import max_upload_bytes
 from ...services.job_queue import (
     EditImageSource,
@@ -21,7 +25,7 @@ from ...services.uploads import validate_upload_image_bytes
 from ...core import settings as config
 from ...repositories.gallery.queries import get_gallery_entry
 from ...core.media import image_content_type_for_filename, safe_image_path
-from ...repositories.image_files import validate_image_file
+from ...repositories.image_files import validate_image_file_details
 from ...schemas.generation import EditRequest, GenerateJobResponse
 from ...runtime.blocking import run_db_operation, run_image_operation
 
@@ -90,13 +94,22 @@ def validate_edit_source_header(
     validate_upload_image_bytes(image_header, filename, content_type)
 
 
-def validate_edit_source_file(path: Path, filename: str, content_type: str):
+def validate_edit_source_file_details(
+    path: Path, filename: str, content_type: str
+) -> tuple[int, int]:
+    """Full Pillow decode, returning the size so callers don't decode again.
+
+    Used for primary/reference images; mask uploads skip this (see
+    `copy_edit_source_stream_to_temp(..., validate=False)`) because
+    `validate_edit_mask_file()` decodes them once on its own.
+    """
     try:
-        validate_image_file(
+        _format, width, height = validate_image_file_details(
             path,
             filename=filename,
             content_type=content_type,
         )
+        return width, height
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
@@ -137,7 +150,16 @@ def copy_edit_source_stream_to_temp(
     too_large_detail: str,
     read_error_detail: str,
     max_bytes: int | None = None,
+    validate: bool = True,
 ) -> EditImageSource:
+    """Copy an upload to a temp edit-source file.
+
+    `validate=False` skips the full Pillow decode (still does the cheap magic-
+    byte header sniff) for uploads that will be fully decoded once, later, by
+    a caller-specific validator — currently only mask uploads, whose
+    alpha/dimension checks in `validate_edit_mask_file()` already decode the
+    file. Width/height stay 0 when the decode is skipped.
+    """
     limit = max_upload_bytes() if max_bytes is None else max_bytes
     fd, temp_path = create_edit_source_temp_path(filename)
     total = 0
@@ -166,6 +188,7 @@ def copy_edit_source_stream_to_temp(
         temp_path.unlink(missing_ok=True)
         raise
 
+    width = height = 0
     try:
         validate_edit_source_header(
             bytes(header),
@@ -176,12 +199,13 @@ def copy_edit_source_stream_to_temp(
             too_large_detail=too_large_detail,
             max_bytes=max_bytes,
         )
-        validate_edit_source_file(temp_path, filename, content_type)
+        if validate:
+            width, height = validate_edit_source_file_details(temp_path, filename, content_type)
     except BaseException:
         temp_path.unlink(missing_ok=True)
         raise
 
-    return EditImageSource(temp_path, total, filename, content_type)
+    return EditImageSource(temp_path, total, filename, content_type, width=width, height=height)
 
 
 def cleanup_edit_sources(sources: list[EditImageSource]):
@@ -272,14 +296,27 @@ async def read_upload_edit_mask(form: FormData) -> EditImageSource | None:
         read_error_detail="Failed to read mask upload",
         metric_name="copy_validate_edit_mask_upload",
         max_bytes=MAX_EDIT_MASK_BYTES,
+        # validate_edit_mask() decodes the mask itself; skip the redundant
+        # Pillow pass here so a masked edit decodes the mask exactly once.
+        validate=False,
     )
     return replace(source, role="mask")
 
 
 async def validate_edit_mask(mask: EditImageSource, primary: EditImageSource) -> EditMaskInfo:
     try:
+        if primary.width > 0 and primary.height > 0:
+            return await run_image_operation(
+                validate_edit_mask_against_primary,
+                mask.temp_path,
+                primary_width=primary.width,
+                primary_height=primary.height,
+                metric_name="validate_edit_mask",
+            )
+        # Defensive fallback for a primary admitted without a cached size
+        # (e.g. a legacy in-flight request); decodes the primary once more.
         return await run_image_operation(
-            validate_edit_mask_against_primary,
+            validate_edit_mask_against_primary_path,
             mask.temp_path,
             primary.temp_path,
             primary_filename=primary.filename,

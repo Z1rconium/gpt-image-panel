@@ -299,6 +299,20 @@ async def get_generate_job(job_id: str):
     return GenerateJobStatus(**job)
 
 
+async def _job_mask_coverage(job_id: str) -> float | None:
+    aggregate = await run_db_operation(
+        aggregate_image_job_units,
+        job_id,
+        metric_name="get_generate_job_mask_coverage",
+    )
+    for unit in aggregate.get("units", []):
+        for source in unit.get("edit_sources") or []:
+            if source.get("role") == "mask":
+                coverage = source.get("coverage")
+                return float(coverage) if coverage is not None else None
+    return None
+
+
 @router.get("/api/generate/{job_id}/mask")
 async def get_generate_job_mask(job_id: str):
     job = await run_db_operation(
@@ -311,7 +325,18 @@ async def get_generate_job_mask(job_id: str):
     path = safe_mask_path(f"{job_id}.png")
     if not path or not path.is_file():
         raise HTTPException(status_code=404, detail="Mask file not found")
-    return FileResponse(path, media_type=MASK_CONTENT_TYPE, filename="mask.png")
+    # job_id is unique and the file is never rewritten after promotion, so a
+    # retry re-fetching the same job's mask can cache it indefinitely.
+    headers = {"Cache-Control": "private, max-age=31536000, immutable"}
+    coverage = await _job_mask_coverage(job_id)
+    if coverage is not None:
+        headers["X-Mask-Coverage"] = str(coverage)
+    return FileResponse(
+        path,
+        media_type=MASK_CONTENT_TYPE,
+        filename="mask.png",
+        headers=headers,
+    )
 
 
 @router.get("/api/generate/{job_id}/events")

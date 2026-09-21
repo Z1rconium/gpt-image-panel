@@ -127,6 +127,94 @@ def test_edit_accepts_valid_mask_and_marks_job(client, monkeypatch):
     assert job_queue.get_pending_edit_source_bytes() == 0
 
 
+def test_masked_edit_decodes_primary_and_mask_exactly_once(client, monkeypatch):
+    """Admission used to decode the primary twice and the mask three times
+    (see mask-performance-optimization-plan.md B1/B2); the primary's size is
+    now cached on EditImageSource at admission and reused, and the mask is
+    validated with a single Image.open + load."""
+    opens: list[object] = []
+    original_open = PILImage.open
+
+    def counting_open(fp, *args, **kwargs):
+        opens.append(fp)
+        return original_open(fp, *args, **kwargs)
+
+    monkeypatch.setattr(PILImage, "open", counting_open)
+
+    async def fake_edit_api(
+        api_url,
+        api_key,
+        payload,
+        image_sources,
+        api_preset_name=None,
+        progress=None,
+        socks5_proxy=None,
+        persist_gallery_entry=None,
+        mask_source=None,
+        mask_coverage=None,
+    ):
+        return [await _fake_entry(payload, api_preset_name)]
+
+    monkeypatch.setattr(backend_main.proxy, "call_image_edit_api", fake_edit_api)
+
+    resp = client.post(
+        "/api/edits",
+        data=_edit_data(),
+        files={
+            "image": ("input.png", SOURCE_PNG, "image/png"),
+            "mask": ("mask.png", MASK_PNG, "image/png"),
+        },
+    )
+    assert resp.status_code == 202
+    assert len(opens) == 2
+
+
+def _palette_trns_mask_png(size: tuple[int, int] = (8, 8)) -> bytes:
+    image = PILImage.new("P", size, 0)
+    image.putpalette([0, 0, 0] * 256)
+    image.info["transparency"] = 0
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+PALETTE_TRNS_MASK_PNG = _palette_trns_mask_png()
+
+
+def test_edit_accepts_palette_mask_with_trns_transparency(client, monkeypatch):
+    seen: dict[str, object] = {}
+
+    async def fake_edit_api(
+        api_url,
+        api_key,
+        payload,
+        image_sources,
+        api_preset_name=None,
+        progress=None,
+        socks5_proxy=None,
+        persist_gallery_entry=None,
+        mask_source=None,
+        mask_coverage=None,
+    ):
+        seen["mask_coverage"] = mask_coverage
+        return [await _fake_entry(payload, api_preset_name)]
+
+    monkeypatch.setattr(backend_main.proxy, "call_image_edit_api", fake_edit_api)
+
+    resp = client.post(
+        "/api/edits",
+        data=_edit_data(),
+        files={
+            "image": ("input.png", SOURCE_PNG, "image/png"),
+            "mask": ("mask.png", PALETTE_TRNS_MASK_PNG, "image/png"),
+        },
+    )
+    assert resp.status_code == 202
+    job = _wait_for_job(client, resp.json()["job_id"])
+    assert job["status"] == "success"
+    assert seen["mask_coverage"] == 1.0
+
+
 def test_edit_without_mask_reports_mask_not_applied(client, monkeypatch):
     async def fake_edit_api(
         api_url,
@@ -525,9 +613,19 @@ def test_legacy_edit_source_payload_without_role_rebuilds_as_image():
     }
     source = job_queue.edit_source_from_payload(payload)
     assert source.role == "image"
+    # Rows persisted before width/height existed default to 0 ("unknown"),
+    # never a guessed size that could silently defeat the primary-size reuse
+    # in validate_edit_mask().
+    assert source.width == 0
+    assert source.height == 0
 
     masked = job_queue.edit_source_from_payload({**payload, "role": "mask"})
     assert masked.role == "mask"
+
+    sized = job_queue.edit_source_from_payload({**payload, "width": 64, "height": 32})
+    assert (sized.width, sized.height) == (64, 32)
+    assert job_queue.edit_source_to_payload(sized)["width"] == 64
+    assert job_queue.edit_source_to_payload(sized)["height"] == 32
 
 
 def _mask_path_for(job_id: str) -> Path:
@@ -585,6 +683,10 @@ def test_edit_persists_mask_file_and_serves_it(client, monkeypatch):
     assert served.status_code == 200
     assert served.headers["content-type"] == "image/png"
     assert served.content == MASK_PNG
+    # job_id is unique and the promoted file is never rewritten, so a retry
+    # re-fetching the same job's mask can cache it indefinitely.
+    assert served.headers["cache-control"] == "private, max-age=31536000, immutable"
+    assert served.headers["x-mask-coverage"] == "1.0"
 
 
 def test_mask_endpoint_is_missing_for_unmasked_and_unknown_jobs(client, monkeypatch):

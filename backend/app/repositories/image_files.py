@@ -19,27 +19,6 @@ from ..core.media import (
 )
 
 
-def validate_image_file(
-    path: Path,
-    *,
-    filename: str = "",
-    content_type: str = "",
-) -> str:
-    try:
-        with path.open("rb") as file:
-            header = file.read(512)
-    except OSError as e:
-        raise ValueError("Image data could not be read") from e
-
-    detected_format = validate_image_header_bytes(
-        header,
-        filename=filename,
-        content_type=content_type,
-    )
-    verify_pillow_image(lambda: Image.open(path), expected_format=detected_format)
-    return detected_format
-
-
 def validate_image_file_details(
     path: Path,
     *,

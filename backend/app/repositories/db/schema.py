@@ -1086,6 +1086,19 @@ def _migration_performance_indexes(conn: sqlite3.Connection):
     )
 
 
+def _migration_gallery_mask_coverage_index(conn: sqlite3.Connection):
+    # mask_only filters gallery_entries down to masked edits before the usual
+    # (sort_seq DESC, id DESC) keyset page; without this the filter falls back
+    # to a full scan + sort once the gallery has thousands of rows.
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_gallery_entries_masked_sort_seq_id
+            ON gallery_entries(sort_seq DESC, id DESC)
+            WHERE mask_coverage IS NOT NULL
+        """
+    )
+
+
 SCHEMA_MIGRATIONS = (
     (1, "baseline_legacy_schema", _migration_baseline_legacy_schema),
     (2, "gallery_filter_options", _migration_gallery_filter_options),
@@ -1110,4 +1123,5 @@ SCHEMA_MIGRATIONS = (
     (21, "generate_job_mask_column", _migration_generate_job_mask_column),
     (22, "api_preset_supports_mask", _migration_api_preset_supports_mask),
     (23, "gallery_mask_coverage", _migration_gallery_mask_coverage),
+    (24, "gallery_mask_coverage_index", _migration_gallery_mask_coverage_index),
 )
