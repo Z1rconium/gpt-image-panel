@@ -274,3 +274,74 @@ test('mask editor stays usable at a mobile viewport', async ({ page }) => {
   await page.getByRole('button', { name: 'Apply mask' }).click();
   await expect(page.getByText(/^Mask \d+\.\d%$/)).toBeVisible();
 });
+
+async function canvasStrokePaths(
+  page: Page,
+  paths: { x: number; y: number }[][]
+) {
+  const box = await page.locator(MASK_CANVAS).boundingBox();
+  if (!box) throw new Error('mask canvas has no layout box');
+  const start = paths[0][0];
+  await page.mouse.move(box.x + box.width * start.x, box.y + box.height * start.y);
+  await page.mouse.down();
+  for (const point of paths[0].slice(1)) {
+    await page.mouse.move(box.x + box.width * point.x, box.y + box.height * point.y, { steps: 6 });
+  }
+  await page.mouse.up();
+}
+
+test('the rectangle tool fills a dragged region', async ({ page }) => {
+  await loadApp(page);
+  await uploadPrimary(page);
+  await openMaskEditor(page);
+
+  await page.getByRole('button', { name: 'Rectangle' }).click();
+  await canvasStrokePaths(page, [
+    [
+      { x: 0.25, y: 0.25 },
+      { x: 0.75, y: 0.75 }
+    ]
+  ]);
+
+  await expect(page.getByText(/Edit area [1-9]/)).toBeVisible();
+  await page.getByRole('button', { name: 'Apply mask' }).click();
+  await expect(page.getByText(/^Mask \d+\.\d%$/)).toBeVisible();
+});
+
+test('the lasso tool fills a closed region', async ({ page }) => {
+  await loadApp(page);
+  await uploadPrimary(page);
+  await openMaskEditor(page);
+
+  await page.getByRole('button', { name: 'Lasso' }).click();
+  await canvasStrokePaths(page, [
+    [
+      { x: 0.3, y: 0.2 },
+      { x: 0.7, y: 0.3 },
+      { x: 0.5, y: 0.8 },
+      { x: 0.3, y: 0.2 }
+    ]
+  ]);
+
+  await expect(page.getByText(/Edit area [1-9]/)).toBeVisible();
+  await page.getByRole('button', { name: 'Apply mask' }).click();
+  await expect(page.getByText(/^Mask \d+\.\d%$/)).toBeVisible();
+});
+
+test('painting still lands on the image while zoomed in', async ({ page }) => {
+  await loadApp(page);
+  await uploadPrimary(page);
+  await openMaskEditor(page);
+
+  await page.getByRole('button', { name: 'Zoom in' }).click();
+  await page.getByRole('button', { name: 'Zoom in' }).click();
+  await expect(page.getByText('156%')).toBeVisible();
+
+  await paintStroke(page);
+  await expect(page.getByText(/Edit area [1-9]/)).toBeVisible();
+
+  await page.getByRole('button', { name: 'Reset view' }).click();
+  await expect(page.getByText('100%')).toBeVisible();
+  await page.getByRole('button', { name: 'Apply mask' }).click();
+  await expect(page.getByText(/^Mask \d+\.\d%$/)).toBeVisible();
+});
