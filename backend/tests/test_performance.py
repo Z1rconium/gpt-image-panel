@@ -31,6 +31,7 @@ def _configure_runtime(tmp_path: Path):
 
     config.IMAGES_DIR = str(images_dir)
     config.THUMBNAILS_DIR = str(images_dir / "thumbs")
+    config.MASKS_DIR = str(images_dir / "masks")
     config.DATA_DIR = str(data_dir)
     config.DATABASE_FILE = str(data_dir / "app.sqlite3")
     config.DEFAULT_UPSTREAM_SOCKS5_PROXY = ""
