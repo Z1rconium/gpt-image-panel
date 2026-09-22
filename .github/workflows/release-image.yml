@@ -4,9 +4,9 @@
 # Each build job runs the matching release-<arch> bake target from
 # docker-bake.hcl: the image is pushed straight from BuildKit by digest (no tag,
 # no local tarball) and the per-platform registry cache is refreshed. The
-# publish job then assembles ${IMAGE}:${TAG} from the two digests. Promotion
-# to `latest` and the GitHub Release stay manual (AGENTS.md, "GitHub Release
-# Publication").
+# publish job then assembles ${IMAGE}:${TAG} from the two digests and moves
+# ${IMAGE}:latest onto it. Creating the GitHub Release stays manual (AGENTS.md,
+# "GitHub Release Publication").
 name: Release image
 
 on:
@@ -129,3 +129,8 @@ jobs:
             exit 1
           fi
           echo "Published $IMAGE:$TAG ($platforms)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Promote to latest
+        run: |
+          docker buildx imagetools create --tag "$IMAGE:latest" "$IMAGE:$TAG"
+          docker buildx imagetools inspect "$IMAGE:latest"
