@@ -86,11 +86,14 @@ def validate_edit_mask_file(
 
         # The export contract always fills black behind the alpha punch-out
         # (see maskDocument.ts exportPng), so a flat-black L band round-trips
-        # the same pixels through a much smaller PNG.
+        # the same pixels through a much smaller PNG. `optimize=True` would try
+        # several filter strategies and is the slowest step on the admission
+        # path; this file only ever feeds a retry, so a plain mid-level compress
+        # trades a few KB for a noticeably faster response.
         black = Image.new("L", (width, height), 0)
         optimized = Image.merge("LA", (black, alpha))
         buffer = io.BytesIO()
-        optimized.save(buffer, format="PNG", optimize=True)
+        optimized.save(buffer, format="PNG", compress_level=6)
 
     return EditMaskInfo(
         width=width,
