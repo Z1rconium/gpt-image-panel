@@ -17,6 +17,12 @@
 export const MAX_MASK_FILE_BYTES = 4 * 1024 * 1024;
 export const MAX_SMOOTH_PX = 64;
 
+/**
+ * Above this share of the frame, a dirty-region repaint of the smoothed view
+ * costs more bookkeeping than it saves, so the full-frame path is used instead.
+ */
+const PROCESSED_REGION_MAX_RATIO = 0.25;
+
 /** Solid fill used for marks; export and coverage only ever look at alpha. */
 export const MARK_COLOR = '#10b981';
 const MARK_RGB = { r: 16, g: 185, b: 129 } as const;
@@ -26,7 +32,7 @@ const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 const ALPHA_CHANNEL_COLOR_TYPES = new Set([4, 6]);
 const PALETTE_COLOR_TYPE = 3;
 
-export type MaskTool = 'brush' | 'eraser' | 'rect' | 'lasso' | 'pan';
+export type MaskTool = 'brush' | 'eraser' | 'rect' | 'ellipse' | 'lasso' | 'pan';
 
 export type MaskShapeMode = 'add' | 'erase';
 
@@ -170,6 +176,37 @@ export function unionRect(a: MaskRect, b: MaskRect): MaskRect {
   };
 }
 
+/** Grow a rect by `pad` on every side, clamped to the canvas; null if empty. */
+export function expandRect(
+  rect: MaskRect,
+  pad: number,
+  width: number,
+  height: number
+): MaskRect | null {
+  return clampRect(
+    {
+      x: rect.x - pad,
+      y: rect.y - pad,
+      width: rect.width + pad * 2,
+      height: rect.height + pad * 2
+    },
+    width,
+    height
+  );
+}
+
+export function rectArea(rect: MaskRect): number {
+  return Math.max(0, rect.width) * Math.max(0, rect.height);
+}
+
+/** True when the rect is unusable or spans the whole canvas. */
+export function rectCoversAll(rect: MaskRect | null, width: number, height: number): boolean {
+  if (!rect) return true;
+  return (
+    rect.x <= 0 && rect.y <= 0 && rect.x + rect.width >= width && rect.y + rect.height >= height
+  );
+}
+
 /** Rects covering `outer` minus `hole` as up to four pairwise-disjoint strips. */
 export function subtractRect(outer: MaskRect, hole: MaskRect): MaskRect[] {
   if (outer.width <= 0 || outer.height <= 0) return [];
@@ -254,6 +291,17 @@ export class MaskCoverageTracker {
     return this.totalPixels ? this.markedPixels / this.totalPixels : 0;
   }
 
+  /**
+   * Coverage including the in-flight stroke's painted-so-far delta. `coverage()`
+   * only changes when a stroke is committed, so the editor needs this to show
+   * the number move while the user is still drawing.
+   */
+  preview(countRegion: (rect: MaskRect) => number): number {
+    const active = this.active;
+    if (!active || !this.totalPixels) return this.coverage();
+    return (this.markedPixels + (countRegion(active.rect) - active.before)) / this.totalPixels;
+  }
+
   /** Snapshot the pre-stroke state of the stroke's first bounding box. */
   beginStroke(rect: MaskRect, countRegion: (rect: MaskRect) => number): void {
     this.active = { rect, before: countRegion(rect) };
@@ -312,7 +360,7 @@ type StrokeCommand = {
 };
 
 type ShapeCommand = {
-  kind: 'rect' | 'lasso';
+  kind: 'rect' | 'ellipse' | 'lasso';
   mode: MaskShapeMode;
   points: MaskPoint[];
 };
@@ -461,6 +509,12 @@ export function createMaskDocument(width: number, height: number) {
   let processedCanvas: HTMLCanvasElement | null = null;
   let blurCanvas: HTMLCanvasElement | null = null;
 
+  // Repaint bookkeeping for the processed view: the union of regions whose
+  // marks changed since the last repaint, plus the running marked-pixel total
+  // so `processedEditableRatio()` never needs a second full-frame read.
+  let processedDirty: MaskRect | null = null;
+  let processedMarked = 0;
+
   // Single-slot cache of the binarized layer for the most recent import
   // command, so undo/redo replays do not re-decode the stored PNG every time.
   let importLayerCache: { source: Blob; layer: CanvasImageSource } | null = null;
@@ -530,20 +584,32 @@ export function createMaskDocument(width: number, height: number) {
     target.restore();
   }
 
-  /** Trace a rect/lasso outline into the current path; false when degenerate. */
+  /** Trace a rect/ellipse/lasso outline into the current path; false when degenerate. */
   function traceShape(target: CanvasRenderingContext2D, command: ShapeCommand): boolean {
     const { points } = command;
     target.beginPath();
-    if (command.kind === 'rect') {
+    if (command.kind === 'rect' || command.kind === 'ellipse') {
       const start = points[0];
       const end = points[points.length - 1];
       if (!start || !end || (start.x === end.x && start.y === end.y)) return false;
-      target.rect(
-        Math.min(start.x, end.x),
-        Math.min(start.y, end.y),
-        Math.abs(end.x - start.x),
-        Math.abs(end.y - start.y)
-      );
+      const x = Math.min(start.x, end.x);
+      const y = Math.min(start.y, end.y);
+      const rectWidth = Math.abs(end.x - start.x);
+      const rectHeight = Math.abs(end.y - start.y);
+      if (command.kind === 'rect') {
+        target.rect(x, y, rectWidth, rectHeight);
+      } else {
+        // Ellipse inscribed in the dragged box, matching the rect tool's corners.
+        target.ellipse(
+          x + rectWidth / 2,
+          y + rectHeight / 2,
+          rectWidth / 2,
+          rectHeight / 2,
+          0,
+          0,
+          Math.PI * 2
+        );
+      }
       return true;
     }
     if (points.length < 3) return false;
@@ -593,6 +659,7 @@ export function createMaskDocument(width: number, height: number) {
         drawStroke(context, command);
         break;
       case 'rect':
+      case 'ellipse':
       case 'lasso':
         fillShape(context, command);
         break;
@@ -652,13 +719,29 @@ export function createMaskDocument(width: number, height: number) {
     tracker.resetTo(countRegion({ x: 0, y: 0, width, height }));
   }
 
-  function invalidateProcessed() {
+  /**
+   * Mark the processed view stale. Pass the region whose marks changed to let
+   * the next repaint touch only that area; omit it (or pass null) when the
+   * change is unbounded (clear/invert/import/undo replay, smoothing radius).
+   */
+  function invalidateProcessed(rect: MaskRect | null = null) {
     processedStale = true;
+    if (smoothPx <= 0) return;
+    if (!rect) {
+      processedDirty = { x: 0, y: 0, width, height };
+      return;
+    }
+    processedDirty = processedDirty ? unionRect(processedDirty, rect) : rect;
   }
 
   function ensureProcessedCanvas(): HTMLCanvasElement {
     if (!processedCanvas) processedCanvas = createCanvas(width, height);
     return processedCanvas;
+  }
+
+  function ensureBlurCanvas(): HTMLCanvasElement {
+    if (!blurCanvas) blurCanvas = createCanvas(width, height);
+    return blurCanvas;
   }
 
   function releaseProcessedLayers() {
@@ -672,24 +755,25 @@ export function createMaskDocument(width: number, height: number) {
       blurCanvas.height = 0;
       blurCanvas = null;
     }
+    processedMarked = 0;
+    processedDirty = null;
   }
 
-  // Blur the marks and re-binarize the alpha: the same contour the export
-  // produces, so the on-canvas preview never promises a different region.
-  // Without smoothing the marks themselves are the processed view and the
-  // extra layers are released.
-  function repaintProcessed() {
-    if (smoothPx <= 0) {
-      releaseProcessedLayers();
-      processedStale = false;
-      return;
-    }
-    const target = context2d(ensureProcessedCanvas(), true);
-    target.save();
-    target.globalCompositeOperation = 'copy';
-    target.clearRect(0, 0, width, height);
-    if (!blurCanvas) blurCanvas = createCanvas(width, height);
-    const blur = context2d(blurCanvas, true);
+  /** Marked pixels of the processed view inside `rect` (clamped). */
+  function countProcessedRegion(rect: MaskRect): number {
+    const region = clampRect(rect, width, height);
+    if (!region || !processedCanvas) return 0;
+    const data = context2d(processedCanvas, true).getImageData(
+      region.x,
+      region.y,
+      region.width,
+      region.height
+    ).data;
+    return countMarked(data);
+  }
+
+  /** Full-frame repaint: blur + binarize every pixel and recount the total. */
+  function repaintProcessedFull(target: CanvasRenderingContext2D, blur: CanvasRenderingContext2D) {
     blur.save();
     blur.globalCompositeOperation = 'copy';
     blur.clearRect(0, 0, width, height);
@@ -697,23 +781,133 @@ export function createMaskDocument(width: number, height: number) {
     blur.drawImage(marks, 0, 0);
     blur.filter = 'none';
     blur.restore();
+
     const imageData = blur.getImageData(0, 0, width, height);
-    binarizeMaskAlphaData(imageData.data);
+    const transparentRatio = binarizeMaskAlphaData(imageData.data);
     blur.putImageData(imageData, 0, 0);
-    target.drawImage(blurCanvas, 0, 0);
+
+    target.save();
+    target.globalCompositeOperation = 'copy';
+    target.clearRect(0, 0, width, height);
+    target.drawImage(blurCanvas as HTMLCanvasElement, 0, 0);
     target.restore();
+
+    const total = width * height;
+    processedMarked = Math.round((1 - transparentRatio) * total);
+  }
+
+  /**
+   * Region repaint: blur a padded input area, binarize the expanded output
+   * region, and fold that region's marked-pixel delta into the running total.
+   *
+   * Both partial draws below explicitly `clearRect` their own sub-rectangle
+   * and rely on the default `source-over` compositing rather than `copy`:
+   * per the Canvas 2D Porter-Duff "copy" operator (Co = Cs, Ao = As), setting
+   * `globalCompositeOperation = 'copy'` and then drawing into only part of a
+   * canvas clears the *entire* canvas to transparent outside the drawn area,
+   * not just the sub-rectangle being updated — it would silently erase every
+   * previously smoothed stroke elsewhere on the canvas on every incremental
+   * repaint. `repaintProcessedFull` gets away with `copy` because it always
+   * draws the whole canvas, so there is no "outside" to lose.
+   */
+  function repaintProcessedRegion(
+    target: CanvasRenderingContext2D,
+    blur: CanvasRenderingContext2D,
+    output: MaskRect
+  ) {
+    // CSS `blur(<length>)` uses the length as the Gaussian's standard
+    // deviation, whose significant support reaches well past the nominal
+    // radius (~3 sigma covers >99% of the kernel's mass), so the padding
+    // has to be a multiple of smoothPx rather than a small constant offset
+    // or the inner box would be computed from a clipped, under-blurred edge.
+    const padding = Math.ceil(smoothPx * 3) + 2;
+    // Keep padding around the output region so the cropped input has the same
+    // blur samples as a full-frame draw.
+    const input = expandRect(output, padding, width, height);
+    if (!input) return;
+    const before = countProcessedRegion(output);
+
+    blur.save();
+    blur.clearRect(input.x, input.y, input.width, input.height);
+    blur.filter = `blur(${smoothPx}px)`;
+    blur.drawImage(
+      marks,
+      input.x,
+      input.y,
+      input.width,
+      input.height,
+      input.x,
+      input.y,
+      input.width,
+      input.height
+    );
+    blur.filter = 'none';
+    blur.restore();
+
+    const imageData = blur.getImageData(output.x, output.y, output.width, output.height);
+    const transparentRatio = binarizeMaskAlphaData(imageData.data);
+    blur.putImageData(imageData, output.x, output.y);
+
+    target.save();
+    target.clearRect(output.x, output.y, output.width, output.height);
+    target.drawImage(
+      blurCanvas as HTMLCanvasElement,
+      output.x,
+      output.y,
+      output.width,
+      output.height,
+      output.x,
+      output.y,
+      output.width,
+      output.height
+    );
+    target.restore();
+
+    // Reuse the ratio the binarize pass already computed instead of reading
+    // the just-drawn pixels back a second time.
+    const after = Math.round((1 - transparentRatio) * (output.width * output.height));
+    processedMarked += after - before;
+  }
+
+  // Blur the marks and re-binarize the alpha: the same contour the export
+  // produces, so the on-canvas preview never promises a different region.
+  // Without smoothing the marks themselves are the processed view and the
+  // extra layers are released. A repaint only touches the dirty region unless
+  // it spans too much of the frame to be worth the bookkeeping (or is unknown).
+  function repaintProcessed() {
+    if (smoothPx <= 0) {
+      releaseProcessedLayers();
+      processedStale = false;
+      return;
+    }
+    const target = context2d(ensureProcessedCanvas(), true);
+    const blur = context2d(ensureBlurCanvas(), true);
+    const dirty = processedDirty;
+    const full: MaskRect = { x: 0, y: 0, width, height };
+    const processedRegion = dirty && expandRect(dirty, Math.ceil(smoothPx * 3) + 2, width, height);
+    if (
+      !processedRegion ||
+      rectCoversAll(processedRegion, width, height) ||
+      rectArea(processedRegion) > rectArea(full) * PROCESSED_REGION_MAX_RATIO
+    ) {
+      repaintProcessedFull(target, blur);
+    } else {
+      repaintProcessedRegion(target, blur, processedRegion);
+    }
+    processedDirty = null;
     processedStale = false;
   }
 
   /**
    * Edited-area ratio of the processed view. The processed canvas keeps the
    * marks orientation (painted alpha = editable), unlike the exported PNG
-   * where editable pixels end up fully transparent.
+   * where editable pixels end up fully transparent. The count is maintained by
+   * the repaint above, so this never reads pixels back.
    */
   function processedEditableRatio(): number {
     if (smoothPx <= 0 || !processedCanvas) return tracker.coverage();
-    const data = context2d(processedCanvas, true).getImageData(0, 0, width, height).data;
-    return countMarkedPixels(data);
+    const total = width * height;
+    return total ? processedMarked / total : 0;
   }
 
   function releaseImportLayerCache() {
@@ -773,7 +967,7 @@ export function createMaskDocument(width: number, height: number) {
 
     beginStroke(tool: MaskTool, size: number, point: MaskPoint, mode: MaskShapeMode = 'add') {
       if (tool === 'pan') return;
-      if (tool === 'rect' || tool === 'lasso') {
+      if (tool === 'rect' || tool === 'ellipse' || tool === 'lasso') {
         // Shapes stay uncommitted until the pointer is released so an
         // accidental drag can be dismissed and undo has a single entry.
         redoStack = [];
@@ -787,13 +981,15 @@ export function createMaskDocument(width: number, height: number) {
       const rect = strokeRectFor(command.points, size, width, height);
       if (rect) tracker.beginStroke(rect, countRegion);
       drawStroke(context, command, 0);
-      invalidateProcessed();
+      invalidateProcessed(rect);
     },
 
     extendStroke(points: MaskPoint[]) {
       if (!points.length) return;
       if (activeShape) {
-        if (activeShape.kind === 'rect') {
+        // A shape only touches the marks canvas on release, so there is no
+        // processed repaint to schedule while dragging.
+        if (activeShape.kind === 'rect' || activeShape.kind === 'ellipse') {
           activeShape.points = [activeShape.points[0], points[points.length - 1]];
         } else {
           activeShape.points.push(...points);
@@ -806,7 +1002,7 @@ export function createMaskDocument(width: number, height: number) {
       const rect = strokeRectFor(points, activeStroke.size, width, height);
       if (rect) tracker.extendStroke(rect, countRegion);
       drawStroke(context, activeStroke, fromIndex);
-      invalidateProcessed();
+      invalidateProcessed(rect);
     },
 
     endStroke() {
@@ -819,7 +1015,7 @@ export function createMaskDocument(width: number, height: number) {
           commands.push(command);
           redoStack = [];
           tracker.endStroke(countRegion);
-          invalidateProcessed();
+          invalidateProcessed(rect);
           maybeCheckpoint();
         } else {
           tracker.cancelStroke();
@@ -830,6 +1026,13 @@ export function createMaskDocument(width: number, height: number) {
         tracker.endStroke(countRegion);
         maybeCheckpoint();
       }
+    },
+
+    /** Drop the in-flight rect/ellipse/lasso drag without committing it. */
+    cancelActiveShape() {
+      if (!activeShape) return false;
+      activeShape = null;
+      return true;
     },
 
     canUndo() {
@@ -913,6 +1116,9 @@ export function createMaskDocument(width: number, height: number) {
     setSmoothing(px: number) {
       const next = normalizeSmoothPx(px, width);
       if (next === smoothPx && !processedStale) return processedEditableRatio();
+      // A different radius changes every pixel's blur input, so the whole
+      // frame has to be rebuilt regardless of what was dirty.
+      if (next !== smoothPx) processedDirty = { x: 0, y: 0, width, height };
       smoothPx = next;
       repaintProcessed();
       return processedEditableRatio();
@@ -939,11 +1145,16 @@ export function createMaskDocument(width: number, height: number) {
 
     coverage,
 
+    /** Live coverage of the committed marks plus the stroke in progress. */
+    liveCoverage() {
+      return tracker.preview(countRegion);
+    },
+
     hasActiveShape() {
       return activeShape !== null;
     },
 
-    /** Draw the in-progress rect/lasso into a context in image coordinates. */
+    /** Draw the in-progress rect/ellipse/lasso into a context in image coordinates. */
     drawActiveShapePreview(target: CanvasRenderingContext2D) {
       if (!activeShape) return;
       fillShape(target, activeShape, activeShape.mode === 'erase' ? '#000' : MARK_PREVIEW_COLOR);

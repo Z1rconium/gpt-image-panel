@@ -2,6 +2,7 @@
   import { get } from 'svelte/store';
   import { onDestroy, tick } from 'svelte';
   import Brush from 'lucide-svelte/icons/brush';
+  import Circle from 'lucide-svelte/icons/circle';
   import CircleHelp from 'lucide-svelte/icons/circle-help';
   import Contrast from 'lucide-svelte/icons/contrast';
   import Eraser from 'lucide-svelte/icons/eraser';
@@ -9,6 +10,7 @@
   import Hand from 'lucide-svelte/icons/hand';
   import Layers from 'lucide-svelte/icons/layers';
   import Lasso from 'lucide-svelte/icons/lasso';
+  import Magnet from 'lucide-svelte/icons/magnet';
   import Maximize from 'lucide-svelte/icons/maximize';
   import Minus from 'lucide-svelte/icons/minus';
   import Plus from 'lucide-svelte/icons/plus';
@@ -35,6 +37,15 @@
     type MaskShapeMode,
     type MaskTool
   } from '$lib/features/mask/maskDocument';
+  import {
+    SNAP_RADIUS_DEFAULT,
+    SNAP_RADIUS_MAX,
+    SNAP_RADIUS_MIN,
+    computeEdgeMap,
+    edgeMapSize,
+    snapToEdge,
+    type EdgeMap
+  } from '$lib/features/mask/maskSnap';
 
   export let open: boolean;
   export let sourceId = '';
@@ -70,14 +81,28 @@
   let naturalHeight = 0;
   let cursorVisible = false;
   let renderHandle: number | null = null;
+  // Set on every brush/eraser pointermove and drained inside the same rAF
+  // that repaints the canvas, so a fast drag doesn't run the coverage's
+  // getImageData read once per raw pointer event.
+  let liveCoverageDirty = false;
   let resizeObserver: ResizeObserver | null = null;
   let checkerPattern: CanvasPattern | null = null;
   let prepareToken = 0;
   let showHelp = false;
   let smoothTimer: ReturnType<typeof setTimeout> | null = null;
 
+  // Magnetic edge snapping (lasso + rectangle). Off by default; the choice and
+  // radius are remembered across sessions. The edge map is a downscaled Sobel
+  // gradient of the primary image, built lazily the first time it is needed.
+  let snapEnabled = false;
+  let snapRadiusScreen = SNAP_RADIUS_DEFAULT;
+  let snapMap: EdgeMap | null = null;
+  let naturalImage: HTMLImageElement | null = null;
+
   const MIN_ZOOM = 0.1;
   const MAX_ZOOM = 8;
+  const SNAP_STORAGE_KEY = 'maskEditor.snap';
+  const SNAP_TOOLS: MaskTool[] = ['rect', 'ellipse', 'lasso'];
   let viewScale = 1;
   let viewX = 0;
   let viewY = 0;
@@ -89,6 +114,7 @@
 
   $: sizeHint = size !== 'auto' && naturalWidth > 0 && size !== `${naturalWidth}x${naturalHeight}`;
   $: hasExistingMask = Boolean(existingMask && existingMask.sourceId === sourceId);
+  $: snapAvailable = SNAP_TOOLS.includes(tool);
   $: brushRingSize = brushScreen / viewScale;
   $: cursorHidden = !cursorVisible || spacePressed || (tool !== 'brush' && tool !== 'eraser');
   $: canvasCursorClass = spacePressed
@@ -126,6 +152,8 @@
     drawing = false;
     checkerPattern = null;
     cursorVisible = false;
+    snapMap = null;
+    naturalImage = null;
   }
 
   onDestroy(teardown);
@@ -170,6 +198,9 @@
     viewScale = 1;
     viewX = 0;
     viewY = 0;
+    snapMap = null;
+    naturalImage = null;
+    restoreSnapPreference();
 
     try {
       const image = await loadImageElement(imageUrl);
@@ -180,6 +211,7 @@
         onError(get(t).maskEditor.importFailed);
         return;
       }
+      naturalImage = image;
       doc = createMaskDocument(naturalWidth, naturalHeight);
       if (existingMask && existingMask.sourceId === sourceId) {
         try {
@@ -209,6 +241,9 @@
     resizeOverlay();
     fitView();
     scheduleRender();
+    // A snap preference restored from a previous session needs its edge map
+    // before the first stroke, otherwise the first drag would go unsnapped.
+    if (snapEnabled) void ensureSnapMap();
   }
 
   function resizeOverlay() {
@@ -232,6 +267,10 @@
     if (renderHandle !== null) return;
     renderHandle = requestAnimationFrame(() => {
       renderHandle = null;
+      if (liveCoverageDirty) {
+        liveCoverageDirty = false;
+        publishLiveCoverage();
+      }
       render();
     });
   }
@@ -279,14 +318,167 @@
     // up to date so the preview matches the coverage readout and the export;
     // raw marks keep mid-stroke feedback instant. Marks are already emerald
     // in the document layer, so they are drawn straight into the view
-    // transform — the browser only rasterizes the visible part of the image.
+    // transform — and only the slice that lands on screen, so the browser
+    // never has to touch off-screen pixels of a 4096² mask.
     context.setTransform(viewScale * dpr, 0, 0, viewScale * dpr, viewX * dpr, viewY * dpr);
     context.globalAlpha = 0.45;
     const base = doc.processedFresh() ? doc.processed : doc.marks;
-    context.drawImage(base, 0, 0);
+    const visible = visibleSourceRect(doc.width, doc.height, width / dpr, height / dpr);
+    if (visible) {
+      context.drawImage(
+        base,
+        visible.x,
+        visible.y,
+        visible.width,
+        visible.height,
+        visible.x,
+        visible.y,
+        visible.width,
+        visible.height
+      );
+    }
     context.globalAlpha = 1;
     doc.drawActiveShapePreview(context);
     context.setTransform(1, 0, 0, 1, 0, 0);
+  }
+
+  function clampSource(value: number, min: number, max: number) {
+    return Math.min(max, Math.max(min, value));
+  }
+
+  /** Image-space rectangle currently on screen; null when it is off-canvas. */
+  function visibleSourceRect(
+    imageWidth: number,
+    imageHeight: number,
+    stageWidth: number,
+    stageHeight: number
+  ) {
+    if (viewScale <= 0) return null;
+    const left = clampSource(-viewX / viewScale, 0, imageWidth);
+    const top = clampSource(-viewY / viewScale, 0, imageHeight);
+    const right = clampSource((stageWidth - viewX) / viewScale, 0, imageWidth);
+    const bottom = clampSource((stageHeight - viewY) / viewScale, 0, imageHeight);
+    if (right <= left || bottom <= top) return null;
+    return { x: left, y: top, width: right - left, height: bottom - top };
+  }
+
+  /**
+   * Live coverage while a stroke is in flight. The incremental tracker is
+   * cheap to read (no full-frame pixel pass), so the readout moves with the
+   * brush instead of waiting for the pointer to come up. Publishing from the
+   * pointer handler rather than the render pass keeps it immediate — the
+   * canvas repaint is allowed to lag a frame, the number is not. Only a change
+   * in the displayed tenth of a percent touches reactive state.
+   */
+  function publishLiveCoverage() {
+    if (!doc) return;
+    const next = doc.liveCoverage();
+    if (Math.round(next * 1000) === Math.round(coverage * 1000)) return;
+    coverage = next;
+  }
+
+  /**
+   * Snap preference is a per-user editor habit rather than per-image state, so
+   * it lives in localStorage and carries across sessions. Defaults to off.
+   */
+  function restoreSnapPreference() {
+    snapEnabled = false;
+    snapRadiusScreen = SNAP_RADIUS_DEFAULT;
+    if (typeof localStorage === 'undefined') return;
+    try {
+      const raw = localStorage.getItem(SNAP_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as { enabled?: unknown; radius?: unknown };
+      snapEnabled = parsed.enabled === true;
+      if (typeof parsed.radius === 'number' && Number.isFinite(parsed.radius)) {
+        snapRadiusScreen = Math.min(
+          SNAP_RADIUS_MAX,
+          Math.max(SNAP_RADIUS_MIN, Math.round(parsed.radius))
+        );
+      }
+    } catch {
+      // A corrupt entry just falls back to the defaults.
+    }
+  }
+
+  function persistSnapPreference() {
+    if (typeof localStorage === 'undefined') return;
+    try {
+      localStorage.setItem(
+        SNAP_STORAGE_KEY,
+        JSON.stringify({ enabled: snapEnabled, radius: snapRadiusScreen })
+      );
+    } catch {
+      // Storage can be unavailable (private mode); snapping still works.
+    }
+  }
+
+  /**
+   * Downscaled Sobel gradient map of the primary image. Built lazily — a user
+   * who never turns snapping on never pays for it. The pass is synchronous but
+   * bounded by the map's size cap, so even a 4096² photo costs tens of ms.
+   */
+  function buildSnapMap(): EdgeMap | null {
+    if (!naturalImage || !doc) return null;
+    const size = edgeMapSize(doc.width, doc.height);
+    const canvas = document.createElement('canvas');
+    canvas.width = size.width;
+    canvas.height = size.height;
+    const context = canvas.getContext('2d', { willReadFrequently: true });
+    if (!context) return null;
+    context.drawImage(naturalImage, 0, 0, size.width, size.height);
+    const data = context.getImageData(0, 0, size.width, size.height);
+    canvas.width = 0;
+    canvas.height = 0;
+    return computeEdgeMap(data.data, size.width, size.height, {
+      scale: size.scale,
+      sourceWidth: doc.width,
+      sourceHeight: doc.height
+    });
+  }
+
+  async function ensureSnapMap() {
+    if (snapMap || !naturalImage || !doc) return;
+    busy = true;
+    // Let the busy banner paint before the synchronous build blocks the thread.
+    await tick();
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    if (!doc) {
+      busy = false;
+      return;
+    }
+    snapMap = buildSnapMap();
+    busy = false;
+  }
+
+  async function setSnapEnabled(next: boolean) {
+    if (next === snapEnabled) return;
+    snapEnabled = next;
+    persistSnapPreference();
+    if (next) await ensureSnapMap();
+    scheduleRender();
+  }
+
+  function setSnapRadius(value: number) {
+    snapRadiusScreen = Math.min(SNAP_RADIUS_MAX, Math.max(SNAP_RADIUS_MIN, Math.round(value)));
+    persistSnapPreference();
+  }
+
+  /** Snap radius converted from screen pixels to image pixels at the current zoom. */
+  function snapRadiusImage() {
+    if (viewScale <= 0) return snapRadiusScreen;
+    return snapRadiusScreen / viewScale;
+  }
+
+  /**
+   * Pull a point onto the nearest strong image edge. The input is returned
+   * untouched when snapping is off, its map is missing, or the point sits in a
+   * flat area (so freehand tracing of smooth regions is unaffected).
+   */
+  function snapPoint(point: MaskPoint): MaskPoint {
+    if (!snapEnabled || !snapMap || !snapAvailable) return point;
+    const result = snapToEdge(snapMap, point.x, point.y, snapRadiusImage());
+    return result.snapped ? { x: result.x, y: result.y } : point;
   }
 
   function setView(next: 'overlay' | 'maskOnly') {
@@ -424,7 +616,7 @@
     overlayEl.setPointerCapture(event.pointerId);
     drawing = true;
     const mode: MaskShapeMode = event.altKey ? (shapeMode === 'add' ? 'erase' : 'add') : shapeMode;
-    doc.beginStroke(tool, brushImageSize(), point, mode);
+    doc.beginStroke(tool, brushImageSize(), snapPoint(point), mode);
     paintedAny = true;
     dirty = true;
     updateHistoryFlags();
@@ -451,9 +643,11 @@
       typeof event.getCoalescedEvents === 'function' ? event.getCoalescedEvents() : [event];
     const points = coalesced
       .map((candidate) => toImagePoint(candidate, rect))
-      .filter((point): point is MaskPoint => point !== null);
+      .filter((point): point is MaskPoint => point !== null)
+      .map(snapPoint);
     if (!points.length) return;
     doc.extendStroke(points);
+    if (tool === 'brush' || tool === 'eraser') liveCoverageDirty = true;
     scheduleRender();
   }
 
@@ -471,6 +665,9 @@
       overlayEl.releasePointerCapture(event.pointerId);
     }
     doc.endStroke();
+    // Commit the number synchronously so the readout never sits on the
+    // in-flight estimate while the debounced smoothing sync catches up.
+    coverage = doc.coverage();
     scheduleRender();
     scheduleSmoothSync(smoothPx > 0 ? 150 : 0);
     updateHistoryFlags();
@@ -650,6 +847,20 @@
     onClose();
   }
 
+  function handleKeydownCapture(event: KeyboardEvent) {
+    if (!open) return;
+    // Escape during a shape drag should discard that drag, not close the whole
+    // dialog. `use:dialog` listens on document in the capture phase, so this
+    // window-capture handler runs first and can consume the event. Snapping
+    // makes a mistimed drag more likely, which is why this exists.
+    if (event.key === 'Escape' && doc?.hasActiveShape()) {
+      event.preventDefault();
+      event.stopPropagation();
+      doc.cancelActiveShape();
+      scheduleRender();
+    }
+  }
+
   function handleKeydown(event: KeyboardEvent) {
     if (!open) return;
     const meta = event.metaKey || event.ctrlKey;
@@ -678,8 +889,10 @@
     if (key === 'b') tool = 'brush';
     else if (key === 'e') tool = 'eraser';
     else if (key === 'r') tool = 'rect';
+    else if (key === 'o') tool = 'ellipse';
     else if (key === 'l') tool = 'lasso';
     else if (key === 'h') tool = 'pan';
+    else if (key === 's') void setSnapEnabled(!snapEnabled);
     else if (key === '0') fitView();
     else if (event.key === '[') {
       event.preventDefault();
@@ -695,7 +908,11 @@
   }
 </script>
 
-<svelte:window on:keydown={handleKeydown} on:keyup={handleKeyup} />
+<svelte:window
+  on:keydown|capture={handleKeydownCapture}
+  on:keydown={handleKeydown}
+  on:keyup={handleKeyup}
+/>
 
 {#if open}
   <div
@@ -870,6 +1087,21 @@
             <button
               type="button"
               class="mobile-touch-target control-focus flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors"
+              class:bg-emerald-600={tool === 'ellipse'}
+              class:text-white={tool === 'ellipse'}
+              class:text-zinc-300={tool !== 'ellipse'}
+              class:hover:bg-zinc-800={tool !== 'ellipse'}
+              aria-pressed={tool === 'ellipse'}
+              aria-label={$t.maskEditor.ellipse}
+              title={$t.maskEditor.ellipse}
+              on:click={() => (tool = 'ellipse')}
+            >
+              <Circle size={15} strokeWidth={1.9} aria-hidden="true" />
+              <span>{$t.maskEditor.ellipse}</span>
+            </button>
+            <button
+              type="button"
+              class="mobile-touch-target control-focus flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors"
               class:bg-emerald-600={tool === 'lasso'}
               class:text-white={tool === 'lasso'}
               class:text-zinc-300={tool !== 'lasso'}
@@ -899,7 +1131,50 @@
             </button>
           </div>
 
-          {#if tool === 'rect' || tool === 'lasso'}
+          {#if snapAvailable}
+            <div
+              class="flex items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-900/60 p-1"
+              role="group"
+              aria-label={$t.maskEditor.snapGroupLabel}
+            >
+              <button
+                type="button"
+                class="mobile-touch-target control-focus flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium transition-colors"
+                class:bg-emerald-600={snapEnabled}
+                class:text-white={snapEnabled}
+                class:text-zinc-300={!snapEnabled}
+                class:hover:bg-zinc-800={!snapEnabled}
+                aria-pressed={snapEnabled}
+                aria-label={$t.maskEditor.snap}
+                title={$t.maskEditor.snapHint}
+                on:click={() => void setSnapEnabled(!snapEnabled)}
+              >
+                <Magnet size={15} strokeWidth={1.9} aria-hidden="true" />
+                <span>{$t.maskEditor.snap}</span>
+              </button>
+              {#if snapEnabled}
+                <label class="flex items-center gap-2 px-1.5">
+                  <input
+                    type="range"
+                    min={SNAP_RADIUS_MIN}
+                    max={SNAP_RADIUS_MAX}
+                    step="1"
+                    class="control-focus h-1.5 w-24 accent-emerald-600"
+                    aria-label={$t.maskEditor.snapRadius(snapRadiusScreen)}
+                    title={$t.maskEditor.snapRadius(snapRadiusScreen)}
+                    value={snapRadiusScreen}
+                    on:input={(event) =>
+                      setSnapRadius((event.currentTarget as HTMLInputElement).valueAsNumber)}
+                  />
+                  <span class="w-[70px] shrink-0 text-xs tabular-nums text-zinc-400">
+                    {$t.maskEditor.snapRadius(snapRadiusScreen)}
+                  </span>
+                </label>
+              {/if}
+            </div>
+          {/if}
+
+          {#if tool === 'rect' || tool === 'ellipse' || tool === 'lasso'}
             <div
               class="flex items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-900/60 p-1"
               role="group"

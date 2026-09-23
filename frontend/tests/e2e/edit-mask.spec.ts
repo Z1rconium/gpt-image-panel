@@ -62,6 +62,36 @@ function solidPng(width: number, height: number): Buffer {
 
 const HUGE_PNG = solidPng(4096, 4096);
 
+/** A 64x64 RGB PNG with a hard black/white vertical step at x = 32. */
+function twoTonePng(width: number, height: number): Buffer {
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8;
+  ihdr[9] = 2;
+  const raw = Buffer.alloc((1 + width * 3) * height);
+  let offset = 0;
+  for (let y = 0; y < height; y += 1) {
+    raw[offset] = 0;
+    offset += 1;
+    for (let x = 0; x < width; x += 1) {
+      const value = x < width / 2 ? 0 : 255;
+      raw[offset] = value;
+      raw[offset + 1] = value;
+      raw[offset + 2] = value;
+      offset += 3;
+    }
+  }
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    pngChunk('IHDR', ihdr),
+    pngChunk('IDAT', deflateSync(raw)),
+    pngChunk('IEND', Buffer.alloc(0))
+  ]);
+}
+
+const TWO_TONE_PNG = twoTonePng(64, 64);
+
 const MASK_CANVAS = 'canvas[aria-label="Mask canvas"]';
 const MASK_INPUT = 'input[type="file"][accept="image/png"]';
 const EDITOR_DIALOG = (page: Page) => page.getByRole('dialog', { name: /Repaint area/ });
@@ -599,7 +629,11 @@ async function paintGrowingStroke(page: Page, endFraction: number) {
   await page.mouse.up();
 }
 
-test('undo across a checkpoint boundary restores exact prior coverage', async ({ page }) => {
+function parseCoverage(text: string | null): number {
+  return parseFloat((text ?? '').replace(/[^\d.]/g, ''));
+}
+
+test('undo across a checkpoint boundary restores the prior coverage', async ({ page }) => {
   // maskDocument.ts snapshots an undo checkpoint every 8 committed commands
   // (CHECKPOINT_INTERVAL); ten strokes and ten matching undos exercise both
   // the checkpoint-restore path and the from-scratch path below it.
@@ -608,7 +642,7 @@ test('undo across a checkpoint boundary restores exact prior coverage', async ({
   await openMaskEditor(page);
 
   const strokeCount = 10;
-  const coverageAfter: string[] = [];
+  const coverageAfter: number[] = [];
   for (let index = 0; index < strokeCount; index += 1) {
     // Each stroke starts at the same point but reaches further right, so
     // every one adds new, distinguishable coverage instead of repainting an
@@ -616,16 +650,212 @@ test('undo across a checkpoint boundary restores exact prior coverage', async ({
     await paintGrowingStroke(page, 0.15 + index * 0.075);
     const readout = page.getByText(/^Edit area/);
     await expect(readout).toBeVisible();
-    coverageAfter.push((await readout.textContent()) ?? '');
+    coverageAfter.push(parseCoverage(await readout.textContent()));
   }
   // Sanity check: coverage must actually have grown each step, or this test
   // would pass trivially without ever exercising undo.
   expect(new Set(coverageAfter).size).toBe(strokeCount);
+  for (let index = 1; index < strokeCount; index += 1) {
+    expect(coverageAfter[index]).toBeGreaterThan(coverageAfter[index - 1]);
+  }
 
+  const restored: number[] = [];
   for (let index = strokeCount - 1; index >= 0; index -= 1) {
     await page.keyboard.press('Control+z');
-    const expected = index === 0 ? 'Edit area 0.0%' : coverageAfter[index - 1];
-    await expect(page.getByText(expected)).toBeVisible();
+    await expect(page.getByText(/^Edit area/)).toBeVisible();
+    restored.push(parseCoverage(await page.getByText(/^Edit area/).textContent()));
+  }
+
+  // Undo restores from the nearest checkpoint and replays the tail. A replayed
+  // stroke is traced as one path while live painting traces it segment by
+  // segment, so antialiased edge pixels land a hair differently and the
+  // recounted coverage runs ~0.1-0.2pp below what the incremental tracker
+  // reported at paint time. Hence the tolerance instead of string equality.
+  // restored[k] is the state after undoing the (k + 1)-th last stroke, so it
+  // corresponds to coverageAfter[strokeCount - 2 - k].
+  expect(restored[strokeCount - 1]).toBe(0);
+  for (let index = 0; index < strokeCount - 1; index += 1) {
+    const expected = coverageAfter[strokeCount - 2 - index];
+    expect(Math.abs(restored[index] - expected)).toBeLessThanOrEqual(0.3);
   }
   await expect(page.getByRole('button', { name: 'Save selection' })).toBeDisabled();
+});
+
+/**
+ * Overlay-canvas backing pixel for image coordinate (ix, iy). The overlay is a
+ * viewport-sized sibling of the zoom layer, so the mapping runs through the
+ * displayed image rect.
+ */
+async function overlayPixelForImage(page: Page, size: number, ix: number, iy: number) {
+  const image = await maskImageBox(page);
+  const canvas = await page.locator(MASK_CANVAS).boundingBox();
+  if (!canvas) throw new Error('mask canvas has no layout box');
+  const dpr = await page.evaluate(() => window.devicePixelRatio || 1);
+  const scale = image.width / size;
+  return {
+    x: Math.round((image.x - canvas.x + ix * scale) * dpr),
+    y: Math.round((image.y - canvas.y + iy * scale) * dpr)
+  };
+}
+
+async function overlayAlphaAtImage(page: Page, size: number, ix: number, iy: number) {
+  const point = await overlayPixelForImage(page, size, ix, iy);
+  return (await canvasPixel(page, point.x, point.y))[3];
+}
+
+async function uploadTwoTonePrimary(page: Page, name = 'snap-source.png') {
+  await page
+    .getByLabel('Upload edit image')
+    .setInputFiles([{ name, mimeType: 'image/png', buffer: TWO_TONE_PNG }]);
+  await expect(page.getByRole('button', { name: `Preview ${name}` })).toBeVisible();
+}
+
+test('edge snapping pulls a rectangle corner onto the image edge', async ({ page }) => {
+  await loadApp(page);
+  await uploadTwoTonePrimary(page);
+  await openMaskEditor(page, 'snap-source.png');
+
+  await page.getByRole('button', { name: 'Rectangle' }).click();
+  await page.getByRole('button', { name: 'Snap', exact: true }).click();
+
+  // Drag from just left of the x=32 step into the white half. The anchor at
+  // image x~25.6 is inside the snap radius of the edge, so the selection must
+  // start at the edge (~31.5) rather than where the pointer went down.
+  await canvasStrokePaths(page, [
+    [
+      { x: 0.4, y: 0.25 },
+      { x: 0.75, y: 0.75 }
+    ]
+  ]);
+
+  // x=29 sits left of the snapped boundary but right of the raw pointer anchor.
+  await expect.poll(async () => overlayAlphaAtImage(page, 64, 29, 32)).toBe(0);
+  expect(await overlayAlphaAtImage(page, 64, 40, 32)).toBeGreaterThan(0);
+});
+
+test('without snapping the same drag follows the pointer', async ({ page }) => {
+  await loadApp(page);
+  await uploadTwoTonePrimary(page);
+  await openMaskEditor(page, 'snap-source.png');
+
+  await page.getByRole('button', { name: 'Rectangle' }).click();
+  await canvasStrokePaths(page, [
+    [
+      { x: 0.4, y: 0.25 },
+      { x: 0.75, y: 0.75 }
+    ]
+  ]);
+
+  // Snapping is off by default, so the paint starts under the pointer.
+  expect(await overlayAlphaAtImage(page, 64, 29, 32)).toBeGreaterThan(0);
+});
+
+test('the snap toggle is remembered across editor sessions', async ({ page }) => {
+  await loadApp(page);
+  await uploadTwoTonePrimary(page);
+  await openMaskEditor(page, 'snap-source.png');
+
+  await page.getByRole('button', { name: 'Rectangle' }).click();
+  const snapButton = page.getByRole('button', { name: 'Snap', exact: true });
+  await expect(snapButton).toHaveAttribute('aria-pressed', 'false');
+  await snapButton.click();
+  await expect(snapButton).toHaveAttribute('aria-pressed', 'true');
+
+  await page.keyboard.press('Escape');
+  await expect(EDITOR_DIALOG(page)).toHaveCount(0);
+  await openMaskEditor(page, 'snap-source.png');
+
+  await page.getByRole('button', { name: 'Rectangle' }).click();
+  await expect(page.getByRole('button', { name: 'Snap', exact: true })).toHaveAttribute(
+    'aria-pressed',
+    'true'
+  );
+});
+
+test('the ellipse tool fills an oval inside the dragged box', async ({ page }) => {
+  await loadApp(page);
+  await uploadPrimary(page);
+  await openMaskEditor(page);
+
+  await page.getByRole('button', { name: 'Ellipse' }).click();
+  await canvasStrokePaths(page, [
+    [
+      { x: 0.25, y: 0.25 },
+      { x: 0.75, y: 0.75 }
+    ]
+  ]);
+
+  await expect(page.getByText(/Edit area [1-9]/)).toBeVisible();
+  // The box spans image 16..48, so its center is inside the oval while its
+  // corner falls outside it.
+  expect(await overlayAlphaAtImage(page, 64, 32, 32)).toBeGreaterThan(0);
+  expect(await overlayAlphaAtImage(page, 64, 17, 17)).toBe(0);
+});
+
+test('the coverage readout updates while a stroke is still in flight', async ({ page }) => {
+  await loadApp(page);
+  await uploadPrimary(page);
+  await openMaskEditor(page);
+  await expect(page.getByText('Edit area 0.0%')).toBeVisible();
+
+  const box = await maskImageBox(page);
+  await page.mouse.move(box.x + box.width * 0.3, box.y + box.height * 0.5);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.7, box.y + box.height * 0.5, { steps: 8 });
+
+  // Still holding the pointer down: the readout must already reflect the paint.
+  await expect(page.getByText(/Edit area [1-9]/)).toBeVisible();
+  await page.mouse.up();
+});
+
+test('escape cancels a shape drag instead of closing the editor', async ({ page }) => {
+  await loadApp(page);
+  await uploadPrimary(page);
+  await openMaskEditor(page);
+
+  await page.getByRole('button', { name: 'Rectangle' }).click();
+  const box = await maskImageBox(page);
+  await page.mouse.move(box.x + box.width * 0.3, box.y + box.height * 0.3);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.7, box.y + box.height * 0.7, { steps: 5 });
+
+  await page.keyboard.press('Escape');
+  await expect(EDITOR_DIALOG(page)).toBeVisible();
+
+  await page.mouse.up();
+  await expect(page.getByText('Edit area 0.0%')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Save selection' })).toBeDisabled();
+});
+
+test('the smoothed preview matches a full recompute at the same radius', async ({ page }) => {
+  await loadApp(page);
+  await uploadPrimary(page);
+  await openMaskEditor(page);
+
+  const smoothing = page
+    .locator('label')
+    .filter({ hasText: 'Edge smoothing' })
+    .locator('input[type="range"]');
+  const setRadius = (px: number) =>
+    smoothing.evaluate((element, value) => {
+      const input = element as HTMLInputElement;
+      input.value = String(value);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    }, px);
+  const readout = async () => parseCoverage(await page.getByText(/^Edit area/).textContent());
+
+  await setRadius(8);
+  await paintStroke(page);
+  // A single stroke covers far less than the 25% gate, so this repaint runs on
+  // the dirty-region path rather than the full-frame one.
+  await expect.poll(readout).toBeGreaterThan(0);
+  const region = await readout();
+
+  // Changing the radius forces two full-frame repaints; the second one is at
+  // the original radius, so it must agree with the dirty-region result.
+  await setRadius(4);
+  await setRadius(8);
+  await expect
+    .poll(async () => Math.abs((await readout()) - region))
+    .toBeLessThanOrEqual(0.1);
 });

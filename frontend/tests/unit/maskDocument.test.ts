@@ -7,9 +7,12 @@ import {
   containsRect,
   countMarked,
   countMarkedPixels,
+  expandRect,
   normalizeSmoothPx,
   pngHasAlphaChannel,
   readPngSize,
+  rectArea,
+  rectCoversAll,
   shapeRectFor,
   strokeRectFor,
   subtractRect,
@@ -166,6 +169,37 @@ describe('rect helpers', () => {
     });
     expect(containsRect({ x: 0, y: 0, width: 10, height: 10 }, { x: 2, y: 2, width: 3, height: 3 })).toBe(true);
     expect(containsRect({ x: 0, y: 0, width: 10, height: 10 }, { x: 9, y: 2, width: 3, height: 3 })).toBe(false);
+  });
+});
+
+describe('processed-view rect helpers', () => {
+  it('expandRect pads on every side and clamps to the canvas', () => {
+    expect(expandRect({ x: 10, y: 20, width: 30, height: 40 }, 4, 100, 100)).toEqual({
+      x: 6,
+      y: 16,
+      width: 38,
+      height: 48
+    });
+    expect(expandRect({ x: 0, y: 0, width: 10, height: 10 }, 6, 100, 100)).toEqual({
+      x: 0,
+      y: 0,
+      width: 16,
+      height: 16
+    });
+  });
+
+  it('expandRect returns null when the padded rect lands outside the canvas', () => {
+    expect(expandRect({ x: 0, y: 0, width: 0, height: 0 }, 0, 100, 100)).toBeNull();
+  });
+
+  it('rectArea and rectCoversAll describe the repaint gate', () => {
+    expect(rectArea({ x: 0, y: 0, width: 40, height: 30 })).toBe(1200);
+    expect(rectArea({ x: 0, y: 0, width: -5, height: 30 })).toBe(0);
+
+    expect(rectCoversAll(null, 100, 100)).toBe(true);
+    expect(rectCoversAll({ x: 0, y: 0, width: 100, height: 100 }, 100, 100)).toBe(true);
+    expect(rectCoversAll({ x: 0, y: 0, width: 60, height: 100 }, 100, 100)).toBe(false);
+    expect(rectCoversAll({ x: 1, y: 0, width: 100, height: 100 }, 100, 100)).toBe(false);
   });
 });
 
@@ -395,6 +429,27 @@ describe('MaskCoverageTracker', () => {
 
   it('reports zero coverage for an empty document', () => {
     expect(new MaskCoverageTracker(0, 0).coverage()).toBe(0);
+  });
+
+  it('preview includes the in-flight stroke while coverage() lags behind', () => {
+    const buffer = new MaskBuffer(32, 32);
+    const tracker = new MaskCoverageTracker(32, 32);
+    const rect = strokeRectFor([{ x: 8, y: 8 }], 6, 32, 32);
+    if (!rect) throw new Error('expected a rect');
+
+    expect(tracker.preview(buffer.countRegion)).toBe(0);
+
+    tracker.beginStroke(rect, buffer.countRegion);
+    buffer.stampDisc(8, 8, 3, false);
+
+    // The committed total only moves on endStroke, so the live read must come
+    // from preview while the pointer is still down.
+    expect(tracker.coverage()).toBe(0);
+    expect(Math.round(tracker.preview(buffer.countRegion) * 32 * 32)).toBe(buffer.markedCount());
+
+    tracker.endStroke(buffer.countRegion);
+    expect(tracker.coverage()).toBeGreaterThan(0);
+    expect(tracker.preview(buffer.countRegion)).toBe(tracker.coverage());
   });
 });
 
