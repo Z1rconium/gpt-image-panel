@@ -91,7 +91,7 @@ class GenerateRequest(StrictRequestModel):
 
 
 class EditRequest(GenerateRequest):
-    pass
+    paste_back: Optional[bool] = None
 
 
 class GenerateJobResponse(BaseModel):
@@ -128,6 +128,8 @@ class GenerateJobImage(BaseModel):
     filename: str
     image_width: Optional[int] = None
     image_height: Optional[int] = None
+    paste_back: Optional[str] = None
+    paste_back_scale: Optional[float] = None
 
 
 class GeneratePreviewEvent(BaseModel):
@@ -171,4 +173,5 @@ class GenerateJobStatus(GenerateJobResponse):
     streaming: Optional[bool] = None
     partial_images: Optional[int] = None
     mask_applied: Optional[bool] = None
+    paste_back: Optional[bool] = None
     error: Optional[str] = None

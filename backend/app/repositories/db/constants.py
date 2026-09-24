@@ -33,6 +33,8 @@ GALLERY_COLUMNS = (
     "sha256",
     "sort_seq",
     "mask_coverage",
+    "paste_back",
+    "paste_back_scale",
 )
 REQUIRED_GALLERY_COLUMNS = {"id", "prompt", "size", "filename", "created_at"}
 _GALLERY_INTERNAL_COLUMNS = {"sort_seq"}
@@ -45,7 +47,7 @@ INTEGER_GALLERY_COLUMNS = {
     "bytes",
     "sort_seq",
 }
-REAL_GALLERY_COLUMNS = {"mask_coverage"}
+REAL_GALLERY_COLUMNS = {"mask_coverage", "paste_back_scale"}
 GENERATE_JOB_COLUMNS = (
     "job_id",
     "status",
@@ -82,6 +84,7 @@ GENERATE_JOB_COLUMNS = (
     "streaming",
     "partial_images",
     "mask_applied",
+    "paste_back",
     "error",
     "webhook_url",
 )
@@ -165,6 +168,7 @@ INTEGER_GENERATE_JOB_COLUMNS = {
     "streaming",
     "partial_images",
     "mask_applied",
+    "paste_back",
 }
 SETTINGS_ACTIVE_PRESET_KEY = "active_preset_id"
 UPSTREAM_SOCKS5_PROXY_KEY = "upstream_socks5_proxy"

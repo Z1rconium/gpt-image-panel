@@ -18,6 +18,8 @@ class ImageEditSource(Protocol):
     temp_path: Path
     filename: str
     content_type: str
+    width: int
+    height: int
 
 
 PreviewCallback = Callable[[int, str, bytes], None]

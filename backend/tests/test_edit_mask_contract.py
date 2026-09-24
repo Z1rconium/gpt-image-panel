@@ -693,6 +693,139 @@ def test_upstream_edit_form_includes_mask_field(tmp_path, monkeypatch):
     assert ("image", "first.png") not in fields
 
 
+def test_upstream_masked_edit_paste_back_applies_or_preserves_raw(tmp_path, monkeypatch):
+    from backend.app.integrations.upstream import generation as upstream_client
+
+    _configure_runtime(tmp_path)
+    primary_path = tmp_path / "primary.png"
+    mask_path = tmp_path / "mask.png"
+    primary_path.write_bytes(_png_bytes((64, 64)))
+    mask_image = PILImage.new("RGBA", (64, 64), (0, 0, 0, 255))
+    for y in range(16, 48):
+        for x in range(16, 48):
+            mask_image.putpixel((x, y), (0, 0, 0, 0))
+    mask_buffer = io.BytesIO()
+    mask_image.save(mask_buffer, format="PNG")
+    mask_path.write_bytes(mask_buffer.getvalue())
+    result_image = PILImage.new("RGB", (64, 64), (255, 0, 0))
+    for y in range(16, 48):
+        for x in range(10, 48):
+            result_image.putpixel((x, y), (0, 200, 0))
+    result_buffer = io.BytesIO()
+    result_image.save(result_buffer, format="PNG")
+    result_bytes = result_buffer.getvalue()
+    source = EditImageSource(primary_path, primary_path.stat().st_size, "primary.png", "image/png", width=64, height=64)
+    mask = EditImageSource(mask_path, mask_path.stat().st_size, "mask.png", "image/png", "mask")
+    response_body = json.dumps(
+        {"data": [{"b64_json": base64.b64encode(result_bytes).decode("ascii")}]}
+    ).encode("utf-8")
+
+    async def run(paste_back):
+        session = _FakePostSession(
+            _FakeResponse(200, headers={"Content-Type": "application/json"}, chunks=[response_body], peer_ip="93.184.216.34")
+        )
+        monkeypatch.setattr(upstream_client, "get_pool", lambda: _FakePool(session))
+        entries = await ORIGINAL_CALL_IMAGE_EDIT_API(
+            "https://api.example.com",
+            "test-key",
+            EditRequest(prompt="paste back test", model="gpt-image-2", paste_back=paste_back),
+            [source],
+            persist_gallery_entry=gallery_mutations.add_to_gallery_async,
+            mask_source=mask,
+        )
+        return entries[0]
+
+    applied = asyncio.run(run(True))
+    assert applied.paste_back == "applied"
+    assert applied.paste_back_scale == 1
+    with PILImage.open(Path(config.IMAGES_DIR) / applied.filename) as image:
+        assert image.convert("RGB").getpixel((0, 0)) == (255, 0, 0)
+        assert image.convert("RGB").getpixel((32, 32)) == (0, 200, 0)
+        assert image.convert("RGB").getpixel((10, 32))[0] > 0
+
+    disabled = asyncio.run(run(False))
+    assert disabled.paste_back == "skipped:disabled"
+    with PILImage.open(Path(config.IMAGES_DIR) / disabled.filename) as image:
+        assert image.convert("RGB").getpixel((10, 32)) == (0, 200, 0)
+
+
+def test_edit_paste_back_request_default_override_and_no_mask(client, monkeypatch):
+    seen: list[tuple[bool | None, bool]] = []
+
+    async def fake_edit_api(
+        api_url, api_key, payload, image_sources, api_preset_name=None,
+        progress=None, socks5_proxy=None, persist_gallery_entry=None,
+        mask_source=None, mask_coverage=None,
+    ):
+        seen.append((payload.paste_back, mask_source is not None))
+        return [await _fake_entry(payload, api_preset_name)]
+
+    monkeypatch.setattr(backend_main.proxy, "call_image_edit_api", fake_edit_api)
+    files = {
+        "image": ("input.png", SOURCE_PNG, "image/png"),
+        "mask": ("mask.png", MASK_PNG, "image/png"),
+    }
+
+    default = client.post("/api/edits", data=_edit_data(), files=files)
+    assert default.status_code == 202
+    assert _wait_for_job(client, default.json()["job_id"])["paste_back"] is True
+
+    disabled = client.post("/api/edits", data={**_edit_data(), "paste_back": "false"}, files=files)
+    assert disabled.status_code == 202
+    assert _wait_for_job(client, disabled.json()["job_id"])["paste_back"] is False
+
+    monkeypatch.setattr(config, "MASK_PASTE_BACK_DEFAULT", False)
+    server_disabled = client.post("/api/edits", data=_edit_data(), files=files)
+    assert server_disabled.status_code == 202
+    assert _wait_for_job(client, server_disabled.json()["job_id"])["paste_back"] is False
+
+    unmasked = client.post(
+        "/api/edits",
+        data={**_edit_data(), "paste_back": "true"},
+        files={"image": ("input.png", SOURCE_PNG, "image/png")},
+    )
+    assert unmasked.status_code == 202
+    assert _wait_for_job(client, unmasked.json()["job_id"])["paste_back"] is None
+    assert seen == [(True, True), (False, True), (False, True), (True, False)]
+
+
+def test_gallery_exif_masked_edit_pastes_result_at_upright_size(client, monkeypatch):
+    from backend.app.integrations.upstream import generation as upstream_client
+
+    gallery_mutations.add_to_gallery_sync(
+        image_id="paste-exif-source",
+        prompt="seed oriented photo",
+        size="auto",
+        filename="paste-exif-source.jpg",
+        metadata={"output_format": "jpeg", "api_path": "/v1/images/generations"},
+        image_bytes=EXIF6_JPEG,
+    )
+    result = _png_bytes((300, 400))
+    response_body = json.dumps(
+        {"data": [{"b64_json": base64.b64encode(result).decode("ascii")}]}
+    ).encode("utf-8")
+    session = _FakePostSession(
+        _FakeResponse(200, headers={"Content-Type": "application/json"}, chunks=[response_body], peer_ip="93.184.216.34")
+    )
+    monkeypatch.setattr(upstream_client, "get_pool", lambda: _FakePool(session))
+    monkeypatch.setattr(backend_main.proxy, "call_image_edit_api", ORIGINAL_CALL_IMAGE_EDIT_API)
+
+    response = client.post(
+        "/api/edits/from-gallery/paste-exif-source",
+        data=_edit_data(),
+        files={"mask": ("mask.png", EXIF6_ROTATED_MASK_PNG, "image/png")},
+    )
+    assert response.status_code == 202
+    saved_job = _wait_for_job(client, response.json()["job_id"])
+    assert saved_job["status"] == "success"
+    assert saved_job["paste_back"] is True
+    assert saved_job["images"][0]["paste_back"] == "applied"
+    assert (saved_job["images"][0]["image_width"], saved_job["images"][0]["image_height"]) == (300, 400)
+    with PILImage.open(Path(config.IMAGES_DIR) / saved_job["images"][0]["filename"]) as output:
+        assert output.size == (300, 400)
+        assert output.convert("RGB").getpixel((150, 200)) == (255, 0, 0)
+
+
 def test_edit_mask_bytes_count_in_pending_reservation_and_cleanup(tmp_path, monkeypatch):
     _configure_runtime(tmp_path)
     config.MAX_ACTIVE_GENERATE_JOBS = 1

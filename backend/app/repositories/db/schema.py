@@ -1099,6 +1099,16 @@ def _migration_gallery_mask_coverage_index(conn: sqlite3.Connection):
     )
 
 
+def _migration_mask_paste_back(conn: sqlite3.Connection):
+    gallery_columns = _table_columns(conn, "gallery_entries")
+    if "paste_back" not in gallery_columns:
+        conn.execute("ALTER TABLE gallery_entries ADD COLUMN paste_back TEXT")
+    if "paste_back_scale" not in gallery_columns:
+        conn.execute("ALTER TABLE gallery_entries ADD COLUMN paste_back_scale REAL")
+    if "paste_back" not in _table_columns(conn, "generate_jobs"):
+        conn.execute("ALTER TABLE generate_jobs ADD COLUMN paste_back INTEGER")
+
+
 SCHEMA_MIGRATIONS = (
     (1, "baseline_legacy_schema", _migration_baseline_legacy_schema),
     (2, "gallery_filter_options", _migration_gallery_filter_options),
@@ -1124,4 +1134,5 @@ SCHEMA_MIGRATIONS = (
     (22, "api_preset_supports_mask", _migration_api_preset_supports_mask),
     (23, "gallery_mask_coverage", _migration_gallery_mask_coverage),
     (24, "gallery_mask_coverage_index", _migration_gallery_mask_coverage_index),
+    (25, "mask_paste_back", _migration_mask_paste_back),
 )

@@ -279,6 +279,20 @@ def test_schema_migrations_are_recorded_and_idempotent(tmp_path):
     ]
 
 
+def test_mask_paste_back_migration_adds_nullable_columns(tmp_path):
+    _configure_runtime(tmp_path)
+    db_repo.verify_storage_writable()
+    with db_repo._connect() as conn:
+        gallery_columns = {row["name"] for row in conn.execute("PRAGMA table_info(gallery_entries)")}
+        job_columns = {row["name"] for row in conn.execute("PRAGMA table_info(generate_jobs)")}
+        version = conn.execute(
+            "SELECT name FROM schema_migrations WHERE version = 25"
+        ).fetchone()
+    assert {"paste_back", "paste_back_scale"} <= gallery_columns
+    assert "paste_back" in job_columns
+    assert version["name"] == "mask_paste_back"
+
+
 def test_performance_indexes_are_created(tmp_path):
     _configure_runtime(tmp_path)
     db_repo.verify_storage_writable()

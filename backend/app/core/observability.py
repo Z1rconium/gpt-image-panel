@@ -14,6 +14,7 @@ JOB_STAGE_TIMING_KEYS = {
     "validate",
     "thumbnail",
     "db_insert",
+    "paste_back",
 }
 
 _current_job_timer: ContextVar["JobStageTimer | None"] = ContextVar(

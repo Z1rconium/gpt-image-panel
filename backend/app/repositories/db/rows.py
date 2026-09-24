@@ -556,6 +556,8 @@ def _generate_job_from_row(row: sqlite3.Row) -> dict[str, Any]:
         job["streaming"] = bool(job["streaming"])
     if "mask_applied" in job:
         job["mask_applied"] = bool(job["mask_applied"])
+    if job.get("paste_back") is not None:
+        job["paste_back"] = bool(job["paste_back"])
     if job.get("image_id"):
         job["id"] = job["image_id"]
     if not job.get("images") and job.get("image_id") and job.get("image_url"):

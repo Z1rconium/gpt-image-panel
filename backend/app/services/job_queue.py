@@ -200,6 +200,7 @@ def build_pending_job(
         "streaming": bool(getattr(req, "stream", False)),
         "partial_images": getattr(req, "partial_images", None) if getattr(req, "stream", False) else None,
         "mask_applied": bool(mask_applied),
+        "paste_back": req.paste_back if isinstance(req, EditRequest) and mask_applied else None,
     }
 
 
@@ -213,6 +214,8 @@ def gallery_entry_job_image(entry: GalleryEntry) -> dict:
         "filename": entry.filename,
         "image_width": entry.image_width,
         "image_height": entry.image_height,
+        "paste_back": entry.paste_back,
+        "paste_back_scale": entry.paste_back_scale,
     }
 
 
@@ -229,6 +232,8 @@ def gallery_entry_job_result(entry: GalleryEntry) -> dict:
     image["api_path"] = entry.api_path
     image["api_preset_name"] = entry.api_preset_name
     image["completed_at"] = entry.completed_at
+    image["paste_back"] = entry.paste_back
+    image["paste_back_scale"] = entry.paste_back_scale
     return image
 
 
@@ -327,6 +332,7 @@ def build_edit_request_from_form(
     response_format: str | None,
     webhook_url: str | None,
     background: str = "auto",
+    paste_back: bool | None = None,
 ) -> EditRequest:
     try:
         return EditRequest(
@@ -340,6 +346,7 @@ def build_edit_request_from_form(
             background=background,
             response_format=response_format,
             webhook_url=webhook_url,
+            paste_back=paste_back,
         )
     except ValueError as e:
         raise UnprocessableRequestError(str(e)) from e
@@ -470,6 +477,8 @@ async def queue_edit_job(
 ) -> GenerateJobResponse:
     job_id = str(uuid.uuid4())
     if mask_source is not None:
+        if req.paste_back is None:
+            req.paste_back = config.MASK_PASTE_BACK_DEFAULT
         mask_source = replace(mask_source, coverage=mask_coverage)
         # The retry copy in MASKS_DIR is a re-encoded `LA` PNG built once,
         # during the mask's single admission-time decode (see

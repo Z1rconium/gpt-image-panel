@@ -176,6 +176,7 @@ def _configure_runtime(tmp_path: Path, *, access_key: str = "", allow_unauthenti
     config.WEBHOOK_TIMEOUT_SECONDS = 1
     config.WEBHOOK_MAX_ATTEMPTS = 1
     config.MAX_FILE_SIZE_MB = 50
+    config.MASK_PASTE_BACK_DEFAULT = True
     config.MAX_JSON_BODY_MB = 1
     config.MAX_UPSTREAM_JSON_MB = 128
     config.MAX_IMAGE_PIXELS = 100000000

@@ -25,6 +25,8 @@ from ...core.media import (
     generate_image_id,
     validate_image_header_bytes,
 )
+from ...core.observability import metrics
+from .edit_paste_back import PasteBackOutcome, paste_back_image
 from ...runtime.blocking import run_image_operation, upstream_memory_lease
 from ...schemas.gallery import GalleryEntry
 from ...schemas.generation import EditRequest, GenerateRequest
@@ -145,6 +147,7 @@ async def save_gallery_entries_from_upstream_data(
     save_message: str,
     progress: ProgressCallback | None,
     persist_gallery_entry: PersistGalleryEntry,
+    transform_image: Callable[[bytes], Any] | None = None,
 ) -> list[GalleryEntry]:
     data = validate_upstream_image_data(data, payload.n)
     max_bytes = config.MAX_FILE_SIZE_MB * 1024 * 1024
@@ -194,6 +197,20 @@ async def save_gallery_entries_from_upstream_data(
                 filename = f"{image_id}.{detected_extension}"
                 validate_image_header_bytes(image_bytes, filename=filename)
             entry_metadata = {**gallery_metadata}
+            if transform_image is not None:
+                if progress:
+                    progress("paste_back", f"Pasting masked edit ({image_index + 1}/{total})")
+                with observe_job_stage("paste_back"):
+                    outcome: PasteBackOutcome = await transform_image(image_bytes)
+                image_bytes = outcome.image_bytes
+                entry_metadata.update(outcome.metadata)
+                metric_status = outcome.status.replace(":", ".")
+                metrics.increment(f"image_jobs.paste_back.{metric_status}")
+                detected_format = detect_image_format(image_bytes)
+                detected_extension = DETECTED_FORMAT_EXTENSIONS.get(
+                    detected_format or "", format_extension
+                )
+                filename = f"{image_id}.{detected_extension}"
             if detected_format:
                 entry_metadata["output_format"] = detected_format
 
@@ -546,6 +563,23 @@ async def call_image_edit_api(
         api_preset_name,
         mask_coverage=mask_coverage,
     )
+    transform_image = None
+    if mask_source is not None:
+        if payload.paste_back is False:
+            gallery_metadata["paste_back"] = "skipped:disabled"
+            metrics.increment("image_jobs.paste_back.skipped.disabled")
+        else:
+            async def transform_image(image_bytes: bytes) -> PasteBackOutcome:
+                return await run_image_operation(
+                    paste_back_image,
+                    image_bytes,
+                    image_sources[0].temp_path,
+                    mask_source.temp_path,
+                    output_format=payload.output_format,
+                    output_compression=payload.output_compression,
+                    background=payload.background,
+                    metric_name="paste_back_image",
+                )
 
     if progress:
         progress("building_edit_form", "Building multipart edit request")
@@ -581,6 +615,8 @@ async def call_image_edit_api(
         pool = get_pool()
         memory_lease = upstream_memory_lease(
             upstream_task_memory_weight(payload.response_format)
+            + (max(0, image_sources[0].width or 0) * max(0, image_sources[0].height or 0) * 12
+               if transform_image is not None else 0)
         )
         await memory_lease.__aenter__()
         if progress:
@@ -635,6 +671,7 @@ async def call_image_edit_api(
             save_message="Saving edited images",
             progress=progress,
             persist_gallery_entry=persist_gallery_entry,
+            transform_image=transform_image,
         )
     finally:
         if memory_lease is not None:

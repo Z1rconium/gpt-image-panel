@@ -37,6 +37,8 @@ class GalleryEntry(BaseModel):
     favorite: bool = False
     bytes: Optional[int] = None
     mask_coverage: Optional[float] = None
+    paste_back: Optional[str] = None
+    paste_back_scale: Optional[float] = None
 
 
 class GalleryFavoriteRequest(StrictRequestModel):

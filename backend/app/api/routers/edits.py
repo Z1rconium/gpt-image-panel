@@ -49,6 +49,7 @@ def edit_request_from_form(
     background: str = Form("auto"),
     response_format: str | None = Form(None),
     webhook_url: str | None = Form(None),
+    paste_back: bool | None = Form(None),
 ) -> EditRequest:
     return build_edit_request_from_form(
         prompt=prompt,
@@ -61,6 +62,7 @@ def edit_request_from_form(
         background=background,
         response_format=response_format,
         webhook_url=webhook_url,
+        paste_back=paste_back,
     )
 
 
