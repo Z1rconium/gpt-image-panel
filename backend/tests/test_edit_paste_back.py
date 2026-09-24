@@ -65,6 +65,17 @@ def test_paste_back_skips_aspect_and_drift_without_reencoding(tmp_path):
     assert outcome.image_bytes is changed
 
 
+def test_paste_back_skips_color_only_drift(tmp_path):
+    primary, mask = _inputs(tmp_path)
+    # (70, 40, 10) keeps the luma of (30, 40, 50) within the old guard's
+    # threshold while shifting red and blue by 40; only the per-channel
+    # comparison catches it.
+    changed = _bytes(Image.new("RGB", (128, 128), (70, 40, 10)))
+    outcome = paste_back_image(changed, primary, mask)
+    assert outcome.status == "skipped:keep_region_changed"
+    assert outcome.image_bytes is changed
+
+
 def test_paste_back_keeps_alpha_and_icc(tmp_path):
     primary, mask = _inputs(tmp_path)
     source = Image.new("RGBA", (128, 128), (30, 40, 50, 255))
