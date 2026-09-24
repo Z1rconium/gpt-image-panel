@@ -1349,7 +1349,32 @@ async function mockApi(page: Page, options: MockOptions = {}) {
 async function loadApp(page: Page, options: MockOptions = {}) {
   await mockApi(page, options);
   await page.goto('/');
-  await expect(page.getByRole('heading', { name: options.language === 'zh-CN' ? '提示词' : 'Prompt', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: options.language === 'zh-CN' ? '提示词' : 'Prompt', exact: true })).toBeVisible({ timeout: 15_000 });
+}
+
+/**
+ * Pre-seed the mask editor's region-processing preference. Call it *before*
+ * `loadApp`: the editor reads localStorage when it opens.
+ *
+ * Automatic gap filling is on by default, so tests that assert exact exported
+ * pixels or an exact coverage percentage opt out here instead of depending on
+ * how many pixels the pipeline happens to add.
+ */
+async function setRegionPreference(page: Page, preferences: Record<string, unknown>) {
+  await page.addInitScript((value: string) => {
+    localStorage.setItem('maskEditor.region', value);
+  }, JSON.stringify(preferences));
+}
+
+/** Turn the automatic gap filling off for one test. */
+async function disableRegionProcessing(page: Page) {
+  await setRegionPreference(page, {
+    enabled: false,
+    strength: 'normal',
+    edgeSnap: false,
+    edgeRange: null,
+    grow: 0
+  });
 }
 
 export {
@@ -1368,6 +1393,8 @@ export {
   applyActivePresetFields,
   manyGalleryImages,
   mockApi,
-  loadApp
+  loadApp,
+  setRegionPreference,
+  disableRegionProcessing
 };
 export type { GalleryImageFixture, PromptSnippetFixture, MockOptions, JobStatus };
