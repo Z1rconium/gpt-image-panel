@@ -113,6 +113,12 @@ def test_frontend_index_uses_csp_nonce(tmp_path, monkeypatch):
     assert "'unsafe-inline'" not in csp.split("script-src-elem", 1)[1].split(";", 1)[0]
     assert "style-src 'self'" in csp
     assert "style-src-attr 'unsafe-inline'" in csp
+    # The mask editor's region worker must stay same-origin only: blob: and
+    # data: workers would let a bundled inline worker smuggle script past
+    # script-src.
+    assert "worker-src 'self'" in csp
+    assert "worker-src 'self' blob:" not in csp
+    assert "worker-src 'self' data:" not in csp
 
 
 def test_access_cookie_and_status(tmp_path):

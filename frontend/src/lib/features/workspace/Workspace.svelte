@@ -47,7 +47,11 @@
     snippetsPanel
   } from '$lib/features/workspace/panels';
   import { promptForm } from '$lib/features/workspace/formState.svelte';
-  import { measureMaskBlob, readPngSize, type MaskMeasurements } from '$lib/features/mask/maskDocument';
+  import {
+    measureMaskBlob,
+    readPngSize,
+    type MaskMeasurements
+  } from '$lib/features/mask/maskImage';
   import { createLightboxController } from '$lib/features/workspace/lightbox';
   import { createPanelController } from '$lib/features/workspace/panelController';
   import { installWorkspaceLifecycle } from '$lib/features/workspace/lifecycle';
@@ -1536,6 +1540,7 @@
     onRemove={removeMaskFromEditor}
     onClose={closeMaskEditor}
     onError={(message: string) => showToast(message, 'error')}
+    onNotice={(message: string) => showToast(message)}
   />
 {/if}
 

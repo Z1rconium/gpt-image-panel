@@ -29,6 +29,12 @@ def build_content_security_policy(script_nonce: str | None = None) -> str:
             "style-src-attr 'unsafe-inline'",
             "img-src 'self' data: blob:",
             "font-src 'self' data:",
+            # The mask editor's gap-fill worker (see maskRegionClient.ts) is a
+            # same-origin module worker. Without an explicit worker-src,
+            # browsers fall back to child-src and then script-src, so tightening
+            # script-src later would silently break it; stating it also keeps
+            # blob:/data: workers out.
+            "worker-src 'self'",
             f"connect-src 'self' {turnstile}",
             f"frame-src {turnstile}",
         ]

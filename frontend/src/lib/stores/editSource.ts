@@ -1,5 +1,8 @@
 import { get, writable } from 'svelte/store';
 import { t } from '$lib/i18n';
+// Type-only: erased at compile time, so this does not pull the mask editor's
+// code into whatever eagerly imports this store (see maskImage.ts's header).
+import type { MaskRegionPreferences } from '$lib/features/mask/maskRegion';
 
 export const MAX_EDIT_SOURCE_IMAGES = 16;
 
@@ -18,6 +21,19 @@ export type EditUploadSource = {
 
 export type EditMaskOrigin = 'painted' | 'uploaded' | 'restored';
 
+// Reopening the editor with only `blob` (the already-processed export) forces
+// the non-idempotent options off and drops the original strokes; carrying
+// this alongside it lets `MaskEditorDialog` restore the exact pre-export
+// state instead (plan Phase 4, U2). It never leaves the browser: nothing here
+// is read by the upload path (see stores/preview.ts), only by the editor
+// itself, so it is fine for it to hold blobs no server ever sees.
+export type EditMaskEditorState = {
+  marks: Blob;
+  protected: Blob | null;
+  smoothPx: number;
+  region: MaskRegionPreferences;
+};
+
 export type EditMask = {
   sourceId: string;
   blob: Blob;
@@ -26,6 +42,7 @@ export type EditMask = {
   coverage: number;
   previewUrl: string;
   origin: EditMaskOrigin;
+  editorState?: EditMaskEditorState;
 };
 
 export type EditSourceState = {

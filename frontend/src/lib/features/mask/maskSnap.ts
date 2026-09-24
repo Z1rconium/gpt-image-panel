@@ -142,16 +142,31 @@ export function computeEdgeMap(
 }
 
 /**
+ * How much an already-snapped point is penalized for jumping away from the
+ * previous one, beyond the distance the pointer itself travelled. Two parallel
+ * edges a couple of pixels apart (an outline and its shadow) are equally
+ * strong, so without this the selection flips between them and leaves a comb of
+ * thin unmarked strips.
+ */
+const CONTINUITY_PENALTY = 48;
+
+/**
  * Pull `(x, y)` (source-image coordinates) onto the strongest gradient within
  * `radiusImagePx`. Returns the input unchanged with `snapped: false` when the
  * best candidate is below `minStrength` — flat areas stay freehand.
+ *
+ * `previous`, when given, is the point snapped on the previous event: a
+ * candidate farther from it than `stepImagePx` (the pointer's own travel) loses
+ * up to `CONTINUITY_PENALTY` strength, which keeps a contour on one edge
+ * without ever prefering a weak edge over a strong one.
  */
 export function snapToEdge(
   map: EdgeMap,
   x: number,
   y: number,
   radiusImagePx: number,
-  minStrength: number = SNAP_MIN_STRENGTH
+  minStrength: number = SNAP_MIN_STRENGTH,
+  previous: { x: number; y: number; stepImagePx?: number } | null = null
 ): { x: number; y: number; strength: number; snapped: boolean } {
   const { width, height, sourceWidth, sourceHeight, magnitude } = map;
   const centerX = (x / sourceWidth) * width;
@@ -167,6 +182,7 @@ export function snapToEdge(
   const maxY = Math.min(height - 1, Math.floor(centerY) + radius);
 
   const radiusSquared = Math.max(0, radiusImagePx) ** 2;
+  const step = Math.max(1, previous?.stepImagePx ?? Math.max(0, radiusImagePx));
   let bestScore = -Infinity;
   let bestStrength = 0;
   let bestX = -1;
@@ -177,12 +193,21 @@ export function snapToEdge(
     for (let mapX = minX; mapX <= maxX; mapX += 1) {
       const strength = magnitude[row + mapX];
       if (strength <= 0) continue;
-      const dx = ((mapX + 0.5) * sourceWidth) / width - x;
-      const dy = ((mapY + 0.5) * sourceHeight) / height - y;
+      const candidateX = ((mapX + 0.5) * sourceWidth) / width;
+      const candidateY = ((mapY + 0.5) * sourceHeight) / height;
+      const dx = candidateX - x;
+      const dy = candidateY - y;
       const distanceSquared = dx * dx + dy * dy;
       if (distanceSquared > radiusSquared) continue;
-      const score =
+      let score =
         strength - Math.round((distanceSquared / (radiusSquared + 1)) * DISTANCE_PENALTY);
+      if (previous) {
+        const jumpX = candidateX - previous.x;
+        const jumpY = candidateY - previous.y;
+        const jump = Math.sqrt(jumpX * jumpX + jumpY * jumpY);
+        const excess = Math.max(0, jump - step) / step;
+        score -= Math.round(Math.min(1, excess) * CONTINUITY_PENALTY);
+      }
       if (score > bestScore) {
         bestScore = score;
         bestStrength = strength;

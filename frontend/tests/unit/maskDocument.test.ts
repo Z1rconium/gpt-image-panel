@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  DirtyRegionList,
   MaskCheckpointer,
   MaskCoverageTracker,
   MaskImportError,
+  MaskUndoPatches,
   binarizeMaskAlphaData,
   containsRect,
   countMarked,
@@ -279,6 +281,24 @@ describe('strokeRectFor', () => {
   });
 });
 
+describe('stroke segment rects', () => {
+  it('spans the point a segment is drawn from, not just the new points', () => {
+    // drawStroke() starts its path at points[fromIndex - 1], so a segment's box
+    // has to include that point: otherwise a pointer jump longer than the brush
+    // leaves the stretch between them out of the count and the dirty region.
+    const previous = { x: 20, y: 100 };
+    const next = { x: 180, y: 100 };
+    const rect = strokeRectFor([previous, next], 8, 200, 200);
+    if (!rect) throw new Error('expected a rect');
+
+    expect(rect.x).toBeLessThanOrEqual(previous.x - 6);
+    expect(rect.x + rect.width).toBeGreaterThanOrEqual(next.x + 6);
+    // The omitted-point bug shows up as a box that starts at the *new* point.
+    const newPointsOnly = strokeRectFor([next], 8, 200, 200);
+    expect(rect.width).toBeGreaterThan(newPointsOnly?.width ?? 0);
+  });
+});
+
 describe('shapeRectFor', () => {
   it('bounds shape outlines with a small antialias margin', () => {
     expect(shapeRectFor([{ x: 10, y: 10 }, { x: 40, y: 30 }], 64, 64)).toEqual({
@@ -320,6 +340,16 @@ class MaskBuffer {
 
   markedCount(): number {
     return this.countRegion({ x: 0, y: 0, width: this.width, height: this.height });
+  }
+
+  /**
+   * Fold a mutation into the tracker the way the document does: count the
+   * affected region before and after, then hand the pair to `applyDelta`.
+   */
+  apply(tracker: MaskCoverageTracker, rect: MaskRect | null, mutate: () => void) {
+    const before = rect ? this.countRegion(rect) : 0;
+    mutate();
+    if (rect) tracker.applyDelta(before, this.countRegion(rect));
   }
 
   stampDisc(centerX: number, centerY: number, radius: number, erase: boolean) {
@@ -371,26 +401,26 @@ describe('MaskCoverageTracker', () => {
       if (random() < 0.2) {
         const shape = [point(), point()];
         const rect = shapeRectFor(shape, width, height);
-        if (rect) {
-          tracker.beginStroke(rect, buffer.countRegion);
-          buffer.fillRectRegion(rect, erase);
-          tracker.endStroke(buffer.countRegion);
-        }
+        buffer.apply(tracker, rect, () => {
+          if (rect) buffer.fillRectRegion(rect, erase);
+        });
       } else {
         const size = 2 + Math.floor(random() * 18);
         const radius = Math.max(1, size) / 2;
         const first = point();
-        const rect = strokeRectFor([first], size, width, height);
-        if (rect) tracker.beginStroke(rect, buffer.countRegion);
-        buffer.stampDisc(first.x, first.y, radius, erase);
+        buffer.apply(tracker, strokeRectFor([first], size, width, height), () =>
+          buffer.stampDisc(first.x, first.y, radius, erase)
+        );
         const extra = 1 + Math.floor(random() * 5);
+        let previous = first;
         for (let index = 0; index < extra; index += 1) {
           const next = point();
-          const nextRect = strokeRectFor([next], size, width, height);
-          if (nextRect) tracker.extendStroke(nextRect, buffer.countRegion);
-          buffer.stampDisc(next.x, next.y, radius, erase);
+          // Segments are reported with the point they are drawn from, exactly
+          // like the document's extendStroke (P2).
+          const rect = strokeRectFor([previous, next], size, width, height);
+          buffer.apply(tracker, rect, () => buffer.stampDisc(next.x, next.y, radius, erase));
+          previous = next;
         }
-        tracker.endStroke(buffer.countRegion);
       }
       expectConsistent();
       if (random() < 0.15) {
@@ -406,50 +436,41 @@ describe('MaskCoverageTracker', () => {
     }
   });
 
-  it('cancelStroke discards an in-flight snapshot without touching the total', () => {
+  it('applyDelta moves the total by the region difference, including downwards', () => {
     const buffer = new MaskBuffer(32, 32);
     const tracker = new MaskCoverageTracker(32, 32);
     const rect = strokeRectFor([{ x: 8, y: 8 }], 6, 32, 32);
     if (!rect) throw new Error('expected a rect');
 
-    // Paint between begin and cancel: the snapshot is dropped, so the total
-    // does not pick the pixels up.
-    tracker.beginStroke(rect, buffer.countRegion);
-    buffer.stampDisc(8, 8, 3, false);
-    tracker.cancelStroke();
-    expect(tracker.coverage()).toBe(0);
+    // A paint inside the region raises the total...
+    buffer.apply(tracker, rect, () => buffer.stampDisc(8, 8, 3, false));
+    expect(Math.round(tracker.coverage() * 32 * 32)).toBe(buffer.markedCount());
+    expect(tracker.markedCount()).toBeGreaterThan(0);
 
-    // A complete begin/end pair around the same paint does.
-    buffer.clearAll();
-    tracker.beginStroke(rect, buffer.countRegion);
+    // ...and an erase over it brings the total back down with it.
+    const marked = tracker.markedCount();
+    buffer.apply(tracker, rect, () => buffer.stampDisc(8, 8, 3, true));
+    expect(tracker.markedCount()).toBeLessThan(marked);
+    expect(tracker.markedCount()).toBe(buffer.markedCount());
+  });
+
+  it('a segment the mirror already knows the contents of reports its own delta', () => {
+    const buffer = new MaskBuffer(32, 32);
+    const tracker = new MaskCoverageTracker(32, 32);
+    const rect = strokeRectFor([{ x: 8, y: 8 }], 6, 32, 32);
+    if (!rect) throw new Error('expected a rect');
+
     buffer.stampDisc(8, 8, 3, false);
-    tracker.endStroke(buffer.countRegion);
+    tracker.resetTo(buffer.countRegion(rect));
+
+    // Repainting the same pixels is a no-op, exactly what folding before/after
+    // counts into the running total has to produce.
+    buffer.apply(tracker, rect, () => buffer.stampDisc(8, 8, 3, false));
     expect(Math.round(tracker.coverage() * 32 * 32)).toBe(buffer.markedCount());
   });
 
   it('reports zero coverage for an empty document', () => {
     expect(new MaskCoverageTracker(0, 0).coverage()).toBe(0);
-  });
-
-  it('preview includes the in-flight stroke while coverage() lags behind', () => {
-    const buffer = new MaskBuffer(32, 32);
-    const tracker = new MaskCoverageTracker(32, 32);
-    const rect = strokeRectFor([{ x: 8, y: 8 }], 6, 32, 32);
-    if (!rect) throw new Error('expected a rect');
-
-    expect(tracker.preview(buffer.countRegion)).toBe(0);
-
-    tracker.beginStroke(rect, buffer.countRegion);
-    buffer.stampDisc(8, 8, 3, false);
-
-    // The committed total only moves on endStroke, so the live read must come
-    // from preview while the pointer is still down.
-    expect(tracker.coverage()).toBe(0);
-    expect(Math.round(tracker.preview(buffer.countRegion) * 32 * 32)).toBe(buffer.markedCount());
-
-    tracker.endStroke(buffer.countRegion);
-    expect(tracker.coverage()).toBeGreaterThan(0);
-    expect(tracker.preview(buffer.countRegion)).toBe(tracker.coverage());
   });
 });
 
@@ -513,5 +534,124 @@ describe('MaskCheckpointer', () => {
     checkpointer.record(8, () => 8);
     checkpointer.clear();
     expect(checkpointer.nearestAtOrBelow(8)).toBeNull();
+  });
+});
+
+describe('MaskUndoPatches', () => {
+  it('retains a patch until the byte budget forces it out', () => {
+    const patches = new MaskUndoPatches<string>(100);
+    patches.record(1, 40, 'a');
+    patches.record(2, 40, 'b');
+    expect(patches.usedBytes).toBe(80);
+    expect(patches.get(1)).toBe('a');
+    expect(patches.get(2)).toBe('b');
+
+    // The third patch pushes the total past 100 bytes; the oldest (afterIndex
+    // 1) is evicted first, since undo works from the top of the stack down.
+    patches.record(3, 40, 'c');
+    expect(patches.usedBytes).toBe(80);
+    expect(patches.get(1)).toBeNull();
+    expect(patches.get(2)).toBe('b');
+    expect(patches.get(3)).toBe('c');
+  });
+
+  it('evicts as many oldest entries as needed for one large patch', () => {
+    const patches = new MaskUndoPatches<string>(100);
+    patches.record(1, 30, 'a');
+    patches.record(2, 30, 'b');
+    patches.record(3, 90, 'c');
+    expect(patches.get(1)).toBeNull();
+    expect(patches.get(2)).toBeNull();
+    expect(patches.get(3)).toBe('c');
+    expect(patches.usedBytes).toBe(90);
+  });
+
+  it('a patch bigger than the whole budget is dropped rather than kept over budget', () => {
+    const patches = new MaskUndoPatches<string>(50);
+    patches.record(1, 500, 'huge');
+    expect(patches.get(1)).toBeNull();
+    expect(patches.usedBytes).toBe(0);
+  });
+
+  it('dropAbove removes only patches past the given index, like a cleared redo stack', () => {
+    const patches = new MaskUndoPatches<number>(1000);
+    for (const index of [1, 2, 3, 4]) patches.record(index, 10, index * 10);
+
+    patches.dropAbove(2);
+    expect(patches.get(1)).toBe(10);
+    expect(patches.get(2)).toBe(20);
+    expect(patches.get(3)).toBeNull();
+    expect(patches.get(4)).toBeNull();
+    expect(patches.usedBytes).toBe(20);
+
+    // A fresh patch landing at a dropped index must not resurrect the old one.
+    patches.record(3, 10, 999);
+    expect(patches.get(3)).toBe(999);
+  });
+
+  it('get() returns null for an index that was never recorded', () => {
+    const patches = new MaskUndoPatches<number>(1000);
+    expect(patches.get(5)).toBeNull();
+  });
+
+  it('clear() drops every patch and resets the byte total', () => {
+    const patches = new MaskUndoPatches<number>(1000);
+    patches.record(1, 100, 1);
+    patches.clear();
+    expect(patches.get(1)).toBeNull();
+    expect(patches.usedBytes).toBe(0);
+  });
+});
+
+describe('DirtyRegionList', () => {
+  it('merges rects that land close together and keeps far-apart ones separate', () => {
+    const dirty = new DirtyRegionList(32, 1.5);
+    dirty.markRect({ x: 0, y: 0, width: 10, height: 10 });
+    dirty.markRect({ x: 3, y: 3, width: 10, height: 10 });
+    // These two overlap heavily, so the union wastes little area and they merge.
+    expect(dirty.list).toHaveLength(1);
+
+    dirty.markRect({ x: 1000, y: 1000, width: 10, height: 10 });
+    // Far away: unioning would waste far more than mergeWaste allows, so it
+    // stays a separate region instead of ballooning the dirty area.
+    expect(dirty.list).toHaveLength(2);
+  });
+
+  it('degrades to a single union once past the region cap', () => {
+    const dirty = new DirtyRegionList(3, 1.01);
+    // Far enough apart, and with a tight merge tolerance, that none of these
+    // merge with each other on their own.
+    for (let index = 0; index < 3; index += 1) {
+      dirty.markRect({ x: index * 1000, y: index * 1000, width: 1, height: 1 });
+    }
+    expect(dirty.list).toHaveLength(3);
+
+    // The 4th distinct rect pushes the list past the cap, so it collapses to
+    // one bounding union instead of growing further.
+    dirty.markRect({ x: 3000, y: 3000, width: 1, height: 1 });
+    expect(dirty.list).toHaveLength(1);
+    expect(dirty.isFull).toBe(false);
+  });
+
+  it('markFull short-circuits further rects until clear()', () => {
+    const dirty = new DirtyRegionList();
+    dirty.markRect({ x: 0, y: 0, width: 5, height: 5 });
+    dirty.markFull();
+    expect(dirty.isFull).toBe(true);
+    expect(dirty.list).toEqual([]);
+
+    dirty.markRect({ x: 100, y: 100, width: 5, height: 5 });
+    expect(dirty.isFull).toBe(true);
+
+    dirty.clear();
+    expect(dirty.isFull).toBe(false);
+    expect(dirty.isEmpty).toBe(true);
+  });
+
+  it('isEmpty is true only with no regions and not full', () => {
+    const dirty = new DirtyRegionList();
+    expect(dirty.isEmpty).toBe(true);
+    dirty.markRect({ x: 0, y: 0, width: 1, height: 1 });
+    expect(dirty.isEmpty).toBe(false);
   });
 });

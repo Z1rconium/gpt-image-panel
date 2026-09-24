@@ -154,6 +154,31 @@ describe('snapToEdge', () => {
     expect(snapToEdge(map, 1990, 1990, 4).snapped).toBe(false);
   });
 
+  it('stays on the edge the previous point chose when a parallel one is equally strong', () => {
+    // Two rows of identical strength, one 2px above the cursor and one 2px
+    // below: without the continuity anchor the cursor's own row wins on the
+    // distance penalty, and the selection combs between the two.
+    const width = 21;
+    const map = edgeMapFrom(width, 11, new Uint8Array(width * 11));
+    for (let x = 0; x < width; x += 1) {
+      map.magnitude[4 * width + x] = 200;
+      map.magnitude[8 * width + x] = 200;
+    }
+    const cursor = { x: 10, y: 6 };
+
+    const cold = snapToEdge(map, cursor.x, cursor.y, 4);
+    expect(cold.snapped).toBe(true);
+    expect(cold.y).toBeCloseTo(4.5, 6);
+
+    const anchored = snapToEdge(map, cursor.x, cursor.y, 4, undefined, {
+      x: 10.5,
+      y: 8.5,
+      stepImagePx: 1
+    });
+    expect(anchored.snapped).toBe(true);
+    expect(anchored.y).toBeCloseTo(8.5, 6);
+  });
+
   it('prefers a nearer edge of comparable strength over a distant one', () => {
     // The distant edge is stronger (210 vs 200); without the distance penalty
     // it would win. Both are inside the radius.
