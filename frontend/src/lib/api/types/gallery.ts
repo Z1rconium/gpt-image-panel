@@ -31,6 +31,8 @@ export type GalleryEntry = {
   favorite: boolean;
   bytes?: number | null;
   mask_coverage?: number | null;
+  paste_back?: string | null;
+  paste_back_scale?: number | null;
 };
 
 export type GalleryResponse = {

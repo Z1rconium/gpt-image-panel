@@ -29,6 +29,7 @@ class PromptFormController {
   responseFormat = $state<ResponseFormatDefault>(initialPromptFormState.responseFormat);
   stream = $state(initialPromptFormState.stream);
   partialImages = $state(initialPromptFormState.partialImages);
+  pasteBack = $state(typeof localStorage === 'undefined' ? true : localStorage.getItem('maskEditor.pasteBack') !== 'false');
 
   #lastPresetId = '';
   #presetDefaultModel = initialPromptFormState.model;
@@ -54,7 +55,8 @@ class PromptFormController {
       quantity: this.quantity,
       responseFormat: this.responseFormat,
       stream: this.stream,
-      partialImages: this.partialImages
+      partialImages: this.partialImages,
+      pasteBack: this.pasteBack
     };
   }
 
@@ -71,6 +73,7 @@ class PromptFormController {
     if (updates.responseFormat !== undefined) this.responseFormat = updates.responseFormat;
     if (updates.stream !== undefined) this.stream = updates.stream;
     if (updates.partialImages !== undefined) this.partialImages = updates.partialImages;
+    if (updates.pasteBack !== undefined) this.pasteBack = updates.pasteBack;
   }
 
   replace(next: PromptFormState) {
@@ -78,7 +81,7 @@ class PromptFormController {
   }
 
   reset() {
-    this.patch({ ...initialPromptFormState });
+    this.patch({ ...initialPromptFormState, pasteBack: this.pasteBack });
   }
 
   /** Clamp the free-text quantity input to the submittable range. */

@@ -60,7 +60,8 @@ export function jobToPromptForm(job: GenerateJobStatus, fallbackModel = DEFAULT_
     quantity: clampQuantity(job.n),
     responseFormat: normalizeJobResponseFormat(job.response_format),
     stream: Boolean(job.streaming),
-    partialImages: job.partial_images ?? initialPromptFormState.partialImages
+    partialImages: job.partial_images ?? initialPromptFormState.partialImages,
+    pasteBack: job.paste_back ?? initialPromptFormState.pasteBack
   };
 }
 
@@ -81,7 +82,8 @@ export function galleryEntryToPromptForm(
     quantity: clampQuantity(image.n),
     responseFormat: normalizeJobResponseFormat(image.response_format),
     stream: initialPromptFormState.stream,
-    partialImages: initialPromptFormState.partialImages
+    partialImages: initialPromptFormState.partialImages,
+    pasteBack: initialPromptFormState.pasteBack
   };
 }
 
@@ -103,7 +105,8 @@ export function galleryEntryToEditForm(
     quantity: clampQuantity(image.n),
     responseFormat: normalizeJobResponseFormat(image.response_format),
     stream: initialPromptFormState.stream,
-    partialImages: initialPromptFormState.partialImages
+    partialImages: initialPromptFormState.partialImages,
+    pasteBack: initialPromptFormState.pasteBack
   };
 }
 

@@ -215,6 +215,12 @@ const en = {
     diagnosing: 'Diagnosing...',
     aiDiagnosis: 'AI diagnosis',
     maskedBadge: 'Masked',
+    pasteBackBadge: (status: string) => status === 'applied' ? 'Pasted back' : 'Not pasted back',
+    pasteBackDetail: (status: string, scale: number | null) => {
+      if (status === 'applied') return scale && scale > 1.5 ? `Pasted back. Edit area enlarged ×${scale.toFixed(1)} from the result.` : 'Pasted back onto the primary image.';
+      const reasons: Record<string, string> = { aspect_mismatch: 'Aspect ratios differ', keep_region_changed: 'The kept region changed too much', decode: 'An image could not be decoded', too_large: 'The pasted image is too large', disabled: 'Disabled for this request' };
+      return `Not pasted back: ${reasons[status.replace('skipped:', '')] || status}`;
+    },
     aiLikelyCauses: 'Likely causes',
     aiRecommendedActions: 'Recommended actions',
     retryUnavailable: 'Running jobs cannot be retried yet.',
@@ -279,6 +285,8 @@ const en = {
     editMask: 'Repaint',
     maskOnlyPrimaryHint: 'The repaint area applies to the primary image only',
     maskBadge: (coverage: string) => `Repaint ${coverage}`,
+    pasteBack: 'Paste back',
+    pasteBackHint: 'Restore the original pixels outside the mask in the final image',
     maskOriginPainted: 'Painted',
     maskOriginUploaded: 'Uploaded',
     maskOriginRestored: 'Restored',
@@ -451,6 +459,10 @@ const en = {
     working: 'Working on image',
     queued: 'Queued',
     generatedAlt: 'Generated preview',
+    compareOriginal: 'Compare with original',
+    showEditedResult: 'Show edited result',
+    originalAlt: (label: string) => `Original source image: ${label}`,
+    originalUnavailable: 'Original image is unavailable.',
     resultCount: (count: number) => `${count} results`,
     selectResult: (index: number) => `Select result ${index}`,
     resultThumbAlt: (index: number) => `Generated result ${index}`,

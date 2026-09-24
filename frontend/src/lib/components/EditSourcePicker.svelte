@@ -22,6 +22,8 @@
   export let onEditMask: (sourceId: string) => void = () => {};
   export let onRemoveMask: () => void = () => {};
   export let maskSupported = true;
+  export let pasteBack = true;
+  export let onPasteBackChange: (enabled: boolean) => void = () => {};
 
   let input: HTMLInputElement;
   let dragDepth = 0;
@@ -167,11 +169,11 @@
             </span>
           </button>
           {#if maskSupported}
-            <div class="flex items-center gap-1 border-t border-stone-200/80 px-1.5 py-1 dark:border-zinc-800/80">
+            <div class="flex flex-wrap items-center gap-1 border-t border-stone-200/80 px-1.5 py-1 dark:border-zinc-800/80">
             {#if source.isPrimary}
               <button
                 type="button"
-                class={`control-focus flex min-h-7 min-w-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium transition-colors ${
+                class={`control-focus flex min-h-7 shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium transition-colors ${
                   source.maskCoverage != null
                     ? 'bg-emerald-500/10 text-emerald-700 hover:bg-emerald-500/20 dark:text-emerald-300'
                     : 'text-stone-600 hover:bg-stone-200/60 hover:text-stone-950 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100'
@@ -189,6 +191,12 @@
                 <span class="shrink-0 rounded bg-stone-100 px-1.5 py-0.5 text-[10px] font-medium text-stone-500 dark:bg-zinc-800 dark:text-zinc-400">
                   {maskOriginLabel(source.maskOrigin)}
                 </span>
+              {/if}
+              {#if source.maskCoverage != null}
+                <label class="flex shrink-0 items-center gap-1 text-[10px] text-stone-600 dark:text-zinc-400" title={$t.promptForm.pasteBackHint}>
+                  <input type="checkbox" class="control-focus accent-emerald-500" checked={pasteBack} on:change={(event) => onPasteBackChange(event.currentTarget.checked)} />
+                  {$t.promptForm.pasteBack}
+                </label>
               {/if}
               {#if source.maskCoverage != null}
                 <button

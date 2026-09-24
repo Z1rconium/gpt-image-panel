@@ -1434,6 +1434,11 @@
         onClear={clearEditSource}
         onEditMask={openMaskEditor}
         onRemoveMask={removeEditMask}
+        pasteBack={promptForm.pasteBack}
+        onPasteBackChange={(enabled: boolean) => {
+          promptForm.pasteBack = enabled;
+          try { localStorage.setItem('maskEditor.pasteBack', String(enabled)); } catch { /* storage may be disabled */ }
+        }}
         {maskSupported}
       />
     {/snippet}

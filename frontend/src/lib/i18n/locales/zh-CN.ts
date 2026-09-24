@@ -217,6 +217,12 @@ const zh: Translation = {
     diagnosing: '诊断中...',
     aiDiagnosis: 'AI 诊断',
     maskedBadge: '蒙版',
+    pasteBackBadge: (status) => status === 'applied' ? '已回贴' : '未回贴',
+    pasteBackDetail: (status, scale) => {
+      if (status === 'applied') return scale && scale > 1.5 ? `已回贴；编辑区域由结果放大 ×${scale.toFixed(1)}` : '已回贴到主图';
+      const reasons: Record<string, string> = { aspect_mismatch: '宽高比不一致', keep_region_changed: '保留区变化过大', decode: '图像解码失败', too_large: '结果过大', disabled: '本次请求已关闭' };
+      return `未回贴：${reasons[status.replace('skipped:', '')] || status}`;
+    },
     aiLikelyCauses: '可能原因',
     aiRecommendedActions: '建议操作',
     retryUnavailable: '运行中的任务暂不能重试。',
@@ -281,6 +287,8 @@ const zh: Translation = {
     editMask: '局部重绘',
     maskOnlyPrimaryHint: '局部重绘只作用于主图',
     maskBadge: (coverage) => `局部重绘 ${coverage}`,
+    pasteBack: '回贴原图',
+    pasteBackHint: '最终图片的蒙版外区域恢复为主图像素',
     maskOriginPainted: '手绘',
     maskOriginUploaded: '上传',
     maskOriginRestored: '已恢复',
@@ -452,6 +460,10 @@ const zh: Translation = {
     working: '正在处理图像',
     queued: '排队中',
     generatedAlt: '生成结果预览',
+    compareOriginal: '与原图对比',
+    showEditedResult: '返回编辑结果',
+    originalAlt: (label) => `原图：${label}`,
+    originalUnavailable: '原图无法加载。',
     resultCount: (count) => `${count} 个结果`,
     selectResult: (index) => `选择结果 ${index}`,
     resultThumbAlt: (index) => `生成结果 ${index}`,

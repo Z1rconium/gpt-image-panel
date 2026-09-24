@@ -254,6 +254,9 @@
                 <span class="rounded-md border border-stone-300 px-2 py-0.5 text-xs text-stone-500 dark:border-zinc-700 dark:text-zinc-400">{operationLabel(job.operation, $t.operations)}</span>
                 {#if job.mask_applied}
                   <span class="rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:text-emerald-300">{$t.jobs.maskedBadge}</span>
+                  {#if job.images?.[0]?.paste_back}
+                    <span class="rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:text-emerald-300" title={$t.jobs.pasteBackDetail(job.images[0].paste_back ?? '', job.images[0].paste_back_scale ?? null)}>{$t.jobs.pasteBackBadge(job.images[0].paste_back ?? '')}</span>
+                  {/if}
                 {/if}
               </span>
               <span class={`text-xs font-medium ${statusClass(job)}`}>{statusLabel(job.status, $t.statuses)}</span>

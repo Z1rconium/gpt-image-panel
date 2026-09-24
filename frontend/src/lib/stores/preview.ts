@@ -16,7 +16,12 @@ export type PreviewState = {
   prompt: string;
   streamingPreviewDataUrl: string;
   streamingPreviewSequence: number;
+  compareSource: PreviewCompareSource | null;
 };
+
+export type PreviewCompareSource =
+  | { kind: 'upload'; file: File; label: string }
+  | { kind: 'gallery'; url: string; label: string };
 
 export type PromptFormState = {
   prompt: string;
@@ -31,6 +36,7 @@ export type PromptFormState = {
   responseFormat: ResponseFormatDefault;
   stream: boolean;
   partialImages: number;
+  pasteBack: boolean;
 };
 
 export const DEFAULT_QUANTITY = 1;
@@ -43,7 +49,8 @@ const initialPreviewState: PreviewState = {
   filename: '',
   prompt: '',
   streamingPreviewDataUrl: '',
-  streamingPreviewSequence: 0
+  streamingPreviewSequence: 0,
+  compareSource: null
 };
 
 export const DEFAULT_PROMPT_MODEL = 'gpt-image-2';
@@ -60,7 +67,8 @@ export const initialPromptFormState: PromptFormState = {
   quantity: DEFAULT_QUANTITY,
   responseFormat: 'url',
   stream: false,
-  partialImages: 2
+  partialImages: 2,
+  pasteBack: true
 };
 
 function buildRequestBody(form: PromptFormState): GenerateRequestBody {
@@ -107,10 +115,23 @@ function submissionError(body: GenerateRequestBody, edit = false): string {
   return '';
 }
 
+function comparisonSourceForEdit(source: EditSourceState): PreviewCompareSource | null {
+  if (!source.mask) return null;
+  if (source.selectedGalleryImageId) {
+    if (!source.galleryPreviewUrl) return null;
+    return { kind: 'gallery', url: source.galleryPreviewUrl, label: source.galleryPreviewLabel || source.galleryLabel };
+  }
+  const upload = source.files[0];
+  // The source store may revoke its preview URL after submission. Keep the
+  // File and let PreviewPanel own a separate, short-lived comparison URL.
+  return upload ? { kind: 'upload', file: upload.file, label: upload.label } : null;
+}
+
 function createPreviewStore() {
   const { subscribe, set, update } = writable<PreviewState>(initialPreviewState);
   let lastRequest: GenerateRequestBody | null = null;
   let lastAction: 'generate' | 'edit' = 'generate';
+  let lastPasteBack = true;
 
   function setPreview(next: PreviewState) {
     set(next);
@@ -122,7 +143,7 @@ function createPreviewStore() {
 
   function setSubmissionError(error: unknown) {
     const message = error instanceof Error ? error.message : get(t).messages.requestFailed;
-    update((current) => ({ ...current, loading: false, error: message, job: null }));
+    update((current) => ({ ...current, loading: false, error: message, job: null, compareSource: null }));
   }
 
   function clearPreview(closeActiveJobSource?: () => void) {
@@ -203,7 +224,8 @@ function createPreviewStore() {
     }
     lastRequest = body;
     lastAction = 'edit';
-    set(makeQueuedPreview(body.prompt, 'edit'));
+    lastPasteBack = form.pasteBack;
+    set({ ...makeQueuedPreview(body.prompt, 'edit'), compareSource: comparisonSourceForEdit(editSource) });
 
     const formData = new FormData();
     Object.entries(body).forEach(([key, value]) => {
@@ -223,6 +245,7 @@ function createPreviewStore() {
     });
     if (editSource.mask) {
       formData.append('mask', editSource.mask.blob, 'mask.png');
+      formData.append('paste_back', String(form.pasteBack));
     }
 
     try {
@@ -255,7 +278,8 @@ function createPreviewStore() {
       outputCompression: lastRequest.output_compression === null || lastRequest.output_compression === undefined ? '' : String(lastRequest.output_compression),
       responseFormat: lastRequest.response_format || '',
       stream: Boolean(lastRequest.stream),
-      partialImages: lastRequest.partial_images ?? initialPromptFormState.partialImages
+      partialImages: lastRequest.partial_images ?? initialPromptFormState.partialImages,
+      pasteBack: lastPasteBack
     });
     if (lastAction === 'edit') edit();
     else generate();
@@ -263,6 +287,7 @@ function createPreviewStore() {
 
   function cleanup() {
     editSourceStore.cleanup();
+    set(initialPreviewState);
   }
 
   return {

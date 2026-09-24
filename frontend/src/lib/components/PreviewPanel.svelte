@@ -2,7 +2,7 @@
   import { onDestroy, tick } from 'svelte';
   import type { GenerateJobImage, GenerateJobStatus } from '$lib/api/types/jobs';
   import { t } from '$lib/i18n';
-  import { previewStore } from '$lib/stores/preview';
+  import { previewStore, type PreviewCompareSource } from '$lib/stores/preview';
   import { displayImageSize, downloadUrl, filenameFromImageUrl, formatBeijingTime, stageLabel, statusLabel, thumbnailUrl } from '$lib/utils/format';
   import { canRunExposure, runExposure, type ExposureHandle } from '$lib/webgl/exposureScene';
 
@@ -20,12 +20,29 @@
   const filename = $derived($previewStore.filename);
   const prompt = $derived($previewStore.prompt);
   const streamingPreviewDataUrl = $derived($previewStore.streamingPreviewDataUrl);
+  const compareSource = $derived($previewStore.compareSource);
 
   let activeJobId = $state('');
   let selectedImageId = $state('');
   let loadedPreviewSrc = $state('');
   let failedPreviewSrc = $state('');
   let failedStripThumbs = $state<Record<string, boolean>>({});
+  let compareUpload = $state.raw<{ source: PreviewCompareSource; url: string } | null>(null);
+  let showOriginal = $state(false);
+  let failedCompareUrl = $state('');
+  let previousCompareSource: PreviewCompareSource | null = null;
+  let previousComparedImageId = '';
+
+  $effect(() => {
+    const source = compareSource;
+    if (source?.kind !== 'upload') {
+      compareUpload = null;
+      return;
+    }
+    const url = URL.createObjectURL(source.file);
+    compareUpload = { source, url };
+    return () => URL.revokeObjectURL(url);
+  });
 
   type PreviewImage = GenerateJobImage & { thumb_url: string };
 
@@ -41,7 +58,9 @@
           filename: imageFilename,
           thumb_url: imageFilename ? thumbnailUrl(imageFilename) : image_url,
           image_width: image.image_width ?? null,
-          image_height: image.image_height ?? null
+          image_height: image.image_height ?? null,
+          paste_back: image.paste_back ?? null,
+          paste_back_scale: image.paste_back_scale ?? null
         };
       });
     }
@@ -75,6 +94,21 @@
   });
   const selectedImage = $derived(resultImages.find((image) => image.image_id === selectedImageId) || resultImages[0] || null);
   const selectedImageUrl = $derived(selectedImage?.image_url || imageUrl);
+  const compareUrl = $derived(
+    compareSource?.kind === 'gallery'
+      ? compareSource.url
+      : compareUpload?.source === compareSource ? compareUpload.url : ''
+  );
+
+  $effect(() => {
+    const imageId = selectedImage?.image_id || '';
+    if (compareSource !== previousCompareSource || imageId !== previousComparedImageId) {
+      showOriginal = false;
+      failedCompareUrl = '';
+      previousCompareSource = compareSource;
+      previousComparedImageId = imageId;
+    }
+  });
   const selectedFilename = $derived(selectedImage?.filename || filename);
   const selectedImageIndex = $derived(selectedImage ? resultImages.findIndex((image) => image.image_id === selectedImage.image_id) : -1);
   const previewWidth = $derived(selectedImage?.image_width || job?.image_width || undefined);
@@ -195,12 +229,30 @@
             </div>
           </div>
         {/if}
+        {#if compareUrl && seated && job?.operation === 'edit'}
+          <div class="flex justify-end border-b border-stone-200 bg-white/80 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900/80">
+            {#if failedCompareUrl === compareUrl}
+              <span class="text-xs text-stone-500 dark:text-zinc-400" role="status">{$t.preview.originalUnavailable}</span>
+            {:else}
+              <button
+                type="button"
+                class={`control-focus rounded-md border px-3 py-1.5 text-xs font-medium ${showOriginal ? 'border-emerald-500 bg-emerald-50 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200' : 'border-stone-300 text-stone-700 hover:bg-stone-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800'}`}
+                aria-pressed={showOriginal}
+                title={compareSource?.label || ''}
+                onclick={() => (showOriginal = !showOriginal)}
+              >
+                {showOriginal ? $t.preview.showEditedResult : $t.preview.compareOriginal}
+              </button>
+            {/if}
+          </div>
+        {/if}
         <div class="flex min-h-[320px] flex-1 items-center justify-center p-3">
           <div class="preview-image-frame relative">
             <img
               bind:this={previewImageEl}
               src={selectedImageUrl}
               alt={$t.preview.generatedAlt}
+              aria-hidden={showOriginal}
               class={`preview-image max-h-[640px] max-w-full rounded-lg object-contain ${seated ? 'preview-image-seated' : ''}`}
               loading="eager"
               fetchpriority="high"
@@ -218,8 +270,22 @@
             {#if showExposureCanvas}
               <canvas bind:this={exposureCanvasEl} class="preview-exposure-canvas rounded-lg" aria-hidden="true"></canvas>
             {/if}
-            {#if job?.mask_applied}
+            {#if showOriginal && compareUrl && failedCompareUrl !== compareUrl}
+              <img
+                src={compareUrl}
+                alt={$t.preview.originalAlt(compareSource?.label || '')}
+                class="absolute inset-0 h-full w-full rounded-lg bg-stone-100 object-contain dark:bg-zinc-950"
+                onerror={() => {
+                  failedCompareUrl = compareUrl;
+                  showOriginal = false;
+                }}
+              />
+            {/if}
+            {#if job?.mask_applied && !showOriginal}
               <span class="absolute left-2 top-2 rounded border border-emerald-500/40 bg-black/60 px-2 py-1 text-xs font-medium text-emerald-300">{$t.jobs.maskedBadge}</span>
+              {#if selectedImage?.paste_back}
+                <span class="absolute left-2 top-10 rounded border border-emerald-500/40 bg-black/60 px-2 py-1 text-xs font-medium text-emerald-300" title={$t.jobs.pasteBackDetail(selectedImage.paste_back, selectedImage.paste_back_scale ?? null)}>{$t.jobs.pasteBackBadge(selectedImage.paste_back)}</span>
+              {/if}
             {/if}
             {#if previewFailed}
               <div class="preview-image-error" role="status">{$t.lightbox.originalLoadFailed}</div>

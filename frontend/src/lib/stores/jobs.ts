@@ -509,6 +509,7 @@ function createJobsStore() {
       prompt: currentPrompt,
       streamingPreviewDataUrl: '',
       streamingPreviewSequence: 0,
+      compareSource: null,
       job: {
         job_id: '',
         status: 'queued',
@@ -534,7 +535,8 @@ function createJobsStore() {
       // drop the streaming preview so PreviewPanel switches to the real image.
       // A failed job never gets one, so release its (potentially large) data URL.
       streamingPreviewDataUrl: image || !active ? '' : preview.streamingPreviewDataUrl,
-      streamingPreviewSequence: image || !active ? 0 : preview.streamingPreviewSequence
+      streamingPreviewSequence: image || !active ? 0 : preview.streamingPreviewSequence,
+      compareSource: preview.compareSource
     };
   }
 

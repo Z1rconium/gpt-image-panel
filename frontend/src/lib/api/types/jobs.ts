@@ -34,6 +34,8 @@ export type GenerateJobImage = {
   filename: string;
   image_width?: number | null;
   image_height?: number | null;
+  paste_back?: string | null;
+  paste_back_scale?: number | null;
 };
 
 export type GeneratePreviewEvent = {
@@ -77,6 +79,6 @@ export type GenerateJobStatus = GenerateJobResponse & {
   streaming?: boolean | null;
   partial_images?: number | null;
   mask_applied?: boolean | null;
+  paste_back?: boolean | null;
   error?: string | null;
 };
-
