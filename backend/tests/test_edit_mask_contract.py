@@ -331,6 +331,190 @@ def test_edit_from_gallery_validates_mask_against_gallery_image(client, monkeypa
     assert "8x8" in mismatch.json()["detail"]
 
 
+def _exif_orientedjpeg(size: tuple[int, int], orientation: int) -> bytes:
+    """A JPEG whose EXIF Orientation says the picture is displayed rotated.
+
+    Browsers honour the tag (`naturalWidth/Height` and `createImageBitmap`
+    return the rotated size) while Pillow reports the stored one, which is the
+    mismatch the orientation normalization closes.
+    """
+    image = PILImage.new("RGB", size, (255, 0, 0))
+    exif = PILImage.Exif()
+    exif[274] = orientation
+    buffer = io.BytesIO()
+    image.save(buffer, format="JPEG", quality=95, exif=exif)
+    return buffer.getvalue()
+
+
+EXIF6_JPEG = _exif_orientedjpeg((400, 300), 6)
+EXIF6_ROTATED_MASK_PNG = _png_bytes((300, 400), "RGBA", fill_alpha=0)
+PLAIN_JPEG = _exif_orientedjpeg((400, 300), 1)
+
+
+def _capture_edit_sources(seen: dict[str, object]):
+    async def fake_edit_api(
+        api_url,
+        api_key,
+        payload,
+        image_sources,
+        api_preset_name=None,
+        progress=None,
+        socks5_proxy=None,
+        persist_gallery_entry=None,
+        mask_source=None,
+        mask_coverage=None,
+    ):
+        primary = image_sources[0]
+        seen["size"] = (primary.width, primary.height)
+        seen["bytes"] = primary.temp_path.read_bytes()
+        seen["byte_size"] = primary.byte_size
+        return [await _fake_entry(payload, api_preset_name)]
+
+    return fake_edit_api
+
+
+def test_exif_oriented_primary_is_normalized_for_a_rotated_mask(client, monkeypatch):
+    """E1: an EXIF-6 photo is written back upright, so what the browser showed,
+    what the mask was drawn against and what upstream receives all agree."""
+    seen: dict[str, object] = {}
+    monkeypatch.setattr(backend_main.proxy, "call_image_edit_api", _capture_edit_sources(seen))
+
+    resp = client.post(
+        "/api/edits",
+        data=_edit_data(),
+        files={
+            "image": ("phone.jpg", EXIF6_JPEG, "image/jpeg"),
+            "mask": ("mask.png", EXIF6_ROTATED_MASK_PNG, "image/png"),
+        },
+    )
+
+    assert resp.status_code == 202
+    assert _wait_for_job(client, resp.json()["job_id"])["status"] == "success"
+    assert seen["size"] == (300, 400)
+    # The reserved pending-upload bytes track the file that is actually sent.
+    assert seen["byte_size"] == len(seen["bytes"])
+    assert seen["bytes"] != EXIF6_JPEG
+    with PILImage.open(io.BytesIO(seen["bytes"])) as sent:
+        assert sent.size == (300, 400)
+        # `exif_transpose` drops the tag, so a reader that also honours EXIF
+        # cannot rotate the picture a second time.
+        assert sent.getexif().get(274) in (None, 1)
+
+
+def test_exif_oriented_primary_keeps_raw_orientation_for_a_raw_mask(client, monkeypatch):
+    """The compatibility branch: a mask that only fits the stored orientation
+    was drawn by a client that never saw the EXIF tag, so the bytes stay as they
+    were and the mask keeps matching."""
+    seen: dict[str, object] = {}
+    monkeypatch.setattr(backend_main.proxy, "call_image_edit_api", _capture_edit_sources(seen))
+
+    resp = client.post(
+        "/api/edits",
+        data=_edit_data(),
+        files={
+            "image": ("phone.jpg", EXIF6_JPEG, "image/jpeg"),
+            "mask": ("mask.png", _png_bytes((400, 300), "RGBA", fill_alpha=0), "image/png"),
+        },
+    )
+
+    assert resp.status_code == 202
+    assert _wait_for_job(client, resp.json()["job_id"])["status"] == "success"
+    assert seen["size"] == (400, 300)
+    assert seen["bytes"] == EXIF6_JPEG
+
+
+def test_exif_free_primary_bytes_are_not_rewritten(client, monkeypatch):
+    """A file without an orientation tag is forwarded exactly as uploaded."""
+    seen: dict[str, object] = {}
+
+    async def fake_edit_api(
+        api_url,
+        api_key,
+        payload,
+        image_sources,
+        api_preset_name=None,
+        progress=None,
+        socks5_proxy=None,
+        persist_gallery_entry=None,
+        mask_source=None,
+        mask_coverage=None,
+    ):
+        seen["bytes"] = image_sources[0].temp_path.read_bytes()
+        seen["size"] = (image_sources[0].width, image_sources[0].height)
+        return [await _fake_entry(payload, api_preset_name)]
+
+    monkeypatch.setattr(backend_main.proxy, "call_image_edit_api", fake_edit_api)
+
+    resp = client.post(
+        "/api/edits",
+        data=_edit_data(),
+        files={
+            "image": ("plain.jpg", PLAIN_JPEG, "image/jpeg"),
+            "mask": ("mask.png", _png_bytes((400, 300), "RGBA", fill_alpha=0), "image/png"),
+        },
+    )
+
+    assert resp.status_code == 202
+    assert _wait_for_job(client, resp.json()["job_id"])["status"] == "success"
+    assert seen["bytes"] == PLAIN_JPEG
+    assert seen["size"] == (400, 300)
+
+
+def test_gallery_source_is_normalized_for_edits(client, monkeypatch):
+    """A gallery photo imported with EXIF orientation is normalized too."""
+    gallery_mutations.add_to_gallery_sync(
+        image_id="gallery-exif",
+        prompt="seed oriented photo",
+        size="1024x1024",
+        filename="gallery-exif.jpg",
+        metadata={
+            "model": "gpt-image-2",
+            "quality": "auto",
+            "output_format": "jpeg",
+            "n": 1,
+            "api_path": "/v1/images/generations",
+            "api_preset_name": "Default",
+        },
+        image_bytes=EXIF6_JPEG,
+    )
+    seen: dict[str, object] = {}
+
+    async def capture_edit_api(
+        api_url,
+        api_key,
+        payload,
+        image_sources,
+        api_preset_name=None,
+        progress=None,
+        socks5_proxy=None,
+        persist_gallery_entry=None,
+        mask_source=None,
+        mask_coverage=None,
+    ):
+        seen["size"] = (image_sources[0].width, image_sources[0].height)
+        seen["bytes"] = image_sources[0].temp_path.read_bytes()
+        return [await _fake_entry(payload, api_preset_name)]
+
+    monkeypatch.setattr(backend_main.proxy, "call_image_edit_api", capture_edit_api)
+
+    resp = client.post(
+        "/api/edits/from-gallery/gallery-exif",
+        data=_edit_data(),
+        files={"mask": ("mask.png", EXIF6_ROTATED_MASK_PNG, "image/png")},
+    )
+
+    assert resp.status_code == 202
+    assert _wait_for_job(client, resp.json()["job_id"])["status"] == "success"
+    assert seen["size"] == (300, 400)
+    with PILImage.open(io.BytesIO(seen["bytes"])) as sent:
+        assert sent.size == (300, 400)
+        assert sent.getexif().get(274) in (None, 1)
+    # The stored gallery file itself is untouched: only the edit-source copy is
+    # re-encoded, so retries and thumbnails keep the original bytes.
+    stored = Path(config.IMAGES_DIR) / "gallery-exif.jpg"
+    assert stored.read_bytes() == EXIF6_JPEG
+
+
 def test_edit_rejects_mask_with_wrong_dimensions(client):
     resp = client.post(
         "/api/edits",

@@ -10,11 +10,15 @@ from pathlib import Path
 from ..core import settings as config
 from ..core.media import (
     IMAGE_FILE_EXTENSIONS,
+    ORIENTATION_REWRITE_FORMATS,
     Image,
+    encode_upright_image,
+    orientation_upright_size,
+    pillow_exif_orientation,
     safe_image_path,
     safe_mask_path,
     validate_image_header_bytes,
-    verify_pillow_image,
+    verified_pillow_image,
 )
 
 
@@ -24,6 +28,55 @@ def validate_image_file_details(
     filename: str = "",
     content_type: str = "",
 ) -> tuple[str, int, int]:
+    detected_format, width, height, _byte_size = _read_image_file_details(
+        path,
+        filename=filename,
+        content_type=content_type,
+    )
+    return detected_format, width, height
+
+
+def validate_and_normalize_image_file(
+    path: Path,
+    *,
+    filename: str = "",
+    content_type: str = "",
+    orientation_mask_size: tuple[int, int] | None = None,
+) -> tuple[str, int, int, int]:
+    """Validate a decoded image, then write it back upright when it carries an EXIF orientation.
+
+    Returns `(format, width, height, byte_size)` describing the file as it now
+    stands on disk — the byte size changes when the pixels are re-encoded, and
+    callers size their upload accounting off it. Everything happens off a single
+    decode: the loaded image both answers the orientation check and, when a
+    rotation is needed, supplies the pixels for the re-encode, so the file is
+    never opened twice.
+
+    `orientation_mask_size` is the mask's pixel size when the request carries
+    one. A mask that fits the *untouched* orientation exactly, and would stop
+    fitting once the picture is rotated, was drawn against the raw pixels by a
+    caller that never saw the EXIF direction; the file is then left alone and
+    the rest of the pipeline keeps the original orientation (see E1's
+    compatibility branch in plan/mask-v1.6-gap-fill-and-perf-plan.md).
+    """
+
+    return _read_image_file_details(
+        path,
+        filename=filename,
+        content_type=content_type,
+        orientation_mask_size=orientation_mask_size,
+        normalize_orientation=True,
+    )
+
+
+def _read_image_file_details(
+    path: Path,
+    *,
+    filename: str = "",
+    content_type: str = "",
+    orientation_mask_size: tuple[int, int] | None = None,
+    normalize_orientation: bool = False,
+) -> tuple[str, int, int, int]:
     try:
         with path.open("rb") as file:
             header = file.read(512)
@@ -35,11 +88,29 @@ def validate_image_file_details(
         filename=filename,
         content_type=content_type,
     )
-    width, height = verify_pillow_image(
+
+    with verified_pillow_image(
         lambda: Image.open(path),
         expected_format=detected_format,
-    )
-    return detected_format, width, height
+    ) as image:
+        width, height = int(image.size[0]), int(image.size[1])
+        if not normalize_orientation:
+            return detected_format, width, height, path.stat().st_size
+        orientation = pillow_exif_orientation(image)
+        if orientation == 1 or detected_format not in ORIENTATION_REWRITE_FORMATS:
+            return detected_format, width, height, path.stat().st_size
+
+        upright_width, upright_height = orientation_upright_size(width, height, orientation)
+        if (
+            orientation_mask_size == (width, height)
+            and (upright_width, upright_height) != (width, height)
+        ):
+            return detected_format, width, height, path.stat().st_size
+
+        data = encode_upright_image(image, image_format=detected_format)
+
+    path.write_bytes(data)
+    return detected_format, upright_width, upright_height, len(data)
 
 
 def save_image_to_temp(image_bytes: bytes, filename: str) -> Path:

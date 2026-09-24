@@ -16,9 +16,10 @@ from pathlib import Path
 from . import settings as config
 
 try:
-    from PIL import Image, UnidentifiedImageError
+    from PIL import Image, ImageOps, UnidentifiedImageError
 except ImportError:  # pragma: no cover - Pillow is a runtime dependency
     Image = None
+    ImageOps = None
     UnidentifiedImageError = OSError
 
 IMAGE_FILE_EXTENSIONS = {
@@ -93,6 +94,13 @@ PILLOW_FORMATS = {
     "TIFF": "tiff",
     "WEBP": "webp",
 }
+
+# EXIF tag 274 and the formats whose pixels survive a rotation re-encode
+# without losing anything the upstream contract depends on.
+EXIF_ORIENTATION_TAG = 274
+ORIENTATION_REWRITE_FORMATS = {"jpeg", "png", "tiff", "webp"}
+# Orientations 5-8 describe a quarter turn, which swaps the two dimensions.
+ORIENTATION_SWAPS_AXES = {5, 6, 7, 8}
 
 
 def image_content_type_for_filename(filename: str | Path) -> str:
@@ -233,6 +241,66 @@ def verify_pillow_image(
     with verified_pillow_image(opener, expected_format=expected_format) as image:
         width, height = image.size
         return int(width), int(height)
+
+
+def pillow_exif_orientation(image) -> int:
+    """EXIF orientation of an already-decoded Pillow image.
+
+    Returns 1 (upright) when the tag is absent, out of range, or the container's
+    EXIF block cannot be parsed at all — every caller treats anything but a real
+    rotation as "leave these pixels alone".
+    """
+
+    try:
+        exif = image.getexif()
+    except Exception:
+        return 1
+    if not exif:
+        return 1
+    try:
+        value = exif.get(EXIF_ORIENTATION_TAG)
+    except Exception:
+        return 1
+    if isinstance(value, int) and 2 <= value <= 8:
+        return value
+    return 1
+
+
+def orientation_upright_size(width: int, height: int, orientation: int) -> tuple[int, int]:
+    """Dimensions an image with `orientation` has once it is displayed upright."""
+
+    if orientation in ORIENTATION_SWAPS_AXES:
+        return height, width
+    return width, height
+
+
+def encode_upright_image(image, *, image_format: str) -> bytes:
+    """Rotate a decoded image upright and re-encode it in `image_format`.
+
+    `ImageOps.exif_transpose` also drops the orientation tag, so the re-encoded
+    file cannot be rotated a second time by anything downstream. JPEG keeps
+    quality 95 and the ICC profile; PNG/TIFF/WebP stay in their lossless mode,
+    since the rotation itself never needed to be lossy.
+    """
+
+    if ImageOps is None:  # pragma: no cover - Pillow is a runtime dependency
+        raise ValueError("Pillow is required to normalize image orientation")
+    upright = ImageOps.exif_transpose(image)
+    if upright is None:  # pragma: no cover - exif_transpose never returns None for a loaded image
+        upright = image
+
+    options: dict = {"format": image_format.upper()}
+    icc_profile = getattr(image, "info", {}).get("icc_profile")
+    if icc_profile:
+        options["icc_profile"] = icc_profile
+    if image_format == "jpeg":
+        options["quality"] = 95
+    elif image_format == "webp":
+        options["lossless"] = True
+
+    buffer = io.BytesIO()
+    upright.save(buffer, **options)
+    return buffer.getvalue()
 
 
 def validate_image_bytes(

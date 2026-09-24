@@ -24,8 +24,8 @@ from ..uploads import is_image_upload, resolve_upload_content_type
 from ...services.uploads import validate_upload_image_bytes
 from ...core import settings as config
 from ...repositories.gallery.queries import get_gallery_entry
-from ...core.media import image_content_type_for_filename, safe_image_path
-from ...repositories.image_files import validate_image_file_details
+from ...core.media import get_image_dimensions, image_content_type_for_filename, safe_image_path
+from ...repositories.image_files import validate_and_normalize_image_file
 from ...schemas.generation import EditRequest, GenerateJobResponse
 from ...runtime.blocking import run_db_operation, run_image_operation
 
@@ -95,23 +95,52 @@ def validate_edit_source_header(
 
 
 def validate_edit_source_file_details(
-    path: Path, filename: str, content_type: str
-) -> tuple[int, int]:
-    """Full Pillow decode, returning the size so callers don't decode again.
+    path: Path,
+    filename: str,
+    content_type: str,
+    *,
+    orientation_mask_size: tuple[int, int] | None = None,
+) -> tuple[int, int, int]:
+    """Full Pillow decode, returning the size and byte size so callers don't decode again.
+
+    A photo that carries an EXIF orientation is rotated upright and re-encoded
+    in the same decode (see `validate_and_normalize_image_file`), because the
+    browser shows and the mask editor draws the rotated pixels while Pillow
+    reports the raw ones — a mismatch that rejects non-square phone photos with
+    a 422 and silently edits the wrong region on square ones.
 
     Used for primary/reference images; mask uploads skip this (see
     `copy_edit_source_stream_to_temp(..., validate=False)`) because
     `validate_edit_mask_file()` decodes them once on its own.
     """
     try:
-        _format, width, height = validate_image_file_details(
+        _format, width, height, byte_size = validate_and_normalize_image_file(
             path,
             filename=filename,
             content_type=content_type,
+            orientation_mask_size=orientation_mask_size,
         )
-        return width, height
+        return width, height, byte_size
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+def mask_dimensions(mask: EditImageSource | None) -> tuple[int, int] | None:
+    """Mask pixel size straight from its header, without decoding it.
+
+    The primary's orientation normalization needs to know whether the mask was
+    drawn against the raw or the rotated pixels, and that decision has to be
+    made before the primary is decoded — `validate_edit_mask_file()` still does
+    the only full mask decode, later.
+    """
+    if mask is None:
+        return None
+    try:
+        with mask.temp_path.open("rb") as file:
+            header = file.read(EDIT_SOURCE_SNIFF_BYTES)
+    except OSError:
+        return None
+    return get_image_dimensions(header)
 
 
 def copy_edit_source_file_to_temp(
@@ -123,6 +152,7 @@ def copy_edit_source_file_to_temp(
     too_large_detail: str,
     read_error_detail: str,
     max_bytes: int | None = None,
+    orientation_mask_size: tuple[int, int] | None = None,
 ) -> EditImageSource:
     try:
         with path.open("rb") as source:
@@ -134,6 +164,7 @@ def copy_edit_source_file_to_temp(
                 too_large_detail=too_large_detail,
                 read_error_detail=read_error_detail,
                 max_bytes=max_bytes,
+                orientation_mask_size=orientation_mask_size,
             )
     except HTTPException:
         raise
@@ -151,6 +182,7 @@ def copy_edit_source_stream_to_temp(
     read_error_detail: str,
     max_bytes: int | None = None,
     validate: bool = True,
+    orientation_mask_size: tuple[int, int] | None = None,
 ) -> EditImageSource:
     """Copy an upload to a temp edit-source file.
 
@@ -159,6 +191,10 @@ def copy_edit_source_stream_to_temp(
     a caller-specific validator — currently only mask uploads, whose
     alpha/dimension checks in `validate_edit_mask_file()` already decode the
     file. Width/height stay 0 when the decode is skipped.
+
+    `byte_size` is the size of the file as it ends up on disk, so an EXIF
+    orientation re-encode (which changes the byte count) still reserves the
+    right amount of pending-upload memory.
     """
     limit = max_upload_bytes() if max_bytes is None else max_bytes
     fd, temp_path = create_edit_source_temp_path(filename)
@@ -200,7 +236,12 @@ def copy_edit_source_stream_to_temp(
             max_bytes=max_bytes,
         )
         if validate:
-            width, height = validate_edit_source_file_details(temp_path, filename, content_type)
+            width, height, total = validate_edit_source_file_details(
+                temp_path,
+                filename,
+                content_type,
+                orientation_mask_size=orientation_mask_size,
+            )
     except BaseException:
         temp_path.unlink(missing_ok=True)
         raise
@@ -221,7 +262,10 @@ def validate_edit_source_count(sources: list[EditImageSource]):
         )
 
 
-async def read_upload_edit_source(image: UploadFile) -> EditImageSource:
+async def read_upload_edit_source(
+    image: UploadFile,
+    orientation_mask_size: tuple[int, int] | None = None,
+) -> EditImageSource:
     if not is_image_upload(image):
         raise HTTPException(status_code=400, detail="Upload must be an image file.")
 
@@ -238,10 +282,15 @@ async def read_upload_edit_source(image: UploadFile) -> EditImageSource:
         ),
         read_error_detail="Failed to read uploaded image",
         metric_name="copy_validate_edit_upload",
+        orientation_mask_size=orientation_mask_size,
     )
 
 
-async def read_upload_edit_sources(form: FormData) -> list[EditImageSource]:
+async def read_upload_edit_sources(
+    form: FormData,
+    *,
+    orientation_mask_size: tuple[int, int] | None = None,
+) -> list[EditImageSource]:
     uploads: list[UploadFile] = []
     for field_name in ("image", "image[]"):
         for value in form.getlist(field_name):
@@ -255,8 +304,13 @@ async def read_upload_edit_sources(form: FormData) -> list[EditImageSource]:
         )
 
     sources: list[EditImageSource] = []
+    # Only the first upload is the primary image the mask has to match, so only
+    # that one gets the orientation compatibility check.
     results = await asyncio.gather(
-        *(read_upload_edit_source(upload) for upload in uploads),
+        *(
+            read_upload_edit_source(upload, orientation_mask_size if index == 0 else None)
+            for index, upload in enumerate(uploads)
+        ),
         return_exceptions=True,
     )
     sources = [result for result in results if isinstance(result, EditImageSource)]
@@ -327,7 +381,11 @@ async def validate_edit_mask(mask: EditImageSource, primary: EditImageSource) ->
         raise HTTPException(status_code=422, detail=str(e)) from e
 
 
-async def read_gallery_edit_source(image_id: str) -> EditImageSource:
+async def read_gallery_edit_source(
+    image_id: str,
+    *,
+    orientation_mask_size: tuple[int, int] | None = None,
+) -> EditImageSource:
     entry = await run_db_operation(
         get_gallery_entry,
         image_id,
@@ -351,6 +409,7 @@ async def read_gallery_edit_source(image_id: str) -> EditImageSource:
         too_large_detail=f"Gallery image is too large. Max size is {config.MAX_FILE_SIZE_MB} MB.",
         read_error_detail="Failed to read gallery image",
         metric_name="copy_validate_gallery_edit_source",
+        orientation_mask_size=orientation_mask_size,
     )
 
 
@@ -360,13 +419,20 @@ async def edit_image(
     req: EditRequest = Depends(edit_request_from_form),
 ):
     form = await request.form()
-    sources = await read_upload_edit_sources(form)
-    if not sources:
-        raise HTTPException(status_code=422, detail="Upload image is required.")
-    validate_edit_source_count(sources)
-    mask = None
+    # The mask is streamed to disk before the sources because its size decides
+    # whether an EXIF-oriented primary is rotated upright (see
+    # `validate_edit_source_file_details`); the header read for that costs
+    # nothing and the mask itself is still decoded exactly once.
+    mask = await read_upload_edit_mask(form)
+    sources: list[EditImageSource] = []
     try:
-        mask = await read_upload_edit_mask(form)
+        sources = await read_upload_edit_sources(
+            form,
+            orientation_mask_size=mask_dimensions(mask),
+        )
+        if not sources:
+            raise HTTPException(status_code=422, detail="Upload image is required.")
+        validate_edit_source_count(sources)
         mask_coverage = None
         mask_optimized_png = None
         if mask is not None:
@@ -396,17 +462,22 @@ async def edit_image_from_gallery(
     req: EditRequest = Depends(edit_request_from_form),
 ):
     form = await request.form()
-    upload_sources = await read_upload_edit_sources(form)
+    mask = await read_upload_edit_mask(form)
+    upload_sources: list[EditImageSource] = []
     try:
-        gallery_source = await read_gallery_edit_source(image_id)
+        # Uploads here are reference images; the gallery entry is the primary
+        # the mask must match, so only it gets the orientation check.
+        upload_sources = await read_upload_edit_sources(form)
+        gallery_source = await read_gallery_edit_source(
+            image_id,
+            orientation_mask_size=mask_dimensions(mask),
+        )
     except BaseException:
-        cleanup_edit_sources(upload_sources)
+        cleanup_edit_sources([*upload_sources, *([mask] if mask is not None else [])])
         raise
     sources = [gallery_source, *upload_sources]
-    mask = None
     try:
         validate_edit_source_count(sources)
-        mask = await read_upload_edit_mask(form)
         mask_coverage = None
         mask_optimized_png = None
         if mask is not None:
