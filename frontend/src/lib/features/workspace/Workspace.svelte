@@ -7,7 +7,7 @@
   import PreviewPanel from '$lib/components/PreviewPanel.svelte';
   import PromptForm from '$lib/components/PromptForm.svelte';
   import ToastHost from '$lib/components/ToastHost.svelte';
-  import { apiFetch } from '$lib/api/client';
+  import { ApiError, apiFetch } from '$lib/api/client';
   import { language, t } from '$lib/i18n';
   import type { AssistantJobDiagnoseResponse, AssistantRecommendParamsResponse, PromptOptimizeResponse } from '$lib/api/types/assistant';
   import type { GalleryEntry } from '$lib/api/types/gallery';
@@ -19,7 +19,8 @@
   import { confirmStore } from '$lib/stores/confirm';
   import { editMaskDiscards, editSourceCount, editSourceStore, isMaskValid, MAX_EDIT_SOURCE_IMAGES, primaryEditSourceId, type EditMask } from '$lib/stores/editSource';
   import { galleryActivityStore, galleryStore } from '$lib/stores/gallery';
-  import { fetchJobMaskBlob, type JobMaskFetch, jobsStore } from '$lib/stores/jobs';
+  import { jobsStore } from '$lib/stores/jobs';
+  import type { JobMaskFetch } from '$lib/features/workspace/jobMaskRestore';
   import { lightboxStore } from '$lib/stores/lightbox';
   import { nodeImageResult } from '$lib/stores/nodeImage';
   import { initialPromptFormState, previewStore, type PromptFormState } from '$lib/stores/preview';
@@ -1083,31 +1084,15 @@
       return;
     }
     if (job.mask_applied) {
-      // A retry always rebuilds the original task's own mask instead of
-      // reusing whatever selection currently sits in the editor.
+      // Clear any current selection before the identity check. A failed
+      // restore must never leave a mask available for this retry.
+      editSourceStore.removeMask();
       const outcome = await restoreMaskFromJob(job);
       if (outcome !== 'restored') {
-        const withoutMask = await confirmStore.confirm({
-          title:
-            outcome === 'mismatch'
-              ? $t.messages.editRetryMaskMismatchTitle
-              : $t.messages.editRetryMaskMissingTitle,
-          message:
-            outcome === 'mismatch' ? $t.messages.editRetryMaskMismatch : $t.messages.editRetryMaskMissing,
-          // Enter submits without a mask; closing or cancelling falls back to
-          // the safe path of re-editing the selection instead.
-          confirmLabel: $t.messages.editRetryWithoutMask,
-          cancelLabel: $t.messages.editRetryReeditMask,
-          closeLabel: $t.confirm.cancel,
-          variant: 'default'
-        });
-        if (withoutMask) {
-          editSourceStore.removeMask();
-        } else {
-          const sourceId = primaryEditSourceId($editSourceStore);
-          if (sourceId) await openMaskEditor(sourceId);
-          return;
-        }
+        showToast(outcome === 'mismatch' ? $t.messages.editRetryMaskMismatch : $t.messages.editRetryMaskMissing, 'error');
+        const sourceId = primaryEditSourceId($editSourceStore);
+        if (sourceId) await openMaskEditor(sourceId);
+        return;
       }
     } else if (isMaskValid($editSourceStore)) {
       // The original task had no mask: never ride the current selection along.
@@ -1117,23 +1102,23 @@
     editImage();
   }
 
-  function measureImageUrlSize(url: string): Promise<{ width: number; height: number } | null> {
-    return new Promise((resolve) => {
-      const image = new Image();
-      image.onload = () =>
-        resolve({ width: image.naturalWidth || image.width, height: image.naturalHeight || image.height });
-      image.onerror = () => resolve(null);
-      image.src = url;
-    });
-  }
-
   async function restoreMaskFromJob(job: GenerateJobStatus): Promise<'restored' | 'missing' | 'mismatch'> {
     const sourceId = primaryEditSourceId($editSourceStore);
     if (!sourceId) return 'missing';
     let fetched: JobMaskFetch;
     try {
-      fetched = await fetchJobMaskBlob(job.job_id);
-    } catch {
+      const { fetchJobMaskBlob } = await import('$lib/features/workspace/jobMaskRestore');
+      const state = $editSourceStore;
+      const upload = state.files[0];
+      if (!state.selectedGalleryImageId && !upload) return 'missing';
+      fetched = await fetchJobMaskBlob(
+        job.job_id,
+        state.selectedGalleryImageId
+          ? { galleryImageId: state.selectedGalleryImageId }
+          : { file: upload.file }
+      );
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 409) return 'mismatch';
       return 'missing';
     }
     const { blob } = fetched;
@@ -1155,19 +1140,16 @@
       }
     }
 
-    // The job record keeps no hash of its source image, so dimension equality
-    // against the current primary is the only identity check available; a
-    // mismatch means the stored mask cannot belong to this image.
+    // Keep the dimension check as a consistency guard after server identity
+    // verification, including for oriented photos displayed upright.
     const primary = primaryEditSource;
     if (primary) {
-      const size =
-        primary.width > 0 && primary.height > 0
-          ? { width: primary.width, height: primary.height }
-          : await measureImageUrlSize(primary.previewUrl);
-      if (size && (size.width !== measurements.width || size.height !== measurements.height)) {
+      if (primary.width > 0 && primary.height > 0 &&
+          (primary.width !== measurements.width || primary.height !== measurements.height)) {
         return 'mismatch';
       }
     }
+    if (primaryEditSourceId($editSourceStore) !== sourceId) return 'mismatch';
     editSourceStore.setMask({
       sourceId,
       blob,

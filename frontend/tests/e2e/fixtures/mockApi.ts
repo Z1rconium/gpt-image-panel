@@ -93,6 +93,7 @@ type MockOptions = {
   historyJobs?: unknown[];
   language?: 'en' | 'zh-CN' | null;
   maskSupported?: boolean;
+  maskRestoreStatus?: number;
   reversePrompt?: string;
   optimizedPrompts?: string[];
   optimizeFailureAt?: number;
@@ -1288,7 +1289,11 @@ async function mockApi(page: Page, options: MockOptions = {}) {
       await route.fulfill(json(includeFinished ? (failedOnly ? historyJobs.filter(isErrorJob) : historyJobs) : runningJobs));
       return;
     }
-    if (url.pathname === '/api/generate/history-mask/mask') {
+    if (url.pathname === '/api/generate/history-mask/mask/restore' && request.method() === 'POST') {
+      if (options.maskRestoreStatus && options.maskRestoreStatus !== 200) {
+        await route.fulfill(json({ detail: 'Edit source does not match this job' }, options.maskRestoreStatus));
+        return;
+      }
       await route.fulfill({ status: 200, contentType: 'image/png', body: MASK_PNG_BYTES });
       return;
     }

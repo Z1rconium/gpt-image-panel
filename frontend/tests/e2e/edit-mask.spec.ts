@@ -1,4 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
+import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
+import { resolve } from 'node:path';
 import { baseGalleryImages, disableRegionProcessing, job, loadApp } from './fixtures/mockApi';
 import { blackWhiteMaskPng, blockPng, opaqueRgbaBlackWhiteMaskPng, softAlphaMaskPng, solidPng, twoTonePng } from './fixtures/png';
 
@@ -666,11 +669,19 @@ test('retrying a masked edit job restores the original task mask', async ({ page
   });
   await uploadPrimary(page);
 
+  const restoreRequestPromise = page.waitForRequest((request) =>
+    new URL(request.url()).pathname === '/api/generate/history-mask/mask/restore'
+  );
+
   await page.getByRole('button', { name: 'Job History' }).click();
   const jobsDrawer = page.getByRole('dialog', { name: 'Job History' });
   await jobsDrawer.getByRole('button', { name: 'History', exact: true }).click();
   const historyJob = jobsDrawer.locator('article').filter({ hasText: 'masked retry prompt' });
   await historyJob.getByRole('button', { name: 'Retry' }).click();
+  const restoreRequest = await restoreRequestPromise;
+  expect(restoreRequest.method()).toBe('POST');
+  expect(restoreRequest.postData() || '').toContain('name="source_sha256"');
+  expect(restoreRequest.postData() || '').toContain(createHash('sha256').update(SOURCE_PNG).digest('hex'));
 
   // The original task's own mask is restored onto the primary source, and the
   // retry submits with it attached instead of reusing a current selection.
@@ -682,6 +693,78 @@ test('retrying a masked edit job restores the original task mask', async ({ page
   const body = (await editRequestPromise).postDataBuffer()?.toString('latin1') || '';
   expect(body).toContain('name="mask"');
   expect(body).toContain('filename="mask.png"');
+});
+
+test('a mismatched or legacy masked job clears the selection and requires re-editing', async ({ page }) => {
+  await loadApp(page, {
+    maskRestoreStatus: 409,
+    historyJobs: [{ ...job('history-mask', 'legacy masked prompt'), operation: 'edit', mask_applied: true }]
+  });
+  await uploadPrimary(page);
+  await openMaskEditor(page);
+  await paintStroke(page);
+  await page.getByRole('button', { name: 'Save selection' }).click();
+  await expect(page.getByText(/^Repaint \d+\.\d%$/)).toBeVisible();
+  let editRequests = 0;
+  page.on('request', (request) => {
+    if (new URL(request.url()).pathname === '/api/edits') editRequests += 1;
+  });
+
+  await page.getByRole('button', { name: 'Job History' }).click();
+  const drawer = page.getByRole('dialog', { name: 'Job History' });
+  await drawer.getByRole('button', { name: 'History', exact: true }).click();
+  await drawer.locator('article').filter({ hasText: 'legacy masked prompt' }).getByRole('button', { name: 'Retry' }).click();
+
+  await expect(EDITOR_DIALOG(page)).toBeVisible();
+  await expect(page.getByText('Edit area 0.0%')).toBeVisible();
+  expect(editRequests).toBe(0);
+});
+
+test('a missing saved mask never submits the current selection automatically', async ({ page }) => {
+  await loadApp(page, {
+    maskRestoreStatus: 404,
+    historyJobs: [{ ...job('history-mask', 'missing mask prompt'), operation: 'edit', mask_applied: true }]
+  });
+  await uploadPrimary(page);
+  await openMaskEditor(page);
+  await paintStroke(page);
+  await page.getByRole('button', { name: 'Save selection' }).click();
+  let editRequests = 0;
+  page.on('request', (request) => {
+    if (new URL(request.url()).pathname === '/api/edits') editRequests += 1;
+  });
+
+  await page.getByRole('button', { name: 'Job History' }).click();
+  const drawer = page.getByRole('dialog', { name: 'Job History' });
+  await drawer.getByRole('button', { name: 'History', exact: true }).click();
+  await drawer.locator('article').filter({ hasText: 'missing mask prompt' }).getByRole('button', { name: 'Retry' }).click();
+
+  await expect(EDITOR_DIALOG(page)).toBeVisible();
+  await expect(page.getByText('Edit area 0.0%')).toBeVisible();
+  expect(editRequests).toBe(0);
+});
+
+test('gallery retry sends the image ID for server-side file verification', async ({ page }) => {
+  await loadApp(page, {
+    galleryImages: [{ ...baseGalleryImages[0], image_width: 64, image_height: 64 }],
+    historyJobs: [{ ...job('history-mask', 'gallery retry prompt'), operation: 'edit', mask_applied: true }]
+  });
+  await page.route('**/api/image/img-1.png', (route) => route.fulfill({ status: 200, contentType: 'image/png', body: SOURCE_PNG }));
+  await page.locator('.gallery-card').first().getByRole('button', { name: 'Edit' }).click();
+  await page.getByRole('dialog', { name: 'Edit this image' }).getByRole('button', { name: 'Keep original prompt', exact: true }).click();
+
+  const restoreRequestPromise = page.waitForRequest((request) =>
+    new URL(request.url()).pathname === '/api/generate/history-mask/mask/restore'
+  );
+  await page.getByRole('button', { name: 'Job History' }).click();
+  const drawer = page.getByRole('dialog', { name: 'Job History' });
+  await drawer.getByRole('button', { name: 'History', exact: true }).click();
+  await drawer.locator('article').filter({ hasText: 'gallery retry prompt' }).getByRole('button', { name: 'Retry' }).click();
+  const request = await restoreRequestPromise;
+  expect(request.postData() || '').toContain('name="gallery_image_id"');
+  expect(request.postData() || '').toContain('img-1');
+  expect(request.postData() || '').not.toContain('name="source_sha256"');
+  await expect(page.getByRole('status').filter({ hasText: 'Original task selection restored' })).toBeVisible();
 });
 
 test('retrying an edit job that used no mask ignores the current selection', async ({ page }) => {
@@ -1391,7 +1474,37 @@ test('the readout reports the auto-fill delta and matches the exported mask', as
 
   const mask = await exportedMask(page, 'delta prompt');
   const stats = await maskStats(page, mask);
-  expect(Math.abs(stats.coverage * 100 - (numbers[0] + numbers[1]))).toBeLessThanOrEqual(0.2);
+  expect(Math.abs(stats.coverage * 100 - (numbers[0] + numbers[1]))).toBeLessThanOrEqual(0.1);
+});
+
+test('editor readout, exported PNG and backend gallery coverage agree within 0.1pp', async ({ page }) => {
+  await loadApp(page);
+  await uploadSizedPrimary(page, MEDIUM_PNG, 'coverage-stack.png');
+  await page.getByRole('button', { name: 'Rectangle' }).click();
+  const box = await maskImageBox(page);
+  await page.mouse.move(box.x + box.width * 0.2, box.y + box.height * 0.3);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.7, box.y + box.height * 0.8, { steps: 6 });
+  await page.mouse.up();
+  const readout = page.getByText(/^Edit area/);
+  await expect(readout).not.toContainText('…');
+  const readoutNumbers = ((await readout.textContent()) ?? '').match(/[\d.]+/g)?.map(Number) ?? [];
+  const readoutPct = readoutNumbers.reduce((sum, number) => sum + number, 0);
+  const mask = await exportedMask(page, 'cross-stack coverage prompt');
+  const exportedPct = (await maskStats(page, mask)).coverage * 100;
+
+  const repo = resolve(process.cwd(), '..');
+  const response = execFileSync(resolve(repo, '.venv/bin/python'), [
+    resolve(repo, 'backend/tests/support/browser_mask_coverage.py')
+  ], {
+    cwd: repo,
+    input: JSON.stringify({ image: MEDIUM_PNG.toString('base64'), mask: mask.toString('base64') }),
+    encoding: 'utf8',
+    timeout: 20_000
+  });
+  const backendPct = (JSON.parse(response) as { mask_coverage: number }).mask_coverage * 100;
+  expect(Math.abs(readoutPct - exportedPct)).toBeLessThanOrEqual(0.1);
+  expect(Math.abs(exportedPct - backendPct)).toBeLessThanOrEqual(0.1);
 });
 
 test('the auto-fill toggle is remembered across editor sessions', async ({ page }) => {
@@ -1416,6 +1529,8 @@ test('the auto-fill toggle is remembered across editor sessions', async ({ page 
 
 test('the export is identical without a worker', async ({ page, context }) => {
   const run = async (target: Page, disableWorker: boolean) => {
+    const workers: string[] = [];
+    target.on('worker', (worker) => workers.push(worker.url()));
     if (disableWorker) {
       await target.addInitScript(() => {
         delete (window as unknown as { Worker?: unknown }).Worker;
@@ -1423,17 +1538,20 @@ test('the export is identical without a worker', async ({ page, context }) => {
     }
     await loadApp(target);
     await uploadSizedPrimary(target, LARGE_PNG, `worker-${disableWorker}.png`);
+    if (!disableWorker) await expect.poll(() => workers.length).toBeGreaterThan(0);
     await zoomToActualSize(target);
     await paintStroke(target);
     const readout = parseCoverage(await target.getByText(/^Edit area/).textContent());
     const stats = await maskStats(target, await exportedMask(target, 'worker prompt'));
-    return { readout, stats };
+    return { readout, stats, workers };
   };
 
   const withWorker = await run(page, false);
   const withoutWorker = await run(await context.newPage(), true);
 
   expect(withWorker.stats.transparent).toBeGreaterThan(0);
+  expect(withWorker.workers.some((url) => /maskRegion\.worker/.test(url))).toBe(true);
+  expect(withoutWorker.workers).toEqual([]);
   expect(withoutWorker.stats).toEqual(withWorker.stats);
   expect(Math.abs(withoutWorker.readout - withWorker.readout)).toBeLessThanOrEqual(0.1);
 });
