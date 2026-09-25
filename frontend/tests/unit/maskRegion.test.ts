@@ -235,6 +235,47 @@ describe('composeRegion', () => {
     edgeRange: 8
   };
 
+  it('preserves every drawn pixel and every explicit erasure across randomized region passes', () => {
+    const random = mulberry32(20260925);
+    for (let round = 0; round < 20; round += 1) {
+      const width = 48;
+      const height = 40;
+      const a = grid(width, height, () => random() < 0.28);
+      const p = grid(width, height, () => random() < 0.15);
+      for (let index = 0; index < a.length; index += 1) {
+        if (p[index]) a[index] = 0;
+      }
+      const result = composeRegion({
+        width, height, a, p,
+        params: { ...params, grow: round % 4, close: 1 + (round % 4) }
+      });
+      for (let index = 0; index < a.length; index += 1) {
+        const exported = Boolean(a[index] || result.additions[index]);
+        if (a[index]) expect(exported).toBe(true);
+        if (p[index]) expect(exported).toBe(false);
+      }
+    }
+  });
+
+  it('cropped 4K-style processing matches the full-frame answer', () => {
+    const width = 256;
+    const height = 256;
+    const random = mulberry32(20260926);
+    for (let round = 0; round < 5; round += 1) {
+      const a = grid(width, height, (x, y) => x >= 80 && x < 176 && y >= 80 && y < 176 && random() < 0.8);
+      const p = grid(width, height, (x, y) => x >= 80 && x < 176 && y >= 80 && y < 176 && random() < 0.05);
+      for (let index = 0; index < a.length; index += 1) {
+        if (p[index]) a[index] = 0;
+      }
+      const input = { width, height, a, p, params: { ...params, borderSnap: 8, holeRadius: 6, grow: round % 3 } };
+      const cropped = composeRegion(input);
+      const full = composeRegion(input, false);
+      expect(cropped.count).toBe(full.count);
+      expect(cropped.bbox).toEqual(full.bbox);
+      expect(cropped.additions).toEqual(full.additions);
+    }
+  });
+
   it('returns only what it added, never touching the marks or the protection set', () => {
     const size = 48;
     // A solid square with a one-pixel slit down the middle: closing it is the

@@ -614,12 +614,64 @@ export function composeRegion(input: {
   p: Uint8Array | null;
   params: MaskRegionParams;
   edge?: EdgeMap | null;
-}): MaskRegionResult {
+}, allowCrop = true): MaskRegionResult {
   const { width, height, a, p, params } = input;
   const count = width * height;
   const additions = new Uint8Array(count);
   const empty: MaskRegionResult = { additions, count: 0, bbox: null };
   if (count <= 0 || !a.length) return empty;
+
+  // Most brush and shape selections occupy only part of a large image. The
+  // morphology needs the marks and a reach-sized margin, while an unrelated
+  // blank frame costs two full distance transforms plus a flood scan. Crop
+  // only when every side stays beyond the original-frame snap reach; then
+  // border snapping cannot contribute and the crop edges are genuinely open.
+  if (allowCrop && !params.edgeSnap) {
+    let minX = width;
+    let minY = height;
+    let maxX = -1;
+    let maxY = -1;
+    for (let index = 0; index < count; index += 1) {
+      if (!a[index]) continue;
+      const x = index % width;
+      const y = (index - x) / width;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+    if (maxX < 0) return empty;
+    const reach = 2 * params.close + params.borderSnap + params.holeRadius + params.grow + 2;
+    if (minX > reach && minY > reach && width - 1 - maxX > reach && height - 1 - maxY > reach) {
+      const rect = {
+        x: minX - reach,
+        y: minY - reach,
+        width: maxX - minX + 1 + 2 * reach,
+        height: maxY - minY + 1 + 2 * reach
+      };
+      if (rect.width * rect.height < count * 0.8) {
+        const cropped = composeRegion({
+          width: rect.width,
+          height: rect.height,
+          a: cropRegion(a, width, rect),
+          p: p ? cropRegion(p, width, rect) : null,
+          params: { ...params, borderSnap: 0 }
+        }, false);
+        if (!cropped.bbox) return empty;
+        for (let y = 0; y < rect.height; y += 1) {
+          additions.set(
+            cropped.additions.subarray(y * rect.width, (y + 1) * rect.width),
+            (rect.y + y) * width + rect.x
+          );
+        }
+        return {
+          additions,
+          count: cropped.count,
+          bbox: { ...cropped.bbox, x: cropped.bbox.x + rect.x, y: cropped.bbox.y + rect.y }
+        };
+      }
+    }
+  }
 
   // ① close gaps, ② pull to the frame, ③ fill enclosed holes. All three are
   // idempotent, which is what lets a reopened mask keep them enabled.
