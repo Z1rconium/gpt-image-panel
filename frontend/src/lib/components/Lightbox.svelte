@@ -7,7 +7,7 @@
   import {
     displayImageSize,
     downloadUrl,
-    formatBeijingTime,
+    formatLocalTime,
     imageUrl,
     thumbnailUrl
   } from '$lib/utils/format';
@@ -418,7 +418,7 @@
             </div>
             <div class="rounded-lg border border-stone-200 bg-stone-50/80 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-950/50">
               <div class="text-stone-400 dark:text-zinc-600">{$t.common.completedAt}</div>
-              <div class="mt-1 whitespace-nowrap text-stone-700 dark:text-zinc-300">{formatBeijingTime(image.completed_at)}</div>
+              <div class="mt-1 whitespace-nowrap text-stone-700 dark:text-zinc-300">{formatLocalTime(image.completed_at)}</div>
             </div>
             <div class="rounded-lg border border-stone-200 bg-stone-50/80 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-950/50">
               <div class="text-stone-400 dark:text-zinc-600">{$t.common.preset}</div>

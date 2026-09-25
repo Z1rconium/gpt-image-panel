@@ -64,8 +64,6 @@ export function formatLocalTime(value: string | null | undefined) {
   return `${part('year')}-${part('month')}-${part('day')} ${part('hour')}:${part('minute')}:${part('second')}`;
 }
 
-export const formatBeijingTime = formatLocalTime;
-
 type ImageSizeLike = {
   size?: string | null;
   image_width?: number | null;

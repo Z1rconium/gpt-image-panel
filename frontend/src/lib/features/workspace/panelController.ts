@@ -90,5 +90,3 @@ export function createPanelController(showToast: ShowToast) {
     reset
   };
 }
-
-export type PanelController = ReturnType<typeof createPanelController>;

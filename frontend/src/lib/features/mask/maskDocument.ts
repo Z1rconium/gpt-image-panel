@@ -176,15 +176,6 @@ export function clampRect(rect: MaskRect, width: number, height: number): MaskRe
   return { x, y, width: right - x, height: bottom - y };
 }
 
-export function containsRect(outer: MaskRect, inner: MaskRect): boolean {
-  return (
-    inner.x >= outer.x &&
-    inner.y >= outer.y &&
-    inner.x + inner.width <= outer.x + outer.width &&
-    inner.y + inner.height <= outer.y + outer.height
-  );
-}
-
 export function unionRect(a: MaskRect, b: MaskRect): MaskRect {
   const x = Math.min(a.x, b.x);
   const y = Math.min(a.y, b.y);
@@ -225,30 +216,6 @@ export function rectCoversAll(rect: MaskRect | null, width: number, height: numb
   return (
     rect.x <= 0 && rect.y <= 0 && rect.x + rect.width >= width && rect.y + rect.height >= height
   );
-}
-
-/** Rects covering `outer` minus `hole` as up to four pairwise-disjoint strips. */
-export function subtractRect(outer: MaskRect, hole: MaskRect): MaskRect[] {
-  if (outer.width <= 0 || outer.height <= 0) return [];
-  const left = Math.max(outer.x, hole.x);
-  const top = Math.max(outer.y, hole.y);
-  const right = Math.min(outer.x + outer.width, hole.x + hole.width);
-  const bottom = Math.min(outer.y + outer.height, hole.y + hole.height);
-  if (right <= left || bottom <= top) return [outer];
-  const strips: MaskRect[] = [];
-  if (top > outer.y) {
-    strips.push({ x: outer.x, y: outer.y, width: outer.width, height: top - outer.y });
-  }
-  if (bottom < outer.y + outer.height) {
-    strips.push({ x: outer.x, y: bottom, width: outer.width, height: outer.y + outer.height - bottom });
-  }
-  if (left > outer.x) {
-    strips.push({ x: outer.x, y: top, width: left - outer.x, height: bottom - top });
-  }
-  if (right < outer.x + outer.width) {
-    strips.push({ x: right, y: top, width: outer.x + outer.width - right, height: bottom - top });
-  }
-  return strips;
 }
 
 /** Bounding box of points painted with a stroke of the given size (clamped). */

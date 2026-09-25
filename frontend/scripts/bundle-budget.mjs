@@ -5,7 +5,7 @@ import { gzipSync } from 'node:zlib';
 
 /**
  * Computes the homepage's required JS dependency set from the production Vite
- * manifest and reports it against the budgets in FRONTEND_IMPLEMENTATION_PLAN.md.
+ * manifest and reports it against the budget values defined below.
  * Run `npm --prefix frontend run build` first, then `node frontend/scripts/bundle-budget.mjs`.
  */
 

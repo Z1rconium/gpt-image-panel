@@ -6,7 +6,6 @@ import {
   MaskImportError,
   MaskUndoPatches,
   binarizeMaskAlphaData,
-  containsRect,
   countMarked,
   countMarkedPixels,
   expandRect,
@@ -17,7 +16,6 @@ import {
   rectCoversAll,
   shapeRectFor,
   strokeRectFor,
-  subtractRect,
   unionRect,
   type MaskRect
 } from '$lib/features/mask/maskDocument';
@@ -39,15 +37,6 @@ function mulberry32(seed: number): () => number {
     t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
-}
-
-function rectsOverlap(a: MaskRect, b: MaskRect): boolean {
-  return (
-    a.x < b.x + b.width &&
-    b.x < a.x + a.width &&
-    a.y < b.y + b.height &&
-    b.y < a.y + a.height
-  );
 }
 
 describe('binarizeMaskAlphaData', () => {
@@ -161,19 +150,6 @@ describe('MaskImportError', () => {
   });
 });
 
-describe('rect helpers', () => {
-  it('unions and containment work on clamped rects', () => {
-    expect(unionRect({ x: 0, y: 0, width: 10, height: 10 }, { x: 5, y: 5, width: 20, height: 2 })).toEqual({
-      x: 0,
-      y: 0,
-      width: 25,
-      height: 10
-    });
-    expect(containsRect({ x: 0, y: 0, width: 10, height: 10 }, { x: 2, y: 2, width: 3, height: 3 })).toBe(true);
-    expect(containsRect({ x: 0, y: 0, width: 10, height: 10 }, { x: 9, y: 2, width: 3, height: 3 })).toBe(false);
-  });
-});
-
 describe('processed-view rect helpers', () => {
   it('expandRect pads on every side and clamps to the canvas', () => {
     expect(expandRect({ x: 10, y: 20, width: 30, height: 40 }, 4, 100, 100)).toEqual({
@@ -205,39 +181,14 @@ describe('processed-view rect helpers', () => {
   });
 });
 
-describe('subtractRect', () => {
-  it('covers outer minus hole exactly once with disjoint strips', () => {
-    const outer = { x: 10, y: 10, width: 90, height: 80 };
-    const hole = { x: 40, y: 30, width: 30, height: 25 };
-    const strips = subtractRect(outer, hole);
-    let area = 0;
-    for (const strip of strips) {
-      area += strip.width * strip.height;
-      expect(containsRect(outer, strip)).toBe(true);
-    }
-    for (let i = 0; i < strips.length; i += 1) {
-      for (let j = i + 1; j < strips.length; j += 1) {
-        expect(rectsOverlap(strips[i], strips[j])).toBe(false);
-      }
-    }
-    expect(area).toBe(90 * 80 - 30 * 25);
-  });
-
-  it('handles holes that only partially overlap the outer rect', () => {
-    const outer = { x: 0, y: 0, width: 50, height: 50 };
-    const strips = subtractRect(outer, { x: 40, y: 20, width: 30, height: 10 });
-    let area = 0;
-    for (const strip of strips) area += strip.width * strip.height;
-    expect(area).toBe(50 * 50 - 10 * 10);
-  });
-
-  it('returns the outer rect when the hole does not intersect it', () => {
-    const outer = { x: 0, y: 0, width: 10, height: 10 };
-    expect(subtractRect(outer, { x: 20, y: 20, width: 5, height: 5 })).toEqual([outer]);
-  });
-
-  it('returns nothing for an empty outer rect', () => {
-    expect(subtractRect({ x: 0, y: 0, width: 0, height: 10 }, { x: 0, y: 0, width: 1, height: 1 })).toEqual([]);
+describe('unionRect', () => {
+  it('unions overlapping rectangles', () => {
+    expect(unionRect({ x: 0, y: 0, width: 10, height: 10 }, { x: 5, y: 5, width: 20, height: 2 })).toEqual({
+      x: 0,
+      y: 0,
+      width: 25,
+      height: 10
+    });
   });
 });
 

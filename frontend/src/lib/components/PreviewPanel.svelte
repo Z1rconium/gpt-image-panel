@@ -3,7 +3,7 @@
   import type { GenerateJobImage, GenerateJobStatus } from '$lib/api/types/jobs';
   import { t } from '$lib/i18n';
   import { previewStore, type PreviewCompareSource } from '$lib/stores/preview';
-  import { displayImageSize, downloadUrl, filenameFromImageUrl, formatBeijingTime, stageLabel, statusLabel, thumbnailUrl } from '$lib/utils/format';
+  import { displayImageSize, downloadUrl, filenameFromImageUrl, formatLocalTime, stageLabel, statusLabel, thumbnailUrl } from '$lib/utils/format';
   import { canRunExposure, runExposure, type ExposureHandle } from '$lib/webgl/exposureScene';
 
   interface Props {
@@ -360,7 +360,7 @@
   {#if job}
     <dl class="mt-4 grid grid-cols-2 gap-x-5 gap-y-3 border-t border-stone-200 pt-4 text-xs dark:border-zinc-800 sm:grid-cols-5">
       <div><dt class="text-stone-500 dark:text-zinc-400">{$t.common.status}</dt><dd class="mt-1 text-stone-800 dark:text-zinc-200">{statusLabel(job.status, $t.statuses)}</dd></div>
-      <div><dt class="text-stone-500 dark:text-zinc-400">{$t.common.completedAt}</dt><dd class="mt-1 whitespace-nowrap text-stone-800 dark:text-zinc-200">{formatBeijingTime(job.completed_at)}</dd></div>
+      <div><dt class="text-stone-500 dark:text-zinc-400">{$t.common.completedAt}</dt><dd class="mt-1 whitespace-nowrap text-stone-800 dark:text-zinc-200">{formatLocalTime(job.completed_at)}</dd></div>
       <div><dt class="text-stone-500 dark:text-zinc-400">{$t.common.size}</dt><dd class="mt-1 text-stone-800 dark:text-zinc-200">{previewSize}</dd></div>
       <div class="min-w-0"><dt class="text-stone-500 dark:text-zinc-400">{$t.common.model}</dt><dd class="mt-1 truncate text-stone-800 dark:text-zinc-200">{job.model || '-'}</dd></div>
       <div><dt class="text-stone-500 dark:text-zinc-400">{$t.common.duration}</dt><dd class="mt-1 text-stone-800 dark:text-zinc-200">{job.duration || '-'}</dd></div>

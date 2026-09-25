@@ -3,7 +3,7 @@
   import type { GenerateJobStatus } from '$lib/api/types/jobs';
   import { t } from '$lib/i18n';
   import {
-    formatBeijingTime,
+    formatLocalTime,
     formatTokenCount,
     formatUsdCost,
     jobFailureMessage,
@@ -276,7 +276,7 @@
               {#if jobMeta(job)}
                 <span>{jobMeta(job)}</span>
               {/if}
-              <span>{formatBeijingTime(job.completed_at || job.updated_at || job.created_at)}</span>
+              <span>{formatLocalTime(job.completed_at || job.updated_at || job.created_at)}</span>
               {#if job.duration}
                 <span>{$t.common.duration}: {job.duration}</span>
               {/if}

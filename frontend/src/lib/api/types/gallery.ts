@@ -58,11 +58,6 @@ export type GalleryThumbnailState = Pick<
   'id' | 'thumbnail_filename' | 'thumbnail_url' | 'thumbnail_status'
 >;
 
-export type MessageResponse = {
-  status: string;
-  message: string;
-};
-
 export type GalleryBatchResponse = {
   status: string;
   count: number;
@@ -115,9 +110,6 @@ export type NodeImageUploadJobStatus = {
   events_url?: string | null;
   cancel_url?: string | null;
 };
-
-export type NodeImageBatchUploadJobStatus = NodeImageUploadJobStatus;
-export type NodeImageBatchUploadCreateResponse = NodeImageUploadJobStatus;
 
 export type GallerySelectionTokenResponse = {
   selection_token: string;

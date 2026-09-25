@@ -104,14 +104,6 @@ export function sameGalleryEntryThumbnail(left: GalleryThumbnailState, right: Ga
   );
 }
 
-export function sameGalleryImageList(left: GalleryEntry[], right: GalleryEntry[]) {
-  if (left.length !== right.length) return false;
-  return left.every((image, index) => {
-    const next = right[index];
-    return Boolean(next) && sameGalleryEntryThumbnail(image, next);
-  });
-}
-
 export function pendingImageMatchesFilters(image: GalleryEntry, filters: GalleryFilters) {
   if (filters.prompt.trim() && !image.prompt.toLowerCase().includes(filters.prompt.trim().toLowerCase())) return false;
   if (filters.model && image.model !== filters.model) return false;
