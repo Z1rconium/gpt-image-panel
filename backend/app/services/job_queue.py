@@ -78,6 +78,8 @@ class EditImageSource:
     # back to decoding the file when they need the size.
     width: int = 0
     height: int = 0
+    raw_sha256: str | None = None
+    gallery_image_id: str | None = None
 
 
 def trim_generate_jobs():
@@ -247,6 +249,8 @@ def edit_source_to_payload(source: EditImageSource) -> dict:
         "coverage": source.coverage,
         "width": source.width,
         "height": source.height,
+        "raw_sha256": source.raw_sha256,
+        "gallery_image_id": source.gallery_image_id,
     }
 
 
@@ -264,6 +268,8 @@ def edit_source_from_payload(payload: dict) -> EditImageSource:
         # "decode to find out" to every reader (see EditImageSource docstring).
         width=int(payload.get("width") or 0),
         height=int(payload.get("height") or 0),
+        raw_sha256=payload.get("raw_sha256"),
+        gallery_image_id=payload.get("gallery_image_id"),
     )
 
 

@@ -1,4 +1,5 @@
 import io
+import hashlib
 import random
 
 from PIL import Image as PILImage
@@ -1055,6 +1056,127 @@ def test_edit_persists_mask_file_and_serves_it(client, monkeypatch):
     assert served.headers["x-mask-coverage"] == "1.0"
 
 
+def test_mask_restore_verifies_uploaded_source_bytes(client, monkeypatch):
+    job_id = _submit_masked_edit(client, monkeypatch)
+    _wait_for_job(client, job_id)
+    endpoint = f"/api/generate/{job_id}/mask/restore"
+    digest = hashlib.sha256(SOURCE_PNG).hexdigest()
+    restored = client.post(endpoint, data={"source_sha256": digest})
+    assert restored.status_code == 200
+    assert restored.content == _mask_path_for(job_id).read_bytes()
+    assert restored.headers["x-mask-coverage"] == "1.0"
+    assert restored.headers["cache-control"] == "private, no-store"
+
+    different_same_size = _png_bytes((8, 8), "RGBA")
+    assert client.post(endpoint, data={"source_sha256": hashlib.sha256(different_same_size).hexdigest()}).status_code == 409
+    assert client.post(endpoint, data={"gallery_image_id": "another-image"}).status_code == 409
+
+    from backend.app.api.routers import generate as generate_router
+
+    original_aggregate = generate_router.aggregate_image_job_units
+
+    def legacy_aggregate(parent_job_id):
+        aggregate = original_aggregate(parent_job_id)
+        for unit in aggregate.get("units", []):
+            for source in unit.get("edit_sources") or []:
+                source.pop("raw_sha256", None)
+        return aggregate
+
+    monkeypatch.setattr(generate_router, "aggregate_image_job_units", legacy_aggregate)
+    assert client.post(endpoint, data={"source_sha256": digest}).status_code == 409
+
+
+def test_mask_restore_verifies_current_gallery_file(client, monkeypatch):
+    _seed_gallery_entry("restore-gallery", SOURCE_PNG)
+
+    async def fake_edit_api(api_url, api_key, payload, image_sources, api_preset_name=None,
+                            progress=None, socks5_proxy=None, persist_gallery_entry=None,
+                            mask_source=None, mask_coverage=None):
+        return [await _fake_entry(payload, api_preset_name)]
+
+    monkeypatch.setattr(backend_main.proxy, "call_image_edit_api", fake_edit_api)
+    response = client.post(
+        "/api/edits/from-gallery/restore-gallery", data=_edit_data(),
+        files={"mask": ("mask.png", MASK_PNG, "image/png")},
+    )
+    assert response.status_code == 202
+    job_id = response.json()["job_id"]
+    _wait_for_job(client, job_id)
+    endpoint = f"/api/generate/{job_id}/mask/restore"
+    assert client.post(endpoint, data={"gallery_image_id": "restore-gallery"}).status_code == 200
+    entry = gallery_queries.get_gallery_entry("restore-gallery")
+    media.safe_image_path(entry.filename).write_bytes(_png_bytes((8, 8), "RGBA"))
+    assert client.post(endpoint, data={"gallery_image_id": "restore-gallery"}).status_code == 409
+
+
+def test_mask_restore_uses_original_exif_file_bytes(client, monkeypatch):
+    async def fake_edit_api(api_url, api_key, payload, image_sources, api_preset_name=None,
+                            progress=None, socks5_proxy=None, persist_gallery_entry=None,
+                            mask_source=None, mask_coverage=None):
+        return [await _fake_entry(payload, api_preset_name)]
+
+    monkeypatch.setattr(backend_main.proxy, "call_image_edit_api", fake_edit_api)
+    response = client.post(
+        "/api/edits", data=_edit_data(),
+        files={"image": ("phone.jpg", EXIF6_JPEG, "image/jpeg"),
+               "mask": ("mask.png", EXIF6_ROTATED_MASK_PNG, "image/png")},
+    )
+    assert response.status_code == 202
+    job_id = response.json()["job_id"]
+    _wait_for_job(client, job_id)
+    assert client.post(
+        f"/api/generate/{job_id}/mask/restore",
+        data={"source_sha256": hashlib.sha256(EXIF6_JPEG).hexdigest()},
+    ).status_code == 200
+
+
+def test_exported_mask_ratio_matches_recorded_gallery_coverage(client, monkeypatch):
+    alpha = PILImage.new("L", (64, 64), 255)
+    for y in range(16, 48):
+        for x in range(16, 48):
+            alpha.putpixel((x, y), 0)
+    mask_image = PILImage.new("RGBA", (64, 64), (0, 0, 0, 255))
+    mask_image.putalpha(alpha)
+    buffer = io.BytesIO()
+    mask_image.save(buffer, format="PNG")
+    gallery_ids = []
+
+    async def fake_edit_api(api_url, api_key, payload, image_sources, api_preset_name=None,
+                            progress=None, socks5_proxy=None, persist_gallery_entry=None,
+                            mask_source=None, mask_coverage=None):
+        image_id = media.generate_image_id()
+        gallery_ids.append(image_id)
+        entry = await gallery_mutations.add_to_gallery_async(
+            image_bytes=PNG_BYTES,
+            image_id=image_id,
+            prompt=payload.prompt,
+            size=payload.size,
+            filename=f"{image_id}.png",
+            metadata={"api_path": "/v1/images/edits", "api_preset_name": api_preset_name,
+                      "mask_coverage": mask_coverage},
+        )
+        return [entry]
+
+    monkeypatch.setattr(backend_main.proxy, "call_image_edit_api", fake_edit_api)
+    response = client.post(
+        "/api/edits", data=_edit_data(),
+        files={"image": ("input.png", _png_bytes((64, 64)), "image/png"),
+               "mask": ("mask.png", buffer.getvalue(), "image/png")},
+    )
+    assert response.status_code == 202
+    job_id = response.json()["job_id"]
+    _wait_for_job(client, job_id)
+    stored = client.get(f"/api/generate/{job_id}/mask")
+    assert stored.status_code == 200
+    with PILImage.open(io.BytesIO(stored.content)) as exported:
+        raw = exported.getchannel("A").tobytes()
+        exported_pct = 100 * raw.count(0) / len(raw)
+    readout_pct = round(exported_pct, 1)
+    backend_pct = gallery_queries.get_gallery_entry(gallery_ids[0]).mask_coverage * 100
+    assert abs(readout_pct - exported_pct) <= 0.1
+    assert abs(exported_pct - backend_pct) <= 0.1
+
+
 def test_mask_endpoint_is_missing_for_unmasked_and_unknown_jobs(client, monkeypatch):
     async def fake_edit_api(
         api_url,
@@ -1082,6 +1204,7 @@ def test_mask_endpoint_is_missing_for_unmasked_and_unknown_jobs(client, monkeypa
     _wait_for_job(client, job_id)
 
     assert client.get(f"/api/generate/{job_id}/mask").status_code == 404
+    assert client.post(f"/api/generate/{job_id}/mask/restore", data={"source_sha256": "0" * 64}).status_code == 404
     assert client.get("/api/generate/unknown-job/mask").status_code == 404
 
 

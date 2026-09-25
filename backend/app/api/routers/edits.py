@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import os
 import tempfile
 from dataclasses import replace
@@ -155,6 +156,7 @@ def copy_edit_source_file_to_temp(
     read_error_detail: str,
     max_bytes: int | None = None,
     orientation_mask_size: tuple[int, int] | None = None,
+    gallery_image_id: str | None = None,
 ) -> EditImageSource:
     try:
         with path.open("rb") as source:
@@ -167,6 +169,7 @@ def copy_edit_source_file_to_temp(
                 read_error_detail=read_error_detail,
                 max_bytes=max_bytes,
                 orientation_mask_size=orientation_mask_size,
+                gallery_image_id=gallery_image_id,
             )
     except HTTPException:
         raise
@@ -185,6 +188,7 @@ def copy_edit_source_stream_to_temp(
     max_bytes: int | None = None,
     validate: bool = True,
     orientation_mask_size: tuple[int, int] | None = None,
+    gallery_image_id: str | None = None,
 ) -> EditImageSource:
     """Copy an upload to a temp edit-source file.
 
@@ -202,6 +206,7 @@ def copy_edit_source_stream_to_temp(
     fd, temp_path = create_edit_source_temp_path(filename)
     total = 0
     header = bytearray()
+    digest = hashlib.sha256()
 
     try:
         source.seek(0)
@@ -215,6 +220,7 @@ def copy_edit_source_stream_to_temp(
                     raise HTTPException(status_code=400, detail=too_large_detail)
                 if len(header) < EDIT_SOURCE_SNIFF_BYTES:
                     header.extend(chunk[: EDIT_SOURCE_SNIFF_BYTES - len(header)])
+                digest.update(chunk)
                 target.write(chunk)
     except HTTPException:
         temp_path.unlink(missing_ok=True)
@@ -248,7 +254,10 @@ def copy_edit_source_stream_to_temp(
         temp_path.unlink(missing_ok=True)
         raise
 
-    return EditImageSource(temp_path, total, filename, content_type, width=width, height=height)
+    return EditImageSource(
+        temp_path, total, filename, content_type, width=width, height=height,
+        raw_sha256=digest.hexdigest(), gallery_image_id=gallery_image_id,
+    )
 
 
 def cleanup_edit_sources(sources: list[EditImageSource]):
@@ -412,6 +421,7 @@ async def read_gallery_edit_source(
         read_error_detail="Failed to read gallery image",
         metric_name="copy_validate_gallery_edit_source",
         orientation_mask_size=orientation_mask_size,
+        gallery_image_id=image_id,
     )
 
 

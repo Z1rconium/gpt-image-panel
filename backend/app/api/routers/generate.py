@@ -1,9 +1,12 @@
 import asyncio
+import hashlib
+import hmac
 import json
 import logging
 import time
+from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Form, HTTPException, Query, Request
 from fastapi.responses import FileResponse, StreamingResponse
 
 from ...runtime.state import state
@@ -18,7 +21,7 @@ from ...services.job_events import (
     resolve_generate_job_view,
     serialize_sse_event,
 )
-from ...runtime.blocking import run_db_operation
+from ...runtime.blocking import run_db_operation, run_image_operation
 from ...services.job_queue import (
     cleanup_parent_edit_sources,
     queue_image_job,
@@ -30,7 +33,8 @@ from ...core import security as auth
 from ...core import settings as config
 from ...core.api_paths import normalize_api_path
 from ...core.constants import ACTIVE_GENERATE_JOB_STATUSES, ERROR_GENERATE_JOB_STATUSES
-from ...core.media import MASK_CONTENT_TYPE, safe_mask_path
+from ...core.media import MASK_CONTENT_TYPE, safe_image_path, safe_mask_path
+from ...repositories.gallery.queries import get_gallery_entry
 from ...core.observability import metrics
 from ...repositories.image_jobs import (
     aggregate_image_job_units,
@@ -313,6 +317,84 @@ async def _job_mask_coverage(job_id: str) -> float | None:
     return None
 
 
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _mask_response(path: Path, coverage: float | None, *, verified: bool) -> FileResponse:
+    headers = {
+        "Cache-Control": (
+            "private, no-store" if verified else "private, max-age=31536000, immutable"
+        )
+    }
+    if coverage is not None:
+        headers["X-Mask-Coverage"] = str(coverage)
+    return FileResponse(path, media_type=MASK_CONTENT_TYPE, filename="mask.png", headers=headers)
+
+
+@router.post("/api/generate/{job_id}/mask/restore")
+async def restore_generate_job_mask(
+    job_id: str,
+    source_sha256: str | None = Form(None),
+    gallery_image_id: str | None = Form(None),
+):
+    job = await run_db_operation(
+        get_persisted_generate_job, job_id, metric_name="restore_generate_job_mask"
+    )
+    if not job or not job.get("mask_applied"):
+        raise HTTPException(status_code=404, detail="No mask is stored for this job")
+    path = safe_mask_path(f"{job_id}.png")
+    if not path or not path.is_file():
+        raise HTTPException(status_code=404, detail="Mask file not found")
+    if bool(source_sha256) == bool(gallery_image_id):
+        raise HTTPException(status_code=400, detail="Provide exactly one edit source identity")
+    aggregate = await run_db_operation(
+        aggregate_image_job_units, job_id, metric_name="restore_generate_job_sources"
+    )
+    primary = next(
+        (
+            source
+            for unit in aggregate.get("units", [])
+            for source in unit.get("edit_sources") or []
+            if source.get("role", "image") == "image"
+        ),
+        None,
+    )
+    expected = primary.get("raw_sha256") if primary else None
+    if not isinstance(expected, str) or len(expected) != 64:
+        raise HTTPException(status_code=409, detail="Original edit source identity is unavailable")
+    if source_sha256 is not None:
+        if (
+            primary.get("gallery_image_id")
+            or len(source_sha256) != 64
+            or any(c not in "0123456789abcdef" for c in source_sha256)
+        ):
+            raise HTTPException(status_code=409, detail="Edit source does not match this job")
+        actual = source_sha256
+    else:
+        if primary.get("gallery_image_id") != gallery_image_id:
+            raise HTTPException(status_code=409, detail="Edit source does not match this job")
+        entry = await run_db_operation(
+            get_gallery_entry, gallery_image_id, metric_name="restore_generate_gallery_source"
+        )
+        gallery_path = safe_image_path(entry.filename) if entry else None
+        if not gallery_path or not gallery_path.is_file():
+            raise HTTPException(status_code=409, detail="Original gallery image is unavailable")
+        try:
+            actual = await run_image_operation(
+                _sha256_file, gallery_path, metric_name="hash_restore_gallery_source"
+            )
+        except OSError as exc:
+            raise HTTPException(status_code=409, detail="Original gallery image is unavailable") from exc
+    if not hmac.compare_digest(expected, actual):
+        raise HTTPException(status_code=409, detail="Edit source does not match this job")
+    return _mask_response(path, await _job_mask_coverage(job_id), verified=True)
+
+
 @router.get("/api/generate/{job_id}/mask")
 async def get_generate_job_mask(job_id: str):
     job = await run_db_operation(
@@ -327,16 +409,7 @@ async def get_generate_job_mask(job_id: str):
         raise HTTPException(status_code=404, detail="Mask file not found")
     # job_id is unique and the file is never rewritten after promotion, so a
     # retry re-fetching the same job's mask can cache it indefinitely.
-    headers = {"Cache-Control": "private, max-age=31536000, immutable"}
-    coverage = await _job_mask_coverage(job_id)
-    if coverage is not None:
-        headers["X-Mask-Coverage"] = str(coverage)
-    return FileResponse(
-        path,
-        media_type=MASK_CONTENT_TYPE,
-        filename="mask.png",
-        headers=headers,
-    )
+    return _mask_response(path, await _job_mask_coverage(job_id), verified=False)
 
 
 @router.get("/api/generate/{job_id}/events")
