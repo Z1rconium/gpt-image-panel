@@ -2,6 +2,7 @@ CLAUDE.md
 
 # Claude Code local config
 .claude/
+.codex/
 .impeccable
 .venv
 
@@ -53,7 +54,9 @@ PERFORMANCE_UX_AUDIT.md
 CODE_REVIEW_OPTIMIZATION_PLAN.md
 REVIEW_REPORT.md
 docs/product-brainstorm-report.md
-plan/
+# Local planning and acceptance notes
+/plan/
+/MASK_RETRY_ACCEPTANCE_*.md
 
 test-results
 .commandcode
