@@ -121,7 +121,10 @@ def paste_back_image(
         image_format = "png"
     save_options: dict[str, object] = {}
     if image_format == "png":
-        save_options["compress_level"] = 6
+        # Paste-back already decodes and composites a full frame. A moderate
+        # deflate level keeps 2K PNG output within the latency budget while
+        # preserving the exact same pixels and alpha.
+        save_options["compress_level"] = 5
     else:
         save_options["quality"] = min(output_compression or 95, 95)
     if icc_profile:

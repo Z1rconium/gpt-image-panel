@@ -1,9 +1,12 @@
 import multiprocessing
+import io
 import os
 import statistics
 import time
 from collections import Counter
 from pathlib import Path
+
+from PIL import Image, ImageChops, ImageDraw
 
 import pytest
 
@@ -15,12 +18,35 @@ from backend.app.repositories import image_jobs as image_jobs_repo
 from backend.app.repositories.gallery import mutations as gallery_mutations
 from backend.app.repositories.gallery import queries as gallery_queries
 from backend.app.runtime import blocking
+from backend.app.services.edit_paste_back import paste_back_image
 
 
 pytestmark = pytest.mark.skipif(
     os.getenv("RUN_PERFORMANCE_TESTS") != "true",
     reason="set RUN_PERFORMANCE_TESTS=true to run performance baselines",
 )
+
+
+def test_2048_png_paste_back_adds_under_one_second(tmp_path):
+    size = 2048
+    base = Image.linear_gradient("L").resize((size, size)).convert("RGB")
+    noise = Image.effect_noise((size, size), 18).convert("RGB")
+    primary = Image.blend(ImageChops.add(base, noise, scale=1.6), Image.new("RGB", (size, size), (40, 90, 140)), 0.3)
+    result = Image.blend(ImageChops.add(base, noise, scale=1.6), Image.new("RGB", (size, size), (42, 90, 140)), 0.3)
+    mask = Image.new("RGBA", (size, size), (0, 0, 0, 255))
+    ImageDraw.Draw(mask).ellipse((size * 0.3, size * 0.3, size * 0.7, size * 0.75), fill=(0, 0, 0, 0))
+    primary_path = tmp_path / "primary.png"
+    mask_path = tmp_path / "mask.png"
+    primary.save(primary_path)
+    mask.save(mask_path)
+    result_buffer = io.BytesIO()
+    result.save(result_buffer, format="PNG")
+
+    started = time.perf_counter()
+    outcome = paste_back_image(result_buffer.getvalue(), primary_path, mask_path)
+    elapsed_ms = (time.perf_counter() - started) * 1000
+    assert outcome.status == "applied"
+    assert elapsed_ms <= 1_000, f"2K paste-back took {elapsed_ms:.0f} ms"
 
 
 def _configure_runtime(tmp_path: Path):
