@@ -1224,31 +1224,6 @@ def mark_worker_heartbeat(worker_id: str, active_units: int = 0) -> None:
             )
 
 
-def record_worker_metrics_snapshot(worker_id: str, snapshot: dict[str, Any]) -> None:
-    _ensure_database()
-    normalized_worker_id = str(worker_id or "").strip()
-    if not normalized_worker_id:
-        return
-    now = utc_now()
-    payload = json.dumps(snapshot, sort_keys=True, separators=(",", ":"))
-    with _connect() as conn:
-        with _transaction(conn):
-            conn.execute(
-                """
-                INSERT INTO worker_metric_snapshots (
-                    worker_id,
-                    snapshot_json,
-                    updated_at
-                )
-                VALUES (?, ?, ?)
-                ON CONFLICT(worker_id) DO UPDATE SET
-                    snapshot_json = excluded.snapshot_json,
-                    updated_at = excluded.updated_at
-                """,
-                (normalized_worker_id, payload, now),
-            )
-
-
 def _worker_metric_snapshots_on_conn(conn: sqlite3.Connection, now: datetime) -> list[dict[str, Any]]:
     cutoff = (now - timedelta(seconds=WORKER_METRIC_SNAPSHOT_TTL_SECONDS)).isoformat()
     rows = conn.execute(

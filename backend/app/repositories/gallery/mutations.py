@@ -49,7 +49,6 @@ from ..image_files import (
     scan_image_files as _scan_image_files,
 )
 from ..thumbnail_jobs import (
-    _attach_gallery_thumbnail_url,
     _cleanup_prepared_gallery_files,
     _dedupe_import_entries_on_conn,
     _enqueue_thumbnail_jobs_on_conn,

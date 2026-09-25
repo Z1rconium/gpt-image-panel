@@ -6,9 +6,7 @@ from ..db import (
     _coerce_nonnegative_int,
     _connect,
     _ensure_database,
-    _invalidate_gallery_total_bytes_cache,
     _transaction,
-    logger,
 )
 
 from typing import (
@@ -16,7 +14,6 @@ from typing import (
     Iterable,
     Iterator,
 )
-import sqlite3
 
 
 def _gallery_r2_sync_changed_condition() -> str:
@@ -190,36 +187,3 @@ def mark_gallery_r2_sync_state(rows: Iterable[dict[str, Any]]) -> None:
                 """,
                 prepared,
             )
-
-
-def update_gallery_entry_hash(filename: str, sha256: str, byte_size: int) -> None:
-    """Backfill sha256/bytes for entries sharing a filename. Best-effort."""
-    if not filename or not sha256:
-        return
-    _ensure_database()
-    try:
-        with _connect() as conn:
-            with _transaction(conn):
-                conn.execute(
-                    """
-                    UPDATE gallery_entries
-                    SET sha256 = CASE
-                            WHEN sha256 IS NULL OR sha256 = '' THEN ?
-                            ELSE sha256
-                        END,
-                        bytes = COALESCE(bytes, ?)
-                    WHERE filename = ?
-                      AND (
-                          sha256 IS NULL OR sha256 = ''
-                          OR bytes IS NULL
-                      )
-                    """,
-                    (sha256, byte_size, filename),
-                )
-                _invalidate_gallery_total_bytes_cache()
-    except sqlite3.Error as e:
-        logger.warning("Failed to persist sha256 for %s: %s", filename, e)
-
-
-__all__ = [name for name in globals() if not name.startswith("_")]
-

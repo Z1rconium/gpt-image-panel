@@ -13,12 +13,10 @@ from .db import (
     WORKER_METRIC_SNAPSHOT_TTL_SECONDS,
     _PreparedGalleryFile,
     _add_verified_thumbnail,
-    _attach_gallery_thumbnail_url,
     _connect,
     _ensure_database,
     _iter_sqlite_in_chunks,
     _transaction,
-    image_url_for_filename,
     logger,
 )
 from .image_files import (
@@ -52,16 +50,6 @@ import time
 import uuid
 from .coordination import acquire_background_slot, release_background_slot
 from .db import state as db_state
-
-
-def _attach_gallery_thumbnail_url(entry: dict[str, Any]) -> dict[str, Any]:
-    if "image_url" not in entry:
-        entry["image_url"] = image_url_for_filename(str(entry.get("filename") or ""))
-    if "thumbnail_url" not in entry:
-        entry["thumbnail_url"] = _thumbnail_url_for_filename(
-            str(entry.get("filename") or "")
-        )
-    return entry
 
 
 def _prepare_gallery_file(image_bytes: bytes, filename: str) -> _PreparedGalleryFile:

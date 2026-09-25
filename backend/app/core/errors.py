@@ -35,10 +35,6 @@ class NotFoundError(DomainError):
     status_code = 404
 
 
-class ConflictError(DomainError):
-    status_code = 409
-
-
 class RateLimitedError(DomainError):
     status_code = 429
 

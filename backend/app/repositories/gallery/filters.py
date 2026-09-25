@@ -6,19 +6,9 @@ from ..db import (
     _connect,
     _ensure_database,
     _get_filter_options_cache_version,
-    _rebuild_gallery_filter_options_on_conn,
-    _transaction,
 )
 import sqlite3
 from ..db import state as db_state
-
-
-def rebuild_gallery_filter_options() -> GalleryFilterOptions:
-    _ensure_database()
-    with _connect() as conn:
-        with _transaction(conn):
-            _rebuild_gallery_filter_options_on_conn(conn)
-        return _get_gallery_filter_options_on_conn(conn)
 
 
 def _get_gallery_filter_options_on_conn(conn: sqlite3.Connection) -> GalleryFilterOptions:
@@ -58,7 +48,3 @@ def get_gallery_filter_options() -> GalleryFilterOptions:
     _ensure_database()
     with _connect() as conn:
         return _get_gallery_filter_options_on_conn(conn)
-
-
-__all__ = [name for name in globals() if not name.startswith("_")]
-

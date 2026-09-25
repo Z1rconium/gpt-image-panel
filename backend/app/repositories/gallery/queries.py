@@ -40,7 +40,6 @@ import binascii
 import json
 import sqlite3
 import time
-from ..thumbnail_jobs import _attach_gallery_thumbnail_url
 from .filters import _get_gallery_filter_options_on_conn
 from ..db import state as db_state
 
@@ -212,13 +211,6 @@ def _get_gallery_total_bytes_on_conn(
             db_state._gallery_total_bytes_cache.popitem(last=False)
 
     return total_bytes
-
-
-def get_gallery_total_bytes(filters: dict[str, Any] | None = None) -> int:
-    _ensure_database()
-    with _connect() as conn:
-        where_sql, params = _build_gallery_filter_where(filters)
-        return _get_gallery_total_bytes_on_conn(conn, where_sql, params)
 
 
 def encode_gallery_cursor(sort_seq: int, image_id: str) -> str:
@@ -1053,20 +1045,3 @@ def _get_all_filenames_on_conn(conn: sqlite3.Connection) -> list[str]:
         "SELECT DISTINCT filename FROM gallery_entries WHERE filename IS NOT NULL"
     ).fetchall()
     return [row["filename"] for row in rows if row["filename"]]
-
-
-def get_all_filenames() -> list[str]:
-    """Return all filenames in the gallery without loading full entry objects."""
-    _ensure_database()
-    with _connect() as conn:
-        return _get_all_filenames_on_conn(conn)
-
-
-def get_all_gallery_ids() -> list[str]:
-    _ensure_database()
-    with _connect() as conn:
-        rows = conn.execute("SELECT id FROM gallery_entries").fetchall()
-        return [row["id"] for row in rows if row["id"]]
-
-
-__all__ = [name for name in globals() if not name.startswith("__")]

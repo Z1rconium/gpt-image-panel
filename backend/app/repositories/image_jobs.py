@@ -117,16 +117,6 @@ def pop_generate_job_webhook(job_id: str) -> str:
             return webhook_url if cursor.rowcount > 0 else ""
 
 
-def get_generate_job_updated_at_edge(job_id: str) -> str | None:
-    _ensure_database()
-    with _connect() as conn:
-        row = conn.execute(
-            "SELECT updated_at FROM generate_jobs WHERE job_id = ?",
-            (job_id,),
-        ).fetchone()
-    return str(row["updated_at"]) if row else None
-
-
 def get_generate_jobs_list_updated_at_edge(
     *,
     statuses: set[str] | None = None,
@@ -211,15 +201,6 @@ def get_generate_sse_edges(
         else {}
     )
     return list_edge, job_edges
-
-
-def count_active_image_job_units() -> int:
-    _ensure_database()
-    with _connect() as conn:
-        row = conn.execute(
-            "SELECT COUNT(*) FROM image_job_units WHERE status IN ('queued', 'running')"
-        ).fetchone()
-    return int(row[0] or 0) if row else 0
 
 
 def count_pending_image_job_units() -> tuple[int, int]:
@@ -427,39 +408,6 @@ def enqueue_image_job(
                 [_image_job_unit_values(unit) for unit in units],
             )
     return normalized_job, units
-
-
-def create_image_job_units(
-    *,
-    parent_job_id: str,
-    operation: str,
-    request: dict[str, Any],
-    image_units: int,
-    api_preset_id: str,
-    api_preset_name: str,
-    api_path: str,
-    edit_sources: list[dict[str, Any]] | None = None,
-) -> list[dict[str, Any]]:
-    _ensure_database()
-    units = _build_image_job_units(
-        parent_job_id=parent_job_id,
-        operation=operation,
-        request=request,
-        image_units=image_units,
-        api_preset_id=api_preset_id,
-        api_preset_name=api_preset_name,
-        api_path=api_path,
-        edit_sources=edit_sources,
-    )
-    columns_sql = ", ".join(IMAGE_JOB_UNIT_COLUMNS)
-    placeholders_sql = ", ".join("?" for _ in IMAGE_JOB_UNIT_COLUMNS)
-    with _connect() as conn:
-        with _transaction(conn):
-            conn.executemany(
-                f"INSERT INTO image_job_units ({columns_sql}) VALUES ({placeholders_sql})",
-                [_image_job_unit_values(unit) for unit in units],
-            )
-    return units
 
 
 def get_image_job_unit(unit_id: str) -> dict[str, Any] | None:
@@ -883,14 +831,6 @@ def fail_image_job_unit(
                 (unit_id,),
             ).fetchone()
     return _image_job_unit_from_row(row) if row else None
-
-
-def cancel_image_job_units(parent_job_id: str) -> int:
-    _ensure_database()
-    now = utc_now()
-    with _connect() as conn:
-        with _transaction(conn):
-            return _cancel_image_job_units_on_conn(conn, parent_job_id, now)
 
 
 def _cancel_image_job_units_on_conn(

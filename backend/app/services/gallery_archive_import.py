@@ -7,18 +7,16 @@ import tempfile
 import time
 import uuid
 import zipfile
-from collections.abc import Callable, Generator, Iterable, Iterator
-from dataclasses import dataclass
+from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from zipstream import ZipStream
 from ..runtime.blocking import run_file_operation
 
 from ..core.errors import InvalidRequestError
 from ..core import settings as config
 from ..core.utils import utc_now
-from ..core.media import safe_image_path, validate_image_bytes
+from ..core.media import validate_image_bytes
 from ..schemas.gallery import GalleryEntry
 from .uploads import IMAGE_UPLOAD_CONTENT_TYPES, IMAGE_UPLOAD_EXTENSIONS
 

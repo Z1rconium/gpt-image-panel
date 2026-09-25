@@ -1,22 +1,18 @@
 import os
-import re
 import shutil
 import tempfile
 import time
-import uuid
 import zipfile
 from collections.abc import Callable, Generator, Iterable, Iterator
-from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import Any
 
 from zipstream import ZipStream
 
 from ..core import settings as config
 from ..core.utils import utc_now
-from ..core.media import safe_image_path, validate_image_bytes
+from ..core.media import safe_image_path
 from ..schemas.gallery import GalleryEntry
-from .uploads import IMAGE_UPLOAD_CONTENT_TYPES, IMAGE_UPLOAD_EXTENSIONS
 
 GalleryZipProgressCallback = Callable[[dict[str, Any]], None]
 from .gallery_archive_shared import (
@@ -398,5 +394,4 @@ def write_gallery_zip_file(
         missing_count=prepared.missing_count,
         bytes_total=prepared.bytes_total,
     )
-
 
