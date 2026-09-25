@@ -4,20 +4,24 @@ Everything here reads or writes the settings_kv table."""
 import json
 import logging
 import sqlite3
-from datetime import datetime, timedelta, timezone
-from typing import Any, Iterable, Iterator, Sequence
+from datetime import datetime, timezone
+from typing import Any
 
 from ...core import settings as config
 from ...core.api_paths import default_model_for_api_path, normalize_api_preset
 from ...core.secrets import configured_secret_ids
+from ...core.settings_defaults import (
+    coerce_positive_int as _coerce_positive_int,
+    default_ai_assistant_settings as _default_ai_assistant_settings,
+    default_prompt_optimizer_settings as _default_prompt_optimizer_settings,
+    default_secret_reference as _default_secret_reference,
+)
 from ...core.utils import utc_now
 from ...core.validators import (
     get_env_var_ref_name,
     is_malformed_env_var_ref,
     normalize_secret_env_ref_or_plaintext,
     normalize_r2_endpoint_url,
-    normalize_socks5_proxy_url,
-    normalize_webhook_url,
 )
 from .connection import (
     _connect,
@@ -32,48 +36,12 @@ from .schema import (
 
 from .constants import (
     AI_ASSISTANT_SETTINGS_KEY,
-    DATA_DIR_MODE,
-    DATA_FILE_MODE,
-    DATA_PERMISSION_CHECK_INTERVAL_SECONDS,
-    EditSourceQueueFullError,
-    GALLERY_COLUMNS,
-    GALLERY_COUNT_CACHE_SECONDS,
-    GALLERY_FTS_MIN_QUERY_LENGTH,
-    GALLERY_FTS_VERSION,
-    GALLERY_FTS_VERSION_KEY,
-    GALLERY_IMPORT_BATCH_SIZE,
-    GALLERY_JOB_COLUMNS,
-    GALLERY_ORPHAN_FILE_TTL_SECONDS,
-    GALLERY_ORPHAN_GC_BATCH_SIZE,
-    GALLERY_PAGE_ANCHOR_INTERVAL_PAGES,
-    GALLERY_PAGE_ANCHOR_INVALIDATING_UPDATE_FIELDS,
-    GALLERY_PAGE_ANCHOR_MAX_PER_QUERY,
-    GALLERY_PAGE_ANCHOR_SMALL_OFFSET_THRESHOLD,
-    GALLERY_SYNC_BATCH_SIZE,
-    GALLERY_TOTAL_BYTES_CACHE_SECONDS,
-    GENERATE_JOB_COLUMNS,
-    IMAGE_JOB_UNIT_COLUMNS,
-    INTEGER_GALLERY_COLUMNS,
-    INTEGER_GENERATE_JOB_COLUMNS,
-    ImageJobQueueFullError,
-    MAX_PERSISTED_JOB_TEXT_CHARS,
     NODEIMAGE_SETTINGS_KEY,
     PROMPT_OPTIMIZER_SETTINGS_KEY,
-    PROMPT_SNIPPET_COLUMNS,
     R2_BACKUP_SETTINGS_KEY,
-    REQUIRED_GALLERY_COLUMNS,
     SETTINGS_ACTIVE_PRESET_KEY,
-    SQLITE_IN_CLAUSE_CHUNK_SIZE,
-    SQLITE_TIMEOUT_SECONDS,
-    THUMBNAIL_CPU_SLOT_LEASE_SECONDS,
-    THUMBNAIL_JOB_LEASE_SECONDS,
-    THUMBNAIL_JOB_MAX_ATTEMPTS,
     UPSTREAM_SOCKS5_PROXY_KEY,
     WEBHOOK_URL_KEY,
-    WORKER_METRIC_SNAPSHOT_TTL_SECONDS,
-    _GALLERY_BYTES_CACHE_MAX_SIZE,
-    _GALLERY_COUNT_CACHE_MAX_SIZE,
-    _GALLERY_INTERNAL_COLUMNS,
 )
 
 logger = logging.getLogger(__name__)
@@ -142,15 +110,6 @@ def _normalize_stored_nodeimage_api_key(value: str | None) -> str:
         return normalized
 
 
-def _default_secret_reference(secret_id: str, value: str | None) -> str:
-    if secret_id in configured_secret_ids():
-        return secret_id
-    normalized = str(value or "").strip()
-    if get_env_var_ref_name(normalized):
-        return normalized
-    return ""
-
-
 def _default_env_backed_secret_reference(
     secret_id: str,
     env_var: str,
@@ -205,26 +164,6 @@ def _coerce_bool(value: Any, default: bool = False) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
-def _default_prompt_optimizer_settings() -> dict:
-    return {
-        "enabled": config.PROMPT_OPTIMIZER_ENABLED,
-        "api_url": config.PROMPT_OPTIMIZER_API_URL,
-        "api_key": _default_secret_reference(
-            "builtin-prompt-optimizer-key",
-            config.PROMPT_OPTIMIZER_API_KEY,
-        ),
-        "model": config.PROMPT_OPTIMIZER_MODEL,
-        "timeout_seconds": config.PROMPT_OPTIMIZER_TIMEOUT_SECONDS,
-    }
-
-
-def _default_ai_assistant_settings() -> dict:
-    return {
-        "enabled": config.AI_ASSISTANT_ENABLED,
-        "vision_model": config.AI_ASSISTANT_VISION_MODEL or config.PROMPT_OPTIMIZER_MODEL,
-    }
-
-
 def _normalize_r2_key_prefix(value: Any, default: str = "gallery/") -> str:
     raw = str(value if value is not None else default).strip()
     if not raw:
@@ -263,14 +202,6 @@ def _default_nodeimage_settings() -> dict:
             config.NODEIMAGE_API_KEY,
         ),
     }
-
-
-def _coerce_positive_int(value, default: int) -> int:
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        return default
-    return parsed if parsed > 0 else default
 
 
 def _coerce_non_negative_int(value, default: int) -> int:

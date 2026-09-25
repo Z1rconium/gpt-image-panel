@@ -8,7 +8,7 @@ import time
 
 from ..runtime.state import state
 from ..core import settings as config
-from ..core.observability import build_metrics_snapshot, metrics
+from ..core.observability import build_metrics_snapshot, failure_rates, metrics
 from ..repositories.coordination import refresh_runtime_coordination_metrics
 from ..repositories.db import optimize_database_if_due
 from ..repositories.image_jobs import get_image_queue_runtime_metrics
@@ -17,16 +17,6 @@ from .job_queue import snapshot_queue_metrics
 
 
 logger = logging.getLogger(__name__)
-
-
-def _failure_rates(counters: dict) -> dict[str, float]:
-    rates: dict[str, float] = {}
-    for operation in ("generation", "edit"):
-        failed = int(counters.get(f"image_jobs.{operation}.failed", 0))
-        succeeded = int(counters.get(f"image_jobs.{operation}.succeeded", 0))
-        total = failed + succeeded
-        rates[f"image_jobs.{operation}.failure_ratio"] = failed / total if total else 0.0
-    return rates
 
 
 def _resource_gauges() -> dict[str, int | float]:
@@ -51,7 +41,7 @@ async def refresh_runtime_metrics_once(worker_id: str) -> None:
     gauges.update(executor_gauges())
     gauges.update(_resource_gauges())
     local_snapshot = build_metrics_snapshot(gauges=gauges)
-    local_snapshot["rates"] = _failure_rates(local_snapshot["counters"])
+    local_snapshot["rates"] = failure_rates(local_snapshot["counters"])
     worker_payload = {
         "counters": local_snapshot["counters"],
         "gauges": local_snapshot["gauges"],

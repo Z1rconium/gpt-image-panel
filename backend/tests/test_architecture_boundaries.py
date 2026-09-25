@@ -44,8 +44,6 @@ FRAMEWORK_IMPORT_ALLOWLIST: frozenset[str] = frozenset(
 )
 
 # Frozen debt: every entry is a mapping the matrix forbids.
-# Frozen debt: every entry is a mapping the matrix forbids.
-# Frozen debt: every entry is a mapping the matrix forbids.
 ALLOWED_VIOLATIONS: frozenset[str] = frozenset(
     {
     }
@@ -53,39 +51,26 @@ ALLOWED_VIOLATIONS: frozenset[str] = frozenset(
 
 # Project imports inside function bodies. Some are deliberate cycle breaks that
 # Python requires; new entries need a documented reason to be added.
-# Project imports inside function bodies. Some are
-# Project imports inside function bodies. Some are
-# Project imports inside function bodies. Some are
-# Project imports inside function bodies. Some are
-# Project imports inside function bodies. Some are
-# Project imports inside function bodies. Some are
-# Project imports inside function bodies. Some are
-# Project imports inside function bodies. Some are
-# Project imports inside function bodies. Some are
-# Project imports inside function bodies. Some are
-# Project imports inside function bodies. Some are
 ALLOWED_DEFERRED_IMPORTS: frozenset[str] = frozenset(
     {
-        "backend/app/api/routers/settings.py:327 -> backend.app.services.presets",
-        "backend/app/api/routers/settings.py:336 -> backend.app.services.presets",
-        "backend/app/api/routers/settings.py:341 -> backend.app.services.presets",
-        "backend/app/api/routers/settings.py:373 -> backend.app.services.presets",
-        "backend/app/core/overall_config.py:353 -> backend.app.core.secrets",
-        "backend/app/core/overall_config.py:360 -> backend.app.core.security",
-        "backend/app/core/redaction.py:63 -> backend.app.core.secrets",
-        "backend/app/core/secrets.py:138 -> backend.app.core",
-        "backend/app/core/secrets.py:320 -> backend.app.core.validators",
-        "backend/app/core/secrets.py:353 -> backend.app.core",
-        "backend/app/core/validators.py:38 -> backend.app.core.secrets",
-        "backend/app/core/validators.py:446 -> backend.app.core.secrets",
-        "backend/app/core/validators.py:500 -> backend.app.core.secrets",
-        "backend/app/repositories/db/settings_store.py:490 -> backend.app.core.overall_config",
-        "backend/app/repositories/db/settings_store.py:558 -> backend.app.core.overall_config",
-        "backend/app/runtime/blocking.py:175 -> backend.app.repositories",
-        "backend/app/runtime/blocking.py:218 -> backend.app.repositories",
-        "backend/app/runtime/blocking.py:341 -> backend.app.repositories",
-        "backend/app/services/presets.py:47 -> backend.app.core.redaction",
-        "backend/app/services/runtime_metrics.py:71 -> backend.app.services.job_events",
+        "backend/app/api/routers/settings.py:check_r2_settings_health -> backend.app.services.presets",
+        "backend/app/api/routers/settings.py:update_settings -> backend.app.services.presets",
+        "backend/app/core/overall_config.py:apply_rows_to_config -> backend.app.core.secrets",
+        "backend/app/core/overall_config.py:apply_rows_to_config -> backend.app.core.security",
+        "backend/app/core/redaction.py:redact_sensitive_text -> backend.app.core.secrets",
+        "backend/app/core/secrets.py:_builtin_entries -> backend.app.core",
+        "backend/app/core/secrets.py:active_secret_values -> backend.app.core",
+        "backend/app/core/secrets.py:resolve_secret_reference -> backend.app.core.validators",
+        "backend/app/core/validators.py:mask_socks5_proxy_url -> backend.app.core.secrets",
+        "backend/app/core/validators.py:mask_webhook_url -> backend.app.core.secrets",
+        "backend/app/core/validators.py:normalize_secret_env_ref_or_plaintext -> backend.app.core.secrets",
+        "backend/app/repositories/db/settings_store.py:save_overall_config_overrides -> backend.app.core.overall_config",
+        "backend/app/repositories/db/settings_store.py:sync_overall_config_env_values -> backend.app.core.overall_config",
+        "backend/app/runtime/blocking.py:close_blocking_executors -> backend.app.repositories",
+        "backend/app/runtime/blocking.py:run_db_operation -> backend.app.repositories",
+        "backend/app/runtime/blocking.py:run_db_operation_in_current_thread -> backend.app.repositories",
+        "backend/app/services/presets.py:get_exception_message -> backend.app.core.redaction",
+        "backend/app/services/runtime_metrics.py:refresh_runtime_metrics_once -> backend.app.services.job_events",
     }
 )
 
@@ -123,24 +108,26 @@ class _ImportCollector(ast.NodeVisitor):
     def __init__(self, package: str) -> None:
         self.package = package
         self.module_imports: list[tuple[int, str]] = []
-        self.deferred_imports: list[tuple[int, str]] = []
-        self._scoped = False
+        self.deferred_imports: list[tuple[str, str]] = []
+        self._scope = ""
 
     def _visit_scoped(self, node: ast.AST) -> None:
-        previous = self._scoped
-        self._scoped = True
+        previous = self._scope
+        self._scope = f"{previous}.{node.name}" if previous else node.name
         self.generic_visit(node)
-        self._scoped = previous
+        self._scope = previous
 
     visit_FunctionDef = _visit_scoped
     visit_AsyncFunctionDef = _visit_scoped
     visit_ClassDef = _visit_scoped
 
     def _record(self, node: ast.AST, modules: list[str | None]) -> None:
-        target = self.deferred_imports if self._scoped else self.module_imports
         for module in modules:
             if module:
-                target.append((node.lineno, module))
+                if self._scope:
+                    self.deferred_imports.append((self._scope, module))
+                else:
+                    self.module_imports.append((node.lineno, module))
 
     def visit_Import(self, node: ast.Import) -> None:
         self._record(node, [alias.name for alias in node.names])
@@ -166,10 +153,10 @@ def _scan() -> tuple[list[str], list[str]]:
             if target_layer is None or target_layer in ALLOWED_TARGET_LAYERS[source_layer]:
                 continue
             violations.append(f"{relative_path}:{lineno} -> {target}")
-        for lineno, target in collector.deferred_imports:
+        for scope, target in collector.deferred_imports:
             if _layer_of(target) is None:
                 continue
-            deferred.append(f"{relative_path}:{lineno} -> {target}")
+            deferred.append(f"{relative_path}:{scope} -> {target}")
     return violations, deferred
 
 

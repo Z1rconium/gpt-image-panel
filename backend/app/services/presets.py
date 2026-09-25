@@ -3,6 +3,12 @@ from ..core.errors import UnprocessableRequestError
 from ..runtime.state import state
 from ..core import secrets
 from ..core import settings as config
+from ..core.settings_defaults import (
+    coerce_positive_int as _coerce_positive_int,
+    default_ai_assistant_settings as _default_ai_assistant_settings,
+    default_prompt_optimizer_settings as _default_prompt_optimizer_settings,
+    default_secret_reference as _default_secret_reference,
+)
 from ..core.api_paths import (
     normalize_api_path,
     normalize_api_preset,
@@ -61,16 +67,6 @@ def get_api_key_env_var(api_key: str) -> str | None:
 
 def is_malformed_api_key_env_ref(api_key: str) -> bool:
     return "${" in str(api_key or "") or "}" in str(api_key or "")
-
-
-def _default_secret_reference(secret_id: str, value: str | None) -> str:
-    if secret_id in secrets.configured_secret_ids():
-        return secret_id
-    normalized = str(value or "").strip()
-    env_var = get_api_key_env_var(normalized)
-    if env_var:
-        return f"${{{env_var}}}"
-    return ""
 
 
 def resolve_api_key(api_key: str) -> str:
@@ -145,34 +141,6 @@ def get_effective_preset_api_key(preset: dict) -> str:
         )
     except secrets.SecretRegistryError as exc:
         raise UnprocessableRequestError(str(exc)) from exc
-
-
-def _default_prompt_optimizer_settings() -> dict:
-    return {
-        "enabled": config.PROMPT_OPTIMIZER_ENABLED,
-        "api_url": config.PROMPT_OPTIMIZER_API_URL,
-        "api_key": _default_secret_reference(
-            "builtin-prompt-optimizer-key",
-            config.PROMPT_OPTIMIZER_API_KEY,
-        ),
-        "model": config.PROMPT_OPTIMIZER_MODEL,
-        "timeout_seconds": config.PROMPT_OPTIMIZER_TIMEOUT_SECONDS,
-    }
-
-
-def _default_ai_assistant_settings() -> dict:
-    return {
-        "enabled": config.AI_ASSISTANT_ENABLED,
-        "vision_model": config.AI_ASSISTANT_VISION_MODEL or config.PROMPT_OPTIMIZER_MODEL,
-    }
-
-
-def _coerce_positive_int(value, default: int) -> int:
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        return default
-    return parsed if parsed > 0 else default
 
 
 def _coerce_non_negative_int(value, default: int = 0) -> int:

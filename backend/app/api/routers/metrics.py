@@ -5,21 +5,15 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from ...runtime.state import state
 from ...services.job_queue import snapshot_queue_metrics
 from ...core import settings as config
-from ...core.observability import build_metrics_snapshot, format_prometheus_metrics
+from ...core.observability import (
+    build_metrics_snapshot,
+    failure_rates,
+    format_prometheus_metrics,
+)
 from ...runtime.blocking import executor_gauges
 
 
 router = APIRouter()
-
-
-def _failure_rates(counters: dict) -> dict[str, float]:
-    rates: dict[str, float] = {}
-    for operation in ("generation", "edit"):
-        failed = int(counters.get(f"image_jobs.{operation}.failed", 0))
-        succeeded = int(counters.get(f"image_jobs.{operation}.succeeded", 0))
-        total = failed + succeeded
-        rates[f"image_jobs.{operation}.failure_ratio"] = failed / total if total else 0.0
-    return rates
 
 
 def _current_worker_snapshot(worker_id: str, payload: dict) -> dict:
@@ -53,7 +47,7 @@ def _metrics_snapshot() -> dict:
     gauges.update(getattr(state, "runtime_resource_gauges", {}))
     gauges.update(runtime.get("gauges", {}))
     snapshot = build_metrics_snapshot(gauges=gauges)
-    snapshot["rates"] = _failure_rates(snapshot["counters"])
+    snapshot["rates"] = failure_rates(snapshot["counters"])
     snapshot["worker_id"] = worker_id
     snapshot["background_leases"] = runtime.get("background_leases", [])
     worker_payload = {

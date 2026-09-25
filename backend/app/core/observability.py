@@ -17,6 +17,17 @@ JOB_STAGE_TIMING_KEYS = {
     "paste_back",
 }
 
+
+def failure_rates(counters: dict) -> dict[str, float]:
+    rates: dict[str, float] = {}
+    for operation in ("generation", "edit"):
+        failed = int(counters.get(f"image_jobs.{operation}.failed", 0))
+        succeeded = int(counters.get(f"image_jobs.{operation}.succeeded", 0))
+        total = failed + succeeded
+        rates[f"image_jobs.{operation}.failure_ratio"] = failed / total if total else 0.0
+    return rates
+
+
 _current_job_timer: ContextVar["JobStageTimer | None"] = ContextVar(
     "current_job_timer",
     default=None,
