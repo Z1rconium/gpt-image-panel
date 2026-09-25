@@ -9,9 +9,11 @@
     "preview": "vite preview --host 127.0.0.1 --port 4173",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "check:bundle": "node scripts/bundle-budget.mjs",
+    "check:worker-build": "node scripts/check-worker-build.mjs",
     "test:unit": "vitest run",
     "test:unit:watch": "vitest",
     "test:e2e": "playwright test",
+    "test:e2e:production": "playwright test --config playwright.production-e2e.config.ts",
     "test:e2e:perf": "RUN_PERFORMANCE_TESTS=true playwright test",
     "test:perf:production": "playwright test --config playwright.perf.config.ts"
   },
