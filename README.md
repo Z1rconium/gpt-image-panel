@@ -40,7 +40,7 @@ This project is only a self-hosted control panel. It does not provide, proxy, re
 
 - Image generation through `/v1/images/generations`, `/v1/responses`, or OpenAI-compatible `/v1/chat/completions`.
 - Image editing through `/v1/images/edits`, including uploaded references and gallery-source edits.
-- Built-in mask editor for targeted inpainting edits (brush/eraser/shape/lasso tools, zoom, feathering, magnetic snapping, mask import, automatic gap filling and edge smoothing), with masks persisted per job and restorable on retry, a per-preset mask-support capability flag, and default paste-back of the model's result onto the untouched primary image behind a color-drift guard.
+- Built-in mask editor for targeted inpainting edits (brush/eraser/shape/lasso tools, zoom, feathering, mask import, auto gap-fill/edge-smoothing), with masks persisted and restorable on retry, and default paste-back of the model's result onto the untouched original behind a color-drift guard.
 - API presets with base URL/path/key, default model, response format, health checks, SOCKS5 proxy, webhook, and env-ref secret support.
 - Web-managed Overall Config for selected runtime settings, with env/default/override sources and restart/build-only badges.
 - Prompt helper tags, reusable prompt snippets, optional server-side prompt optimizer, and an AI Assistant subsystem for prompt rewrites/checks/variants, parameter recommendations, job diagnosis, edit planning, and gallery image analysis.
@@ -249,7 +249,7 @@ Most runtime options live in `.env.example`. API presets, prompt optimizer, R2 b
 | Variable | Purpose |
 | --- | --- |
 | `ACCESS_KEY` | Access gate key. Required unless it is unset and `ALLOW_UNAUTHENTICATED=true`. |
-| `TURNSTILE_ENABLED` / `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` | Optional Cloudflare Turnstile human verification on the access gate. When enabled, unlocking requires a valid Turnstile token in addition to `ACCESS_KEY`; the site key is exposed via `/api/access/status` for the login widget. |
+| `TURNSTILE_ENABLED` / `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` | Optional Cloudflare Turnstile human verification on the access gate; when enabled, unlocking requires a valid Turnstile token alongside `ACCESS_KEY`. |
 | `DEFAULT_API_URL` | Default upstream API base URL; may omit or include `/v1`. |
 | `DEFAULT_API_KEY` | Default upstream API key. Prefer env refs such as `${OPENAI_API_KEY}` in Web Settings. |
 | `DEFAULT_API_PATH` | `/v1/images/generations`, `/v1/responses`, or `/v1/chat/completions`. |
@@ -258,16 +258,16 @@ Most runtime options live in `.env.example`. API presets, prompt optimizer, R2 b
 | `APP_VERSION` / `GITHUB_REPO` / `ENABLE_VERSION_CHECK` | UI/API version reporting and latest-release checks. |
 | `VERSION_CHECK_CACHE_SECONDS` | Per-process cache TTL for successful latest-release checks. |
 | `MAX_UPSTREAM_IMAGE_BYTES_PER_TASK_MB` / `UPSTREAM_MEMORY_BUDGET_MB` | Per-task decoded-image cap and process-local weighted upstream-memory admission budget. |
-| `DB_EXECUTOR_WORKERS` / `SQLITE_BUSY_*` / `SQLITE_CRITICAL_BUSY_*` / `SQLITE_SLOW_TXN_WARN_MS` | Dedicated SQLite executor size and jittered retry controls. `DB_EXECUTOR_WORKERS` defaults to `max(4, MAX_ACTIVE_GENERATE_JOBS // 2 + 2)`. Polling reads use the short `SQLITE_BUSY_*` budget; claim, lease renewal, terminal unit writes, parent finalization and cancellation use the larger `SQLITE_CRITICAL_BUSY_*` budget so a transient lock cannot strand a running unit. Write transactions held longer than `SQLITE_SLOW_TXN_WARN_MS` are logged with their call label. |
+| `DB_EXECUTOR_WORKERS` / `SQLITE_BUSY_*` / `SQLITE_CRITICAL_BUSY_*` / `SQLITE_SLOW_TXN_WARN_MS` | SQLite executor size (defaults to `max(4, MAX_ACTIVE_GENERATE_JOBS // 2 + 2)`) and busy-retry budgets — a larger `SQLITE_CRITICAL_BUSY_*` budget protects claim/lease/finalization writes from transient locks. Slow write transactions are logged. |
 | `IMAGE_CPU_CONCURRENCY` / `FILE_IO_CONCURRENCY` | Bounded full-image decode and blocking file-I/O concurrency per process. |
 | `IMAGE_JOB_PROGRESS_PERSIST_INTERVAL_SECONDS` | Minimum interval for coalesced image-unit progress writes. |
 | `RUNTIME_METRICS_REFRESH_SECONDS` / `EVENT_LOOP_LAG_SAMPLE_SECONDS` | Background coordination snapshot and event-loop lag sampling intervals. |
-| `MAX_ACTIVE_GENERATE_JOBS` | Global running generation/edit image-unit limit. Expired leases from crashed or unreachable workers do not count against it, so a dead worker cannot deadlock the queue; with healthy workers the effective limit stays at this value. |
-| `GRANIAN_WORKERS` | Granian worker process count. Each process claims at most `ceil(MAX_ACTIVE_GENERATE_JOBS / GRANIAN_WORKERS)` image units so an `n>1` job is spread across workers instead of being monopolized by the worker that accepted the request. Set it equal to the actual process count. |
+| `MAX_ACTIVE_GENERATE_JOBS` | Global running generation/edit image-unit limit; expired leases from dead workers don't count against it, so a crashed worker can't deadlock the queue. |
+| `GRANIAN_WORKERS` | Granian worker process count; set it equal to the actual process count. Each worker claims at most `ceil(MAX_ACTIVE_GENERATE_JOBS / GRANIAN_WORKERS)` image units, so an `n>1` job spreads across workers. |
 | `MAX_QUEUED_GENERATE_JOBS` | Queue capacity before new jobs return `429`. |
-| `IMAGE_JOB_UNIT_LEASE_SECONDS` | SQLite claim lease for a running image unit. Crash-detection latency only — the executing worker renews the lease while upstream is in flight, so slow upstreams no longer lose their ownership. The upstream duration cap is still governed by the client timeout in `session_pool`. |
-| `IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS` | Cadence at which the executing worker extends an image-unit lease. Must stay below `lease/2` (defaults to `lease/3`); clamps to `lease/4` if misconfigured. A renewal that fails with a SQLite error is retried every 5s while the lease is still valid; only a renewal rejected by fencing (the unit was re-claimed or cancelled) aborts the in-flight upstream call immediately, so cancelling a job now stops its upstream request within one renewal interval. |
-| `IMAGE_JOB_UNIT_MAX_ATTEMPTS` | Max claim attempts per image unit. A unit whose lease expires after its final attempt is marked `interrupted` instead of retried forever. |
+| `IMAGE_JOB_UNIT_LEASE_SECONDS` | SQLite claim lease for a running image unit — crash-detection latency only; the worker renews it while upstream is in flight, so slow upstreams don't lose ownership. |
+| `IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS` | Cadence at which the worker renews an image-unit lease (must stay under `lease/2`, defaults to `lease/3`). Only a renewal rejected by fencing (unit re-claimed or cancelled) aborts the in-flight upstream call, so cancelling a job stops it within one renewal interval. |
+| `IMAGE_JOB_UNIT_MAX_ATTEMPTS` | Max claim attempts per image unit; a unit whose lease expires on its last attempt is marked `interrupted` instead of retried forever. |
 | `MAX_PENDING_EDIT_SOURCE_MB` | Global pending edit-source byte reservation cap. |
 | `MASK_PASTE_BACK_DEFAULT` | Default for pasting a masked edit's result back onto the untouched primary image; overridable per edit request. |
 | `MAX_SSE_SUBSCRIBERS_GLOBAL` / `MAX_SSE_SUBSCRIBERS_PER_IP` / `SSE_CONNECTION_TTL_SECONDS` | SSE slot limits and max connection lifetime. |
@@ -276,7 +276,7 @@ Most runtime options live in `.env.example`. API presets, prompt optimizer, R2 b
 | `THUMBNAILS_DIR` / `THUMBNAIL_*` | Gallery thumbnail storage and generation controls. |
 | `DATA_DIR` / `DATABASE_FILE` | SQLite runtime storage. |
 | `PROMPT_OPTIMIZER_*` | Optional server-side prompt optimizer settings. |
-| `AI_ASSISTANT_*` | AI Assistant is enabled by default; set `AI_ASSISTANT_ENABLED=false` to disable it. API URL, key, text model, timeout, route, and host allowlist reuse `PROMPT_OPTIMIZER_*`. `AI_ASSISTANT_MAX_CONCURRENCY` caps concurrent upstream assistant calls and `AI_ASSISTANT_BATCH_MAX_IMAGES` caps one gallery AI batch. |
+| `AI_ASSISTANT_*` | AI Assistant is enabled by default (`AI_ASSISTANT_ENABLED=false` to disable); reuses `PROMPT_OPTIMIZER_*` for API URL/key/model/timeout/allowlist. `AI_ASSISTANT_MAX_CONCURRENCY` and `AI_ASSISTANT_BATCH_MAX_IMAGES` cap concurrency and gallery batch size. |
 | `R2_*` | Optional Cloudflare R2 gallery backup sync settings; custom endpoint hosts require `R2_ENDPOINT_HOST_ALLOWLIST`. |
 | `NODEIMAGE_API_KEY` | Optional NodeImage API key for server-side Gallery uploads. |
 | `PUBLIC_ORIGIN` / `ALLOWED_HOSTS` | Reverse-proxy Host/CSRF hardening. |
@@ -291,24 +291,17 @@ Overall Config persists overrides in SQLite. Some settings are hot-reloaded; res
 
 ### Configuration precedence
 
-Settings reach the process through three layers, and which one owns a name matters:
+Settings resolve in three layers: environment variables, read once at process start; Overall Config overrides persisted in SQLite via `/api/settings/overall-config` (hot-reloadable keys apply immediately, `restart_required` keys apply on next start); and names marked `exposed_in_settings` (API presets, prompt optimizer, AI assistant, R2, NodeImage), which are read from SQLite once saved through Web Settings — after that, the matching env var has no further effect. A handful of settings (e.g. `DB_EXECUTOR_WORKERS`, `AI_ASSISTANT_MAX_CONCURRENCY`, `IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS`) are derived from another value and recompute automatically when their base changes.
 
-1. **Environment, read at import.** `backend/app/core/settings.py` reads every env var once into a module constant, and readers use those constants directly. Eight of them are *derived* from another setting (`MAX_UPSTREAM_IMAGE_BYTES_PER_TASK_MB`, `UPSTREAM_MEMORY_BUDGET_MB`, `MAX_PENDING_EDIT_SOURCE_MB`, `IMPORT_ARCHIVE_MAX_MB`, `IMPORT_TEMP_RESERVATION_MAX_MB`, `DB_EXECUTOR_WORKERS`, `AI_ASSISTANT_MAX_CONCURRENCY`, `IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS`): they follow their base value unless that name is itself set, and they are recomputed when a base changes at runtime.
-2. **Overall Config overrides, in SQLite.** `/api/settings/overall-config` stores overrides in `overall_config_values`. Hot-reloadable keys take effect immediately; `restart_required` keys are stored and applied on the next start. `settings.apply_overrides` is the only code path that changes a setting after import, and it recomputes the derived values so the process cannot run with limits that contradict each other.
-3. **Keys owned by `/api/settings`.** Names marked `exposed_in_settings` (API presets, prompt optimizer, AI assistant, R2, NodeImage) are read from SQLite first, with the environment value only seeding the default: after the first save from Web Settings, changing the matching env var has no effect.
-
-Known limits: a runtime change to `DB_EXECUTOR_WORKERS`, `IMAGE_CPU_CONCURRENCY`, or `FILE_IO_CONCURRENCY` does not resize an already created thread pool, and each worker process keeps its own in-memory mirror of the API presets — those are re-read from SQLite for every job unit, so workers do not drift apart.
+Known limits: changing `DB_EXECUTOR_WORKERS`, `IMAGE_CPU_CONCURRENCY`, or `FILE_IO_CONCURRENCY` at runtime does not resize an already-created thread pool. Each worker process re-reads API presets from SQLite per job, so workers stay in sync with each other.
 
 ### SQLite write-lock and lease metrics
 
-With `ENABLE_METRICS=true`, `/api/metrics` exposes the diagnostics used to size SQLite coordination:
+With `ENABLE_METRICS=true`, `/api/metrics` exposes diagnostics for sizing SQLite coordination:
 
-- `sqlite.write_txn` — successful write transactions. On an idle process this should track the heartbeat and runtime-snapshot cadence, not per-second claim work; a flat rate confirms the idle claim prechecks (`image_jobs.claim_precheck_skipped` and the `gallery.*` / `thumbnail.*` variants) are skipping empty `BEGIN IMMEDIATE` cycles.
-- `sqlite.write_lock_wait_ms` / `sqlite.write_txn_hold_ms` — `BEGIN IMMEDIATE` wait and full transaction hold (p50/p95/p99/max). Watch the p95 as `MAX_ACTIVE_GENERATE_JOBS x GRANIAN_WORKERS` grows; super-linear growth means contention scales faster than concurrency.
-- `sqlite.busy` / `sqlite.busy_retries` — failed `BEGIN IMMEDIATE` attempts and retries. Critical writes consume the larger `SQLITE_CRITICAL_BUSY_*` budget before surfacing here.
-- `image_jobs.lease_renewed` / `image_jobs.lease_lost` / `image_jobs.lease_renew_retry` — image-unit lease health. `lease_lost` should stay at zero; a non-zero rate means a unit was re-claimed or cancelled mid-flight (repeat-billing risk).
-- `image_jobs.unit_reclaimed` / `image_jobs.unit_exhausted` — expired leases that were retried or marked `interrupted` after `IMAGE_JOB_UNIT_MAX_ATTEMPTS`.
-- `image_jobs.parent_write_skipped_terminal` — parent updates rejected because the job was already terminal (guards against state regression).
+- `sqlite.write_txn`, `sqlite.write_lock_wait_ms`, `sqlite.write_txn_hold_ms` — write-transaction rate and lock wait/hold times (p50/p95/p99/max); watch the p95 as `MAX_ACTIVE_GENERATE_JOBS x GRANIAN_WORKERS` grows.
+- `sqlite.busy`, `sqlite.busy_retries` — failed/retried lock attempts under contention.
+- `image_jobs.lease_renewed`, `lease_lost`, `unit_reclaimed`, `unit_exhausted` — image-unit lease health; `lease_lost` should stay at zero, since a non-zero rate means a unit was re-claimed or cancelled mid-flight.
 
 ## Usage
 
@@ -328,24 +321,23 @@ The generation form and preset settings offer `gpt-image-2.5-flare` (fast everyd
 
 Use `/v1/images/generations` for generation. Uploading reference images or selecting a gallery image uses multipart `/v1/images/edits`. Both 2.5 variants support `auto`, `low`, `medium`, `high`, `xhigh`, and `max` quality. Earlier/custom models retain the existing quality options. Selecting a model that does not support the current quality resets it to `auto`.
 
-- Prompts support 32,000 Unicode characters across generation, editing, assistants and saved snippets. Prompt Optimizer defaults to the same character limit; an explicitly configured `PROMPT_OPTIMIZER_MAX_OUTPUT_CHARS` still takes precedence. Assistant engines retain their own token limits and report truncated upstream responses as errors.
-- Size accepts `auto` or `WIDTHxHEIGHT`: both edges must be positive multiples of 16, neither may exceed 3840, aspect ratio must not exceed 3:1, and total pixels must be 655,360–8,294,400. Resolutions above 2560×1440 are experimental.
-- Output formats are PNG, JPEG and WebP. Compression is sent only for JPEG/WebP (0–100, default 100). Transparent backgrounds require PNG/WebP; choosing transparency with JPEG switches output to PNG.
-- 2.5 always returns Base64. The panel omits `response_format`, including values inherited from older presets, saves the image, and exposes its local image URL. Existing models and gateway modes keep their prior response-format behavior.
-- This integration accepts up to 16 PNG/JPEG/WebP edit inputs, each smaller than 50 MB and subject to the configured upload limits. Convert other formats before editing. Requests for 1–10 outputs use the existing queue, one upstream image per unit.
+- Prompts support up to 32,000 Unicode characters across generation, editing, assistants, and snippets (Prompt Optimizer shares this limit unless `PROMPT_OPTIMIZER_MAX_OUTPUT_CHARS` overrides it).
+- Size is `auto` or `WIDTHxHEIGHT`: edges must be multiples of 16 up to 3840, aspect ratio ≤ 3:1, and total pixels between 655,360–8,294,400. Above 2560×1440 is experimental.
+- Output is PNG, JPEG, or WebP; compression (0–100, default 100) applies only to JPEG/WebP. Transparent backgrounds require PNG/WebP — JPEG plus transparency auto-switches to PNG.
+- 2.5 always returns Base64: the panel saves the image and serves it from a local URL, ignoring any `response_format` inherited from older presets. Other models keep their prior response-format behavior.
+- Edits accept up to 16 PNG/JPEG/WebP inputs (each under 50 MB, subject to configured upload limits; convert other formats first). Outputs of 1–10 use the existing queue, one upstream image per unit.
 
-GPT Image 2.5 is supported through the Images API here, including streaming preview (see below). The existing Responses gateway format, Chat Completions, and masks are not part of this integration. Model access depends on the upstream account. Higher quality settings can consume more tokens; equal token prices do not imply equal per-image costs between Flare and Sunburst.
+GPT Image 2.5 is supported through the Images API only — the Responses gateway format and Chat Completions are not part of this integration, but mask editing and paste-back (see below) work the same as with other models. Model access depends on your upstream account; higher quality settings consume more tokens, so equal token prices don't imply equal per-image costs between Flare and Sunburst.
 
 API rules checked on 2026-09-10: [image generation guide](https://developers.openai.com/api/docs/guides/image-generation), [generation reference](https://developers.openai.com/api/reference/resources/images/methods/generate), [edit reference](https://developers.openai.com/api/reference/resources/images/methods/edit).
 
 ## Mask Editing & Paste-Back
 
-- The Edit workflow includes a built-in mask editor (brush, eraser, rectangle/circle/lasso shapes, zoom, feathering, and magnetic snapping) for painting the exact region an edit should touch. Masks can also be imported from an existing PNG: black-and-white masks treat white as editable, soft-alpha masks treat any pixel below 50% opacity as editable, and a same-ratio imported mask is scaled to match the primary image.
-- Automatic gap filling and edge smoothing are enabled by default: gap filling closes small holes inside the painted selection, and edge smoothing only ever adds editable pixels, never removes a painted area. Both are reflected in the live preview and coverage readout before you submit the edit.
-- A saved mask (PNG, max 4 MB) is scoped to its primary source image and persisted to disk (`MASKS_DIR`) alongside the job; retrying a masked edit restores that exact mask after verifying the source image's identity, and refuses the retry if the mask no longer matches.
-- By default, a masked edit's result is pasted back onto the original image (`MASK_PASTE_BACK_DEFAULT=true`): only the pixels inside the mask are kept from the model output, everything else reverts to the untouched primary pixels, and a narrow feather blends the boundary. A drift guard compares the red, green, and blue channels of the preserved region before and after, and skips paste-back (returning the raw model output) if the model altered pixels it should not have touched. Paste-back can be turned off per edit request, and the preview panel can toggle between the final result and the original image to check the boundary.
-- API presets carry a `supports_mask` capability flag (enabled by default); turning it off in Web Settings hides mask editing for upstreams that reject mask uploads.
-- Gallery images record `mask_coverage`, `paste_back` status, and `paste_back_scale`; filter the gallery to masked edits only with `mask_only`.
+- The Edit workflow includes a built-in mask editor (brush/eraser/shape/lasso tools, zoom, feathering, magnetic snapping) for painting the exact region to edit, or you can import an existing PNG mask (white is editable for black-and-white masks; below 50% alpha is editable for soft-alpha masks; same-ratio imports are scaled to match). Automatic gap filling and edge smoothing are on by default and only ever add editable pixels, never remove a painted area — both show live in the preview and coverage readout.
+- A saved mask (PNG, max 4 MB) persists to disk (`MASKS_DIR`) with its job and is restored on retry after verifying the source image still matches; a changed source refuses the retry.
+- By default, a masked edit's result is pasted back onto the original image (`MASK_PASTE_BACK_DEFAULT=true`): only the masked pixels come from the model, everything else reverts to the untouched original with a feathered boundary, and a color-drift guard skips paste-back if the model altered pixels outside the mask. Paste-back can be turned off per edit, and the preview panel can toggle between the result and the original to check the boundary.
+- API presets carry a `supports_mask` capability flag (on by default); turning it off in Web Settings hides mask editing for upstreams that reject mask uploads.
+- Gallery images record `mask_coverage`, `paste_back` status, and `paste_back_scale`, and can be filtered to masked edits with `mask_only`.
 
 ## Supported Upstream Paths
 
@@ -360,10 +352,10 @@ For `/v1/responses` and `/v1/chat/completions`, size/quality/format/compression/
 
 ## Streaming Preview & Cost Estimation
 
-- Streaming preview is opt-in per request (the "Streaming preview" toggle in the generation form), applies only to `/v1/images/generations` and `/v1/images/edits`, and only with a quantity of 1 — each requested image is queued as a separate unit, so streaming and batching don't compose. Choose 1–3 preview frames; more frames mean more output tokens from the upstream and a somewhat higher cost for the same final image.
-- If a compatible upstream advertises OpenAI-style support but rejects the `stream`/`partial_images` parameters, the job fails with a clear error asking you to disable streaming and retry — it never silently falls back to a second, non-streaming request, since that could double-bill the generation.
-- Partial images are held only in server memory, one slot per running unit holding just the latest frame, bounded by `PREVIEW_CACHE_MAX_ENTRY_MB`/`PREVIEW_CACHE_MAX_ENTRIES` (see `.env.example`); they are never written to SQLite or the gallery. A client that reconnects mid-job gets whatever frame is still cached, or waits for the next one — a restarted or different worker process has nothing to replay.
-- **Estimated cost is not a bill.** It is only computed from the `usage` object the upstream actually returns; when usage is missing, or the model has no configured price, the UI shows the reason (e.g. "no pricing configured for this model") instead of `$0.00`. The builtin rate table covers `gpt-image-1` and the GPT Image 2 / 2.5 model ids, taken from OpenAI's published Images API pricing — third-party "OpenAI-compatible" upstreams almost never match that pricing. Override or add per-model rates with `IMAGE_COST_RATES_JSON` in `.env.example`.
+- Streaming preview is opt-in per request (the "Streaming preview" toggle), applies only to `/v1/images/generations` and `/v1/images/edits` with a quantity of 1 — streaming and batching don't compose, since each requested image queues as a separate unit. Choose 1–3 preview frames; more frames means more output tokens and a somewhat higher cost.
+- If a compatible upstream rejects the `stream`/`partial_images` parameters, the job fails with a clear error instead of silently retrying non-streaming, since that could double-bill the generation.
+- Partial images live only in server memory (one latest frame per running unit, bounded by `PREVIEW_CACHE_MAX_ENTRY_MB`/`PREVIEW_CACHE_MAX_ENTRIES`) and are never persisted; a reconnecting client gets whatever frame is still cached, and a restarted or different worker has nothing to replay.
+- **Estimated cost is not a bill.** It's computed only from the `usage` object the upstream actually returns; when usage or a model price is missing, the UI shows why instead of `$0.00`. The builtin rate table covers `gpt-image-1` and GPT Image 2 / 2.5, taken from OpenAI's published pricing — third-party upstreams rarely match it. Override or add rates with `IMAGE_COST_RATES_JSON`.
 
 ## API Overview
 

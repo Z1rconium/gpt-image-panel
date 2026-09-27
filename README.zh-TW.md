@@ -36,7 +36,7 @@ GPT Image Panel 是一套輕量 Web UI，可用於圖片生成、圖片編輯、
 
 - 透過 `/v1/images/generations`、`/v1/responses` 或 OpenAI 相容的 `/v1/chat/completions` 生成圖片。
 - 透過 `/v1/images/edits` 編輯圖片，可使用上傳的參考圖或 Gallery 圖片作為來源。
-- 內建遮罩編輯器，用於精準定位需要編輯的區域（畫筆/橡皮擦/矩形/圓形/套索工具、縮放、羽化、磁性吸附、遮罩匯入，以及預設開啟的自動補洞與邊緣平滑），遮罩會隨工作持久化並可在重試時還原，預設可設定是否支援遮罩，且預設會將模型結果貼回未編輯的原圖區域，並具備色彩漂移防護。
+- 內建遮罩編輯器，用於精準定位編輯區域（畫筆/橡皮擦/形狀/套索工具、縮放、羽化、遮罩匯入、預設開啟的自動補洞與邊緣平滑），遮罩隨工作持久化並可在重試時還原，預設會將模型結果貼回未編輯的原圖區域，並具備色彩漂移防護。
 - API 預設管理：base URL/path/key、預設模型、response format、健康檢查、SOCKS5 Proxy、webhook 與環境變數參照式密鑰。
 - 可由網頁管理的 Overall Config，顯示 env/default/override 來源，以及需要重新啟動或僅影響建置的設定標記。
 - 提示詞輔助標籤、可重複使用的提示詞片段、選用的伺服器端提示詞最佳化器，以及 AI Assistant 子系統，可進行提示詞改寫/檢查/變體、參數建議、工作診斷、編輯規劃與 Gallery 圖片分析。
@@ -242,7 +242,7 @@ ALLOW_UNAUTHENTICATED=true .venv/bin/granian --interface asgi backend.app.main:a
 | 變數 | 用途 |
 | --- | --- |
 | `ACCESS_KEY` | 存取密鑰。除非清空該變數並設定 `ALLOW_UNAUTHENTICATED=true`，否則必填。 |
-| `TURNSTILE_ENABLED` / `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` | 選用的 Cloudflare Turnstile 人機驗證。啟用後，除了 `ACCESS_KEY`，解鎖還需要有效的 Turnstile token；site key 透過 `/api/access/status` 提供給登入元件。 |
+| `TURNSTILE_ENABLED` / `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` | 選用的 Cloudflare Turnstile 人機驗證；啟用後，解鎖除 `ACCESS_KEY` 外還需要有效的 Turnstile token。 |
 | `DEFAULT_API_URL` | 預設上游 API base URL，可包含或省略 `/v1`。 |
 | `DEFAULT_API_KEY` | 預設上游 API key。Web Settings 建議使用 `${OPENAI_API_KEY}` 之類的 env ref。 |
 | `DEFAULT_API_PATH` | `/v1/images/generations`、`/v1/responses` 或 `/v1/chat/completions`。 |
@@ -265,7 +265,7 @@ ALLOW_UNAUTHENTICATED=true .venv/bin/granian --interface asgi backend.app.main:a
 | `THUMBNAILS_DIR` / `THUMBNAIL_*` | Gallery 縮圖儲存與產生控制。 |
 | `DATA_DIR` / `DATABASE_FILE` | SQLite 執行期資料。 |
 | `PROMPT_OPTIMIZER_*` | 選用的伺服器端提示詞最佳化器設定。 |
-| `AI_ASSISTANT_*` | AI Assistant 預設啟用；可設 `AI_ASSISTANT_ENABLED=false` 關閉。API URL、密鑰、文字模型、逾時、路徑與 Host 允許清單沿用 `PROMPT_OPTIMIZER_*`。`AI_ASSISTANT_MAX_CONCURRENCY` 限制同時進行的上游 Assistant 呼叫，`AI_ASSISTANT_BATCH_MAX_IMAGES` 限制單次 Gallery AI 批次處理的圖片數。 |
+| `AI_ASSISTANT_*` | AI Assistant 預設啟用（設 `AI_ASSISTANT_ENABLED=false` 關閉）；API URL、密鑰、模型、逾時、允許清單沿用 `PROMPT_OPTIMIZER_*`。`AI_ASSISTANT_MAX_CONCURRENCY` / `AI_ASSISTANT_BATCH_MAX_IMAGES` 限制並行數與單次 Gallery AI 批次圖片數。 |
 | `R2_*` | 選用的 Cloudflare R2 Gallery 備份設定；自訂 Endpoint Host 須設定 `R2_ENDPOINT_HOST_ALLOWLIST`。 |
 | `NODEIMAGE_API_KEY` | 選用的 NodeImage API key，用於從伺服器上傳 Gallery 圖片；也可在 Web Settings 中設定 env ref。 |
 | `PUBLIC_ORIGIN` / `ALLOWED_HOSTS` | Reverse Proxy Host/CSRF 強化。 |
@@ -296,24 +296,23 @@ Overall Config 會將 Override 持久化至 SQLite。部分設定可熱更新；
 
 文生圖使用 `/v1/images/generations`，上傳參考圖或選取圖庫圖片後使用 multipart `/v1/images/edits`。兩個變體均支援 `auto/low/medium/high/xhigh/max` 品質；舊模型和自訂模型沿用原有品質選項，切換至不支援目前品質的模型時恢復為 `auto`。
 
-- 生成、編輯、助手和提示詞收藏支援 32,000 個 Unicode 字元。提示詞最佳化器預設字元上限同步調整；使用者明確設定的 `PROMPT_OPTIMIZER_MAX_OUTPUT_CHARS` 仍優先。助手引擎有獨立的輸出 token 上限，上游截斷時會回報錯誤。
-- 尺寸支援 `auto` 或 `寬x高`：邊長為正整數且是 16 的倍數，最長邊不超過 3840，寬高比不超過 3:1，總像素為 655,360–8,294,400。超過 2560×1440 的解析度屬於實驗性支援。
-- 輸出支援 PNG/JPEG/WebP；壓縮參數僅用於 JPEG/WebP，範圍 0–100，預設 100。透明背景需要 PNG/WebP；JPEG 搭配透明背景時自動切換 PNG。
-- 2.5 自動回傳 Base64。面板省略 `response_format`，包括舊預設繼承的值，儲存圖片後提供本地圖片 URL；舊模型和閘道模式保持原有回傳格式行為。
-- 本次整合支援最多 16 張 PNG/JPEG/WebP 編輯輸入，單張小於 50 MB，並受應用程式上傳限制約束；其他格式請先轉換。1–10 張輸出沿用現有佇列，每個執行單元請求一張圖片。
+- 生成、編輯、助手和提示詞收藏最多支援 32,000 個 Unicode 字元（提示詞最佳化器共用同一上限，除非明確設定了 `PROMPT_OPTIMIZER_MAX_OUTPUT_CHARS`）。
+- 尺寸為 `auto` 或 `寬x高`：邊長須是 16 的倍數且不超過 3840，寬高比不超過 3:1，總像素為 655,360–8,294,400；超過 2560×1440 屬於實驗性支援。
+- 輸出支援 PNG/JPEG/WebP；壓縮參數（0–100，預設 100）僅用於 JPEG/WebP。透明背景需要 PNG/WebP，JPEG 搭配透明背景會自動切換為 PNG。
+- 2.5 一律回傳 Base64：面板會儲存圖片並提供本地 URL，忽略舊預設繼承的 `response_format`；其他模型維持原有回傳格式行為。
+- 編輯最多接受 16 張 PNG/JPEG/WebP 輸入（單張小於 50 MB，受應用程式上傳限制約束，其他格式請先轉換）；1–10 張輸出沿用現有佇列，每個執行單元請求一張圖片。
 
-本次透過 Images API 整合，包含串流預覽（見下文）；不增加官方 Responses 圖像工具或遮罩。上游帳號需要具備模型存取權限；更高品質可能使用更多 token，兩個變體的相同 token 單價不代表每張圖片費用相同。
+本次僅透過 Images API 整合——不包含官方 Responses 閘道格式與 Chat Completions，但遮罩編輯與貼回（見下文）與其他模型一致。上游帳號需要具備模型存取權限；更高品質可能消耗更多 token，兩個變體相同的 token 單價不代表每張圖片費用相同。
 
 規範核對日期：2026-09-10。[官方指南](https://developers.openai.com/api/docs/guides/image-generation) · [生成介面](https://developers.openai.com/api/reference/resources/images/methods/generate) · [編輯介面](https://developers.openai.com/api/reference/resources/images/methods/edit)。
 
 ## 遮罩編輯與貼回
 
-- 編輯流程內建遮罩編輯器（畫筆、橡皮擦、矩形/圓形/套索工具、縮放、羽化、磁性吸附），用於精準繪製需要編輯的區域。也可以匯入既有的 PNG 遮罩：黑白遮罩以白色為可編輯區域，柔和透明遮罩會將透明度低於 50% 的像素視為可編輯區域，比例相同的匯入遮罩會自動縮放以符合原圖。
-- 自動補洞與邊緣平滑預設為開啟：補洞會填補已繪製選取區內的小洞，邊緣平滑只會增加可編輯像素，不會移除已繪製的區域。兩者都會即時反映在預覽與覆蓋率讀數中，方便在送出編輯前確認。
-- 儲存的遮罩（PNG，最大 4 MB）與其來源圖綁定，並持久化到磁碟（`MASKS_DIR`）隨工作保存；重試遮罩編輯工作時，會先驗證來源圖的身分，確認無誤後才還原原始遮罩，否則會拒絕重試。
-- 預設情況下，遮罩編輯結果會被貼回原圖（`MASK_PASTE_BACK_DEFAULT=true`）：只保留模型輸出中遮罩範圍內的像素，其餘部分還原為未編輯的原圖像素，並在邊界處做窄幅羽化融合。漂移防護會分別比較保留區域貼回前後的紅、綠、藍三個色版；若模型改動了不該改動的像素,則會略過貼回並直接回傳模型的原始輸出。可在單次編輯要求中關閉貼回，預覽面板也可在最終結果與原圖之間切換，方便檢查貼回邊界。
-- API 預設攜帶 `supports_mask` 能力旗標（預設開啟）；在 Web Settings 中關閉它，可為不支援遮罩上傳的上游隱藏遮罩編輯功能。
-- Gallery 圖片會記錄 `mask_coverage`、`paste_back` 狀態與 `paste_back_scale`；可透過 `mask_only` 只篩選遮罩編輯的圖片。
+- 編輯流程內建遮罩編輯器（畫筆、橡皮擦、形狀/套索工具、縮放、羽化），用於精準繪製編輯區域；也可匯入既有 PNG 遮罩（黑白遮罩以白色為可編輯區域，柔和透明遮罩以透明度低於 50% 為可編輯區域，同比例匯入會自動縮放符合原圖）。自動補洞與邊緣平滑預設開啟，且只會增加可編輯像素、不會移除已繪製區域，兩者都即時反映在預覽與覆蓋率讀數中。
+- 儲存的遮罩（PNG，最大 4 MB）隨工作持久化到磁碟（`MASKS_DIR`）；重試時會先驗證來源圖仍相符才還原遮罩，來源圖已變更則拒絕重試。
+- 預設情況下，遮罩編輯結果會貼回原圖（`MASK_PASTE_BACK_DEFAULT=true`）：只保留模型輸出中遮罩範圍內的像素，其餘部分還原為未編輯的原圖並做羽化融合，若模型改動了遮罩外的像素則由色彩漂移防護略過貼回。可依編輯關閉貼回，預覽面板也可在結果與原圖間切換以檢查邊界。
+- API 預設攜帶 `supports_mask` 開關（預設開啟），關閉後可為不支援遮罩上傳的上游隱藏遮罩編輯功能。
+- Gallery 圖片會記錄 `mask_coverage`、`paste_back`、`paste_back_scale`，可透過 `mask_only` 篩選遮罩編輯圖片。
 
 ## 支援的上游路徑
 
@@ -328,10 +327,10 @@ Overall Config 會將 Override 持久化至 SQLite。部分設定可熱更新；
 
 ## 串流預覽與費用估算
 
-- 串流預覽需在生成表單中主動開啟（「串流預覽」開關），僅適用於 `/v1/images/generations` 與 `/v1/images/edits`，且數量必須為 1——每張請求圖片都會作為獨立執行單元排隊，因此串流預覽無法與批次生成組合使用。可選擇 1–3 個預覽畫面；畫面數越多，上游消耗的輸出 token 越多，最終圖片的費用也會略高。
-- 若相容服務聲稱支援 OpenAI 卻拒絕 `stream`/`partial_images` 參數，工作會以明確錯誤結束，提示您關閉串流預覽後重試——不會自動降級為非串流請求重新發起，因為這可能導致重複計費。
-- 階段性預覽圖片僅保存在伺服器記憶體中，每個執行單元只保留最新一幀，大小受 `PREVIEW_CACHE_MAX_ENTRY_MB`/`PREVIEW_CACHE_MAX_ENTRIES`（見 `.env.example`）限制，不會寫入 SQLite 或 Gallery。工作進行中重新連線的客戶端會收到目前快取的預覽畫面，或等待下一幀；行程重新啟動或切換到其他 worker 後不會有可重播的快取。
-- **費用估算並非帳單。** 僅在上游實際回傳 `usage` 時才會計算；缺少 usage 或該模型未設定費率時，介面會顯示具體原因（例如「未設定該模型的費率」），而非顯示 `$0.00`。內建費率涵蓋 `gpt-image-1` 與 GPT Image 2 / 2.5 系列模型 id，取自 OpenAI 官方 Images API 定價；第三方「OpenAI 相容」上游的實際定價通常並不相同。可透過 `.env.example` 中的 `IMAGE_COST_RATES_JSON` 覆寫或新增各模型的費率。
+- 串流預覽需在生成表單中主動開啟，僅適用於數量為 1 的 `/v1/images/generations` 與 `/v1/images/edits`——每張請求圖片都作為獨立執行單元排隊，串流與批次無法組合。可選 1–3 個預覽畫面，畫面數越多上游輸出 token 越多，費用也略高。
+- 若相容服務拒絕 `stream`/`partial_images` 參數，工作會以明確錯誤結束，而非自動降級為非串流重試，以免重複計費。
+- 階段性預覽圖片僅存在伺服器記憶體中（每個執行單元僅一幀，受 `PREVIEW_CACHE_MAX_ENTRY_MB`/`PREVIEW_CACHE_MAX_ENTRIES` 限制），不會持久化；重新連線的客戶端會拿到仍快取的畫面，重啟或切換 worker 後則無幀可重播。
+- **費用估算並非帳單。** 僅在上游回傳 `usage` 時才會計算；缺少 usage 或未設定費率時會顯示原因而非 `$0.00`。內建費率涵蓋 `gpt-image-1` 與 GPT Image 2 / 2.5，取自 OpenAI 官方定價——第三方上游通常並不相同。可透過 `IMAGE_COST_RATES_JSON` 覆寫或新增費率。
 
 ## API 概覽
 
