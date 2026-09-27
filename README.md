@@ -18,7 +18,7 @@
 
   <p>
     <img alt="CI passing" src="https://img.shields.io/badge/CI-passing-2cc653?logo=github&logoColor=white" />
-    <img alt="Release v1.5.5" src="https://img.shields.io/badge/release-v1.5.5-0e8dcc" />
+    <img alt="Release v1.6.3" src="https://img.shields.io/badge/release-v1.6.3-0e8dcc" />
     <img alt="Python 3.11+" src="https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white" />
     <img alt="Node.js 24" src="https://img.shields.io/badge/Node.js-24-339933?logo=node.js&logoColor=white" />
     <img alt="FastAPI 0.115+" src="https://img.shields.io/badge/FastAPI-0.115+-009688?logo=fastapi&logoColor=white" />
@@ -40,6 +40,7 @@ This project is only a self-hosted control panel. It does not provide, proxy, re
 
 - Image generation through `/v1/images/generations`, `/v1/responses`, or OpenAI-compatible `/v1/chat/completions`.
 - Image editing through `/v1/images/edits`, including uploaded references and gallery-source edits.
+- Built-in mask editor for targeted inpainting edits (brush/eraser/shape/lasso tools, zoom, feathering, magnetic snapping, mask import, automatic gap filling and edge smoothing), with masks persisted per job and restorable on retry, a per-preset mask-support capability flag, and default paste-back of the model's result onto the untouched primary image behind a color-drift guard.
 - API presets with base URL/path/key, default model, response format, health checks, SOCKS5 proxy, webhook, and env-ref secret support.
 - Web-managed Overall Config for selected runtime settings, with env/default/override sources and restart/build-only badges.
 - Prompt helper tags, reusable prompt snippets, optional server-side prompt optimizer, and an AI Assistant subsystem for prompt rewrites/checks/variants, parameter recommendations, job diagnosis, edit planning, and gallery image analysis.
@@ -268,8 +269,10 @@ Most runtime options live in `.env.example`. API presets, prompt optimizer, R2 b
 | `IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS` | Cadence at which the executing worker extends an image-unit lease. Must stay below `lease/2` (defaults to `lease/3`); clamps to `lease/4` if misconfigured. A renewal that fails with a SQLite error is retried every 5s while the lease is still valid; only a renewal rejected by fencing (the unit was re-claimed or cancelled) aborts the in-flight upstream call immediately, so cancelling a job now stops its upstream request within one renewal interval. |
 | `IMAGE_JOB_UNIT_MAX_ATTEMPTS` | Max claim attempts per image unit. A unit whose lease expires after its final attempt is marked `interrupted` instead of retried forever. |
 | `MAX_PENDING_EDIT_SOURCE_MB` | Global pending edit-source byte reservation cap. |
+| `MASK_PASTE_BACK_DEFAULT` | Default for pasting a masked edit's result back onto the untouched primary image; overridable per edit request. |
 | `MAX_SSE_SUBSCRIBERS_GLOBAL` / `MAX_SSE_SUBSCRIBERS_PER_IP` / `SSE_CONNECTION_TTL_SECONDS` | SSE slot limits and max connection lifetime. |
 | `IMAGES_DIR` | Saved image directory. |
+| `MASKS_DIR` | Persisted edit-mask directory used to restore masks on job retry; keep under `IMAGES_DIR` unless volumes/backups are also adjusted. |
 | `THUMBNAILS_DIR` / `THUMBNAIL_*` | Gallery thumbnail storage and generation controls. |
 | `DATA_DIR` / `DATABASE_FILE` | SQLite runtime storage. |
 | `PROMPT_OPTIMIZER_*` | Optional server-side prompt optimizer settings. |
@@ -335,6 +338,15 @@ GPT Image 2.5 is supported through the Images API here, including streaming prev
 
 API rules checked on 2026-09-10: [image generation guide](https://developers.openai.com/api/docs/guides/image-generation), [generation reference](https://developers.openai.com/api/reference/resources/images/methods/generate), [edit reference](https://developers.openai.com/api/reference/resources/images/methods/edit).
 
+## Mask Editing & Paste-Back
+
+- The Edit workflow includes a built-in mask editor (brush, eraser, rectangle/circle/lasso shapes, zoom, feathering, and magnetic snapping) for painting the exact region an edit should touch. Masks can also be imported from an existing PNG: black-and-white masks treat white as editable, soft-alpha masks treat any pixel below 50% opacity as editable, and a same-ratio imported mask is scaled to match the primary image.
+- Automatic gap filling and edge smoothing are enabled by default: gap filling closes small holes inside the painted selection, and edge smoothing only ever adds editable pixels, never removes a painted area. Both are reflected in the live preview and coverage readout before you submit the edit.
+- A saved mask (PNG, max 4 MB) is scoped to its primary source image and persisted to disk (`MASKS_DIR`) alongside the job; retrying a masked edit restores that exact mask after verifying the source image's identity, and refuses the retry if the mask no longer matches.
+- By default, a masked edit's result is pasted back onto the original image (`MASK_PASTE_BACK_DEFAULT=true`): only the pixels inside the mask are kept from the model output, everything else reverts to the untouched primary pixels, and a narrow feather blends the boundary. A drift guard compares the red, green, and blue channels of the preserved region before and after, and skips paste-back (returning the raw model output) if the model altered pixels it should not have touched. Paste-back can be turned off per edit request, and the preview panel can toggle between the final result and the original image to check the boundary.
+- API presets carry a `supports_mask` capability flag (enabled by default); turning it off in Web Settings hides mask editing for upstreams that reject mask uploads.
+- Gallery images record `mask_coverage`, `paste_back` status, and `paste_back_scale`; filter the gallery to masked edits only with `mask_only`.
+
 ## Supported Upstream Paths
 
 | Path | Notes |
@@ -383,15 +395,15 @@ Key backend routes:
 | `POST` | `/api/assistant/image/prompt/optimize` | Optimize a reverse-prompt result together with its uploaded source image. |
 | `POST/GET` | `/api/assistant/gallery/*` | Describe, reverse-prompt, analyze, batch-analyze, and read AI metadata for local gallery images. |
 | `POST` | `/api/generate` | Start generation job. |
-| `POST` | `/api/edits` | Start edit job with uploaded source images. |
-| `POST` | `/api/edits/from-gallery/{image_id}` | Start edit job from an existing gallery image. |
+| `POST` | `/api/edits` | Start edit job with uploaded source images, an optional PNG mask, and a paste-back preference. |
+| `POST` | `/api/edits/from-gallery/{image_id}` | Start edit job from an existing gallery image, with the same optional mask and paste-back preference. |
 | `GET` | `/api/generate/jobs` | List live jobs and optional persisted history. |
 | `GET` | `/api/generate/jobs/events` | SSE stream for job-list updates. |
 | `GET/DELETE` | `/api/generate/{job_id}` | Read or cancel one generation/edit job. |
 | `GET` | `/api/generate/{job_id}/events` | SSE stream for one job. |
 | `DELETE` | `/api/generate/jobs/history` | Clear terminal job history. |
-| `GET` | `/api/gallery` | List/search/filter gallery images. |
-| `POST` | `/api/gallery/search` | Search/filter gallery images with a JSON request body. |
+| `GET` | `/api/gallery` | List/search/filter gallery images, including a `mask_only` filter for masked edits. |
+| `POST` | `/api/gallery/search` | Search/filter gallery images with a JSON request body, including a `mask_only` filter for masked edits. |
 | `GET/DELETE` | `/api/gallery/{image_id}` | Read or delete a gallery image. |
 | `PATCH` | `/api/gallery/{image_id}/favorite` | Favorite/unfavorite one gallery image. |
 | `POST` | `/api/gallery/{image_id}/nodeimage-upload` | Upload one gallery image to NodeImage. |
@@ -435,7 +447,7 @@ The public API surface is contract-tested; keep paths, methods, status codes, SS
   - SSRF-sensitive URL handling in validators, safe connector, and integration clients
   - secrets exposed to the frontend only as masked values or env-ref metadata
 - Preserve current runtime constraints:
-  - edits accept up to 16 raster source images
+  - edits accept up to 16 raster source images, plus an optional single PNG mask capped at 4 MB
   - gallery ZIP import/export keeps existing safety limits
   - SSE uses SQLite slot leases with global/per-IP caps and TTL
   - R2 sync is backup-only; local SQLite rows and local image files remain the source of truth

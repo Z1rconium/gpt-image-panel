@@ -16,7 +16,7 @@
 
   <p>
     <img alt="CI 通过" src="https://img.shields.io/badge/CI-passing-2cc653?logo=github&logoColor=white" />
-    <img alt="版本 v1.5.5" src="https://img.shields.io/badge/release-v1.5.5-0e8dcc" />
+    <img alt="版本 v1.6.3" src="https://img.shields.io/badge/release-v1.6.3-0e8dcc" />
     <img alt="Python 3.11+" src="https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white" />
     <img alt="Node.js 24" src="https://img.shields.io/badge/Node.js-24-339933?logo=node.js&logoColor=white" />
     <img alt="FastAPI 0.115+" src="https://img.shields.io/badge/FastAPI-0.115+-009688?logo=fastapi&logoColor=white" />
@@ -36,6 +36,7 @@ GPT Image Panel 是一个轻量级 Web UI，用于图像生成、图像编辑、
 
 - 支持 `/v1/images/generations`、`/v1/responses`、OpenAI 兼容 `/v1/chat/completions` 图像生成。
 - 支持 `/v1/images/edits` 图像编辑，可用上传参考图或 Gallery 图片作为源图。
+- 内置蒙版编辑器，用于精确定位需要编辑的区域（画笔/橡皮擦/矩形/圆形/套索工具、缩放、羽化、磁性吸附、蒙版导入、默认开启的自动补洞与边缘平滑），蒙版会随任务持久化并支持重试时恢复，预设可配置是否支持蒙版，且默认会把模型结果贴回未编辑的原图区域，并附带颜色漂移防护。
 - API 预设管理：base URL/path/key、默认模型、response format、健康检查、SOCKS5 代理、webhook、环境变量引用式密钥。
 - Web 管理的 Overall Config，显示 env/default/override 来源，以及需要重启或只影响构建的配置标记。
 - 提示词助手、提示词片段、可选服务端提示词优化器，以及用于提示词改写/检查/变体、参数推荐、任务诊断、编辑规划和 Gallery 图片分析的 AI Assistant 子系统。
@@ -257,8 +258,10 @@ ALLOW_UNAUTHENTICATED=true .venv/bin/granian --interface asgi backend.app.main:a
 | `MAX_ACTIVE_GENERATE_JOBS` | 全局运行中的生成/编辑 image unit 上限。 |
 | `MAX_QUEUED_GENERATE_JOBS` | 队列容量，超过后新任务返回 `429`。 |
 | `MAX_PENDING_EDIT_SOURCE_MB` | 全局待处理编辑源图片字节预留上限。 |
+| `MASK_PASTE_BACK_DEFAULT` | 是否默认把蒙版编辑结果贴回未编辑的原图区域；可在单次编辑请求中覆盖。 |
 | `MAX_SSE_SUBSCRIBERS_GLOBAL` / `MAX_SSE_SUBSCRIBERS_PER_IP` / `SSE_CONNECTION_TTL_SECONDS` | SSE slot 限制和最大连接生命周期。 |
 | `IMAGES_DIR` | 图片保存目录。 |
+| `MASKS_DIR` | 持久化的编辑蒙版目录，用于任务重试时恢复蒙版；如需调整卷/备份路径，请保持在 `IMAGES_DIR` 之下。 |
 | `THUMBNAILS_DIR` / `THUMBNAIL_*` | Gallery 缩略图存储和生成控制。 |
 | `DATA_DIR` / `DATABASE_FILE` | SQLite 运行时数据。 |
 | `PROMPT_OPTIMIZER_*` | 可选提示词优化器配置。 |
@@ -302,6 +305,15 @@ Overall Config 会把 override 持久化到 SQLite。部分配置可热更新；
 本次通过 Images API 接入，包含流式预览（见下文）；不增加官方 Responses 图像工具或蒙版。上游账号需要具备模型访问权限；更高质量可能使用更多 token，两个变体的相同 token 单价不代表每张图片费用相同。
 
 规范核对日期：2026-09-10。[官方指南](https://developers.openai.com/api/docs/guides/image-generation) · [生成接口](https://developers.openai.com/api/reference/resources/images/methods/generate) · [编辑接口](https://developers.openai.com/api/reference/resources/images/methods/edit)。
+
+## 蒙版编辑与贴回
+
+- 编辑流程内置蒙版编辑器（画笔、橡皮擦、矩形/圆形/套索工具、缩放、羽化、磁性吸附），用于精确绘制需要编辑的区域。也可以导入已有 PNG 蒙版：黑白蒙版以白色为可编辑区域，软透明蒙版把透明度低于 50% 的像素视为可编辑区域，比例相同的导入蒙版会自动缩放以匹配原图。
+- 自动补洞与边缘平滑默认开启：补洞会填补已绘制选区内的小空洞，边缘平滑只会增加可编辑像素，不会移除已绘制的区域。两者都会实时反映在预览和覆盖率读数中，方便在提交编辑前确认。
+- 保存的蒙版（PNG，最大 4 MB）与其源图绑定，并持久化到磁盘（`MASKS_DIR`）随任务保存；重试蒙版编辑任务时，会先校验源图身份，确认无误后恢复原始蒙版，否则拒绝重试。
+- 默认情况下，蒙版编辑结果会被贴回原图（`MASK_PASTE_BACK_DEFAULT=true`）：只保留模型输出中蒙版范围内的像素，其余部分还原为未编辑的原图像素，并在边界处做窄幅羽化融合。漂移防护会分别比较保留区域贴回前后的红、绿、蓝三个通道；如果模型改动了本不该改动的像素，则跳过贴回并直接返回模型原始输出。可在单次编辑请求中关闭贴回，预览面板也可在最终结果和原图之间切换，便于检查贴回边界。
+- API 预设携带 `supports_mask` 能力开关（默认开启）；在 Web Settings 中关闭它可以为不支持蒙版上传的上游隐藏蒙版编辑功能。
+- Gallery 图片会记录 `mask_coverage`、`paste_back` 状态和 `paste_back_scale`；可通过 `mask_only` 只筛选蒙版编辑的图片。
 
 ## 支持的上游路径
 
@@ -351,15 +363,15 @@ Overall Config 会把 override 持久化到 SQLite。部分配置可热更新；
 | `POST` | `/api/assistant/image/prompt/optimize` | 结合上传的源图优化反推提示词结果。 |
 | `POST/GET` | `/api/assistant/gallery/*` | 描述、反推 prompt、分析、批量分析和读取本地 Gallery AI metadata。 |
 | `POST` | `/api/generate` | 创建生成任务。 |
-| `POST` | `/api/edits` | 用上传源图创建编辑任务。 |
-| `POST` | `/api/edits/from-gallery/{image_id}` | 用 Gallery 图片创建编辑任务。 |
+| `POST` | `/api/edits` | 用上传源图创建编辑任务，支持可选 PNG 蒙版和贴回偏好设置。 |
+| `POST` | `/api/edits/from-gallery/{image_id}` | 用 Gallery 图片创建编辑任务，同样支持可选蒙版和贴回偏好设置。 |
 | `GET` | `/api/generate/jobs` | 查询实时任务和可选历史。 |
 | `GET` | `/api/generate/jobs/events` | 任务列表 SSE。 |
 | `GET/DELETE` | `/api/generate/{job_id}` | 读取或取消单个生成/编辑任务。 |
 | `GET` | `/api/generate/{job_id}/events` | 单任务 SSE。 |
 | `DELETE` | `/api/generate/jobs/history` | 清理终态任务历史。 |
-| `GET` | `/api/gallery` | 查询/搜索/筛选 Gallery。 |
-| `POST` | `/api/gallery/search` | 使用 JSON 请求体搜索/筛选 Gallery。 |
+| `GET` | `/api/gallery` | 查询/搜索/筛选 Gallery，支持 `mask_only` 筛选蒙版编辑图片。 |
+| `POST` | `/api/gallery/search` | 使用 JSON 请求体搜索/筛选 Gallery，支持 `mask_only` 筛选蒙版编辑图片。 |
 | `GET/DELETE` | `/api/gallery/{image_id}` | 读取或删除 Gallery 图片。 |
 | `PATCH` | `/api/gallery/{image_id}/favorite` | 收藏/取消收藏单张 Gallery 图片。 |
 | `POST` | `/api/gallery/{image_id}/nodeimage-upload` | 上传单张 Gallery 图片到 NodeImage。 |
@@ -403,7 +415,7 @@ Overall Config 会把 override 持久化到 SQLite。部分配置可热更新；
   - SSRF 敏感 URL 处理继续放在 validators、safe connector、integration client 中
   - 前端可见 secret 只能是打码值或 env-ref 元数据
 - 保持现有运行时约束：
-  - 编辑任务最多接受 16 张 raster 源图
+  - 编辑任务最多接受 16 张 raster 源图，外加最多 4 MB 的单张 PNG 蒙版
   - Gallery ZIP 导入导出继续沿用现有安全限制
   - SSE 使用 SQLite slot lease、全局/单 IP 限制和连接 TTL
   - R2 同步只是备份；本地 SQLite 记录和本地图片文件始终是源数据

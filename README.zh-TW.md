@@ -16,7 +16,7 @@
 
   <p>
     <img alt="CI 通過" src="https://img.shields.io/badge/CI-passing-2cc653?logo=github&logoColor=white" />
-    <img alt="版本 v1.5.5" src="https://img.shields.io/badge/release-v1.5.5-0e8dcc" />
+    <img alt="版本 v1.6.3" src="https://img.shields.io/badge/release-v1.6.3-0e8dcc" />
     <img alt="Python 3.11+" src="https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white" />
     <img alt="Node.js 24" src="https://img.shields.io/badge/Node.js-24-339933?logo=node.js&logoColor=white" />
     <img alt="FastAPI 0.115+" src="https://img.shields.io/badge/FastAPI-0.115+-009688?logo=fastapi&logoColor=white" />
@@ -36,6 +36,7 @@ GPT Image Panel 是一套輕量 Web UI，可用於圖片生成、圖片編輯、
 
 - 透過 `/v1/images/generations`、`/v1/responses` 或 OpenAI 相容的 `/v1/chat/completions` 生成圖片。
 - 透過 `/v1/images/edits` 編輯圖片，可使用上傳的參考圖或 Gallery 圖片作為來源。
+- 內建遮罩編輯器，用於精準定位需要編輯的區域（畫筆/橡皮擦/矩形/圓形/套索工具、縮放、羽化、磁性吸附、遮罩匯入，以及預設開啟的自動補洞與邊緣平滑），遮罩會隨工作持久化並可在重試時還原，預設可設定是否支援遮罩，且預設會將模型結果貼回未編輯的原圖區域，並具備色彩漂移防護。
 - API 預設管理：base URL/path/key、預設模型、response format、健康檢查、SOCKS5 Proxy、webhook 與環境變數參照式密鑰。
 - 可由網頁管理的 Overall Config，顯示 env/default/override 來源，以及需要重新啟動或僅影響建置的設定標記。
 - 提示詞輔助標籤、可重複使用的提示詞片段、選用的伺服器端提示詞最佳化器，以及 AI Assistant 子系統，可進行提示詞改寫/檢查/變體、參數建議、工作診斷、編輯規劃與 Gallery 圖片分析。
@@ -257,8 +258,10 @@ ALLOW_UNAUTHENTICATED=true .venv/bin/granian --interface asgi backend.app.main:a
 | `MAX_ACTIVE_GENERATE_JOBS` | 全域執行中的生成/編輯 image unit 上限。 |
 | `MAX_QUEUED_GENERATE_JOBS` | 佇列容量；超過後的新工作會回傳 `429`。 |
 | `MAX_PENDING_EDIT_SOURCE_MB` | 全域待處理編輯來源圖片的位元組保留上限。 |
+| `MASK_PASTE_BACK_DEFAULT` | 是否預設將遮罩編輯結果貼回未編輯的原圖區域；可在單次編輯要求中覆寫。 |
 | `MAX_SSE_SUBSCRIBERS_GLOBAL` / `MAX_SSE_SUBSCRIBERS_PER_IP` / `SSE_CONNECTION_TTL_SECONDS` | SSE slot 限制與最長連線生命週期。 |
 | `IMAGES_DIR` | 圖片儲存目錄。 |
+| `MASKS_DIR` | 持久化的編輯遮罩目錄，用於工作重試時還原遮罩；如需調整磁碟區/備份路徑，請保持在 `IMAGES_DIR` 之下。 |
 | `THUMBNAILS_DIR` / `THUMBNAIL_*` | Gallery 縮圖儲存與產生控制。 |
 | `DATA_DIR` / `DATABASE_FILE` | SQLite 執行期資料。 |
 | `PROMPT_OPTIMIZER_*` | 選用的伺服器端提示詞最佳化器設定。 |
@@ -302,6 +305,15 @@ Overall Config 會將 Override 持久化至 SQLite。部分設定可熱更新；
 本次透過 Images API 整合，包含串流預覽（見下文）；不增加官方 Responses 圖像工具或遮罩。上游帳號需要具備模型存取權限；更高品質可能使用更多 token，兩個變體的相同 token 單價不代表每張圖片費用相同。
 
 規範核對日期：2026-09-10。[官方指南](https://developers.openai.com/api/docs/guides/image-generation) · [生成介面](https://developers.openai.com/api/reference/resources/images/methods/generate) · [編輯介面](https://developers.openai.com/api/reference/resources/images/methods/edit)。
+
+## 遮罩編輯與貼回
+
+- 編輯流程內建遮罩編輯器（畫筆、橡皮擦、矩形/圓形/套索工具、縮放、羽化、磁性吸附），用於精準繪製需要編輯的區域。也可以匯入既有的 PNG 遮罩：黑白遮罩以白色為可編輯區域，柔和透明遮罩會將透明度低於 50% 的像素視為可編輯區域，比例相同的匯入遮罩會自動縮放以符合原圖。
+- 自動補洞與邊緣平滑預設為開啟：補洞會填補已繪製選取區內的小洞，邊緣平滑只會增加可編輯像素，不會移除已繪製的區域。兩者都會即時反映在預覽與覆蓋率讀數中，方便在送出編輯前確認。
+- 儲存的遮罩（PNG，最大 4 MB）與其來源圖綁定，並持久化到磁碟（`MASKS_DIR`）隨工作保存；重試遮罩編輯工作時，會先驗證來源圖的身分，確認無誤後才還原原始遮罩，否則會拒絕重試。
+- 預設情況下，遮罩編輯結果會被貼回原圖（`MASK_PASTE_BACK_DEFAULT=true`）：只保留模型輸出中遮罩範圍內的像素，其餘部分還原為未編輯的原圖像素，並在邊界處做窄幅羽化融合。漂移防護會分別比較保留區域貼回前後的紅、綠、藍三個色版；若模型改動了不該改動的像素,則會略過貼回並直接回傳模型的原始輸出。可在單次編輯要求中關閉貼回，預覽面板也可在最終結果與原圖之間切換，方便檢查貼回邊界。
+- API 預設攜帶 `supports_mask` 能力旗標（預設開啟）；在 Web Settings 中關閉它，可為不支援遮罩上傳的上游隱藏遮罩編輯功能。
+- Gallery 圖片會記錄 `mask_coverage`、`paste_back` 狀態與 `paste_back_scale`；可透過 `mask_only` 只篩選遮罩編輯的圖片。
 
 ## 支援的上游路徑
 
@@ -351,15 +363,15 @@ Overall Config 會將 Override 持久化至 SQLite。部分設定可熱更新；
 | `POST` | `/api/assistant/image/prompt/optimize` | 結合上傳的來源圖片，最佳化反推提示詞結果。 |
 | `POST/GET` | `/api/assistant/gallery/*` | 描述、反推 Prompt、分析、批次分析及讀取本機 Gallery AI 中繼資料。 |
 | `POST` | `/api/generate` | 建立生成工作。 |
-| `POST` | `/api/edits` | 以上傳的來源圖片建立編輯工作。 |
-| `POST` | `/api/edits/from-gallery/{image_id}` | 以現有 Gallery 圖片建立編輯工作。 |
+| `POST` | `/api/edits` | 以上傳的來源圖片建立編輯工作，支援選用的 PNG 遮罩與貼回偏好設定。 |
+| `POST` | `/api/edits/from-gallery/{image_id}` | 以現有 Gallery 圖片建立編輯工作，同樣支援選用的遮罩與貼回偏好設定。 |
 | `GET` | `/api/generate/jobs` | 列出即時工作與選用的持久化歷史。 |
 | `GET` | `/api/generate/jobs/events` | 工作清單更新的 SSE 串流。 |
 | `GET/DELETE` | `/api/generate/{job_id}` | 讀取或取消單一生成/編輯工作。 |
 | `GET` | `/api/generate/{job_id}/events` | 單一工作 SSE。 |
 | `DELETE` | `/api/generate/jobs/history` | 清除已終止的工作歷史。 |
-| `GET` | `/api/gallery` | 列出/搜尋/篩選 Gallery 圖片。 |
-| `POST` | `/api/gallery/search` | 使用 JSON 要求本文搜尋/篩選 Gallery。 |
+| `GET` | `/api/gallery` | 列出/搜尋/篩選 Gallery 圖片，支援 `mask_only` 篩選遮罩編輯圖片。 |
+| `POST` | `/api/gallery/search` | 使用 JSON 要求本文搜尋/篩選 Gallery，支援 `mask_only` 篩選遮罩編輯圖片。 |
 | `GET/DELETE` | `/api/gallery/{image_id}` | 讀取或刪除 Gallery 圖片。 |
 | `PATCH` | `/api/gallery/{image_id}/favorite` | 收藏/取消收藏單張 Gallery 圖片。 |
 | `POST` | `/api/gallery/{image_id}/nodeimage-upload` | 上傳單張 Gallery 圖片至 NodeImage。 |
@@ -403,7 +415,7 @@ Overall Config 會將 Override 持久化至 SQLite。部分設定可熱更新；
   - SSRF 敏感 URL 處理應位於 Validator、Safe Connector 與整合 Client
   - 前端只能看到遮罩後的 Secret 或環境變數參照中繼資料
 - 保留目前的執行期限制：
-  - 編輯工作最多接受 16 張點陣來源圖片
+  - 編輯工作最多接受 16 張點陣來源圖片，外加最多 4 MB 的單張 PNG 遮罩
   - Gallery ZIP 匯入/匯出沿用既有安全限制
   - SSE 使用具有全域/單一 IP 上限與 TTL 的 SQLite Slot Lease
   - R2 同步僅作備份；本機 SQLite 記錄與本機圖片檔案仍是唯一真實來源
