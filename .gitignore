@@ -54,6 +54,8 @@ PERFORMANCE_UX_AUDIT.md
 CODE_REVIEW_OPTIMIZATION_PLAN.md
 REVIEW_REPORT.md
 docs/product-brainstorm-report.md
+CODEBASE_CLEANUP_PLAN.md
+STREAMING_PREVIEW_COST_ESTIMATION_PLAN.md
 # Local planning and acceptance notes
 /plan/
 /MASK_RETRY_ACCEPTANCE_*.md
