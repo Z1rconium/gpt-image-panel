@@ -41,6 +41,27 @@ export type GalleryEntry = {
   paste_back_scale?: number | null;
 };
 
+export type GalleryCollection = {
+  id: string;
+  name: string;
+  position: number;
+  is_default: boolean;
+  image_count: number;
+  cover_image_id?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type GalleryCollectionItemsResponse = {
+  collection: GalleryCollection;
+  changed_count: number;
+};
+
+export type GalleryImageCollectionsResponse = {
+  image_id: string;
+  collection_ids: string[];
+};
+
 export type GalleryResponse = {
   total: number;
   total_bytes: number;

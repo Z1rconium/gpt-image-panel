@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import logging
+import re
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -246,6 +247,7 @@ def build_gallery_filters(
     date_to: str | None,
     favorite: bool | None,
     mask_only: bool | None = None,
+    collection_id: str | None = None,
 ) -> dict:
     return {
         "prompt": str(prompt or "").strip(),
@@ -256,6 +258,7 @@ def build_gallery_filters(
         "date_to": normalize_gallery_date_filter(date_to, end_of_day=True),
         "favorite": favorite,
         "mask_only": mask_only,
+        "collection_id": str(collection_id or "").strip(),
     }
 
 
@@ -270,6 +273,7 @@ def build_gallery_filters_from_selection_request(req: GallerySelectionTokenReque
         filters.date_to,
         filters.favorite,
         filters.mask_only,
+        filters.collection_id,
     )
 
 
@@ -347,6 +351,12 @@ async def _resolve_gallery_batch_ids(req: GalleryBatchRequest) -> tuple[list[str
     entries = await asyncio.to_thread(get_gallery_entries_by_ids, ids)
     missing_ids = _missing_gallery_ids(ids, entries)
     return ids, entries, len(ids), missing_ids
+
+
+def collection_filename_slug(name: str) -> str:
+    """ASCII-only slug; the result is interpolated into Content-Disposition."""
+    slug = re.sub(r"[^A-Za-z0-9_-]+", "-", str(name or "")).strip("-_")[:48]
+    return slug or "collection"
 
 
 def _gallery_filters_for_log(filters: dict) -> dict:

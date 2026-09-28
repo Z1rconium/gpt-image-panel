@@ -1,11 +1,14 @@
 <script lang="ts">
-  import { onDestroy } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
   import type { GalleryEntry, GalleryResponse } from '$lib/api/types/gallery';
+  import CollectionsDialog from '$lib/components/gallery/CollectionsDialog.svelte';
   import GalleryFilterToolbar from '$lib/components/gallery/GalleryFilterToolbar.svelte';
   import GalleryPagination from '$lib/components/gallery/GalleryPagination.svelte';
   import { t } from '$lib/i18n';
   import { galleryActivityStore, galleryStore, type GalleryFilters } from '$lib/stores/gallery';
+  import { defaultCollection, galleryCollectionsStore } from '$lib/stores/galleryCollections';
   import { uiStore } from '$lib/stores/ui';
+  import BookmarkPlus from 'lucide-svelte/icons/bookmark-plus';
   import CloudUpload from 'lucide-svelte/icons/cloud-upload';
   import Download from 'lucide-svelte/icons/download';
   import FileText from 'lucide-svelte/icons/file-text';
@@ -109,6 +112,53 @@
 
   onDestroy(() => clearTimeout(favoritePopTimer));
 
+  let collectionsDialogOpen = $state(false);
+  const collections = $derived($galleryCollectionsStore.collections);
+  const defaultTarget = $derived(defaultCollection(collections));
+  const activeCollection = $derived(collections.find((collection) => collection.id === filters.collectionId) || null);
+
+  onMount(() => {
+    void galleryCollectionsStore.load().catch(() => {});
+  });
+
+  function showCollectionError(error: unknown) {
+    uiStore.showToast(error instanceof Error ? error.message : $t.messages.requestFailed, 'error');
+  }
+
+  async function addSelectionToCollection(collectionId: string) {
+    const collection = collections.find((item) => item.id === collectionId);
+    if (!collection || !hasSelection) return;
+    try {
+      const result = await galleryCollectionsStore.addItems(collectionId, galleryStore.selectedBatchRequestBody());
+      uiStore.showToast($t.collections.added(result.changed_count, collection.name));
+    } catch (error) {
+      showCollectionError(error);
+    }
+  }
+
+  async function removeSelectionFromCollection() {
+    if (!activeCollection || !hasSelection) return;
+    try {
+      const result = await galleryCollectionsStore.removeItems(activeCollection.id, galleryStore.selectedBatchRequestBody());
+      galleryStore.clearSelection();
+      uiStore.showToast($t.collections.removed(result.changed_count, activeCollection.name));
+    } catch (error) {
+      showCollectionError(error);
+    }
+  }
+
+  async function addToDefaultCollection(image: GalleryEntry) {
+    if (!defaultTarget) return;
+    try {
+      const result = await galleryCollectionsStore.addItems(defaultTarget.id, { ids: [image.id] });
+      uiStore.showToast(
+        result.changed_count ? $t.collections.added(1, defaultTarget.name) : $t.collections.alreadyIn(defaultTarget.name)
+      );
+    } catch (error) {
+      showCollectionError(error);
+    }
+  }
+
   const images = $derived(gallery?.images || []);
   $effect(() => {
     pruneFailedThumbnailUrls(images);
@@ -137,7 +187,8 @@
         filters.dateFrom ||
         filters.dateTo ||
         filters.favorite ||
-        filters.maskOnly
+        filters.maskOnly ||
+        filters.collectionId
     )
   );
 
@@ -237,7 +288,8 @@
     </div>
   </div>
 
-  <GalleryFilterToolbar {gallery} {filters} {onFilter} onReset={onResetFilters} />
+  <GalleryFilterToolbar {gallery} {filters} {onFilter} onReset={onResetFilters} {collections} onManageCollections={() => (collectionsDialogOpen = true)} />
+  <CollectionsDialog open={collectionsDialogOpen} onClose={() => (collectionsDialogOpen = false)} />
 
   {#if selectionMode}
     <div class="mb-4 flex flex-col gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3 sm:flex-row sm:items-center sm:justify-between">
@@ -254,6 +306,28 @@
         {/if}
         {#if canAiAnalyze}
           <button type="button" class="control-focus rounded-lg border border-stone-300 px-2.5 py-2 text-xs text-stone-700 hover:bg-stone-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800" disabled={!hasSelection || busy} onclick={onBatchAiAnalyze}>{operationStatus?.kind === 'ai_analyze' ? $t.gallery.aiAnalyzing : $t.gallery.aiAnalyzeSelected}</button>
+        {/if}
+        {#if collections.length}
+          <select
+            class="form-select control-focus min-h-9 rounded-lg py-1.5 text-xs disabled:opacity-40"
+            aria-label={$t.collections.addSelected}
+            disabled={!hasSelection || busy}
+            value=""
+            onchange={(event) => {
+              const target = event.currentTarget;
+              const collectionId = target.value;
+              target.value = '';
+              if (collectionId) void addSelectionToCollection(collectionId);
+            }}
+          >
+            <option value="">{$t.collections.addSelected}</option>
+            {#each [...collections].sort((left, right) => Number(right.is_default) - Number(left.is_default)) as collection (collection.id)}
+              <option value={collection.id}>{collection.name}{collection.is_default ? ` · ${$t.collections.default}` : ''}</option>
+            {/each}
+          </select>
+        {/if}
+        {#if activeCollection}
+          <button type="button" class="control-focus rounded-lg border border-stone-300 px-2.5 py-2 text-xs text-stone-700 hover:bg-stone-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800" disabled={!hasSelection || busy} onclick={() => void removeSelectionFromCollection()}>{$t.collections.removeSelected}</button>
         {/if}
         <button type="button" class="control-focus rounded-lg border border-stone-300 px-2.5 py-2 text-xs text-stone-700 hover:bg-stone-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800" disabled={!hasSelection || busy} onclick={() => onBatchFavorite(true)}>{$t.gallery.favoriteSelected}</button>
         <button type="button" class="control-focus rounded-lg border border-stone-300 px-2.5 py-2 text-xs text-stone-700 hover:bg-stone-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800" disabled={!hasSelection || busy} onclick={() => onBatchFavorite(false)}>{$t.gallery.unfavoriteSelected}</button>
@@ -394,6 +468,18 @@
                 >
                   <Star aria-hidden="true" class={poppedFavoriteId === image.id ? 'favorite-pop' : ''} />
                 </button>
+                {#if collections.length}
+                  <button
+                    type="button"
+                    class="gallery-icon-action control-focus border-stone-300 text-stone-700 hover:bg-stone-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                    disabled={!defaultTarget}
+                    aria-label={defaultTarget ? $t.collections.addToDefault(defaultTarget.name) : $t.collections.noDefault}
+                    title={defaultTarget ? $t.collections.addToDefault(defaultTarget.name) : $t.collections.noDefault}
+                    onclick={(event) => handleGalleryAction(event, () => void addToDefaultCollection(image))}
+                  >
+                    <BookmarkPlus aria-hidden="true" />
+                  </button>
+                {/if}
                 <button
                   type="button"
                   class="gallery-icon-action control-focus border-stone-300 text-stone-700 hover:bg-stone-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"

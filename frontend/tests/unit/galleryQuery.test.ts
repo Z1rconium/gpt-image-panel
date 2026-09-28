@@ -87,3 +87,19 @@ describe('pendingImageMatchesFilters', () => {
     expect(pendingImageMatchesFilters(image, { ...defaultGalleryFilters, dateTo: '2026-05-17' })).toBe(false);
   });
 });
+
+describe('collection filter', () => {
+  it('serializes collection_id in params, search body and selection payload', () => {
+    const filters = { ...defaultGalleryFilters, collectionId: 'album-1' };
+    const params = buildGalleryParams(1, filters);
+    expect(params.get('collection_id')).toBe('album-1');
+    expect(gallerySearchBody(params, filters).collection_id).toBe('album-1');
+    expect(galleryFiltersToSelectionPayload(filters).collection_id).toBe('album-1');
+    expect(gallerySearchBody(buildGalleryParams(1, defaultGalleryFilters), defaultGalleryFilters).collection_id).toBeNull();
+    expect(sameGalleryFilters(filters, { ...filters, collectionId: 'album-2' })).toBe(false);
+  });
+
+  it('never treats a pending image as a collection member', () => {
+    expect(pendingImageMatchesFilters(entry(), { ...defaultGalleryFilters, collectionId: 'album-1' })).toBe(false);
+  });
+});

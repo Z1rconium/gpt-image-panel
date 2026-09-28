@@ -29,6 +29,9 @@ export function createGalleryActions(deps: GalleryActionDeps) {
     async batchDownload(...args: Parameters<DeferredGalleryActions['batchDownload']>) {
       return (await loadDeferredActions()).batchDownload(...args);
     },
+    async exportCollection(...args: Parameters<DeferredGalleryActions['exportCollection']>) {
+      return (await loadDeferredActions()).exportCollection(...args);
+    },
     async exportArchive(...args: Parameters<DeferredGalleryActions['exportArchive']>) {
       return (await loadDeferredActions()).exportArchive(...args);
     },

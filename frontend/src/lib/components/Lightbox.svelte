@@ -13,6 +13,7 @@
   } from '$lib/utils/format';
   import { dialog } from '$lib/actions/dialog';
   import ImageTrace from '$lib/components/ImageTrace.svelte';
+  import ImageCollections from '$lib/components/gallery/ImageCollections.svelte';
 
   interface Props {
     aiAssistantEnabled?: boolean;
@@ -374,6 +375,7 @@
             <div class="mb-1 text-xs font-medium text-stone-500 dark:text-zinc-500">{$t.common.prompt}</div>
             <p class="whitespace-pre-wrap text-sm text-stone-800 dark:text-zinc-200">{image.prompt}</p>
           </div>
+          <ImageCollections imageId={image.id} />
           <ImageTrace image={image} prompt={image.prompt} requestedSize={image.size} requestedQuality={image.quality} />
           {#if aiAssistantEnabled}
             <section class="rounded-lg border border-stone-200 bg-stone-50/80 p-3 dark:border-zinc-800 dark:bg-zinc-950/50">

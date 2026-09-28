@@ -341,6 +341,13 @@ def _build_gallery_filter_where(filters: dict[str, Any] | None) -> tuple[str, li
     if mask_only == 1:
         clauses.append("mask_coverage IS NOT NULL")
 
+    collection_id = str(filters.get("collection_id") or "").strip()
+    if collection_id:
+        clauses.append(
+            "id IN (SELECT image_id FROM gallery_collection_items WHERE collection_id = ?)"
+        )
+        params.append(collection_id)
+
     date_from = str(filters.get("date_from") or "").strip()
     if date_from:
         clauses.append("created_at >= ?")

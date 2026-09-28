@@ -455,6 +455,7 @@ async def _run_gallery_export_job(job: dict) -> None:
             requested_count=requested_count,
             skipped=skipped,
             progress=progress,
+            collection=(job.get("payload") or {}).get("collection"),
         )
         await _publish_gallery_job(
             job_id,

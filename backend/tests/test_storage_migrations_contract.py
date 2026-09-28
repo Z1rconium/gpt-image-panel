@@ -293,6 +293,30 @@ def test_mask_paste_back_migration_adds_nullable_columns(tmp_path):
     assert version["name"] == "mask_paste_back"
 
 
+def test_gallery_collections_migration(tmp_path):
+    _configure_runtime(tmp_path)
+    db_repo.verify_storage_writable()
+    with db_repo._connect() as conn:
+        tables = {row["name"] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+        indexes = {row["name"] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'index'")}
+        name = conn.execute("SELECT name FROM schema_migrations WHERE version = 27").fetchone()["name"]
+        with db_repo._transaction(conn):
+            conn.execute(
+                "INSERT INTO gallery_collections(id, name, is_default, created_at, updated_at) VALUES('a', 'A', 1, 'now', 'now')"
+            )
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(
+                    "INSERT INTO gallery_collections(id, name, is_default, created_at, updated_at) VALUES('b', 'B', 1, 'now', 'now')"
+                )
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(
+                    "INSERT INTO gallery_collections(id, name, created_at, updated_at) VALUES('c', 'a', 'now', 'now')"
+                )
+    assert {"gallery_collections", "gallery_collection_items"} <= tables
+    assert {"idx_gallery_collections_single_default", "idx_gallery_collection_items_image"} <= indexes
+    assert name == "gallery_collections"
+
+
 def test_performance_indexes_are_created(tmp_path):
     _configure_runtime(tmp_path)
     db_repo.verify_storage_writable()

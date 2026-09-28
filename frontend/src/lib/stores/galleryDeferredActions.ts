@@ -706,6 +706,92 @@ export function createDeferredGalleryActions(deps: GalleryActionDeps) {
     await refreshGalleryPageBestEffort(deps, state.page);
   }
 
+  /** Build an export-job ZIP on the server, then hand it to the browser. */
+  async function downloadExportJob(
+    requestBody: Record<string, unknown>,
+    count: number,
+    label: string,
+    fallbackFilename: string,
+    showToast?: (message: string) => void
+  ) {
+    const job = await apiFetch<GalleryExportJobStatus>(
+      '/api/gallery/export-jobs',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody)
+      },
+      'preparing selected image download'
+    );
+    const readyJob = await waitWithAbort((signal) =>
+      waitForGalleryExportJob(
+        job.job_id,
+        (nextJob) => {
+          deps.setOperationStatus({
+            kind: 'download',
+            label,
+            detail: exportJobDetail(nextJob),
+            progress: operationProgress(nextJob.progress, 0, 50)
+          });
+        },
+        { signal }
+      )
+    );
+    deps.setOperationStatus({
+      kind: 'download',
+      label,
+      detail: get(t).gallery.browserSavingDownload,
+      progress: 50
+    });
+    const downloadUrl = readyJob.download_url || `/api/gallery/export-jobs/${encodeURIComponent(readyJob.job_id)}/download`;
+    if (readyJob.bytes_total >= STREAMING_ZIP_DOWNLOAD_BYTES_THRESHOLD) {
+      startNativeDownload(downloadUrl, readyJob.filename || fallbackFilename);
+      const requestedCount = readyJob.requested_count || count;
+      const exportedCount = readyJob.exported_count || requestedCount;
+      const missingCount = readyJob.missing_count || 0;
+      showToast?.(get(t).messages.selectedImagesDownloaded(exportedCount, missingCount));
+      return;
+    }
+
+    const response = await fetch(downloadUrl, {
+      method: 'GET',
+      credentials: 'same-origin',
+      headers: { Accept: 'application/zip' }
+    });
+    if (!response.ok) throw new Error(get(t).messages.requestFailed);
+
+    const blob = await downloadResponseBlob(
+      response,
+      'download',
+      label,
+      get(t).gallery.browserSavingDownload,
+      { start: 50, end: 100 }
+    );
+    downloadBlob(blob, filenameFromContentDisposition(response.headers.get('Content-Disposition'), fallbackFilename));
+    const requestedCount = readyJob.requested_count || parseHeaderInt(response.headers, 'X-Gallery-Requested-Count') || count;
+    const exportedCount = readyJob.exported_count || parseHeaderInt(response.headers, 'X-Gallery-Exported-Count') || requestedCount;
+    const missingCount = readyJob.missing_count || parseHeaderInt(response.headers, 'X-Gallery-Missing-Count');
+    showToast?.(get(t).messages.selectedImagesDownloaded(exportedCount, missingCount));
+  }
+
+  async function exportCollection(collectionId: string, imageCount: number, showToast?: (message: string) => void) {
+    const label = get(t).collections.exporting;
+    deps.setOperationStatus({
+      kind: 'download',
+      label,
+      detail: get(t).gallery.downloadPreparing(imageCount),
+      progress: 0
+    });
+    try {
+      await downloadExportJob({ collection_id: collectionId }, imageCount, label, 'gpt-images-collection.zip', showToast);
+    } catch (error) {
+      if (isAbortError(error)) return;
+      throw error;
+    } finally {
+      deps.setOperationStatus(null);
+    }
+  }
+
   async function batchDownload(showToast?: (message: string) => void) {
     const state = deps.getState();
     const count = selectedCount(state);
@@ -736,64 +822,7 @@ export function createDeferredGalleryActions(deps: GalleryActionDeps) {
         return;
       }
 
-      const job = await apiFetch<GalleryExportJobStatus>(
-        '/api/gallery/export-jobs',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(batchRequestBody(state))
-        },
-        'preparing selected image download'
-      );
-      const readyJob = await waitWithAbort((signal) =>
-        waitForGalleryExportJob(
-          job.job_id,
-          (nextJob) => {
-            deps.setOperationStatus({
-              kind: 'download',
-              label,
-              detail: exportJobDetail(nextJob),
-              progress: operationProgress(nextJob.progress, 0, 50)
-            });
-          },
-          { signal }
-        )
-      );
-      deps.setOperationStatus({
-        kind: 'download',
-        label,
-        detail: get(t).gallery.browserSavingDownload,
-        progress: 50
-      });
-      const downloadUrl = readyJob.download_url || `/api/gallery/export-jobs/${encodeURIComponent(readyJob.job_id)}/download`;
-      if (readyJob.bytes_total >= STREAMING_ZIP_DOWNLOAD_BYTES_THRESHOLD) {
-        startNativeDownload(downloadUrl, 'gpt-images-selected.zip');
-        const requestedCount = readyJob.requested_count || count;
-        const exportedCount = readyJob.exported_count || requestedCount;
-        const missingCount = readyJob.missing_count || 0;
-        showToast?.(get(t).messages.selectedImagesDownloaded(exportedCount, missingCount));
-        return;
-      }
-
-      const response = await fetch(downloadUrl, {
-        method: 'GET',
-        credentials: 'same-origin',
-        headers: { Accept: 'application/zip' }
-      });
-      if (!response.ok) throw new Error(get(t).messages.requestFailed);
-
-      const blob = await downloadResponseBlob(
-        response,
-        'download',
-        label,
-        get(t).gallery.browserSavingDownload,
-        { start: 50, end: 100 }
-      );
-      downloadBlob(blob, filenameFromContentDisposition(response.headers.get('Content-Disposition'), 'gpt-images-selected.zip'));
-      const requestedCount = readyJob.requested_count || parseHeaderInt(response.headers, 'X-Gallery-Requested-Count') || count;
-      const exportedCount = readyJob.exported_count || parseHeaderInt(response.headers, 'X-Gallery-Exported-Count') || requestedCount;
-      const missingCount = readyJob.missing_count || parseHeaderInt(response.headers, 'X-Gallery-Missing-Count');
-      showToast?.(get(t).messages.selectedImagesDownloaded(exportedCount, missingCount));
+      await downloadExportJob(batchRequestBody(state), count, label, 'gpt-images-selected.zip', showToast);
     } catch (error) {
       if (isAbortError(error)) return;
       throw error;
@@ -1003,6 +1032,7 @@ export function createDeferredGalleryActions(deps: GalleryActionDeps) {
     batchFavorite,
     batchDelete,
     batchDownload,
+    exportCollection,
     exportArchive,
     syncGallery,
     deleteAll,

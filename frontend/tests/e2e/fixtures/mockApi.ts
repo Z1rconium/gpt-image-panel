@@ -87,8 +87,19 @@ type NodeImageJobFixture = {
   ids: string[];
 };
 
+type CollectionFixture = {
+  id: string;
+  name: string;
+  position: number;
+  is_default: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
 type MockOptions = {
   authenticated?: boolean;
+  collections?: CollectionFixture[];
+  collectionItems?: Record<string, string[]>;
   editUploadFailure?: boolean;
   galleryImages?: GalleryImageFixture[];
   promptSnippets?: PromptSnippetFixture[];
@@ -526,6 +537,21 @@ async function mockApi(page: Page, options: MockOptions = {}) {
     : [options.generatedJob ?? job('job-generated', 'browser smoke prompt')];
   let generatedJobIndex = 0;
   let historyJobs = options.historyJobs ?? [job('history-1', 'saved prompt')];
+  let collections: CollectionFixture[] = structuredClone(options.collections ?? []);
+  const collectionItems = new Map<string, Set<string>>(
+    Object.entries(options.collectionItems ?? {}).map(([id, ids]) => [id, new Set(ids)])
+  );
+  let collectionSeq = collections.length;
+  let exportJobSeq = 0;
+
+  function publicCollection(collection: CollectionFixture) {
+    const members = [...(collectionItems.get(collection.id) || [])].filter((id) => galleryImages.some((image) => image.id === id));
+    return { ...collection, image_count: members.length, cover_image_id: members.at(-1) ?? null };
+  }
+
+  function sortedCollections() {
+    return [...collections].sort((left, right) => left.position - right.position).map(publicCollection);
+  }
   const initialLanguage = options.language === undefined ? 'en' : options.language;
 
   function matchesGalleryFilters(image: GalleryImageFixture, filters: { prompt?: string; favorite?: boolean | null }) {
@@ -1040,16 +1066,166 @@ async function mockApi(page: Page, options: MockOptions = {}) {
       );
       return;
     }
+    if (url.pathname === '/api/gallery/collections' && request.method() === 'GET') {
+      await route.fulfill(json(sortedCollections()));
+      return;
+    }
+    if (url.pathname === '/api/gallery/collections' && request.method() === 'POST') {
+      const body = request.postDataJSON() as { name?: string };
+      const name = String(body.name || '').trim();
+      if (collections.some((collection) => collection.name.toLowerCase() === name.toLowerCase())) {
+        await route.fulfill(json({ detail: 'A collection with this name already exists' }, 409));
+        return;
+      }
+      const collection: CollectionFixture = {
+        id: `col-${++collectionSeq}`,
+        name,
+        position: collections.length,
+        is_default: false,
+        created_at: '2026-05-18T12:00:00Z',
+        updated_at: '2026-05-18T12:00:00Z'
+      };
+      collections = [...collections, collection];
+      collectionItems.set(collection.id, new Set());
+      await route.fulfill(json(publicCollection(collection), 201));
+      return;
+    }
+    if (url.pathname === '/api/gallery/collections/order' && request.method() === 'PUT') {
+      const body = request.postDataJSON() as { ids?: string[] };
+      const ids = body.ids || [];
+      collections = collections.map((collection) => ({ ...collection, position: ids.indexOf(collection.id) }));
+      await route.fulfill(json(sortedCollections()));
+      return;
+    }
+    const collectionItemsMatch = url.pathname.match(/^\/api\/gallery\/collections\/([^/]+)\/items(\/remove)?$/);
+    if (collectionItemsMatch && request.method() === 'POST') {
+      const id = decodeURIComponent(collectionItemsMatch[1]);
+      const collection = collections.find((item) => item.id === id);
+      if (!collection) {
+        await route.fulfill(json({ detail: 'Collection not found' }, 404));
+        return;
+      }
+      const members = collectionItems.get(id) || new Set<string>();
+      collectionItems.set(id, members);
+      let changed = 0;
+      for (const imageId of resolveBatchIds(request.postDataJSON() as { ids?: string[]; selection_token?: string })) {
+        if (collectionItemsMatch[2]) {
+          if (members.delete(imageId)) changed += 1;
+        } else if (!members.has(imageId) && galleryImages.some((image) => image.id === imageId)) {
+          members.add(imageId);
+          changed += 1;
+        }
+      }
+      await route.fulfill(json({ collection: publicCollection(collection), changed_count: changed }));
+      return;
+    }
+    const collectionMatch = url.pathname.match(/^\/api\/gallery\/collections\/([^/]+)$/);
+    if (collectionMatch && request.method() === 'PATCH') {
+      const id = decodeURIComponent(collectionMatch[1]);
+      const body = request.postDataJSON() as { name?: string; is_default?: boolean };
+      collections = collections.map((collection) => {
+        if (collection.id === id) {
+          return {
+            ...collection,
+            name: body.name ?? collection.name,
+            is_default: body.is_default ?? collection.is_default
+          };
+        }
+        return body.is_default ? { ...collection, is_default: false } : collection;
+      });
+      const collection = collections.find((item) => item.id === id);
+      await route.fulfill(collection ? json(publicCollection(collection)) : json({ detail: 'Collection not found' }, 404));
+      return;
+    }
+    if (collectionMatch && request.method() === 'DELETE') {
+      const id = decodeURIComponent(collectionMatch[1]);
+      collections = collections.filter((collection) => collection.id !== id);
+      collectionItems.delete(id);
+      await route.fulfill({ status: 204 });
+      return;
+    }
+    const imageCollectionsMatch = url.pathname.match(/^\/api\/gallery\/([^/]+)\/collections$/);
+    if (imageCollectionsMatch && request.method() === 'GET') {
+      const imageId = decodeURIComponent(imageCollectionsMatch[1]);
+      await route.fulfill(
+        json({
+          image_id: imageId,
+          collection_ids: sortedCollections()
+            .filter((collection) => collectionItems.get(collection.id)?.has(imageId))
+            .map((collection) => collection.id)
+        })
+      );
+      return;
+    }
+    if (url.pathname === '/api/gallery/export-jobs' && request.method() === 'POST') {
+      const body = (request.postDataJSON() || {}) as { ids?: string[]; collection_id?: string };
+      const count = body.collection_id ? collectionItems.get(body.collection_id)?.size || 0 : body.ids?.length || galleryImages.length;
+      const jobId = `export-job-${++exportJobSeq}`;
+      await route.fulfill(
+        json(
+          {
+            job_id: jobId,
+            status: 'queued',
+            stage: 'queued',
+            message: 'Queued gallery ZIP export',
+            progress: 0,
+            requested_count: count,
+            processed_count: 0,
+            exported_count: 0,
+            missing_count: 0,
+            bytes_total: 0,
+            bytes_written: 0,
+            filename: 'gpt-images-export.zip',
+            download_url: null
+          },
+          202
+        )
+      );
+      return;
+    }
+    const exportEventsMatch = url.pathname.match(/^\/api\/gallery\/export-jobs\/([^/]+)\/events$/);
+    if (exportEventsMatch) {
+      const jobId = decodeURIComponent(exportEventsMatch[1]);
+      const finished = {
+        job_id: jobId,
+        status: 'success',
+        stage: 'ready',
+        message: 'ZIP archive ready',
+        progress: 100,
+        requested_count: 1,
+        processed_count: 1,
+        exported_count: 1,
+        missing_count: 0,
+        bytes_total: PNG_BYTES.length,
+        bytes_written: PNG_BYTES.length,
+        filename: 'gpt-images-export.zip',
+        download_url: `/api/gallery/export-jobs/${encodeURIComponent(jobId)}/download`
+      };
+      await route.fulfill({ status: 200, contentType: 'text/event-stream', body: `event: export\ndata: ${JSON.stringify(finished)}\n\n` });
+      return;
+    }
+    if (url.pathname.match(/^\/api\/gallery\/export-jobs\/[^/]+\/download$/)) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/zip',
+        headers: { 'Content-Disposition': 'attachment; filename="gpt-images-export.zip"' },
+        body: PNG_BYTES
+      });
+      return;
+    }
     if (url.pathname === '/api/gallery/search' && request.method() === 'POST') {
       const body = request.postDataJSON() as Record<string, unknown>;
       const prompt = String(body.prompt || '');
       const favoriteParam = body.favorite;
       const requestedPage = Number(body.page || 1);
-      const images = galleryImages.filter((image) =>
-        matchesGalleryFilters(image, {
-          prompt,
-          favorite: typeof favoriteParam === 'boolean' ? favoriteParam : null
-        })
+      const collectionMembers = body.collection_id ? collectionItems.get(String(body.collection_id)) || new Set<string>() : null;
+      const images = galleryImages.filter(
+        (image) =>
+          (!collectionMembers || collectionMembers.has(image.id)) &&
+          matchesGalleryFilters(image, {
+            prompt,
+            favorite: typeof favoriteParam === 'boolean' ? favoriteParam : null
+          })
       );
       await route.fulfill(
         json(
@@ -1408,4 +1584,4 @@ export {
   setRegionPreference,
   disableRegionProcessing
 };
-export type { GalleryImageFixture, PromptSnippetFixture, MockOptions, JobStatus };
+export type { CollectionFixture, GalleryImageFixture, PromptSnippetFixture, MockOptions, JobStatus };

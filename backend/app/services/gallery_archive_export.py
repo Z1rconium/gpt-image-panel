@@ -192,6 +192,7 @@ def _prepare_gallery_zip_stream(
     *,
     requested_count: int = 0,
     progress: GalleryZipProgressCallback | None = None,
+    collection: dict[str, Any] | None = None,
 ) -> _PreparedGalleryZip:
     used_names: set[str] = set()
     processed_count = 0
@@ -233,10 +234,14 @@ def _prepare_gallery_zip_stream(
             os.fdopen(metadata_ndjson_fd, "w", encoding="utf-8") as metadata_ndjson,
         ):
             header = _export_metadata_header()
+            if collection:
+                header["collection"] = collection
             metadata_json.write("{")
             metadata_json.write(f'"schema_version":{_compact_json(header["schema_version"])}')
             metadata_json.write(f',"exported_at":{_compact_json(header["exported_at"])}')
             metadata_json.write(f',"app":{_compact_json(header["app"])}')
+            if collection:
+                metadata_json.write(f',"collection":{_compact_json(collection)}')
             metadata_json.write(',"images":[')
             metadata_ndjson.write(_compact_json({"type": "header", **header}) + "\n")
 
@@ -331,6 +336,7 @@ def write_gallery_zip_file(
     requested_count: int = 0,
     skipped: Iterable[dict[str, Any]] | None = None,
     progress: GalleryZipProgressCallback | None = None,
+    collection: dict[str, Any] | None = None,
 ) -> GalleryZipFileResult:
     """Write a ZIP archive to disk while reporting deterministic pack progress."""
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -342,6 +348,7 @@ def write_gallery_zip_file(
         skipped=skipped,
         requested_count=requested_count,
         progress=progress,
+        collection=collection,
     )
     bytes_written = 0
     last_emit_at = 0.0

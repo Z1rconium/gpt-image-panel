@@ -74,6 +74,7 @@ from ...repositories.gallery.queries import (
     get_gallery_page,
     iter_gallery_export_rows,
 )
+from ...repositories.gallery.collections import get_gallery_collection
 from ...repositories.gallery.sync_state import (
     count_gallery_r2_sync_rows,
     iter_gallery_r2_sync_rows,
@@ -115,6 +116,7 @@ from ...services.gallery_common import (
     GALLERY_SYNC_TERMINAL_STATUSES,
     TRACKED_EXPORT_STREAMING_BYTES_THRESHOLD,
     _gallery_filters_from_selection_token,
+    collection_filename_slug,
 )
 from ...services.gallery_common import (
     GALLERY_EXPORT_TERMINAL_STATUSES,
@@ -178,7 +180,23 @@ async def get_gallery_direct_export_job(job_id: str):
 async def create_gallery_export_job(req: GalleryExportRequest | None = Body(default=None)):
     ids = req.ids if req else None
     selection_token = req.selection_token if req else None
-    if selection_token:
+    collection_id = req.collection_id if req else None
+    if collection_id:
+        collection = await asyncio.to_thread(get_gallery_collection, collection_id)
+        if collection is None:
+            raise HTTPException(status_code=404, detail="Collection not found")
+        filters = {"collection_id": collection_id}
+        requested_count = await asyncio.to_thread(get_gallery_count, filters)
+        if requested_count <= 0:
+            raise HTTPException(status_code=404, detail="Collection is empty")
+        filename_prefix = f"gpt-images-{collection_filename_slug(collection['name'])}"
+        payload = {
+            "ids": None,
+            "filters": filters,
+            "filename_prefix": filename_prefix,
+            "collection": {"id": collection["id"], "name": collection["name"]},
+        }
+    elif selection_token:
         filters = await _gallery_filters_from_selection_token(selection_token)
         requested_count = await asyncio.to_thread(get_gallery_count, filters)
         if requested_count <= 0:

@@ -79,6 +79,7 @@ class GallerySelectionFilterRequest(StrictRequestModel):
     date_to: Optional[str] = Field(default="", max_length=64)
     favorite: Optional[bool] = None
     mask_only: Optional[bool] = None
+    collection_id: Optional[str] = Field(default=None, max_length=128)
 
 
 class GallerySearchRequest(GallerySelectionFilterRequest):
@@ -134,9 +135,72 @@ class GalleryBatchFavoriteRequest(GalleryBatchRequest):
     favorite: bool
 
 
+class GalleryCollection(BaseModel):
+    id: str
+    name: str
+    position: int = 0
+    is_default: bool = False
+    image_count: int = 0
+    cover_image_id: Optional[str] = None
+    created_at: str
+    updated_at: str
+
+
+def _normalize_collection_name(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    name = " ".join(value.split())
+    if not name:
+        raise ValueError("Collection name must not be empty")
+    if len(name) > 60:
+        raise ValueError("Collection name must be at most 60 characters")
+    return name
+
+
+class GalleryCollectionCreateRequest(StrictRequestModel):
+    name: str = Field(..., max_length=200)
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        return _normalize_collection_name(value)  # type: ignore[return-value]
+
+
+class GalleryCollectionUpdateRequest(StrictRequestModel):
+    name: Optional[str] = Field(default=None, max_length=200)
+    is_default: Optional[bool] = None
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: Optional[str]) -> Optional[str]:
+        return _normalize_collection_name(value)
+
+
+class GalleryCollectionOrderRequest(StrictRequestModel):
+    ids: list[ShortId] = Field(default_factory=list, max_length=1000)
+
+    @field_validator("ids")
+    @classmethod
+    def validate_ids(cls, value: list[str]) -> list[str]:
+        if len(set(value)) != len(value):
+            raise ValueError("ids must not contain duplicates")
+        return value
+
+
+class GalleryCollectionItemsResponse(BaseModel):
+    collection: GalleryCollection
+    changed_count: int
+
+
+class GalleryImageCollectionsResponse(BaseModel):
+    image_id: str
+    collection_ids: list[str]
+
+
 class GalleryExportRequest(StrictRequestModel):
     ids: Optional[list[ShortId]] = Field(default=None, max_length=1000)
     selection_token: Optional[ShortId] = None
+    collection_id: Optional[ShortId] = None
 
     @field_validator("ids")
     @classmethod
@@ -158,8 +222,8 @@ class GalleryExportRequest(StrictRequestModel):
 
     @model_validator(mode="after")
     def validate_export_target(self):
-        if self.ids and self.selection_token:
-            raise ValueError("Provide ids or selection_token, not both")
+        if sum(bool(target) for target in (self.ids, self.selection_token, self.collection_id)) > 1:
+            raise ValueError("Provide only one of ids, selection_token or collection_id")
         return self
 
 

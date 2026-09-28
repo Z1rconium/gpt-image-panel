@@ -1123,6 +1123,46 @@ def _migration_image_trace(conn: sqlite3.Connection):
             conn.execute(f"ALTER TABLE gallery_entries ADD COLUMN {name} {type_name}")
 
 
+def _migration_gallery_collections(conn: sqlite3.Connection):
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS gallery_collections (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+            position INTEGER NOT NULL DEFAULT 0,
+            is_default INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_gallery_collections_single_default
+            ON gallery_collections(is_default)
+            WHERE is_default = 1
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS gallery_collection_items (
+            collection_id TEXT NOT NULL,
+            image_id TEXT NOT NULL,
+            added_at TEXT NOT NULL,
+            PRIMARY KEY(collection_id, image_id),
+            FOREIGN KEY(collection_id) REFERENCES gallery_collections(id) ON DELETE CASCADE,
+            FOREIGN KEY(image_id) REFERENCES gallery_entries(id) ON DELETE CASCADE
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_gallery_collection_items_image
+            ON gallery_collection_items(image_id)
+        """
+    )
+
+
 SCHEMA_MIGRATIONS = (
     (1, "baseline_legacy_schema", _migration_baseline_legacy_schema),
     (2, "gallery_filter_options", _migration_gallery_filter_options),
@@ -1150,4 +1190,5 @@ SCHEMA_MIGRATIONS = (
     (24, "gallery_mask_coverage_index", _migration_gallery_mask_coverage_index),
     (25, "mask_paste_back", _migration_mask_paste_back),
     (26, "image_trace", _migration_image_trace),
+    (27, "gallery_collections", _migration_gallery_collections),
 )

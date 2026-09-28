@@ -1,5 +1,5 @@
 <script lang="ts">
-import type { GalleryResponse } from '$lib/api/types/gallery';
+  import type { GalleryCollection, GalleryResponse } from '$lib/api/types/gallery';
   import { t } from '$lib/i18n';
   import type { GalleryFilters } from '$lib/stores/gallery';
 
@@ -7,9 +7,11 @@ import type { GalleryResponse } from '$lib/api/types/gallery';
   export let filters: GalleryFilters;
   export let onFilter: (key: keyof GalleryFilters, value: string | boolean) => void = () => {};
   export let onReset: () => void = () => {};
+  export let collections: GalleryCollection[] = [];
+  export let onManageCollections: () => void = () => {};
 
   $: hasFilters = Boolean(
-    filters.prompt.trim() || filters.model || filters.preset || filters.size || filters.dateFrom || filters.dateTo || filters.favorite || filters.maskOnly
+    filters.prompt.trim() || filters.model || filters.preset || filters.size || filters.dateFrom || filters.dateTo || filters.favorite || filters.maskOnly || filters.collectionId
   );
 </script>
 
@@ -36,6 +38,16 @@ import type { GalleryResponse } from '$lib/api/types/gallery';
         <option value="">{$t.gallery.allSizes}</option>
         {#each gallery?.filter_options.sizes || [] as size}<option value={size}>{size}</option>{/each}
       </select>
+    </div>
+
+    <div class="flex min-w-0 gap-2">
+      <select value={filters.collectionId} aria-label={$t.collections.filterLabel} class="form-select control-focus min-w-0 flex-1" on:change={(event) => onFilter('collectionId', event.currentTarget.value)}>
+        <option value="">{$t.collections.allImages}</option>
+        {#each collections as collection (collection.id)}
+          <option value={collection.id}>{collection.name} ({collection.image_count}){collection.is_default ? ` · ${$t.collections.default}` : ''}</option>
+        {/each}
+      </select>
+      <button type="button" class="control-focus shrink-0 rounded-md border border-stone-200 bg-white px-3 text-sm font-medium text-stone-700 hover:bg-stone-100 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-800" on:click={onManageCollections}>{$t.collections.manage}</button>
     </div>
 
     <div class="grid gap-2 xl:grid-cols-[minmax(0,1fr)_minmax(210px,0.45fr)]">
