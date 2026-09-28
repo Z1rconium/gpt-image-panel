@@ -17,7 +17,17 @@ const zh: Translation = {
     unprovided: '未提供',
     copy: '复制',
     imageNumber: (number) => `第 ${number} 张`,
-    selectImage: '选择图像生成信息'
+    selectImage: '选择图像生成信息',
+    diagnostics: {
+      title: '兼容性提示',
+      indicator: '上游结果与请求不一致',
+      promptRewritten: (preset) =>
+        `API 改写了你的提示词。可在设置中为${preset ? `预设"${preset}"` : '当前预设'}开启"防止提示词改写"以保持原样。`,
+      promptRewrittenDespiteGuard: '已附加防改写指令，但 API 仍改写了提示词。建议改用 /v1/images/generations 端点。',
+      sizeIgnored: 'API 忽略了请求的尺寸，请确认当前模型和端点是否支持该尺寸。',
+      qualityIgnored: 'API 忽略了请求的质量，请确认当前模型和端点是否支持该质量。',
+      paramsNotSent: '该端点只发送提示词和模型，尺寸、质量、格式和背景均未发送。如需控制这些参数，请切换到 /v1/images/generations。'
+    }
   },
   common: {
     active: '启用中',
@@ -145,6 +155,8 @@ const zh: Translation = {
     defaultResponseFormat: '默认响应格式',
     supportsMask: '支持蒙版编辑',
     supportsMaskHint: '对会忽略 mask 字段的网关请关闭；关闭后该预设不再显示蒙版入口。',
+    promptGuard: '防止提示词改写',
+    promptGuardHint: '在提示词前加入"按原样使用"的指令，要求上游不要扩写或改写。适用于 /v1/responses 及会自动扩写提示词的网关。',
     apiKey: 'API 密钥',
     apiKeyHint: '可填写 ${OPENAI_API_KEY}，SQLite 里只保存环境变量引用。直接填写的 key 会以明文保存。',
     upstreamSocks5Proxy: 'SOCKS5 代理',

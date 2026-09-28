@@ -56,6 +56,14 @@ def normalize_supports_mask(value: Any | None) -> bool:
     return bool(value)
 
 
+def normalize_prompt_guard(value: Any | None) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(value)
+
+
 def normalize_api_preset(raw: dict[str, Any] | None, fallback_id: str = "default") -> dict[str, Any]:
     preset = raw if isinstance(raw, dict) else {}
     preset_id = str(preset.get("id") or fallback_id)
@@ -71,4 +79,5 @@ def normalize_api_preset(raw: dict[str, Any] | None, fallback_id: str = "default
             preset.get("default_response_format")
         ),
         "supports_mask": normalize_supports_mask(preset.get("supports_mask")),
+        "prompt_guard": normalize_prompt_guard(preset.get("prompt_guard")),
     }

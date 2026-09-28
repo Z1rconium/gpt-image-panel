@@ -165,6 +165,17 @@ class _GalleryQueryComponents:
     has_filters: bool
 
 
+def _normalize_gallery_diagnostics(value: Any) -> list[str]:
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except ValueError:
+            return []
+    if not isinstance(value, (list, tuple)):
+        return []
+    return [str(code) for code in value if isinstance(code, str) and code][:16]
+
+
 def _normalize_gallery_entry(entry: dict[str, Any]) -> dict[str, Any] | None:
     if not isinstance(entry, dict):
         return None
@@ -199,6 +210,10 @@ def _normalize_gallery_entry(entry: dict[str, Any]) -> dict[str, Any] | None:
                 normalized[column] = float(value)
             except (TypeError, ValueError):
                 continue
+        elif column == "diagnostics":
+            codes = _normalize_gallery_diagnostics(value)
+            if codes:
+                normalized[column] = json.dumps(codes)
         elif column == "thumbnail_filename":
             thumbnail_filename = str(value)
             if safe_thumbnail_path(thumbnail_filename):
@@ -271,6 +286,8 @@ def _gallery_entry_from_row(
         and (column in REQUIRED_GALLERY_COLUMNS or row[column] is not None)
     }
     entry["favorite"] = bool(entry.get("favorite"))
+    if "diagnostics" in entry:
+        entry["diagnostics"] = _normalize_gallery_diagnostics(entry["diagnostics"])
     if entry.get("thumbnail_filename") and not safe_thumbnail_path(
         str(entry["thumbnail_filename"])
     ):

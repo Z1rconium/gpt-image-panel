@@ -1163,6 +1163,18 @@ def _migration_gallery_collections(conn: sqlite3.Connection):
     )
 
 
+def _migration_api_preset_prompt_guard(conn: sqlite3.Connection):
+    if "prompt_guard" not in _table_columns(conn, "api_presets"):
+        conn.execute(
+            "ALTER TABLE api_presets ADD COLUMN prompt_guard INTEGER NOT NULL DEFAULT 0"
+        )
+
+
+def _migration_gallery_diagnostics(conn: sqlite3.Connection):
+    if "diagnostics" not in _table_columns(conn, "gallery_entries"):
+        conn.execute("ALTER TABLE gallery_entries ADD COLUMN diagnostics TEXT")
+
+
 SCHEMA_MIGRATIONS = (
     (1, "baseline_legacy_schema", _migration_baseline_legacy_schema),
     (2, "gallery_filter_options", _migration_gallery_filter_options),
@@ -1191,4 +1203,6 @@ SCHEMA_MIGRATIONS = (
     (25, "mask_paste_back", _migration_mask_paste_back),
     (26, "image_trace", _migration_image_trace),
     (27, "gallery_collections", _migration_gallery_collections),
+    (28, "api_preset_prompt_guard", _migration_api_preset_prompt_guard),
+    (29, "gallery_diagnostics", _migration_gallery_diagnostics),
 )

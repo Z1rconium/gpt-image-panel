@@ -29,6 +29,7 @@ type GalleryImageFixture = {
   reported_quality?: string | null;
   upstream_duration_ms?: number | null;
   chroma_status?: string | null;
+  diagnostics?: string[];
   model: string;
   quality?: string;
   output_format?: string;
@@ -810,6 +811,14 @@ async function mockApi(page: Page, options: MockOptions = {}) {
     if (url.pathname === '/api/settings') {
       if (request.method() === 'POST') {
         const body = JSON.parse(request.postData() || '{}');
+        if (typeof body.prompt_guard === 'boolean') {
+          mockedSettings = {
+            ...mockedSettings,
+            presets: mockedSettings.presets.map((preset) =>
+              preset.id === mockedSettings.active_preset_id ? { ...preset, prompt_guard: body.prompt_guard } : preset
+            )
+          } as typeof mockedSettings;
+        }
         if (typeof body.supports_mask === 'boolean') {
           mockedSettings = applyActivePresetFields({
             ...mockedSettings,

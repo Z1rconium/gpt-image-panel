@@ -11,14 +11,36 @@
     reported_quality?: string | null;
     upstream_duration_ms?: number | null;
     chroma_status?: string | null;
+    diagnostics?: string[] | null;
   };
 
-  let { image, prompt, requestedSize, requestedQuality }: {
+  let { image, prompt, requestedSize, requestedQuality, presetName }: {
     image: TraceImage;
     prompt: string;
     requestedSize?: string | null;
     requestedQuality?: string | null;
+    presetName?: string | null;
   } = $props();
+
+  const diagnosticMessages = $derived(
+    (image.diagnostics || []).flatMap((code) => {
+      const messages = $t.trace.diagnostics;
+      switch (code) {
+        case 'prompt_rewritten':
+          return [messages.promptRewritten(presetName || '')];
+        case 'prompt_rewritten_despite_guard':
+          return [messages.promptRewrittenDespiteGuard];
+        case 'size_ignored':
+          return [messages.sizeIgnored];
+        case 'quality_ignored':
+          return [messages.qualityIgnored];
+        case 'params_not_sent':
+          return [messages.paramsNotSent];
+        default:
+          return [];
+      }
+    })
+  );
 
   const actualPixels = $derived(
     image.image_width && image.image_height ? `${image.image_width} × ${image.image_height}` : $t.trace.unprovided
@@ -28,6 +50,13 @@
 
 <section class="rounded-lg border border-stone-200 bg-stone-50/70 p-3 text-xs text-stone-700 dark:border-zinc-800 dark:bg-zinc-950/40 dark:text-zinc-300" aria-label={$t.trace.title}>
   <h3 class="font-semibold text-stone-800 dark:text-zinc-200">{$t.trace.title}</h3>
+  {#if diagnosticMessages.length}
+    <ul class="mt-2 space-y-1.5" aria-label={$t.trace.diagnostics.title}>
+      {#each diagnosticMessages as message}
+        <li class="rounded-md border border-amber-400/40 bg-amber-500/10 px-2 py-1.5 text-amber-800 dark:text-amber-200">{message}</li>
+      {/each}
+    </ul>
+  {/if}
   {#if image.chroma_status === 'not_detected'}
     <p class="mt-2 rounded-md border border-amber-400/40 bg-amber-500/10 px-2 py-1.5 text-amber-800 dark:text-amber-200" role="status">{$t.trace.chromaNotDetected}</p>
   {:else if image.chroma_status === 'applied'}

@@ -15,7 +15,17 @@ const en = {
     unprovided: 'Not provided',
     copy: 'Copy',
     imageNumber: (number: number) => `Image ${number}`,
-    selectImage: 'Select image generation details'
+    selectImage: 'Select image generation details',
+    diagnostics: {
+      title: 'Compatibility hints',
+      indicator: 'Upstream diverged from the request',
+      promptRewritten: (preset: string) =>
+        `The API rewrote your prompt. Enable "Prevent prompt rewriting" on ${preset ? `preset "${preset}"` : 'this preset'} in Settings to keep it as-is.`,
+      promptRewrittenDespiteGuard: 'The API rewrote your prompt despite the anti-rewrite instruction. Try the /v1/images/generations endpoint.',
+      sizeIgnored: 'The API ignored the requested size. Check that this model and endpoint support it.',
+      qualityIgnored: 'The API ignored the requested quality. Check that this model and endpoint support it.',
+      paramsNotSent: 'This endpoint only sends the prompt and model; size, quality, format and background were not sent. Switch to /v1/images/generations to control them.'
+    }
   },
   common: {
     active: 'Active',
@@ -143,6 +153,8 @@ const en = {
     defaultResponseFormat: 'Default response format',
     supportsMask: 'Supports mask inpainting',
     supportsMaskHint: 'Turn off for gateways that ignore the mask field; the mask editor is hidden for this preset.',
+    promptGuard: 'Prevent prompt rewriting',
+    promptGuardHint: 'Prepends an instruction asking upstream to use the prompt as-is. Useful for /v1/responses and gateways that expand prompts.',
     apiKey: 'API key',
     apiKeyHint: 'Use ${OPENAI_API_KEY} to store only an environment-variable reference in SQLite. Literal keys are saved as plaintext.',
     upstreamSocks5Proxy: 'SOCKS5 proxy',

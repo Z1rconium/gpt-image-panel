@@ -24,6 +24,7 @@ export type GalleryEntry = {
   reported_quality?: string | null;
   upstream_duration_ms?: number | null;
   chroma_status?: string | null;
+  diagnostics?: string[];
   model?: string | null;
   quality?: string | null;
   output_format?: string | null;

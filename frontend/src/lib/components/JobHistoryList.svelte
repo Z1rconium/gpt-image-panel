@@ -280,6 +280,11 @@
               {#if jobMeta(job)}
                 <span>{jobMeta(job)}</span>
               {/if}
+              {#if job.images?.some((image) => image.diagnostics?.length)}
+                <span class="inline-flex items-center gap-1 text-amber-700 dark:text-amber-300">
+                  <span class="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden="true"></span>{$t.trace.diagnostics.indicator}
+                </span>
+              {/if}
               <span>{formatLocalTime(job.completed_at || job.updated_at || job.created_at)}</span>
               {#if job.duration}
                 <span>{$t.common.duration}: {job.duration}</span>
@@ -294,7 +299,7 @@
                     {/each}
                   </div>
                 {/if}
-                <ImageTrace image={selectedJobImage} prompt={job.prompt || ''} requestedSize={job.size} requestedQuality={job.quality} />
+                <ImageTrace image={selectedJobImage} prompt={job.prompt || ''} requestedSize={job.size} requestedQuality={job.quality} presetName={job.api_preset_name} />
               </div>
             {/if}
             {#if hasCostInfo(job)}

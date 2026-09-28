@@ -24,11 +24,13 @@ from ...core import validators as ssrf
 from ...core.media import (
     detect_image_format,
     generate_image_id,
+    get_image_dimensions,
     validate_image_header_bytes,
 )
 from ...core.observability import metrics
 from .edit_paste_back import PasteBackOutcome, paste_back_image
 from .chroma import remove_chroma_background
+from .diagnostics import image_diagnostics
 from ...runtime.blocking import run_image_operation, upstream_memory_lease
 from ...schemas.gallery import GalleryEntry
 from ...schemas.generation import EditRequest, GenerateRequest
@@ -153,6 +155,7 @@ async def save_gallery_entries_from_upstream_data(
     persist_gallery_entry: PersistGalleryEntry,
     transform_image: Callable[[bytes], Any] | None = None,
     chroma_mode: str | None = None,
+    prompt_guard: bool = False,
 ) -> list[GalleryEntry]:
     data = validate_upstream_image_data(data, payload.n)
     max_bytes = config.MAX_FILE_SIZE_MB * 1024 * 1024
@@ -208,6 +211,16 @@ async def save_gallery_entries_from_upstream_data(
                 for key in ("revised_prompt", "reported_size", "reported_quality")
                 if isinstance(image_data.get(key), str) and image_data[key]
             })
+            entry_metadata["diagnostics"] = image_diagnostics(
+                payload,
+                str(gallery_metadata.get("api_path") or ""),
+                prompt_guard=prompt_guard,
+                sent_prompt=str(gallery_metadata.get("sent_prompt") or payload.prompt),
+                revised_prompt=entry_metadata.get("revised_prompt"),
+                reported_size=entry_metadata.get("reported_size"),
+                reported_quality=entry_metadata.get("reported_quality"),
+                actual_size=get_image_dimensions(image_bytes),
+            )
             if chroma_mode:
                 if progress:
                     progress("chroma_removal", f"Removing solid background ({image_index + 1}/{total})")
@@ -379,6 +392,7 @@ async def call_image_generation_api(
     partial_images: int = 2,
     preview: "PreviewCallback | None" = None,
     persist_gallery_entry: PersistGalleryEntry,
+    prompt_guard: bool = False,
 ) -> list[GalleryEntry]:
     api_path = normalize_api_path(api_path)
     payload.normalize_model_options(api_path)
@@ -395,25 +409,25 @@ async def call_image_generation_api(
     if api_path == RESPONSES_API_PATH:
         if progress:
             progress("building_responses_payload", "Building Responses API payload")
-        request_data = build_responses_request_data(payload)
+        request_data = build_responses_request_data(payload, prompt_guard=prompt_guard)
     elif api_path == CHAT_COMPLETIONS_API_PATH:
         if progress:
             progress(
                 "building_chat_completions_payload",
                 "Building Chat Completions API payload",
             )
-        request_data = build_chat_completions_request_data(payload)
+        request_data = build_chat_completions_request_data(payload, prompt_guard=prompt_guard)
     else:
         if progress:
             progress("building_generation_payload", "Building image generation payload")
-        request_data = _build_image_params(payload)
+        request_data = _build_image_params(payload, prompt_guard=prompt_guard)
         if use_streaming:
             request_data["stream"] = True
             request_data["partial_images"] = max(1, min(3, int(partial_images or 2)))
 
     format_info = get_output_format_info(payload.output_format)
     gallery_metadata = build_gallery_metadata(payload, api_path, api_preset_name)
-    gallery_metadata["sent_prompt"] = sent_generation_prompt(payload) if api_path == "/v1/images/generations" else payload.prompt
+    gallery_metadata["sent_prompt"] = sent_generation_prompt(payload, prompt_guard=prompt_guard)
 
     pool = get_pool()
     download_session = pool.get(timeout_kind=TIMEOUT_UPSTREAM)
@@ -502,6 +516,7 @@ async def call_image_generation_api(
             progress=progress,
             persist_gallery_entry=persist_gallery_entry,
             chroma_mode=payload.background if payload.background.startswith("chroma_") else None,
+            prompt_guard=prompt_guard,
         )
     finally:
         await memory_lease.__aexit__(None, None, None)
@@ -581,6 +596,7 @@ async def call_image_edit_api(
     persist_gallery_entry: PersistGalleryEntry,
     mask_source: ImageEditSource | None = None,
     mask_coverage: float | None = None,
+    prompt_guard: bool = False,
 ) -> list[GalleryEntry]:
     if not image_sources:
         raise UpstreamApiError("At least one edit source image is required")
@@ -602,7 +618,7 @@ async def call_image_edit_api(
         api_preset_name,
         mask_coverage=mask_coverage,
     )
-    gallery_metadata["sent_prompt"] = payload.prompt
+    gallery_metadata["sent_prompt"] = sent_generation_prompt(payload, prompt_guard=prompt_guard)
     transform_image = None
     if mask_source is not None:
         if payload.paste_back is False:
@@ -646,7 +662,7 @@ async def call_image_edit_api(
                 filename=mask_source.filename or "mask.png",
                 content_type="image/png",
             )
-        for key, value in _build_image_params(payload).items():
+        for key, value in _build_image_params(payload, prompt_guard=prompt_guard).items():
             form.add_field(key, str(value))
         if use_streaming:
             form.add_field("stream", "true")
@@ -719,6 +735,7 @@ async def call_image_edit_api(
             progress=progress,
             persist_gallery_entry=persist_gallery_entry,
             transform_image=transform_image,
+            prompt_guard=prompt_guard,
         )
     finally:
         if memory_lease is not None:

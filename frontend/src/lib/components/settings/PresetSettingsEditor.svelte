@@ -24,6 +24,7 @@
   export let defaultModel = '';
   export let defaultResponseFormat: ResponseFormatDefault = 'url';
   export let supportsMask = true;
+  export let promptGuard = false;
   export let apiKey = '';
   export let apiKeyInputType = 'password';
   export let upstreamSocks5Proxy = '';
@@ -154,6 +155,13 @@
             <span class="min-w-0">
               <span class="block text-sm text-stone-800 dark:text-zinc-200">{$t.settings.supportsMask}</span>
               <span class="mt-1 block text-xs text-stone-500 dark:text-zinc-500">{$t.settings.supportsMaskHint}</span>
+            </span>
+          </label>
+          <label class="flex items-start gap-2.5 rounded-lg border border-stone-300 bg-stone-50 px-3 py-2.5 dark:border-zinc-700 dark:bg-zinc-950">
+            <input type="checkbox" class="control-focus mt-0.5 accent-emerald-500" bind:checked={promptGuard} />
+            <span class="min-w-0">
+              <span class="block text-sm text-stone-800 dark:text-zinc-200">{$t.settings.promptGuard}</span>
+              <span class="mt-1 block text-xs text-stone-500 dark:text-zinc-500">{$t.settings.promptGuardHint}</span>
             </span>
           </label>
           <label class="block">

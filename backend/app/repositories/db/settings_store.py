@@ -147,6 +147,7 @@ def _default_settings() -> dict:
                 "default_model": default_model_for_api_path(config.DEFAULT_API_PATH),
                 "default_response_format": "url",
                 "supports_mask": True,
+                "prompt_guard": False,
             }
         ],
         "prompt_optimizer": _default_prompt_optimizer_settings(),
@@ -643,11 +644,12 @@ def _replace_settings_on_conn(conn: sqlite3.Connection, settings: dict):
                 default_model,
                 default_response_format,
                 supports_mask,
+                prompt_guard,
                 position,
                 created_at,
                 updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 preset["id"],
@@ -658,6 +660,7 @@ def _replace_settings_on_conn(conn: sqlite3.Connection, settings: dict):
                 preset["default_model"],
                 preset["default_response_format"],
                 1 if preset.get("supports_mask", True) else 0,
+                1 if preset.get("prompt_guard", False) else 0,
                 position,
                 now,
                 now,
@@ -696,7 +699,7 @@ def _replace_settings_on_conn(conn: sqlite3.Connection, settings: dict):
 def _load_settings_from_conn(conn: sqlite3.Connection) -> dict | None:
     rows = conn.execute(
         """
-        SELECT id, name, api_url, api_key, api_path, default_model, default_response_format, supports_mask
+        SELECT id, name, api_url, api_key, api_path, default_model, default_response_format, supports_mask, prompt_guard
         FROM api_presets
         ORDER BY position ASC, id ASC
         """
@@ -714,6 +717,7 @@ def _load_settings_from_conn(conn: sqlite3.Connection) -> dict | None:
             "default_model": row["default_model"],
             "default_response_format": row["default_response_format"],
             "supports_mask": bool(row["supports_mask"]),
+            "prompt_guard": bool(row["prompt_guard"]),
         }
         for row in rows
     ]

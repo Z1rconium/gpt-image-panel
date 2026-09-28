@@ -222,6 +222,7 @@ def gallery_entry_job_image(entry: GalleryEntry) -> dict:
         "reported_quality": entry.reported_quality,
         "upstream_duration_ms": entry.upstream_duration_ms,
         "chroma_status": entry.chroma_status,
+        "diagnostics": list(entry.diagnostics),
         "paste_back": entry.paste_back,
         "paste_back_scale": entry.paste_back_scale,
     }

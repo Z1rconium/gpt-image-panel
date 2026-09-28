@@ -63,10 +63,14 @@ def extract_response_image_results(result: dict[str, Any]) -> list[dict[str, str
     return image_results
 
 
-def build_chat_completions_request_data(payload: GenerateRequest) -> dict[str, Any]:
+def build_chat_completions_request_data(
+    payload: GenerateRequest,
+    *,
+    prompt_guard: bool = False,
+) -> dict[str, Any]:
     return {
         "model": payload.model,
-        "messages": [{"role": "user", "content": payload.prompt}],
+        "messages": [{"role": "user", "content": sent_generation_prompt(payload, prompt_guard=prompt_guard)}],
         "stream": False,
     }
 
@@ -253,11 +257,11 @@ def get_image_transfer_stage(image_data: dict) -> tuple[str, str]:
     return ("extracting_image_bytes", "Extracting image bytes")
 
 
-def _build_image_params(payload: GenerateRequest) -> dict[str, Any]:
+def _build_image_params(payload: GenerateRequest, *, prompt_guard: bool = False) -> dict[str, Any]:
     payload.normalize_model_options("/v1/images/generations")
     request_data: dict[str, Any] = {
         "model": payload.model,
-        "prompt": sent_generation_prompt(payload),
+        "prompt": sent_generation_prompt(payload, prompt_guard=prompt_guard),
         "size": payload.size,
         "n": payload.n,
         "quality": payload.quality,
@@ -272,15 +276,25 @@ def _build_image_params(payload: GenerateRequest) -> dict[str, Any]:
     return request_data
 
 
-def sent_generation_prompt(payload: GenerateRequest) -> str:
+# Widely used wording that keeps GPT-image upstreams from expanding the prompt.
+PROMPT_GUARD_PREFIX = (
+    "I NEED to test how the tool works with extremely simple prompts. "
+    "DO NOT add any detail, just use it AS-IS:"
+)
+
+
+def sent_generation_prompt(payload: GenerateRequest, *, prompt_guard: bool = False) -> str:
+    prompt = payload.prompt
     color = {"chroma_green": "pure bright green (#00FF00)", "chroma_magenta": "pure bright magenta (#FF00FF)"}.get(payload.background)
-    if color is None:
-        return payload.prompt
-    return (
-        f"{payload.prompt}\n\nUse a flat, uniform {color} background covering the entire canvas "
-        "behind the subject. Keep the subject clearly separated from the background; "
-        "do not add shadows, gradients, texture, or objects to the background."
-    )
+    if color is not None:
+        prompt = (
+            f"{prompt}\n\nUse a flat, uniform {color} background covering the entire canvas "
+            "behind the subject. Keep the subject clearly separated from the background; "
+            "do not add shadows, gradients, texture, or objects to the background."
+        )
+    if prompt_guard:
+        prompt = f"{PROMPT_GUARD_PREFIX}\n\n{prompt}"
+    return prompt
 
 
 def build_gallery_metadata(
@@ -306,9 +320,16 @@ def build_gallery_metadata(
     return metadata
 
 
-def build_responses_request_data(payload: GenerateRequest) -> dict[str, Any]:
+def build_responses_request_data(
+    payload: GenerateRequest,
+    *,
+    prompt_guard: bool = False,
+) -> dict[str, Any]:
     model = (payload.model or config.DEFAULT_RESPONSES_MODEL or "").strip()
-    return {"prompt": payload.prompt, "model": model or payload.model}
+    return {
+        "prompt": sent_generation_prompt(payload, prompt_guard=prompt_guard),
+        "model": model or payload.model,
+    }
 
 
 OUTPUT_FORMATS = {

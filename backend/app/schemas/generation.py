@@ -143,6 +143,7 @@ class GenerateJobImage(BaseModel):
     reported_quality: Optional[str] = None
     upstream_duration_ms: Optional[int] = None
     chroma_status: Optional[str] = None
+    diagnostics: list[str] = Field(default_factory=list)
     paste_back: Optional[str] = None
     paste_back_scale: Optional[float] = None
 

@@ -303,6 +303,8 @@ async def update_settings(req: SettingsRequest):
             )
         if req.supports_mask is not None:
             preset["supports_mask"] = bool(req.supports_mask)
+        if req.prompt_guard is not None:
+            preset["prompt_guard"] = bool(req.prompt_guard)
         if req.upstream_socks5_proxy is not None:
             current_proxy = get_upstream_socks5_proxy(raw=True)
             requested_proxy = req.upstream_socks5_proxy.strip()
@@ -445,6 +447,11 @@ async def create_settings_preset(req: PresetCreateRequest):
         bool(req.supports_mask)
         if req.supports_mask is not None
         else bool(source.get("supports_mask", True))
+    )
+    preset["prompt_guard"] = (
+        bool(req.prompt_guard)
+        if req.prompt_guard is not None
+        else bool(source.get("prompt_guard", False))
     )
     begin_api_settings_write()
     try:

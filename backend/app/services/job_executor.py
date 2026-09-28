@@ -14,6 +14,7 @@ from .presets import (
 )
 from ..core import settings as config
 from ..core import validators as ssrf
+from ..core.api_paths import normalize_prompt_guard
 from ..core.observability import (
     JobStageTimer,
     UsageSink,
@@ -386,6 +387,7 @@ async def run_claimed_image_unit(unit: dict, worker_id: str):
         str(preset.get("api_url") or "").rstrip("/")
     )
     api_key = get_effective_preset_api_key(preset)
+    prompt_guard = normalize_prompt_guard(preset.get("prompt_guard"))
     socks5_proxy = get_upstream_socks5_proxy()
 
     progress_pending: tuple[str, str] | None = None
@@ -663,6 +665,8 @@ async def run_claimed_image_unit(unit: dict, worker_id: str):
                 "preview": on_preview,
             }
             metrics.increment("image_job.streaming_requested")
+        if prompt_guard:
+            stream_kwargs["prompt_guard"] = True
 
         async def run_upstream() -> list:
             with use_job_stage_timer(stage_timer), use_usage_sink(usage_sink):

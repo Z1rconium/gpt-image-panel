@@ -18,6 +18,7 @@ export type SettingsDraft = {
   defaultModel: string;
   defaultResponseFormat: ResponseFormatDefault;
   supportsMask: boolean;
+  promptGuard: boolean;
   apiKey: string;
   apiPath: ApiPath;
   upstreamSocks5Proxy: string;
@@ -87,6 +88,7 @@ export function hasSettingsChanges(
     draft.defaultModel !== (activePreset?.default_model || settings?.default_model || 'gpt-image-2') ||
     draft.defaultResponseFormat !== normalizeResponseFormat(activePreset?.default_response_format ?? settings?.default_response_format, 'url') ||
     draft.supportsMask !== (activePreset?.supports_mask ?? settings?.supports_mask ?? true) ||
+    draft.promptGuard !== (activePreset?.prompt_guard ?? settings?.prompt_guard ?? false) ||
     draft.apiKey !== expectedSecretValue(activePreset?.api_key_source, activePreset?.has_api_key || settings?.has_api_key, activePreset?.api_key_env_var) ||
     draft.apiPath !== (activePreset?.api_path || settings?.api_path || '/v1/images/generations') ||
     proxyValue !== currentProxyMask ||
@@ -172,6 +174,7 @@ export function buildSettingsPayload(draft: SettingsDraft, settings: SettingsRes
     default_model: draft.defaultModel.trim(),
     default_response_format: draft.defaultResponseFormat,
     supports_mask: draft.supportsMask,
+    prompt_guard: draft.promptGuard,
     api_key: draft.apiKey.trim() === MASKED_API_KEY_VALUE ? null : draft.apiKey.trim(),
     api_path: draft.apiPath,
     upstream_socks5_proxy: proxyValue === currentProxyMask ? null : proxyValue,

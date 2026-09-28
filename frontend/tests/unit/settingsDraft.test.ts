@@ -72,6 +72,7 @@ function pristineDraft(): SettingsDraft {
     defaultModel: 'gpt-image-2',
     defaultResponseFormat: 'url',
     supportsMask: true,
+    promptGuard: false,
     apiKey: MASKED_API_KEY_VALUE,
     apiPath: '/v1/images/generations',
     upstreamSocks5Proxy: '',
@@ -121,6 +122,13 @@ describe('buildSettingsPayload', () => {
     const draft = { ...pristineDraft(), supportsMask: false };
     expect(hasSettingsChanges(draft, settings, activePreset)).toBe(true);
     expect(buildSettingsPayload(draft, settings).supports_mask).toBe(false);
+  });
+
+  it('detects and forwards a prompt guard change', () => {
+    expect(buildSettingsPayload(pristineDraft(), settings).prompt_guard).toBe(false);
+    const draft = { ...pristineDraft(), promptGuard: true };
+    expect(hasSettingsChanges(draft, settings, activePreset)).toBe(true);
+    expect(buildSettingsPayload(draft, settings).prompt_guard).toBe(true);
   });
 });
 

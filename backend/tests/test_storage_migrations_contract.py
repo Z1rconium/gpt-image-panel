@@ -317,6 +317,21 @@ def test_gallery_collections_migration(tmp_path):
     assert name == "gallery_collections"
 
 
+def test_prompt_guard_and_diagnostics_migrations(tmp_path):
+    _configure_runtime(tmp_path)
+    db_repo.verify_storage_writable()
+    with db_repo._connect() as conn:
+        preset_columns = {row["name"] for row in conn.execute("PRAGMA table_info(api_presets)")}
+        gallery_columns = {row["name"] for row in conn.execute("PRAGMA table_info(gallery_entries)")}
+        names = {
+            row["version"]: row["name"]
+            for row in conn.execute("SELECT version, name FROM schema_migrations WHERE version IN (28, 29)")
+        }
+    assert "prompt_guard" in preset_columns
+    assert "diagnostics" in gallery_columns
+    assert names == {28: "api_preset_prompt_guard", 29: "gallery_diagnostics"}
+
+
 def test_performance_indexes_are_created(tmp_path):
     _configure_runtime(tmp_path)
     db_repo.verify_storage_writable()

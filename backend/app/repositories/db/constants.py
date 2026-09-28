@@ -24,6 +24,7 @@ GALLERY_COLUMNS = (
     "reported_quality",
     "upstream_duration_ms",
     "chroma_status",
+    "diagnostics",
     "model",
     "quality",
     "output_format",

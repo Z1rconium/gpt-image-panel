@@ -63,3 +63,27 @@ test('history selects image details and gallery lightbox retains trace', async (
   await expect(lightbox.getByRole('region', { name: 'Image generation details' })).toContainText('89 ms');
 });
 
+test('diagnostics explain rewritten prompts and ignored parameters', async ({ page }) => {
+  const generatedJob = {
+    ...job('job-generated', 'plain fox'),
+    size: '1024x1536',
+    api_preset_name: 'Gateway',
+    images: [
+      {
+        image_id: 'img-1', image_url: '/api/image/img-1.png', filename: 'img-1.png', image_width: 1024, image_height: 1024,
+        revised_prompt: 'an elaborate fox portrait', diagnostics: ['prompt_rewritten', 'size_ignored']
+      }
+    ]
+  };
+  await loadApp(page, { generatedJob, historyJobs: [generatedJob] });
+  await page.getByRole('textbox', { name: 'Prompt', exact: true }).fill('plain fox');
+  await page.getByRole('button', { name: 'Generate', exact: true }).click();
+  const hints = page.getByRole('list', { name: 'Compatibility hints' }).first();
+  await expect(hints).toContainText('Enable "Prevent prompt rewriting" on preset "Gateway"');
+  await expect(hints).toContainText('ignored the requested size');
+
+  await page.getByRole('button', { name: 'Job History' }).click();
+  const drawer = page.getByRole('dialog', { name: 'Job History' });
+  await drawer.getByRole('button', { name: 'History', exact: true }).click();
+  await expect(drawer.locator('article').filter({ hasText: 'plain fox' })).toContainText('Upstream diverged from the request');
+});

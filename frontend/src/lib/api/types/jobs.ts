@@ -40,6 +40,7 @@ export type GenerateJobImage = {
   reported_quality?: string | null;
   upstream_duration_ms?: number | null;
   chroma_status?: string | null;
+  diagnostics?: string[];
   paste_back?: string | null;
   paste_back_scale?: number | null;
 };

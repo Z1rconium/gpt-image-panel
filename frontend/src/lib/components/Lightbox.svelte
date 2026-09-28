@@ -376,7 +376,7 @@
             <p class="whitespace-pre-wrap text-sm text-stone-800 dark:text-zinc-200">{image.prompt}</p>
           </div>
           <ImageCollections imageId={image.id} />
-          <ImageTrace image={image} prompt={image.prompt} requestedSize={image.size} requestedQuality={image.quality} />
+          <ImageTrace image={image} prompt={image.prompt} requestedSize={image.size} requestedQuality={image.quality} presetName={image.api_preset_name} />
           {#if aiAssistantEnabled}
             <section class="rounded-lg border border-stone-200 bg-stone-50/80 p-3 dark:border-zinc-800 dark:bg-zinc-950/50">
               <div class="mb-3 flex items-center justify-between gap-3">

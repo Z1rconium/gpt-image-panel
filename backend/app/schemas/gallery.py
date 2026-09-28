@@ -30,6 +30,7 @@ class GalleryEntry(BaseModel):
     reported_quality: Optional[str] = None
     upstream_duration_ms: Optional[int] = None
     chroma_status: Optional[str] = None
+    diagnostics: list[str] = Field(default_factory=list)
     model: Optional[str] = None
     quality: Optional[str] = None
     output_format: Optional[str] = None

@@ -109,6 +109,7 @@
     defaultModel: '',
     defaultResponseFormat: 'url',
     supportsMask: true,
+    promptGuard: false,
     apiKey: '',
     apiPath: '/v1/images/generations',
     upstreamSocks5Proxy: '',
@@ -171,6 +172,7 @@
     draft.apiPath = activePreset.api_path || settings.api_path || '/v1/images/generations';
     draft.defaultResponseFormat = normalizeResponseFormat(activePreset.default_response_format ?? settings.default_response_format, 'url');
     draft.supportsMask = activePreset.supports_mask ?? settings.supports_mask ?? true;
+    draft.promptGuard = activePreset.prompt_guard ?? settings.prompt_guard ?? false;
     draft.upstreamSocks5Proxy = settings.has_upstream_socks5_proxy ? settings.upstream_socks5_proxy_masked : '';
     draft.webhookUrl = settings.has_webhook_url ? settings.webhook_url_masked : '';
     draft.promptOptimizerEnabled = Boolean(settings.prompt_optimizer?.enabled);
@@ -481,6 +483,7 @@
         bind:defaultModel={draft.defaultModel}
         bind:defaultResponseFormat={draft.defaultResponseFormat}
         bind:supportsMask={draft.supportsMask}
+        bind:promptGuard={draft.promptGuard}
         bind:apiKey={draft.apiKey}
         apiKeyInputType="text"
         bind:upstreamSocks5Proxy={draft.upstreamSocks5Proxy}
