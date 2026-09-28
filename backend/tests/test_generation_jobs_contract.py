@@ -2238,3 +2238,48 @@ def test_stale_memory_reconcile_drops_terminal_ghost(tmp_path):
         assert "ghost-job" not in backend_main.app.state.generate_jobs
         counters = metrics.snapshot()["counters"]
         assert counters.get("image_jobs.stale_memory_reconciled", 0) >= 1
+
+
+def test_generate_and_edit_can_pin_a_non_active_preset(client):
+    primary = client.get("/api/settings").json()
+    primary_id = primary["active_preset_id"]
+    created = client.post(
+        "/api/settings/presets",
+        json={"name": "Responses alt", "api_path": "/v1/responses"},
+    )
+    assert created.status_code == 200
+    alt_id = created.json()["active_preset_id"]
+    assert alt_id != primary_id
+    activated = client.post(f"/api/settings/presets/{primary_id}/activate")
+    assert activated.status_code == 200
+    assert activated.json()["active_preset_id"] == primary_id
+
+    resp = client.post("/api/generate", json={"prompt": "pinned preset", "api_preset_id": alt_id})
+    assert resp.status_code == 202
+    job = _wait_for_job(client, resp.json()["job_id"])
+    assert job["status"] == "success"
+    assert job["api_preset_id"] == alt_id
+    assert job["api_preset_name"] == "Responses alt"
+    assert job["api_path"] == "/v1/responses"
+    assert client.get("/api/settings").json()["active_preset_id"] == primary_id
+
+    default_job = _wait_for_job(
+        client,
+        client.post("/api/generate", json={"prompt": "active preset"}).json()["job_id"],
+    )
+    assert default_job["api_preset_id"] == primary_id
+
+    edit = client.post(
+        "/api/edits",
+        data={"prompt": "pinned edit", "api_preset_id": alt_id},
+        files={"image": ("input.png", PNG_BYTES, "image/png")},
+    )
+    assert edit.status_code == 202
+    edit_job = _wait_for_job(client, edit.json()["job_id"])
+    assert edit_job["status"] == "success"
+    assert edit_job["api_preset_id"] == alt_id
+    assert edit_job["api_preset_name"] == "Responses alt"
+
+    unknown = client.post("/api/generate", json={"prompt": "missing preset", "api_preset_id": "nope"})
+    assert unknown.status_code == 422
+    assert "API preset not found" in unknown.text

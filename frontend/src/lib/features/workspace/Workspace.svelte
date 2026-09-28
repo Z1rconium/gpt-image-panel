@@ -23,7 +23,8 @@
   import type { JobMaskFetch } from '$lib/features/workspace/jobMaskRestore';
   import { lightboxStore } from '$lib/stores/lightbox';
   import { nodeImageResult } from '$lib/stores/nodeImage';
-  import { initialPromptFormState, previewStore, type PromptFormState } from '$lib/stores/preview';
+  import { initialPromptFormState, previewStore, type PromptFormState, type SubmitOptions } from '$lib/stores/preview';
+  import { preferencesStore } from '$lib/stores/preferences';
   import { promptSnippetsStore } from '$lib/stores/promptSnippets';
   import { settingsActivityStore, settingsStore } from '$lib/stores/settings';
   import { toastStore, uiStore, type ToastOptions } from '$lib/stores/ui';
@@ -45,6 +46,7 @@
     optimizerPanel,
     settingsPanel,
     sizePanel,
+    preferencesPanel,
     snippetsPanel
   } from '$lib/features/workspace/panels';
   import { promptForm } from '$lib/features/workspace/formState.svelte';
@@ -143,6 +145,7 @@
       !$uiStore.jobsOpen &&
       !$uiStore.editPreviewOpen &&
       !$uiStore.sizeDialogOpen &&
+      !$uiStore.preferencesOpen &&
       !$uiStore.maskEditorOpen &&
       !$confirmStore.request &&
       !Boolean($lightboxStore.image)
@@ -299,6 +302,7 @@
       $confirmStore.request ||
         $uiStore.editPreviewOpen ||
         $uiStore.sizeDialogOpen ||
+        $uiStore.preferencesOpen ||
         $uiStore.maskEditorOpen ||
         galleryEditDialogOpen ||
         $uiStore.promptSnippetsOpen ||
@@ -487,30 +491,36 @@
     jobsStore.trackJob(jobId, async (job) => updatePreviewFromJob(job), previewStore.setError, previewStore.applyPreviewEvent);
   }
 
-  function generateImage() {
+  function generateImage(options?: SubmitOptions): Promise<boolean> {
     promptForm.normalizeQuantityForSubmit();
-    void previewStore.generateImage(
+    return previewStore.generateImage(
       promptForm.snapshot(),
       jobsStore.makeQueuedPreview,
       trackJob,
-      jobsStore.shouldRefreshJobsAfterSubmit() ? jobsStore.loadJobs : undefined
+      jobsStore.shouldRefreshJobsAfterSubmit() ? jobsStore.loadJobs : undefined,
+      options
     );
   }
 
-  function editImage() {
+  function editImage(options?: SubmitOptions): Promise<boolean> {
     promptForm.normalizeQuantityForSubmit();
-    void previewStore.editImage(
+    return previewStore.editImage(
       promptForm.snapshot(),
       $editSourceStore,
       jobsStore.makeQueuedPreview,
       trackJob,
-      jobsStore.shouldRefreshJobsAfterSubmit() ? jobsStore.loadJobs : undefined
+      jobsStore.shouldRefreshJobsAfterSubmit() ? jobsStore.loadJobs : undefined,
+      options
     );
   }
 
-  function submitPrompt() {
-    if (hasEditSource) editImage();
-    else generateImage();
+  async function submitPrompt() {
+    const submittedPrompt = promptForm.prompt;
+    const accepted = await (hasEditSource ? editImage() : generateImage());
+    // Only clear once the job was accepted, and never over text typed meanwhile.
+    if (accepted && $preferencesStore.clearPromptAfterSubmit && promptForm.prompt === submittedPrompt) {
+      promptForm.prompt = '';
+    }
   }
 
   async function planEdit() {
@@ -1071,11 +1081,25 @@
     }
   }
 
+  function retryPresetOptions(job: GenerateJobStatus): SubmitOptions | undefined {
+    if (!$preferencesStore.retryUsesJobPreset) return undefined;
+    const presets = $settingsStore.settings?.presets || [];
+    const preset =
+      presets.find((candidate) => job.api_preset_id && candidate.id === job.api_preset_id) ||
+      presets.find((candidate) => job.api_preset_name && candidate.name === job.api_preset_name);
+    if (!preset) {
+      showToast($t.preferences.retryPresetMissing, 'status');
+      return undefined;
+    }
+    return { apiPresetId: preset.id };
+  }
+
   async function retryJob(job: GenerateJobStatus) {
     promptForm.replace(jobToPromptForm(job, promptForm.presetDefaultModel));
     closeJobsDrawer();
+    const options = retryPresetOptions(job);
     if (job.operation !== 'edit') {
-      generateImage();
+      void generateImage(options);
       return;
     }
     if (!$editSourceStore.files.length && !$editSourceStore.selectedGalleryImageId) {
@@ -1099,7 +1123,7 @@
       editSourceStore.removeMask();
       showToast($t.messages.editRetryMaskCleared, 'status');
     }
-    editImage();
+    void editImage(options);
   }
 
   async function restoreMaskFromJob(job: GenerateJobStatus): Promise<'restored' | 'missing' | 'mismatch'> {
@@ -1196,6 +1220,7 @@
       $uiStore.promptSnippetsOpen ||
       $uiStore.imagePromptOpen ||
       $uiStore.sizeDialogOpen ||
+      $uiStore.preferencesOpen ||
       $uiStore.maskEditorOpen ||
       galleryEditDialogOpen ||
       Boolean($lightboxStore.image);
@@ -1217,6 +1242,7 @@
         else if ($uiStore.editPreviewOpen) closeEditPreview();
         else if ($lightboxStore.image) closeLightbox();
         else if ($uiStore.sizeDialogOpen) setUi('sizeDialogOpen', false);
+        else if ($uiStore.preferencesOpen) setUi('preferencesOpen', false);
         return;
       }
 
@@ -1284,6 +1310,8 @@
   onOpenImagePrompt={openImagePromptDialog}
   onOpenJobs={openJobsDrawer}
   onOpenSettings={() => void openUiPanel('settings', 'settingsOpen')}
+  preferencesOpen={$uiStore.preferencesOpen}
+  onOpenPreferences={() => void openUiPanel('preferences', 'preferencesOpen')}
   onPrefetchPromptSnippets={() => prefetchPanel('snippets')}
   onPrefetchImagePrompt={() => prefetchPanel('imagePrompt')}
   onPrefetchJobs={() => prefetchPanel('jobs')}
@@ -1544,6 +1572,11 @@
 {#if $sizePanel.component}
   {@const Panel = $sizePanel.component}
   <Panel open={$uiStore.sizeDialogOpen} onClose={() => closeUiPanel('size', 'sizeDialogOpen')} />
+{/if}
+
+{#if $preferencesPanel.component}
+  {@const Panel = $preferencesPanel.component}
+  <Panel open={$uiStore.preferencesOpen} onClose={() => closeUiPanel('preferences', 'preferencesOpen')} />
 {/if}
 
 {#if $loadingPanel}

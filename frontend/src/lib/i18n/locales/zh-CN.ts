@@ -660,7 +660,18 @@ const zh: Translation = {
     invalidSize: '请使用 auto 或 宽x高：边长为 16 的倍数且不超过 3840，宽高比不超过 3:1，总像素为 655,360–8,294,400。',
     experimentalSize: '超过 2560×1440 的分辨率属于实验性支持。',
     title: '图像尺寸',
-    subtitle: '选择预设或输入 宽x高。'
+    subtitle: '选择预设或输入 宽x高。',
+    myPresets: '我的预设',
+    noPresets: '还没有保存的预设。在下方为尺寸命名即可保存。',
+    presetName: '预设名称',
+    savePreset: '保存为预设',
+    deletePreset: (name) => `删除预设 ${name}`,
+    presetErrors: {
+      name: '请输入预设名称。',
+      size: '请输入有效的 宽x高 尺寸（auto 不能保存）。',
+      duplicate: '已存在同名预设。',
+      limit: '最多可保存 20 个预设。'
+    }
   },
   collections: {
     title: '收藏夹',
@@ -692,6 +703,17 @@ const zh: Translation = {
     removed: (count, name) => `已从 ${name} 移除 ${count} 张图片`,
     alreadyIn: (name) => `已在 ${name} 中`,
     exporting: '正在打包收藏夹 ZIP'
+  },
+  preferences: {
+    title: '工作区偏好',
+    short: '偏好',
+    subtitle: '仅保存在当前浏览器中。',
+    clearPromptAfterSubmit: '提交后清空提示词',
+    clearPromptAfterSubmitHint: '任务被接受后清空提示词输入框。重试和重新生成不会清空。',
+    retryUsesJobPreset: '重试时使用任务原来的 API 预设',
+    retryUsesJobPresetHint: '重试历史任务时发送到它原先使用的预设，不会切换当前激活的预设。',
+    retryPresetMissing: '原 API 预设已不存在，将使用当前激活的预设重试。',
+    sizePresetsHint: '命名尺寸预设可在尺寸选择器中管理。'
   },
   galleryEditDialog: {
     title: '编辑此图',

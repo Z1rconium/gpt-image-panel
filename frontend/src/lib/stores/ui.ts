@@ -21,6 +21,7 @@ export type UiState = {
   promptSnippetsOpen: boolean;
   imagePromptOpen: boolean;
   sizeDialogOpen: boolean;
+  preferencesOpen: boolean;
   editPreviewOpen: boolean;
   maskEditorOpen: boolean;
 };
@@ -31,6 +32,7 @@ const initialUiState: UiState = {
   promptSnippetsOpen: false,
   imagePromptOpen: false,
   sizeDialogOpen: false,
+  preferencesOpen: false,
   editPreviewOpen: false,
   maskEditorOpen: false
 };

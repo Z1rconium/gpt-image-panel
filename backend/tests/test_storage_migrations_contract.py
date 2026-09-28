@@ -332,6 +332,16 @@ def test_prompt_guard_and_diagnostics_migrations(tmp_path):
     assert names == {28: "api_preset_prompt_guard", 29: "gallery_diagnostics"}
 
 
+def test_generate_job_preset_id_migration(tmp_path):
+    _configure_runtime(tmp_path)
+    db_repo.verify_storage_writable()
+    with db_repo._connect() as conn:
+        job_columns = {row["name"] for row in conn.execute("PRAGMA table_info(generate_jobs)")}
+        name = conn.execute("SELECT name FROM schema_migrations WHERE version = 30").fetchone()["name"]
+    assert "api_preset_id" in job_columns
+    assert name == "generate_job_preset_id"
+
+
 def test_performance_indexes_are_created(tmp_path):
     _configure_runtime(tmp_path)
     db_repo.verify_storage_writable()

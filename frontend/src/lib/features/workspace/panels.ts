@@ -7,6 +7,7 @@ export type LazyPanel =
   | 'imagePrompt'
   | 'lightbox'
   | 'size'
+  | 'preferences'
   | 'editPreview'
   | 'maskEditor'
   | 'optimizer';
@@ -18,6 +19,7 @@ export const lazyPanels = {
   imagePrompt: createLazyComponent(() => import('$lib/components/ImagePromptDialog.svelte')),
   lightbox: createLazyComponent(() => import('$lib/components/Lightbox.svelte')),
   size: createLazyComponent(() => import('$lib/components/SizeDialog.svelte')),
+  preferences: createLazyComponent(() => import('$lib/components/PreferencesDialog.svelte')),
   editPreview: createLazyComponent(() => import('$lib/components/EditPreviewModal.svelte')),
   maskEditor: createLazyComponent(() => import('$lib/components/MaskEditorDialog.svelte')),
   optimizer: createLazyComponent(() => import('$lib/components/PromptOptimizerAssistant.svelte'))
@@ -29,6 +31,7 @@ export const snippetsPanel = lazyPanels.snippets;
 export const imagePromptPanel = lazyPanels.imagePrompt;
 export const lightboxPanel = lazyPanels.lightbox;
 export const sizePanel = lazyPanels.size;
+export const preferencesPanel = lazyPanels.preferences;
 export const editPreviewPanel = lazyPanels.editPreview;
 export const maskEditorPanel = lazyPanels.maskEditor;
 export const optimizerPanel = lazyPanels.optimizer;

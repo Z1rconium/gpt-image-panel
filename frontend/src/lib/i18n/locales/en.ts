@@ -659,7 +659,18 @@ const en = {
     invalidSize: 'Use auto or WIDTHxHEIGHT: multiples of 16, edges up to 3840, aspect ratio up to 3:1, and 655,360–8,294,400 pixels.',
     experimentalSize: 'Resolutions above 2560×1440 are experimental.',
     title: 'Image Size',
-    subtitle: 'Choose a preset or enter WIDTHxHEIGHT.'
+    subtitle: 'Choose a preset or enter WIDTHxHEIGHT.',
+    myPresets: 'My presets',
+    noPresets: 'No saved presets yet. Name the size below to save it.',
+    presetName: 'Preset name',
+    savePreset: 'Save as preset',
+    deletePreset: (name: string) => `Delete preset ${name}`,
+    presetErrors: {
+      name: 'Enter a preset name.',
+      size: 'Enter a valid WIDTHxHEIGHT size (auto cannot be saved).',
+      duplicate: 'A preset with this name already exists.',
+      limit: 'You can save up to 20 presets.'
+    }
   },
   collections: {
     title: 'Collections',
@@ -691,6 +702,17 @@ const en = {
     removed: (count: number, name: string) => `Removed ${count} ${count === 1 ? 'image' : 'images'} from ${name}`,
     alreadyIn: (name: string) => `Already in ${name}`,
     exporting: 'Exporting collection ZIP'
+  },
+  preferences: {
+    title: 'Workspace preferences',
+    short: 'Prefs',
+    subtitle: 'Stored in this browser only.',
+    clearPromptAfterSubmit: 'Clear the prompt after submitting',
+    clearPromptAfterSubmitHint: 'Empties the prompt box once a job is accepted. Retry and Regenerate never clear it.',
+    retryUsesJobPreset: 'Retry with the job\'s API preset',
+    retryUsesJobPresetHint: 'Retrying a history job sends it to the preset it originally ran on, without switching the active preset.',
+    retryPresetMissing: 'The original API preset no longer exists; retrying with the active preset.',
+    sizePresetsHint: 'Named size presets are managed in the size picker.'
   },
   galleryEditDialog: {
     title: 'Edit this image',

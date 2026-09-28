@@ -1175,6 +1175,11 @@ def _migration_gallery_diagnostics(conn: sqlite3.Connection):
         conn.execute("ALTER TABLE gallery_entries ADD COLUMN diagnostics TEXT")
 
 
+def _migration_generate_job_preset_id(conn: sqlite3.Connection):
+    if "api_preset_id" not in _table_columns(conn, "generate_jobs"):
+        conn.execute("ALTER TABLE generate_jobs ADD COLUMN api_preset_id TEXT")
+
+
 SCHEMA_MIGRATIONS = (
     (1, "baseline_legacy_schema", _migration_baseline_legacy_schema),
     (2, "gallery_filter_options", _migration_gallery_filter_options),
@@ -1205,4 +1210,5 @@ SCHEMA_MIGRATIONS = (
     (27, "gallery_collections", _migration_gallery_collections),
     (28, "api_preset_prompt_guard", _migration_api_preset_prompt_guard),
     (29, "gallery_diagnostics", _migration_gallery_diagnostics),
+    (30, "generate_job_preset_id", _migration_generate_job_preset_id),
 )

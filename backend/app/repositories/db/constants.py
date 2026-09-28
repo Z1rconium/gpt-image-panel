@@ -79,6 +79,7 @@ GENERATE_JOB_COLUMNS = (
     "success_count",
     "failure_count",
     "api_path",
+    "api_preset_id",
     "api_preset_name",
     "duration",
     "stage_timings_json",

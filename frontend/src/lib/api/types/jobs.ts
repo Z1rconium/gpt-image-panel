@@ -78,6 +78,7 @@ export type GenerateJobStatus = GenerateJobResponse & {
   success_count?: number | null;
   failure_count?: number | null;
   api_path?: string | null;
+  api_preset_id?: string | null;
   api_preset_name?: string | null;
   duration?: string | null;
   stage_timings?: Record<string, number>;

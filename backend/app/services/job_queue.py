@@ -177,6 +177,7 @@ def build_pending_job(
     api_preset_name: str | None = None,
     image_units: int = 1,
     mask_applied: bool = False,
+    api_preset_id: str | None = None,
 ) -> dict:
     now = utc_now()
     return {
@@ -198,6 +199,7 @@ def build_pending_job(
         "n": req.n,
         "image_units": max(1, int(image_units or 1)),
         "api_path": api_path,
+        "api_preset_id": api_preset_id,
         "api_preset_name": api_preset_name,
         "streaming": bool(getattr(req, "stream", False)),
         "partial_images": getattr(req, "partial_images", None) if getattr(req, "stream", False) else None,
@@ -346,6 +348,7 @@ def build_edit_request_from_form(
     webhook_url: str | None,
     background: str = "auto",
     paste_back: bool | None = None,
+    api_preset_id: str | None = None,
 ) -> EditRequest:
     try:
         return EditRequest(
@@ -360,6 +363,7 @@ def build_edit_request_from_form(
             response_format=response_format,
             webhook_url=webhook_url,
             paste_back=paste_back,
+            api_preset_id=api_preset_id or None,
         )
     except ValueError as e:
         raise UnprocessableRequestError(str(e)) from e
@@ -378,6 +382,15 @@ async def queue_image_job(
 ) -> GenerateJobResponse:
     await run_db_operation(load_api_settings, metric_name="load_api_settings")
     active_preset = get_active_preset()
+    if req.api_preset_id:
+        # Retrying a historical job may pin the preset it ran with, without
+        # switching the globally active preset.
+        active_preset = next(
+            (preset for preset in get_api_presets() if preset.get("id") == req.api_preset_id),
+            None,
+        )
+        if active_preset is None:
+            raise UnprocessableRequestError("API preset not found")
     active_preset_id = str(active_preset.get("id") or "default")
     api_url = str(active_preset.get("api_url") or "").rstrip("/")
     api_preset_name = active_preset.get("name") or "Untitled preset"
@@ -438,6 +451,7 @@ async def queue_image_job(
         api_preset_name=api_preset_name,
         image_units=image_units,
         mask_applied=mask_applied,
+        api_preset_id=active_preset_id,
     )
     pending_job["webhook_url"] = webhook_url
     try:

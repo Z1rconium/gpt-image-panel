@@ -44,6 +44,7 @@ class GenerateRequest(StrictRequestModel):
     response_format: Optional[Literal["url", "b64_json"]] = None
     webhook_url: Optional[str] = Field(default=None, max_length=2048)
     api_path: Optional[ApiPath] = None
+    api_preset_id: Optional[str] = Field(default=None, max_length=128)
     stream: bool = False
     partial_images: int = Field(default=2, ge=1, le=3)
 
@@ -181,6 +182,7 @@ class GenerateJobStatus(GenerateJobResponse):
     success_count: Optional[int] = Field(default=None, ge=0)
     failure_count: Optional[int] = Field(default=None, ge=0)
     api_path: Optional[str] = None
+    api_preset_id: Optional[str] = None
     api_preset_name: Optional[str] = None
     duration: Optional[str] = None
     stage_timings: dict[str, float] = Field(default_factory=dict)

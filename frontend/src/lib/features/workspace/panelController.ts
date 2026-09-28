@@ -10,6 +10,7 @@ export type PanelUiKey =
   | 'promptSnippetsOpen'
   | 'imagePromptOpen'
   | 'sizeDialogOpen'
+  | 'preferencesOpen'
   | 'editPreviewOpen'
   | 'maskEditorOpen';
 

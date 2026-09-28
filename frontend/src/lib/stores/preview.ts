@@ -41,6 +41,12 @@ export type PromptFormState = {
 
 export const DEFAULT_QUANTITY = 1;
 
+/** Per-submission overrides that are not part of the editable form. */
+export type SubmitOptions = {
+  /** Pin a specific API preset instead of the active one (job retry). */
+  apiPresetId?: string | null;
+};
+
 const initialPreviewState: PreviewState = {
   loading: false,
   error: '',
@@ -136,6 +142,7 @@ function createPreviewStore() {
   let lastRequest: GenerateRequestBody | null = null;
   let lastAction: 'generate' | 'edit' = 'generate';
   let lastPasteBack = true;
+  let lastApiPresetId: string | null = null;
 
   function setPreview(next: PreviewState) {
     set(next);
@@ -170,16 +177,19 @@ function createPreviewStore() {
     form: PromptFormState,
     makeQueuedPreview: (prompt: string, operation: NonNullable<GenerateJobResponse['operation']>) => PreviewState,
     trackJob: (jobId: string) => void,
-    loadJobs?: () => Promise<void>
-  ) {
+    loadJobs?: () => Promise<void>,
+    options: SubmitOptions = {}
+  ): Promise<boolean> {
     const body = buildRequestBody(form);
     const error = submissionError(body);
     if (error) {
       setError(error);
-      return;
+      return false;
     }
+    if (options.apiPresetId) body.api_preset_id = options.apiPresetId;
     lastRequest = body;
     lastAction = 'generate';
+    lastApiPresetId = options.apiPresetId || null;
     set(makeQueuedPreview(body.prompt, 'generation'));
 
     try {
@@ -194,8 +204,10 @@ function createPreviewStore() {
       );
       trackJob(job.job_id);
       if (loadJobs) await loadJobs();
+      return true;
     } catch (error) {
       setSubmissionError(error);
+      return false;
     }
   }
 
@@ -204,20 +216,21 @@ function createPreviewStore() {
     editSource: EditSourceState,
     makeQueuedPreview: (prompt: string, operation: NonNullable<GenerateJobResponse['operation']>) => PreviewState,
     trackJob: (jobId: string) => void,
-    loadJobs?: () => Promise<void>
-  ) {
+    loadJobs?: () => Promise<void>,
+    options: SubmitOptions = {}
+  ): Promise<boolean> {
     const sourceCount = editSourceCount(editSource);
     if (sourceCount === 0) {
       setError(get(t).messages.editSourceRequired);
-      return;
+      return false;
     }
     if (sourceCount > MAX_EDIT_SOURCE_IMAGES) {
       setError(get(t).messages.editSourceLimit(MAX_EDIT_SOURCE_IMAGES));
-      return;
+      return false;
     }
     if (editSource.mask && !isMaskValid(editSource)) {
       setError(get(t).messages.editMaskStale);
-      return;
+      return false;
     }
 
     const body = buildRequestBody(form);
@@ -225,10 +238,12 @@ function createPreviewStore() {
     const error = submissionError(body, true);
     if (error) {
       setError(error);
-      return;
+      return false;
     }
+    if (options.apiPresetId) body.api_preset_id = options.apiPresetId;
     lastRequest = body;
     lastAction = 'edit';
+    lastApiPresetId = options.apiPresetId || null;
     lastPasteBack = form.pasteBack;
     set({ ...makeQueuedPreview(body.prompt, 'edit'), compareSource: comparisonSourceForEdit(editSource) });
 
@@ -264,12 +279,18 @@ function createPreviewStore() {
       );
       trackJob(job.job_id);
       if (loadJobs) await loadJobs();
+      return true;
     } catch (error) {
       setSubmissionError(error);
+      return false;
     }
   }
 
-  function regenerate(setForm: (form: PromptFormState) => void, generate: () => void, edit: () => void) {
+  function regenerate(
+    setForm: (form: PromptFormState) => void,
+    generate: (options?: SubmitOptions) => void,
+    edit: (options?: SubmitOptions) => void
+  ) {
     if (!lastRequest) return;
     setForm({
       prompt: lastRequest.prompt,
@@ -286,8 +307,9 @@ function createPreviewStore() {
       partialImages: lastRequest.partial_images ?? initialPromptFormState.partialImages,
       pasteBack: lastPasteBack
     });
-    if (lastAction === 'edit') edit();
-    else generate();
+    const options = lastApiPresetId ? { apiPresetId: lastApiPresetId } : undefined;
+    if (lastAction === 'edit') edit(options);
+    else generate(options);
   }
 
   function cleanup() {

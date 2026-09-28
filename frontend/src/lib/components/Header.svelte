@@ -11,10 +11,12 @@
   export let imagePromptOpen = false;
   export let jobsOpen = false;
   export let settingsOpen = false;
+  export let preferencesOpen = false;
   export let onOpenPromptSnippets: () => void = () => {};
   export let onOpenImagePrompt: () => void = () => {};
   export let onOpenJobs: () => void = () => {};
   export let onOpenSettings: () => void = () => {};
+  export let onOpenPreferences: () => void = () => {};
   export let onPrefetchPromptSnippets: () => void = () => {};
   export let onPrefetchImagePrompt: () => void = () => {};
   export let onPrefetchJobs: () => void = () => {};
@@ -138,6 +140,17 @@
             </span>
           {/key}
         {/if}
+      </button>
+      <button
+        type="button"
+        class="header-command"
+        title={$t.preferences.title}
+        aria-label={$t.preferences.title}
+        aria-haspopup="dialog"
+        aria-expanded={preferencesOpen}
+        on:click={() => onOpenPreferences()}
+      >
+        <span class="text-sm font-semibold leading-none">{$t.preferences.short}</span>
       </button>
       <button
         type="button"
