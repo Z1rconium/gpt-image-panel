@@ -5,6 +5,7 @@
   import { previewStore, type PreviewCompareSource } from '$lib/stores/preview';
   import { displayImageSize, downloadUrl, filenameFromImageUrl, formatLocalTime, stageLabel, statusLabel, thumbnailUrl } from '$lib/utils/format';
   import { canRunExposure, runExposure, type ExposureHandle } from '$lib/webgl/exposureScene';
+  import ImageTrace from '$lib/components/ImageTrace.svelte';
 
   interface Props {
     onRegenerate?: () => void;
@@ -59,6 +60,12 @@
           thumb_url: imageFilename ? thumbnailUrl(imageFilename) : image_url,
           image_width: image.image_width ?? null,
           image_height: image.image_height ?? null,
+          sent_prompt: image.sent_prompt ?? null,
+          revised_prompt: image.revised_prompt ?? null,
+          reported_size: image.reported_size ?? null,
+          reported_quality: image.reported_quality ?? null,
+          upstream_duration_ms: image.upstream_duration_ms ?? null,
+          chroma_status: image.chroma_status ?? null,
           paste_back: image.paste_back ?? null,
           paste_back_scale: image.paste_back_scale ?? null
         };
@@ -365,5 +372,8 @@
       <div class="min-w-0"><dt class="text-stone-500 dark:text-zinc-400">{$t.common.model}</dt><dd class="mt-1 truncate text-stone-800 dark:text-zinc-200">{job.model || '-'}</dd></div>
       <div><dt class="text-stone-500 dark:text-zinc-400">{$t.common.duration}</dt><dd class="mt-1 text-stone-800 dark:text-zinc-200">{job.duration || '-'}</dd></div>
     </dl>
+    {#if selectedImage}
+      <div class="mt-3"><ImageTrace image={selectedImage} prompt={job.prompt || prompt} requestedSize={job.size} requestedQuality={job.quality} /></div>
+    {/if}
   {/if}
 </section>

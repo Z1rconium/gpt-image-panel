@@ -30,7 +30,7 @@ export type PromptFormState = {
   model: string;
   quality: GenerateRequestBody['quality'];
   outputFormat: GenerateRequestBody['output_format'];
-  background: 'auto' | 'opaque' | 'transparent';
+  background: NonNullable<GenerateRequestBody['background']>;
   outputCompression: string;
   quantity: number | string;
   responseFormat: ResponseFormatDefault;
@@ -90,7 +90,10 @@ function buildRequestBody(form: PromptFormState): GenerateRequestBody {
     body.output_compression = Math.min(Math.max(Number(form.outputCompression), 0), 100);
   }
 
-  if (body.background === 'transparent' && body.output_format === 'jpeg') {
+  if (body.background === 'chroma_green' || body.background === 'chroma_magenta') {
+    body.output_format = 'png';
+    body.output_compression = null;
+  } else if (body.background === 'transparent' && body.output_format === 'jpeg') {
     body.output_format = 'png';
     body.output_compression = null;
   }
@@ -112,6 +115,7 @@ function submissionError(body: GenerateRequestBody, edit = false): string {
   if ((edit || body.api_path === '/v1/images/generations') && !validImageSize(body.size)) return messages.sizeDialog.invalidSize;
   if (body.stream && body.n > 1) return messages.promptForm.streamRequiresSingleImage;
   if (body.stream && !edit && body.api_path !== '/v1/images/generations') return messages.promptForm.streamUnsupportedPath;
+  if (!edit && body.background?.startsWith('chroma_') && body.api_path !== '/v1/images/generations') return messages.promptForm.chromaUnsupportedPath;
   return '';
 }
 
@@ -217,6 +221,7 @@ function createPreviewStore() {
     }
 
     const body = buildRequestBody(form);
+    if (body.background === 'chroma_green' || body.background === 'chroma_magenta') body.background = 'auto';
     const error = submissionError(body, true);
     if (error) {
       setError(error);

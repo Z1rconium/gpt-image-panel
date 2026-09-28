@@ -18,6 +18,12 @@ export type GalleryEntry = {
   completed_at?: string | null;
   image_width?: number | null;
   image_height?: number | null;
+  sent_prompt?: string | null;
+  revised_prompt?: string | null;
+  reported_size?: string | null;
+  reported_quality?: string | null;
+  upstream_duration_ms?: number | null;
+  chroma_status?: string | null;
   model?: string | null;
   quality?: string | null;
   output_format?: string | null;

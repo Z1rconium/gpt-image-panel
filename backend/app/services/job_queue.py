@@ -216,6 +216,12 @@ def gallery_entry_job_image(entry: GalleryEntry) -> dict:
         "filename": entry.filename,
         "image_width": entry.image_width,
         "image_height": entry.image_height,
+        "sent_prompt": entry.sent_prompt,
+        "revised_prompt": entry.revised_prompt,
+        "reported_size": entry.reported_size,
+        "reported_quality": entry.reported_quality,
+        "upstream_duration_ms": entry.upstream_duration_ms,
+        "chroma_status": entry.chroma_status,
         "paste_back": entry.paste_back,
         "paste_back_scale": entry.paste_back_scale,
     }

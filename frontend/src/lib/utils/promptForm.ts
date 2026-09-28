@@ -22,7 +22,7 @@ function normalizeJobOutputFormat(value: string | null | undefined): PromptFormS
 }
 
 function normalizeBackground(value: string | null | undefined): PromptFormState['background'] {
-  if (value === 'opaque' || value === 'transparent') return value;
+  if (value === 'opaque' || value === 'transparent' || value === 'chroma_green' || value === 'chroma_magenta') return value;
   return 'auto';
 }
 
@@ -100,7 +100,7 @@ export function galleryEntryToEditForm(
     model: image.model || fallbackModel || initialPromptFormState.model,
     quality: normalizeJobQuality(image.quality),
     outputFormat: normalizeJobOutputFormat(image.output_format),
-    background: normalizeBackground(image.background),
+    background: image.background?.startsWith('chroma_') ? 'auto' : normalizeBackground(image.background),
     outputCompression: image.output_compression === null || image.output_compression === undefined ? '' : String(image.output_compression),
     quantity: clampQuantity(image.n),
     responseFormat: normalizeJobResponseFormat(image.response_format),

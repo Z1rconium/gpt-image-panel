@@ -1,6 +1,24 @@
 import type { Translation } from '../types';
 
 const zh: Translation = {
+  trace: {
+    title: '图像生成信息',
+    actualPixels: '实际像素尺寸',
+    apiWait: 'API 等待耗时',
+    requestedSize: '请求尺寸',
+    reportedSize: 'API 报告尺寸',
+    requestedQuality: '请求质量',
+    reportedQuality: 'API 报告质量',
+    originalPrompt: '原始提示词',
+    revisedPrompt: 'API 改写提示词',
+    sentPrompt: '实际发送提示词',
+    chromaApplied: '已完成本地去色',
+    chromaNotDetected: '本地去色未识别到纯色背景，已保留原图。',
+    unprovided: '未提供',
+    copy: '复制',
+    imageNumber: (number) => `第 ${number} 张`,
+    selectImage: '选择图像生成信息'
+  },
   common: {
     active: '启用中',
     apply: '应用',
@@ -268,6 +286,10 @@ const zh: Translation = {
     backgroundAuto: '自动',
     backgroundOpaque: '不透明',
     backgroundTransparent: '透明',
+    backgroundChromaGreen: '绿幕本地去色',
+    backgroundChromaMagenta: '洋红幕本地去色',
+    chromaHint: '请求纯色背景，完成后在本地去色并保存为 PNG。',
+    chromaUnsupportedPath: '本地去色需要使用图像生成接口',
     backgroundTransparentNote: '需选择 PNG 或 WebP 格式',
     responseFormat: '响应格式',
     defaultResponseFormat: 'none（省略）',
@@ -767,6 +789,7 @@ const zh: Translation = {
     validating_image_bytes: '校验解码后的图像',
     saving_image_file: '保存图像文件和图库元数据',
     saving_images: '保存图像',
+    chroma_removal: '本地去除纯色背景',
     finalizing_preview: '生成预览图',
     completed: '已完成',
     completed_with_failures: '完成但有失败',

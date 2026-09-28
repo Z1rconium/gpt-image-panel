@@ -23,6 +23,12 @@ type GalleryImageFixture = {
   completed_at: string;
   image_width: number;
   image_height: number;
+  sent_prompt?: string | null;
+  revised_prompt?: string | null;
+  reported_size?: string | null;
+  reported_quality?: string | null;
+  upstream_duration_ms?: number | null;
+  chroma_status?: string | null;
   model: string;
   quality?: string;
   output_format?: string;

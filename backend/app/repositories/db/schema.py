@@ -1109,6 +1109,20 @@ def _migration_mask_paste_back(conn: sqlite3.Connection):
         conn.execute("ALTER TABLE generate_jobs ADD COLUMN paste_back INTEGER")
 
 
+def _migration_image_trace(conn: sqlite3.Connection):
+    columns = _table_columns(conn, "gallery_entries")
+    for name, type_name in (
+        ("sent_prompt", "TEXT"),
+        ("revised_prompt", "TEXT"),
+        ("reported_size", "TEXT"),
+        ("reported_quality", "TEXT"),
+        ("upstream_duration_ms", "INTEGER"),
+        ("chroma_status", "TEXT"),
+    ):
+        if name not in columns:
+            conn.execute(f"ALTER TABLE gallery_entries ADD COLUMN {name} {type_name}")
+
+
 SCHEMA_MIGRATIONS = (
     (1, "baseline_legacy_schema", _migration_baseline_legacy_schema),
     (2, "gallery_filter_options", _migration_gallery_filter_options),
@@ -1135,4 +1149,5 @@ SCHEMA_MIGRATIONS = (
     (23, "gallery_mask_coverage", _migration_gallery_mask_coverage),
     (24, "gallery_mask_coverage_index", _migration_gallery_mask_coverage_index),
     (25, "mask_paste_back", _migration_mask_paste_back),
+    (26, "image_trace", _migration_image_trace),
 )

@@ -39,6 +39,16 @@ def extract_response_image_result(value: Any) -> dict[str, str] | None:
     return None
 
 
+def reported_image_fields(value: Any) -> dict[str, str]:
+    if not isinstance(value, dict):
+        return {}
+    fields = {}
+    for source, target in (("revised_prompt", "revised_prompt"), ("size", "reported_size"), ("quality", "reported_quality")):
+        if isinstance(value.get(source), str) and value[source]:
+            fields[target] = value[source]
+    return fields
+
+
 def extract_response_image_results(result: dict[str, Any]) -> list[dict[str, str]]:
     image_results: list[dict[str, str]] = []
 
@@ -48,7 +58,7 @@ def extract_response_image_results(result: dict[str, Any]) -> list[dict[str, str
 
         image = extract_response_image_result(item.get("result"))
         if image:
-            image_results.append(image)
+            image_results.append({**image, **reported_image_fields(item.get("result")), **reported_image_fields(item)})
 
     return image_results
 
@@ -247,19 +257,30 @@ def _build_image_params(payload: GenerateRequest) -> dict[str, Any]:
     payload.normalize_model_options("/v1/images/generations")
     request_data: dict[str, Any] = {
         "model": payload.model,
-        "prompt": payload.prompt,
+        "prompt": sent_generation_prompt(payload),
         "size": payload.size,
         "n": payload.n,
         "quality": payload.quality,
-        "output_format": payload.output_format,
+        "output_format": "png" if payload.background.startswith("chroma_") else payload.output_format,
     }
     if payload.response_format is not None:
         request_data["response_format"] = payload.response_format
     if payload.output_format != "png" and payload.output_compression is not None:
         request_data["output_compression"] = payload.output_compression
     if payload.background != "auto":
-        request_data["background"] = payload.background
+        request_data["background"] = "opaque" if payload.background.startswith("chroma_") else payload.background
     return request_data
+
+
+def sent_generation_prompt(payload: GenerateRequest) -> str:
+    color = {"chroma_green": "pure bright green (#00FF00)", "chroma_magenta": "pure bright magenta (#FF00FF)"}.get(payload.background)
+    if color is None:
+        return payload.prompt
+    return (
+        f"{payload.prompt}\n\nUse a flat, uniform {color} background covering the entire canvas "
+        "behind the subject. Keep the subject clearly separated from the background; "
+        "do not add shadows, gradients, texture, or objects to the background."
+    )
 
 
 def build_gallery_metadata(

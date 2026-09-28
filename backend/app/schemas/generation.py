@@ -40,7 +40,7 @@ class GenerateRequest(StrictRequestModel):
     quality: ImageQuality = "auto"
     output_format: Literal["png", "jpeg", "webp"] = "png"
     output_compression: Optional[int] = Field(default=None, ge=0, le=100)
-    background: Literal["auto", "opaque", "transparent"] = "auto"
+    background: Literal["auto", "opaque", "transparent", "chroma_green", "chroma_magenta"] = "auto"
     response_format: Optional[Literal["url", "b64_json"]] = None
     webhook_url: Optional[str] = Field(default=None, max_length=2048)
     api_path: Optional[ApiPath] = None
@@ -78,7 +78,10 @@ class GenerateRequest(StrictRequestModel):
             self.output_compression = None
         elif self.output_compression is None:
             self.output_compression = 100
-        if self.background == "transparent" and self.output_format == "jpeg":
+        if self.background in {"transparent", "chroma_green", "chroma_magenta"} and self.output_format == "jpeg":
+            self.output_format = "png"
+            self.output_compression = None
+        if self.background in {"chroma_green", "chroma_magenta"}:
             self.output_format = "png"
             self.output_compression = None
         return self
@@ -92,6 +95,12 @@ class GenerateRequest(StrictRequestModel):
 
 class EditRequest(GenerateRequest):
     paste_back: Optional[bool] = None
+
+    @model_validator(mode="after")
+    def validate_edit_background(self) -> "EditRequest":
+        if self.background in {"chroma_green", "chroma_magenta"}:
+            raise ValueError("Local chroma removal is only available for image generation")
+        return self
 
 
 class GenerateJobResponse(BaseModel):
@@ -128,6 +137,12 @@ class GenerateJobImage(BaseModel):
     filename: str
     image_width: Optional[int] = None
     image_height: Optional[int] = None
+    sent_prompt: Optional[str] = None
+    revised_prompt: Optional[str] = None
+    reported_size: Optional[str] = None
+    reported_quality: Optional[str] = None
+    upstream_duration_ms: Optional[int] = None
+    chroma_status: Optional[str] = None
     paste_back: Optional[str] = None
     paste_back_scale: Optional[float] = None
 

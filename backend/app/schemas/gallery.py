@@ -24,6 +24,12 @@ class GalleryEntry(BaseModel):
     completed_at: Optional[str] = None
     image_width: Optional[int] = None
     image_height: Optional[int] = None
+    sent_prompt: Optional[str] = None
+    revised_prompt: Optional[str] = None
+    reported_size: Optional[str] = None
+    reported_quality: Optional[str] = None
+    upstream_duration_ms: Optional[int] = None
+    chroma_status: Optional[str] = None
     model: Optional[str] = None
     quality: Optional[str] = None
     output_format: Optional[str] = None

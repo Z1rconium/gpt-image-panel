@@ -1,0 +1,59 @@
+<script lang="ts">
+  import { t } from '$lib/i18n';
+  import { copyText } from '$lib/utils/format';
+
+  type TraceImage = {
+    image_width?: number | null;
+    image_height?: number | null;
+    sent_prompt?: string | null;
+    revised_prompt?: string | null;
+    reported_size?: string | null;
+    reported_quality?: string | null;
+    upstream_duration_ms?: number | null;
+    chroma_status?: string | null;
+  };
+
+  let { image, prompt, requestedSize, requestedQuality }: {
+    image: TraceImage;
+    prompt: string;
+    requestedSize?: string | null;
+    requestedQuality?: string | null;
+  } = $props();
+
+  const actualPixels = $derived(
+    image.image_width && image.image_height ? `${image.image_width} × ${image.image_height}` : $t.trace.unprovided
+  );
+  const sentPrompt = $derived(image.sent_prompt || prompt);
+</script>
+
+<section class="rounded-lg border border-stone-200 bg-stone-50/70 p-3 text-xs text-stone-700 dark:border-zinc-800 dark:bg-zinc-950/40 dark:text-zinc-300" aria-label={$t.trace.title}>
+  <h3 class="font-semibold text-stone-800 dark:text-zinc-200">{$t.trace.title}</h3>
+  {#if image.chroma_status === 'not_detected'}
+    <p class="mt-2 rounded-md border border-amber-400/40 bg-amber-500/10 px-2 py-1.5 text-amber-800 dark:text-amber-200" role="status">{$t.trace.chromaNotDetected}</p>
+  {:else if image.chroma_status === 'applied'}
+    <p class="mt-2 text-emerald-700 dark:text-emerald-300">{$t.trace.chromaApplied}</p>
+  {/if}
+  <dl class="mt-2 grid grid-cols-2 gap-x-4 gap-y-2">
+    <div><dt class="text-stone-500">{$t.trace.actualPixels}</dt><dd>{actualPixels}</dd></div>
+    <div><dt class="text-stone-500">{$t.trace.apiWait}</dt><dd>{image.upstream_duration_ms == null ? $t.trace.unprovided : `${image.upstream_duration_ms} ms`}</dd></div>
+    <div><dt class="text-stone-500">{$t.trace.requestedSize}</dt><dd>{requestedSize || $t.trace.unprovided}</dd></div>
+    <div><dt class="text-stone-500">{$t.trace.reportedSize}</dt><dd>{image.reported_size || $t.trace.unprovided}</dd></div>
+    <div><dt class="text-stone-500">{$t.trace.requestedQuality}</dt><dd>{requestedQuality || $t.trace.unprovided}</dd></div>
+    <div><dt class="text-stone-500">{$t.trace.reportedQuality}</dt><dd>{image.reported_quality || $t.trace.unprovided}</dd></div>
+  </dl>
+  {#if image.revised_prompt}
+    <div class="mt-3 grid gap-2 sm:grid-cols-2">
+      <div class="min-w-0 rounded-md border border-stone-200 p-2 dark:border-zinc-800">
+        <div class="flex items-center justify-between gap-2"><strong>{$t.trace.originalPrompt}</strong><button type="button" class="control-focus text-emerald-700 dark:text-emerald-300" onclick={() => void copyText(prompt)}>{$t.trace.copy}</button></div>
+        <p class="mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-words">{prompt}</p>
+      </div>
+      <div class="min-w-0 rounded-md border border-emerald-500/30 bg-emerald-500/5 p-2">
+        <div class="flex items-center justify-between gap-2"><strong>{$t.trace.revisedPrompt}</strong><button type="button" class="control-focus text-emerald-700 dark:text-emerald-300" onclick={() => void copyText(image.revised_prompt || '')}>{$t.trace.copy}</button></div>
+        <p class="mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-words">{image.revised_prompt}</p>
+      </div>
+    </div>
+  {/if}
+  {#if sentPrompt && sentPrompt !== prompt}
+    <details class="mt-3"><summary class="cursor-pointer font-medium">{$t.trace.sentPrompt}</summary><p class="mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-words">{sentPrompt}</p><button type="button" class="control-focus mt-1 text-emerald-700 dark:text-emerald-300" onclick={() => void copyText(sentPrompt)}>{$t.trace.copy}</button></details>
+  {/if}
+</section>

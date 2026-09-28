@@ -14,6 +14,7 @@
   import { isActiveJobStatus, isFailureJobStatus } from '$lib/utils/jobs';
   import { measureItem, observeViewport } from '$lib/actions/virtualList';
   import { buildOffsets, computeRenderWindow, computeSpacers } from '$lib/virtualization/window';
+  import ImageTrace from '$lib/components/ImageTrace.svelte';
 
   type MaybePromise = void | Promise<void>;
   type Props = {
@@ -56,6 +57,7 @@
   let measuredHeights = $state<Record<string, number>>({});
   let expandedErrorIds = $state(new Set<string>());
   let expandedCostIds = $state(new Set<string>());
+  let selectedImageIds = $state<Record<string, string>>({});
   let loadMoreRequest = false;
   let previousResetKey = '';
 
@@ -84,6 +86,7 @@
     measuredHeights = {};
     expandedErrorIds = new Set<string>();
     expandedCostIds = new Set<string>();
+    selectedImageIds = {};
     if (scrollEl) scrollEl.scrollTop = 0;
   });
 
@@ -243,6 +246,7 @@
       <div style={`height: ${topSpacerHeight}px`} aria-hidden="true"></div>
       <div class="space-y-3">
         {#each renderedJobs as job, renderedIndex (job.job_id)}
+          {@const selectedJobImage = job.images?.find((image) => image.image_id === selectedImageIds[job.job_id]) || job.images?.[0]}
           <article
             class="rounded-xl border border-stone-200 bg-stone-50/80 p-4 dark:border-zinc-800 dark:bg-zinc-950/45"
             use:measureItem={{ id: job.job_id, onMeasure: handleItemMeasure }}
@@ -281,6 +285,18 @@
                 <span>{$t.common.duration}: {job.duration}</span>
               {/if}
             </div>
+            {#if selectedJobImage}
+              <div class="mt-3">
+                {#if (job.images?.length || 0) > 1}
+                  <div class="mb-2 flex flex-wrap gap-1" aria-label={$t.trace.selectImage}>
+                    {#each job.images || [] as result, index (result.image_id)}
+                      <button type="button" class={`control-focus rounded-md border px-2 py-1 text-xs ${selectedJobImage.image_id === result.image_id ? 'border-emerald-500 text-emerald-700 dark:text-emerald-300' : 'border-stone-300 text-stone-500 dark:border-zinc-700'}`} aria-pressed={selectedJobImage.image_id === result.image_id} onclick={() => (selectedImageIds = { ...selectedImageIds, [job.job_id]: result.image_id })}>{$t.trace.imageNumber(index + 1)}</button>
+                    {/each}
+                  </div>
+                {/if}
+                <ImageTrace image={selectedJobImage} prompt={job.prompt || ''} requestedSize={job.size} requestedQuality={job.quality} />
+              </div>
+            {/if}
             {#if hasCostInfo(job)}
               <div class="mt-3">
                 <button

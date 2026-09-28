@@ -3,6 +3,7 @@ import asyncio
 import base64
 import json
 import logging
+import time
 from contextlib import asynccontextmanager
 from collections.abc import (
     Callable,
@@ -27,6 +28,7 @@ from ...core.media import (
 )
 from ...core.observability import metrics
 from .edit_paste_back import PasteBackOutcome, paste_back_image
+from .chroma import remove_chroma_background
 from ...runtime.blocking import run_image_operation, upstream_memory_lease
 from ...schemas.gallery import GalleryEntry
 from ...schemas.generation import EditRequest, GenerateRequest
@@ -74,6 +76,8 @@ from .payloads import (
     get_output_format_info,
     is_json_content_type,
     looks_like_json_body,
+    reported_image_fields,
+    sent_generation_prompt,
 )
 from .transport import (
     extract_image_bytes,
@@ -148,6 +152,7 @@ async def save_gallery_entries_from_upstream_data(
     progress: ProgressCallback | None,
     persist_gallery_entry: PersistGalleryEntry,
     transform_image: Callable[[bytes], Any] | None = None,
+    chroma_mode: str | None = None,
 ) -> list[GalleryEntry]:
     data = validate_upstream_image_data(data, payload.n)
     max_bytes = config.MAX_FILE_SIZE_MB * 1024 * 1024
@@ -197,6 +202,26 @@ async def save_gallery_entries_from_upstream_data(
                 filename = f"{image_id}.{detected_extension}"
                 validate_image_header_bytes(image_bytes, filename=filename)
             entry_metadata = {**gallery_metadata}
+            entry_metadata.update(reported_image_fields(image_data))
+            entry_metadata.update({
+                key: image_data[key]
+                for key in ("revised_prompt", "reported_size", "reported_quality")
+                if isinstance(image_data.get(key), str) and image_data[key]
+            })
+            if chroma_mode:
+                if progress:
+                    progress("chroma_removal", f"Removing solid background ({image_index + 1}/{total})")
+                with observe_job_stage("chroma_removal"):
+                    chroma = await run_image_operation(
+                        remove_chroma_background, image_bytes, chroma_mode,
+                        metric_name="remove_chroma_background",
+                    )
+                image_bytes = chroma.image_bytes
+                entry_metadata["chroma_status"] = chroma.status
+                if chroma.status == "applied":
+                    detected_format = "png"
+                    detected_extension = "png"
+                    filename = f"{image_id}.png"
             if transform_image is not None:
                 if progress:
                     progress("paste_back", f"Pasting masked edit ({image_index + 1}/{total})")
@@ -211,6 +236,10 @@ async def save_gallery_entries_from_upstream_data(
                     detected_format or "", format_extension
                 )
                 filename = f"{image_id}.{detected_extension}"
+            if len(image_bytes) > max_bytes:
+                raise UpstreamImageDownloadError(
+                    f"Processed image too large: {len(image_bytes)} bytes (max {max_bytes})"
+                )
             if detected_format:
                 entry_metadata["output_format"] = detected_format
 
@@ -319,7 +348,7 @@ async def consume_streaming_image_response(
         elif event_type.endswith(".completed"):
             b64_json = event.get("b64_json")
             if b64_json:
-                final_data = [{"b64_json": b64_json}]
+                final_data = [{"b64_json": b64_json, **reported_image_fields(event)}]
             usage = event.get("usage")
             if isinstance(usage, dict):
                 raw_usage = usage
@@ -353,6 +382,8 @@ async def call_image_generation_api(
 ) -> list[GalleryEntry]:
     api_path = normalize_api_path(api_path)
     payload.normalize_model_options(api_path)
+    if payload.background.startswith("chroma_") and api_path != "/v1/images/generations":
+        raise UpstreamApiError("Local chroma removal requires /v1/images/generations")
     use_streaming = bool(stream) and api_path == "/v1/images/generations"
     prepared_request = await _prepare_upstream_request(
         api_url=api_url,
@@ -382,6 +413,7 @@ async def call_image_generation_api(
 
     format_info = get_output_format_info(payload.output_format)
     gallery_metadata = build_gallery_metadata(payload, api_path, api_preset_name)
+    gallery_metadata["sent_prompt"] = sent_generation_prompt(payload) if api_path == "/v1/images/generations" else payload.prompt
 
     pool = get_pool()
     download_session = pool.get(timeout_kind=TIMEOUT_UPSTREAM)
@@ -398,6 +430,7 @@ async def call_image_generation_api(
     )
     await memory_lease.__aenter__()
     try:
+        upstream_started = time.monotonic()
         with observe_job_stage("upstream_wait"):
             async with prepared_request.post(
                 json=request_data,
@@ -419,6 +452,7 @@ async def call_image_generation_api(
                         resp, api_path, progress
                     )
 
+        gallery_metadata["upstream_duration_ms"] = max(0, round((time.monotonic() - upstream_started) * 1000))
         if not use_streaming:
             raw_usage = result.get("usage") if isinstance(result, dict) else None
             if raw_usage is None and isinstance(result, dict) and "_sse_events" in result:
@@ -442,7 +476,11 @@ async def call_image_generation_api(
             else:
                 if progress:
                     progress("extracting_generation_data", "Extracting image data array")
-                data = result.get("data", [])
+                raw_data = result.get("data", [])
+                data = [
+                    {**item, **reported_image_fields(result)} if isinstance(item, dict) else item
+                    for item in raw_data
+                ] if isinstance(raw_data, list) else raw_data
         data = validate_upstream_image_data(data, payload.n)
         if not data:
             raise UpstreamApiError(
@@ -463,6 +501,7 @@ async def call_image_generation_api(
             save_message="Saving generated images",
             progress=progress,
             persist_gallery_entry=persist_gallery_entry,
+            chroma_mode=payload.background if payload.background.startswith("chroma_") else None,
         )
     finally:
         await memory_lease.__aexit__(None, None, None)
@@ -563,6 +602,7 @@ async def call_image_edit_api(
         api_preset_name,
         mask_coverage=mask_coverage,
     )
+    gallery_metadata["sent_prompt"] = payload.prompt
     transform_image = None
     if mask_source is not None:
         if payload.paste_back is False:
@@ -632,6 +672,7 @@ async def call_image_edit_api(
                     else "Uploading source images, mask and edit parameters"
                 )
             progress("uploading_edit_image", upload_message)
+        upstream_started = time.monotonic()
         with observe_job_stage("upstream_wait"):
             async with prepared_request.post(
                 data=form,
@@ -648,10 +689,16 @@ async def call_image_edit_api(
                     )
                     record_upstream_usage(result.get("usage") if isinstance(result, dict) else None)
 
+        gallery_metadata["upstream_duration_ms"] = max(0, round((time.monotonic() - upstream_started) * 1000))
+
         if not use_streaming:
             if progress:
                 progress("extracting_edit_data", "Extracting edited image data array")
-            data = result.get("data", [])
+            raw_data = result.get("data", [])
+            data = [
+                {**item, **reported_image_fields(result)} if isinstance(item, dict) else item
+                for item in raw_data
+            ] if isinstance(raw_data, list) else raw_data
         data = validate_upstream_image_data(data, payload.n)
         if not data:
             raise UpstreamApiError(f"No image data in upstream response: {response_text[:200]}")

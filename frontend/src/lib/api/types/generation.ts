@@ -9,10 +9,9 @@ export type GenerateRequestBody = {
   quality: ImageQuality;
   output_format: 'png' | 'jpeg' | 'webp';
   output_compression?: number | null;
-  background?: 'auto' | 'opaque' | 'transparent';
+  background?: 'auto' | 'opaque' | 'transparent' | 'chroma_green' | 'chroma_magenta';
   response_format?: 'url' | 'b64_json' | null;
   api_path?: ApiPath | null;
   stream?: boolean;
   partial_images?: number;
 };
-

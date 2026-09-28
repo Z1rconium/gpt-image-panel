@@ -93,6 +93,15 @@
       promptForm.outputCompression = '';
     }
   });
+  $effect(() => {
+    if (promptForm.background?.startsWith('chroma_')) {
+      if (hasEditSource || promptOnlyMode) promptForm.background = 'auto';
+      else if (promptForm.outputFormat !== 'png') {
+        promptForm.outputFormat = 'png';
+        promptForm.outputCompression = '';
+      }
+    }
+  });
 
   function handleQuantityInput() {
     promptForm.quantity = sanitizeQuantityInput(promptForm.quantity);
@@ -235,7 +244,14 @@
               <option value="auto">{$t.promptForm.backgroundAuto}</option>
               <option value="opaque">{$t.promptForm.backgroundOpaque}</option>
               <option value="transparent">{$t.promptForm.backgroundTransparent}</option>
+              {#if !hasEditSource && !promptOnlyMode}
+                <option value="chroma_green">{$t.promptForm.backgroundChromaGreen}</option>
+                <option value="chroma_magenta">{$t.promptForm.backgroundChromaMagenta}</option>
+              {/if}
             </select>
+            {#if promptForm.background?.startsWith('chroma_')}
+              <p class="mt-1 text-xs text-stone-500 dark:text-zinc-400">{$t.promptForm.chromaHint}</p>
+            {/if}
             {#if promptForm.background === 'transparent' && promptForm.outputFormat === 'jpeg'}
               <p class="mt-1 text-xs text-amber-600 dark:text-amber-400">{$t.promptForm.backgroundTransparentNote}</p>
             {/if}
