@@ -44,6 +44,7 @@ This project is only a self-hosted control panel. It does not provide, proxy, re
 - API presets with base URL/path/key, default model, response format, health checks, SOCKS5 proxy, webhook, and env-ref secret support.
 - Web-managed Overall Config for selected runtime settings, with env/default/override sources and restart/build-only badges.
 - Prompt helper tags, reusable prompt snippets, optional server-side prompt optimizer, and an AI Assistant subsystem for prompt rewrites/checks/variants, parameter recommendations, job diagnosis, edit planning, and gallery image analysis.
+- Agent conversation mode: a multi-turn chat where the model plans and creates images through the existing job queue (batches of images, dependent follow-up rounds, edits of earlier images via `@` references), with server-side history, resumable streaming, and every image saved to the gallery. Requires an AI Assistant endpoint whose model supports function calling.
 - SQLite-backed job queue with SSE progress, cancellation, retry/reuse, persisted history, stage timing metadata, and shared generation/edit concurrency limits.
 - Optional streaming partial-image preview for single-image `/v1/images/generations` and `/v1/images/edits` requests, delivered over SSE as the upstream generates. Job history shows per-job token usage and an estimated USD cost whenever the upstream reports `usage` for a model with a configured rate.
 - Local gallery with cursor pagination, search/filtering, favorites, lightbox navigation, selection-token batch actions, ZIP import/export, thumbnails, byte-size metadata, and async export/import jobs.
@@ -277,6 +278,7 @@ Most runtime options live in `.env.example`. API presets, prompt optimizer, R2 b
 | `DATA_DIR` / `DATABASE_FILE` | SQLite runtime storage. |
 | `PROMPT_OPTIMIZER_*` | Optional server-side prompt optimizer settings. |
 | `AI_ASSISTANT_*` | AI Assistant is enabled by default (`AI_ASSISTANT_ENABLED=false` to disable); reuses `PROMPT_OPTIMIZER_*` for API URL/key/model/timeout/allowlist. `AI_ASSISTANT_MAX_CONCURRENCY` and `AI_ASSISTANT_BATCH_MAX_IMAGES` cap concurrency and gallery batch size. |
+| `AGENT_*` | Limits for Agent conversation mode (conversations, turns per conversation, message and prompt length, attachments, images per batch/turn, history images, tool-round ceiling, image-job timeout, turn lease, event retention, concurrent turns per worker). Agent mode itself is switched on in Settings → AI Assistant and reuses the `PROMPT_OPTIMIZER_*` endpoint. See `.env.example`. |
 | `R2_*` | Optional Cloudflare R2 gallery backup sync settings; custom endpoint hosts require `R2_ENDPOINT_HOST_ALLOWLIST`. |
 | `NODEIMAGE_API_KEY` | Optional NodeImage API key for server-side Gallery uploads. |
 | `PUBLIC_ORIGIN` / `ALLOWED_HOSTS` | Reverse-proxy Host/CSRF hardening. |
@@ -314,6 +316,7 @@ With `ENABLE_METRICS=true`, `/api/metrics` exposes diagnostics for sizing SQLite
 7. Save the preset and run its health check if needed.
 8. Generate images from a prompt, or upload/select source images and run edits.
 9. Use Gallery for reuse, filtering, favorites, batch actions, import/export, and R2 sync.
+10. Optionally enable Agent mode in Settings → AI Assistant (pick a model that supports function calling), then switch to **Agent** in the header. Describe what you want, reference earlier images with `@` (for example `@round-1-image-1`), attach gallery images, and press Ctrl/Cmd+Enter. Use Stop to cancel a running reply; generated images appear in the gallery.
 
 ## GPT Image 2.5
 
@@ -386,6 +389,11 @@ Key backend routes:
 | `POST` | `/api/assistant/image/prompt` | Reverse-prompt one validated local raster image in memory; returns a generation prompt without creating a Gallery record. |
 | `POST` | `/api/assistant/image/prompt/optimize` | Optimize a reverse-prompt result together with its uploaded source image. |
 | `POST/GET` | `/api/assistant/gallery/*` | Describe, reverse-prompt, analyze, batch-analyze, and read AI metadata for local gallery images. |
+| `GET/POST` | `/api/agent/conversations` | List or create Agent conversations. |
+| `GET/PATCH/DELETE` | `/api/agent/conversations/{conversation_id}` | Read (messages, image references, active turn), rename, or delete a conversation; deleting keeps its gallery images. |
+| `POST` | `/api/agent/conversations/{conversation_id}/turns` | Send a message (`client_turn_id` makes retries idempotent); runs as a background turn and returns `202`. |
+| `GET` | `/api/agent/turns/{turn_id}`, `/api/agent/turns/{turn_id}/events` | Read a turn or stream its replayable SSE events (`?after=` or `Last-Event-ID` resumes). |
+| `POST` | `/api/agent/turns/{turn_id}/cancel` | Stop a running turn and cancel its queued image jobs. |
 | `POST` | `/api/generate` | Start generation job. |
 | `POST` | `/api/edits` | Start edit job with uploaded source images, an optional PNG mask, and a paste-back preference. |
 | `POST` | `/api/edits/from-gallery/{image_id}` | Start edit job from an existing gallery image, with the same optional mask and paste-back preference. |

@@ -40,6 +40,7 @@ GPT Image Panel 是一个轻量级 Web UI，用于图像生成、图像编辑、
 - API 预设管理：base URL/path/key、默认模型、response format、健康检查、SOCKS5 代理、webhook、环境变量引用式密钥。
 - Web 管理的 Overall Config，显示 env/default/override 来源，以及需要重启或只影响构建的配置标记。
 - 提示词助手、提示词片段、可选服务端提示词优化器，以及用于提示词改写/检查/变体、参数推荐、任务诊断、编辑规划和 Gallery 图片分析的 AI Assistant 子系统。
+- Agent 对话模式：多轮对话中由模型规划并通过现有作业队列生成图片（批量并发、有依赖的后续轮次、用 `@` 引用并修改历史图片），对话历史保存在服务端，流式回复可断线续传，所有图片都会进入 Gallery。需要 AI Assistant 端点使用支持 function calling 的模型。
 - SQLite 任务队列：SSE 进度、取消、重试/复用、历史记录、阶段耗时、生成/编辑共享并发限制。
 - 可选的流式阶段性图片预览，适用于数量为 1 的 `/v1/images/generations` 和 `/v1/images/edits` 请求，通过 SSE 在上游生成过程中推送。任务历史会展示每个任务的 token 用量,并在上游返回 usage 且该模型已配置费率时显示估算美元费用。
 - 本地 Gallery：游标分页、搜索/筛选、收藏、Lightbox、selection token 批量操作、ZIP 导入导出、缩略图、大小统计、异步导出/导入任务。
@@ -266,6 +267,7 @@ ALLOW_UNAUTHENTICATED=true .venv/bin/granian --interface asgi backend.app.main:a
 | `DATA_DIR` / `DATABASE_FILE` | SQLite 运行时数据。 |
 | `PROMPT_OPTIMIZER_*` | 可选提示词优化器配置。 |
 | `AI_ASSISTANT_*` | AI Assistant 默认启用（设置 `AI_ASSISTANT_ENABLED=false` 关闭）；API URL、密钥、模型、超时、host allowlist 复用 `PROMPT_OPTIMIZER_*`。`AI_ASSISTANT_MAX_CONCURRENCY` / `AI_ASSISTANT_BATCH_MAX_IMAGES` 限制并发和单次 Gallery AI 批量分析图片数。 |
+| `AGENT_*` | Agent 对话模式的各项上限（对话数、每个对话的轮数、消息与提示词长度、附图数、每批/每轮图片数、历史图片数、工具轮数上限、图片任务超时、回合租约、事件保留时间、单 worker 并发回合数）。Agent 模式本身在“设置 → AI 助手”中开启，复用 `PROMPT_OPTIMIZER_*` 端点。详见 `.env.example`。 |
 | `R2_*` | 可选 Cloudflare R2 Gallery 备份配置；自定义 endpoint host 需要配置 `R2_ENDPOINT_HOST_ALLOWLIST`。 |
 | `NODEIMAGE_API_KEY` | 可选 NodeImage API key，用于服务端 Gallery 图片上传；也可在 Web Settings 中配置 env ref。 |
 | `PUBLIC_ORIGIN` / `ALLOWED_HOSTS` | 反向代理 Host/CSRF 加固。 |
@@ -289,6 +291,7 @@ Overall Config 会把 override 持久化到 SQLite。部分配置可热更新；
 7. 保存预设，必要时执行健康检查。
 8. 输入 prompt 生成图片，或上传/选择源图执行编辑。
 9. 在 Gallery 中复用参数、筛选、收藏、批量操作、导入导出、执行 R2 同步或上传到 NodeImage。
+10. 按需在“设置 → AI 助手”中开启 Agent 模式（选择支持 function calling 的模型），然后在页眉切换到 **Agent**。描述需求，用 `@`（如 `@round-1-image-1` 或 `@第1轮图1`）引用之前的图片，也可从 Gallery 添加图片，按 Ctrl/Cmd+Enter 发送。运行中可点“停止”取消；生成的图片会出现在 Gallery。
 
 ## GPT Image 2.5
 
@@ -361,6 +364,11 @@ Overall Config 会把 override 持久化到 SQLite。部分配置可热更新；
 | `POST` | `/api/assistant/image/prompt` | 在内存中校验并反推一张本地位图；返回可用于生成的提示词，不创建 Gallery 记录。 |
 | `POST` | `/api/assistant/image/prompt/optimize` | 结合上传的源图优化反推提示词结果。 |
 | `POST/GET` | `/api/assistant/gallery/*` | 描述、反推 prompt、分析、批量分析和读取本地 Gallery AI metadata。 |
+| `GET/POST` | `/api/agent/conversations` | 列出或创建 Agent 对话。 |
+| `GET/PATCH/DELETE` | `/api/agent/conversations/{conversation_id}` | 读取（消息、图片引用、进行中的回合）、重命名或删除对话；删除对话不会删除其生成的 Gallery 图片。 |
+| `POST` | `/api/agent/conversations/{conversation_id}/turns` | 发送消息（`client_turn_id` 保证重试幂等）；作为后台回合运行，返回 `202`。 |
+| `GET` | `/api/agent/turns/{turn_id}`, `/api/agent/turns/{turn_id}/events` | 读取回合状态，或订阅可回放的 SSE 事件（`?after=` 或 `Last-Event-ID` 续传）。 |
+| `POST` | `/api/agent/turns/{turn_id}/cancel` | 停止运行中的回合，并取消其排队中的图片任务。 |
 | `POST` | `/api/generate` | 创建生成任务。 |
 | `POST` | `/api/edits` | 用上传源图创建编辑任务，支持可选 PNG 蒙版和贴回偏好设置。 |
 | `POST` | `/api/edits/from-gallery/{image_id}` | 用 Gallery 图片创建编辑任务，同样支持可选蒙版和贴回偏好设置。 |
