@@ -537,11 +537,16 @@ async def stream_agent_response(
         sock_connect=min(timeout_seconds, 10.0),
         sock_read=timeout_seconds,
     )
+    # The payload can carry megabytes of base64 image data, so it is encoded
+    # off the event loop; aiohttp's json= would serialize it inline.
+    body = await asyncio.to_thread(
+        lambda: json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    )
     try:
         session = get_pool().get(timeout_kind=TIMEOUT_PROMPT_OPTIMIZER)
         async with session.post(
             endpoint,
-            json=payload,
+            data=body,
             headers=json_headers(api_key),
             allow_redirects=False,
             timeout=timeout,

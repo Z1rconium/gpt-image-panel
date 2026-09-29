@@ -1,7 +1,8 @@
 import json
+from pathlib import Path
 
 from backend.app.integrations.agent_client import AssistantTextItem, UserItem
-from backend.app.services import agent_context, agent_prompt, agent_refs, agent_tools
+from backend.app.services import agent_context, agent_prompt, agent_refs, agent_tools, vision_previews
 from backend.tests.support.contract import *  # noqa: F403
 
 
@@ -203,3 +204,28 @@ async def test_load_preview_data_urls_reads_gallery_images(tmp_path):
     assert [row["ref_label"] for row, _url in loaded] == ["round-1-image-1"]
     assert loaded[0][1].startswith("data:image/")
     assert await agent_context.load_preview_data_urls(rows, max_total_bytes=1) == []
+
+
+@pytest.mark.anyio
+async def test_load_preview_data_urls_reuses_cached_previews(tmp_path, monkeypatch):
+    _configure_runtime(tmp_path)  # noqa: F405
+    db_repo.verify_storage_writable()  # noqa: F405
+    entry = _fake_gallery_entry("ctx-cache-1", "p", "1024x1024", "ctx-cache-1.png")  # noqa: F405
+    rows = [_image(1, 1, "output", "a1", image_id="ctx-cache-1")]
+
+    first = await agent_context.load_preview_data_urls(rows)
+    assert len(first) == 1
+    image_path = (Path(config.IMAGES_DIR) / entry.filename).resolve()
+    assert vision_previews.load_preview_data_url(image_path)[0] == first[0][1]
+
+    calls = {"count": 0}
+    real_prepare = vision_previews.assistant_client.prepare_vision_preview
+
+    def counting_prepare(path):
+        calls["count"] += 1
+        return real_prepare(path)
+
+    monkeypatch.setattr(vision_previews.assistant_client, "prepare_vision_preview", counting_prepare)
+    second = await agent_context.load_preview_data_urls(rows)
+    assert second == first
+    assert calls["count"] == 0
