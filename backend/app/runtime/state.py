@@ -64,6 +64,9 @@ def init_defaults() -> None:
     state.gallery_job_subscribers = {kind: {} for kind in GALLERY_JOB_KINDS}
     state.gallery_job_sse_poller_tasks = {}
     state.thumbnail_dispatcher_kick = asyncio.Event()
+    state.agent_turn_tasks = {}
+    state.agent_turn_wakeups = {}
+    state.agent_last_event_purge_at = 0.0
 
 
 def reset() -> None:

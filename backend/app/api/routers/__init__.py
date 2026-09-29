@@ -1,5 +1,6 @@
 from . import (
     access,
+    agent,
     assistant,
     edits,
     gallery,
@@ -14,6 +15,7 @@ from . import (
 
 routers = (
     access.router,
+    agent.router,
     assistant.router,
     settings.router,
     generate.router,

@@ -93,6 +93,7 @@ async def shutdown() -> None:
             *getattr(state, "gallery_job_sse_poller_tasks", {}).values(),
             *getattr(state, "webhook_delivery_tasks", set()),
             *getattr(state, "generate_job_tasks", {}).values(),
+            *getattr(state, "agent_turn_tasks", {}).values(),
         )
     )
     tasks = [task for task in pending if task and not task.done()]

@@ -283,10 +283,14 @@ def _assistant_settings(draft: AIAssistantSettingsRequest | None = None) -> dict
     return settings
 
 
-def _resolve_runtime(*, vision: bool = False, settings: dict | None = None) -> AssistantRuntime:
+def _resolve_runtime(
+    *, vision: bool = False, agent: bool = False, settings: dict | None = None
+) -> AssistantRuntime:
     settings = presets.effective_ai_assistant_settings(settings if settings is not None else _assistant_settings())
     if not settings.get("enabled"):
         raise InvalidRequestError("AI Assistant is not enabled")
+    if agent and not settings.get("agent_enabled"):
+        raise InvalidRequestError("Agent mode is not enabled")
     api_url = str(settings.get("api_url") or "").strip()
     if not api_url:
         raise InvalidRequestError("Prompt Optimizer endpoint URL is not configured for AI Assistant")
@@ -298,7 +302,7 @@ def _resolve_runtime(*, vision: bool = False, settings: dict | None = None) -> A
         endpoint = assistant_client.validate_assistant_endpoint(api_url, api_path)
     except ValueError as e:
         raise InvalidRequestError(str(e)) from e
-    model_key = "vision_model" if vision else "model"
+    model_key = "agent_model" if agent else "vision_model" if vision else "model"
     model = str(settings.get(model_key) or settings.get("model") or "").strip()
     if not model:
         raise InvalidRequestError("AI Assistant model is not configured")
@@ -308,6 +312,34 @@ def _resolve_runtime(*, vision: bool = False, settings: dict | None = None) -> A
 
 async def _resolve_runtime_async(*, vision: bool = False, settings: dict | None = None) -> AssistantRuntime:
     return await asyncio.to_thread(_resolve_runtime, vision=vision, settings=settings)
+
+
+@dataclass(frozen=True)
+class AgentRuntime:
+    """Endpoint plus the Agent-specific knobs, resolved from the AI Assistant settings."""
+
+    assistant: AssistantRuntime
+    max_tool_rounds: int
+    system_prompt: str
+
+
+def resolve_agent_runtime(settings: dict | None = None) -> AgentRuntime:
+    effective = presets.effective_ai_assistant_settings(
+        settings if settings is not None else _assistant_settings()
+    )
+    runtime = _resolve_runtime(agent=True, settings=effective)
+    return AgentRuntime(
+        assistant=runtime,
+        max_tool_rounds=int(effective.get("agent_max_tool_rounds") or 1),
+        system_prompt=str(effective.get("agent_system_prompt") or ""),
+    )
+
+
+async def resolve_agent_runtime_async(settings: dict | None = None) -> AgentRuntime:
+    return await asyncio.to_thread(resolve_agent_runtime, settings)
+
+
+assistant_request_limit = _assistant_request_limit
 
 
 async def _assistant_json(
