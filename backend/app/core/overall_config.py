@@ -41,6 +41,7 @@ class OverallConfigSpec:
     restart_required: bool = False
     build_only: bool = False
     min_value: float | None = None
+    max_value: float | None = None
     validator: str | None = None
     startup_only: bool = False
 
@@ -104,19 +105,19 @@ OVERALL_CONFIG_REGISTRY: tuple[OverallConfigSpec, ...] = (
     _spec("AI_ASSISTANT_BATCH_MAX_IMAGES", "int", "200", "AI Assistant", "Max images per gallery AI batch analysis job.", min_value=1),
     _spec("AI_ASSISTANT_IMAGE_MAX_SIDE", "int", "1024", "AI Assistant", "Max assistant vision preview side.", min_value=256),
     _spec("AI_ASSISTANT_IMAGE_MAX_BYTES", "int", "1048576", "AI Assistant", "Max assistant vision preview bytes.", min_value=65536),
-    _spec("AGENT_MAX_CONVERSATIONS", "int", "200", "Agent", "Max stored Agent conversations.", min_value=1),
-    _spec("AGENT_MAX_TURNS_PER_CONVERSATION", "int", "100", "Agent", "Max turns in one Agent conversation.", min_value=1),
-    _spec("AGENT_MAX_USER_TEXT_CHARS", "int", "8000", "Agent", "Max characters in one Agent user message.", min_value=1),
-    _spec("AGENT_MAX_IMAGE_PROMPT_CHARS", "int", "4000", "Agent", "Max characters in one Agent image prompt.", min_value=1),
-    _spec("AGENT_MAX_ATTACHMENTS_PER_MESSAGE", "int", "8", "Agent", "Max gallery images attached to one Agent message.", min_value=0),
-    _spec("AGENT_MAX_IMAGES_PER_BATCH", "int", "4", "Agent", "Max images in one generate_image_batch call.", min_value=1),
-    _spec("AGENT_MAX_IMAGES_PER_TURN", "int", "12", "Agent", "Max images generated in one Agent turn.", min_value=1),
-    _spec("AGENT_MAX_TOOL_ROUNDS_CEILING", "int", "12", "Agent", "Upper bound for the per-turn tool round setting.", min_value=1),
-    _spec("AGENT_MAX_HISTORY_IMAGES", "int", "8", "Agent", "Max images re-sent to the model as visual context per request.", min_value=0),
-    _spec("AGENT_IMAGE_JOB_TIMEOUT_SECONDS", "int", "900", "Agent", "How long an Agent turn waits for one image job.", min_value=10),
-    _spec("AGENT_TURN_LEASE_SECONDS", "int", "60", "Agent", "Agent turn lease duration before a stalled turn is interrupted.", min_value=10),
-    _spec("AGENT_EVENT_RETENTION_SECONDS", "int", "3600", "Agent", "How long Agent turn events are kept for stream replay.", min_value=60),
-    _spec("AGENT_MAX_ACTIVE_TURNS", "int", "4", "Agent", "Max concurrently running Agent turns per worker.", min_value=1),
+    _spec("AGENT_MAX_CONVERSATIONS", "int", "200", "Agent", "Max stored Agent conversations.", min_value=1, max_value=2000),
+    _spec("AGENT_MAX_TURNS_PER_CONVERSATION", "int", "100", "Agent", "Max turns in one Agent conversation.", min_value=1, max_value=1000),
+    _spec("AGENT_MAX_USER_TEXT_CHARS", "int", "8000", "Agent", "Max characters in one Agent user message.", min_value=1, max_value=200000),
+    _spec("AGENT_MAX_IMAGE_PROMPT_CHARS", "int", "4000", "Agent", "Max characters in one Agent image prompt.", min_value=1, max_value=20000),
+    _spec("AGENT_MAX_ATTACHMENTS_PER_MESSAGE", "int", "8", "Agent", "Max gallery images attached to one Agent message.", min_value=0, max_value=64),
+    _spec("AGENT_MAX_IMAGES_PER_BATCH", "int", "4", "Agent", "Max images in one generate_image_batch call.", min_value=1, max_value=16),
+    _spec("AGENT_MAX_IMAGES_PER_TURN", "int", "12", "Agent", "Max images generated in one Agent turn.", min_value=1, max_value=64),
+    _spec("AGENT_MAX_TOOL_ROUNDS_CEILING", "int", "12", "Agent", "Upper bound for the per-turn tool round setting.", min_value=1, max_value=64),
+    _spec("AGENT_MAX_HISTORY_IMAGES", "int", "8", "Agent", "Max images re-sent to the model as visual context per request.", min_value=0, max_value=32),
+    _spec("AGENT_IMAGE_JOB_TIMEOUT_SECONDS", "int", "900", "Agent", "How long an Agent turn waits for one image job.", min_value=10, max_value=7200),
+    _spec("AGENT_TURN_LEASE_SECONDS", "int", "60", "Agent", "Agent turn lease duration before a stalled turn is interrupted.", min_value=10, max_value=600),
+    _spec("AGENT_EVENT_RETENTION_SECONDS", "int", "3600", "Agent", "How long Agent turn events are kept for stream replay.", min_value=60, max_value=604800),
+    _spec("AGENT_MAX_ACTIVE_TURNS", "int", "4", "Agent", "Max concurrently running Agent turns per worker.", min_value=1, max_value=64),
     _spec("R2_BACKUP_ENABLED", "bool", "false", "R2 Backup", "Enable R2 backup.", exposed_in_settings=True),
     _spec("R2_ENDPOINT_URL", "string", "", "R2 Backup", "R2 endpoint URL.", exposed_in_settings=True),
     _spec("R2_ENDPOINT_HOST_ALLOWLIST", "string", "", "R2 Backup", "Allowed R2 endpoint hostnames.", validator="host_list", startup_only=True, restart_required=True),
@@ -226,6 +227,8 @@ def coerce_value(spec: OverallConfigSpec, value: str) -> str:
             raise ValueError("must be an integer") from e
         if spec.min_value is not None and parsed_int < spec.min_value:
             raise ValueError(f"must be >= {int(spec.min_value)}")
+        if spec.max_value is not None and parsed_int > spec.max_value:
+            raise ValueError(f"must be <= {int(spec.max_value)}")
         normalized = str(parsed_int)
     elif spec.type == "float":
         try:
@@ -234,6 +237,8 @@ def coerce_value(spec: OverallConfigSpec, value: str) -> str:
             raise ValueError("must be a number") from e
         if spec.min_value is not None and parsed_float < spec.min_value:
             raise ValueError(f"must be >= {spec.min_value:g}")
+        if spec.max_value is not None and parsed_float > spec.max_value:
+            raise ValueError(f"must be <= {spec.max_value:g}")
         normalized = f"{parsed_float:g}"
     else:
         raise ValueError("unsupported config type")

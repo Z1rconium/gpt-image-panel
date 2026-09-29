@@ -4,9 +4,14 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
+from ..core import settings as config
 from ..core.image_models import ImageQuality
 from .common import ShortId, StrictRequestModel
 from .generation import validate_image_size
+
+# Static ceilings so absurd payloads fail before the configured caps are read.
+AGENT_TEXT_CEILING_CHARS = 200_000
+AGENT_ATTACHMENT_CEILING = 64
 
 AgentTurnStatusValue = Literal["queued", "running", "completed", "failed", "cancelled", "interrupted"]
 AgentMessageStatusValue = Literal["streaming", "complete", "failed", "cancelled", "interrupted"]
@@ -46,8 +51,10 @@ class AgentImageParams(StrictRequestModel):
 
 class AgentTurnRequest(StrictRequestModel):
     client_turn_id: str = Field(..., min_length=8, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
-    text: str = Field(..., min_length=1)
-    attachments: list[AgentAttachment] = Field(default_factory=list)
+    text: str = Field(..., min_length=1, max_length=AGENT_TEXT_CEILING_CHARS)
+    attachments: list[AgentAttachment] = Field(
+        default_factory=list, max_length=AGENT_ATTACHMENT_CEILING
+    )
     image_params: AgentImageParams = Field(default_factory=AgentImageParams)
 
     @field_validator("text")
@@ -55,6 +62,17 @@ class AgentTurnRequest(StrictRequestModel):
     def validate_text(cls, value: str) -> str:
         if not value.strip():
             raise ValueError("text must not be empty")
+        if len(value) > config.AGENT_MAX_USER_TEXT_CHARS:
+            raise ValueError(f"text exceeds {config.AGENT_MAX_USER_TEXT_CHARS} characters")
+        return value
+
+    @field_validator("attachments")
+    @classmethod
+    def validate_attachments(cls, value: list[AgentAttachment]) -> list[AgentAttachment]:
+        if len(value) > config.AGENT_MAX_ATTACHMENTS_PER_MESSAGE:
+            raise ValueError(
+                f"at most {config.AGENT_MAX_ATTACHMENTS_PER_MESSAGE} attachments are allowed"
+            )
         return value
 
 

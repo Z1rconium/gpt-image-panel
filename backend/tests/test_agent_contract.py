@@ -217,6 +217,20 @@ def test_agent_happy_path_generates_batch_and_summarizes(client, monkeypatch):
     assert [name for _s, name, _d in resumed] == ["turn.completed"]
 
 
+def test_agent_event_stream_ignores_oversized_last_event_id(client, monkeypatch):
+    enable_agent(client)
+    install_model(monkeypatch, [text_round("hi")])
+    conversation_id = new_conversation(client)
+    accepted, _status = run_turn(client, conversation_id, "hello")
+    response = client.get(
+        f"/api/agent/turns/{accepted['turn_id']}/events",
+        headers={"Last-Event-ID": "9" * 5000},
+    )
+    assert response.status_code == 200
+    names = [name for _s, name, _d in parse_sse(response.text)]
+    assert names[0] == "turn.started" and names[-1] == "turn.completed"
+
+
 def test_agent_dependent_image_uses_edit_path_with_ref(client, monkeypatch):
     enable_agent(client)
     model = install_model(

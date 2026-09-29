@@ -7,7 +7,7 @@ from pathlib import Path
 
 from ..core import settings as config
 from ..core.errors import DomainError, InvalidRequestError, NotFoundError
-from ..core.media import image_content_type_for_filename, safe_image_path
+from ..core.media import IMAGE_FILE_EXTENSIONS, image_content_type_for_filename, safe_image_path
 from ..repositories.gallery.queries import get_gallery_entry
 from ..repositories.image_files import validate_and_normalize_image_file
 from ..runtime.blocking import run_db_operation, run_image_operation
@@ -20,14 +20,19 @@ EDIT_SOURCE_CHUNK_BYTES = 1024 * 1024
 
 
 def create_edit_source_temp_path(filename: str) -> tuple[int, Path]:
-    suffix = Path(filename or "").suffix.lower() or ".img"
+    suffix = Path(filename or "").suffix.lower()
+    if suffix not in IMAGE_FILE_EXTENSIONS:
+        suffix = ".img"
     temp_dir = Path(config.DATA_DIR) / "edit-sources"
     temp_dir.mkdir(parents=True, exist_ok=True)
-    fd, temp_name = tempfile.mkstemp(
-        prefix="edit-source-",
-        suffix=suffix,
-        dir=temp_dir,
-    )
+    try:
+        fd, temp_name = tempfile.mkstemp(
+            prefix="edit-source-",
+            suffix=suffix,
+            dir=temp_dir,
+        )
+    except OSError as e:
+        raise InvalidRequestError("The image filename cannot be used for this upload") from e
     return fd, Path(temp_name)
 
 

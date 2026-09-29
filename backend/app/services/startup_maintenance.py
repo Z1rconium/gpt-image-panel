@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import time
 from pathlib import Path
 
 from ..core import settings as config
@@ -27,17 +28,24 @@ from ..runtime.state import (
 
 logger = logging.getLogger(__name__)
 
+# Recent staging files may belong to a turn running in another worker; only
+# files this old can be assumed abandoned.
+EDIT_SOURCE_MIN_STALE_AGE_SECONDS = 6 * 3600.0
+
 
 def cleanup_stale_edit_source_files() -> None:
     temp_dir = Path(config.DATA_DIR) / "edit-sources"
     if not temp_dir.exists():
         return
 
+    cutoff = time.time() - EDIT_SOURCE_MIN_STALE_AGE_SECONDS
     removed = 0
     for temp_path in temp_dir.glob("edit-source-*"):
         if not temp_path.is_file():
             continue
         try:
+            if temp_path.stat().st_mtime > cutoff:
+                continue
             temp_path.unlink()
             removed += 1
         except OSError:

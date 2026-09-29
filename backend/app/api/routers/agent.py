@@ -86,7 +86,8 @@ async def stream_agent_turn_events(
     last_event_id: str | None = Header(default=None),
 ):
     cursor = after
-    if last_event_id and last_event_id.isdigit():
+    # Only short digit strings are usable cursors; longer ones would raise on int().
+    if last_event_id and last_event_id.isdigit() and len(last_event_id) <= 18:
         cursor = max(cursor, int(last_event_id))
     body = await agent_stream.stream_turn_events(
         turn_id=turn_id,
