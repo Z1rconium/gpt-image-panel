@@ -298,6 +298,10 @@ class AIAssistantSettingsResponse(BaseModel):
     api_url: str = ""
     model: str = "gpt-4o-mini"
     vision_model: str = "gpt-4o-mini"
+    agent_enabled: bool = False
+    agent_model: str = ""
+    agent_max_tool_rounds: int = 4
+    agent_system_prompt: str = ""
     timeout_seconds: int = 60
     api_path: AssistantApiPath = "/v1/chat/completions"
     api_key_masked: str = "***"
@@ -320,6 +324,10 @@ class AIAssistantSettingsRequest(StrictRequestModel):
         description="Deprecated no-op. AI Assistant reuses the Prompt Optimizer text model.",
     )
     vision_model: Optional[str] = Field(default=None, max_length=200)
+    agent_enabled: Optional[bool] = None
+    agent_model: Optional[str] = Field(default=None, max_length=200)
+    agent_max_tool_rounds: Optional[int] = Field(default=None, ge=1, le=64)
+    agent_system_prompt: Optional[str] = Field(default=None, max_length=4000)
     timeout_seconds: Optional[int] = Field(
         default=None,
         ge=1,

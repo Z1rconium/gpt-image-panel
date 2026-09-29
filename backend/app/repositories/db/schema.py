@@ -1180,6 +1180,141 @@ def _migration_generate_job_preset_id(conn: sqlite3.Connection):
         conn.execute("ALTER TABLE generate_jobs ADD COLUMN api_preset_id TEXT")
 
 
+def _migration_agent_conversations(conn: sqlite3.Connection):
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS agent_conversations (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL DEFAULT '',
+            title_is_auto INTEGER NOT NULL DEFAULT 1,
+            message_count INTEGER NOT NULL DEFAULT 0,
+            turn_count INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_agent_conversations_updated
+            ON agent_conversations(updated_at DESC)
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS agent_turns (
+            id TEXT PRIMARY KEY,
+            conversation_id TEXT NOT NULL,
+            round_no INTEGER NOT NULL,
+            client_turn_id TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'queued'
+                CHECK (status IN ('queued', 'running', 'completed', 'failed', 'cancelled', 'interrupted')),
+            cancel_requested INTEGER NOT NULL DEFAULT 0,
+            lease_owner TEXT,
+            lease_expires_at TEXT,
+            rounds_used INTEGER NOT NULL DEFAULT 0,
+            model TEXT NOT NULL DEFAULT '',
+            image_params_json TEXT NOT NULL DEFAULT '{}',
+            error_message TEXT,
+            user_message_id TEXT,
+            assistant_message_id TEXT,
+            created_at TEXT NOT NULL,
+            started_at TEXT,
+            finished_at TEXT,
+            FOREIGN KEY(conversation_id) REFERENCES agent_conversations(id) ON DELETE CASCADE,
+            UNIQUE(conversation_id, client_turn_id),
+            UNIQUE(conversation_id, round_no)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_turns_single_active
+            ON agent_turns(conversation_id)
+            WHERE status IN ('queued', 'running')
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_agent_turns_status_lease
+            ON agent_turns(status, lease_expires_at)
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS agent_messages (
+            id TEXT PRIMARY KEY,
+            conversation_id TEXT NOT NULL,
+            turn_id TEXT NOT NULL,
+            seq INTEGER NOT NULL,
+            round_no INTEGER NOT NULL,
+            role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+            text TEXT NOT NULL DEFAULT '',
+            blocks_json TEXT NOT NULL DEFAULT '[]',
+            status TEXT NOT NULL DEFAULT 'complete',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY(conversation_id) REFERENCES agent_conversations(id) ON DELETE CASCADE,
+            FOREIGN KEY(turn_id) REFERENCES agent_turns(id) ON DELETE CASCADE,
+            UNIQUE(conversation_id, seq)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS agent_message_images (
+            id TEXT PRIMARY KEY,
+            conversation_id TEXT NOT NULL,
+            turn_id TEXT NOT NULL,
+            message_id TEXT NOT NULL,
+            round_no INTEGER NOT NULL,
+            image_index INTEGER NOT NULL,
+            role TEXT NOT NULL CHECK (role IN ('input', 'output')),
+            ref_label TEXT NOT NULL,
+            image_id TEXT,
+            job_id TEXT,
+            item_id TEXT,
+            prompt TEXT NOT NULL DEFAULT '',
+            mode TEXT NOT NULL DEFAULT 'generate',
+            status TEXT NOT NULL DEFAULT 'pending'
+                CHECK (status IN ('pending', 'succeeded', 'failed', 'cancelled')),
+            error TEXT,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(conversation_id) REFERENCES agent_conversations(id) ON DELETE CASCADE,
+            FOREIGN KEY(turn_id) REFERENCES agent_turns(id) ON DELETE CASCADE,
+            FOREIGN KEY(message_id) REFERENCES agent_messages(id) ON DELETE CASCADE,
+            FOREIGN KEY(image_id) REFERENCES gallery_entries(id) ON DELETE SET NULL,
+            UNIQUE(conversation_id, ref_label)
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_agent_message_images_image ON agent_message_images(image_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_agent_message_images_message ON agent_message_images(message_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_agent_message_images_turn ON agent_message_images(turn_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_agent_message_images_job ON agent_message_images(job_id)"
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS agent_turn_events (
+            turn_id TEXT NOT NULL,
+            seq INTEGER NOT NULL,
+            type TEXT NOT NULL,
+            data_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY(turn_id, seq),
+            FOREIGN KEY(turn_id) REFERENCES agent_turns(id) ON DELETE CASCADE
+        )
+        """
+    )
+
+
 SCHEMA_MIGRATIONS = (
     (1, "baseline_legacy_schema", _migration_baseline_legacy_schema),
     (2, "gallery_filter_options", _migration_gallery_filter_options),
@@ -1211,4 +1346,5 @@ SCHEMA_MIGRATIONS = (
     (28, "api_preset_prompt_guard", _migration_api_preset_prompt_guard),
     (29, "gallery_diagnostics", _migration_gallery_diagnostics),
     (30, "generate_job_preset_id", _migration_generate_job_preset_id),
+    (31, "agent_conversations", _migration_agent_conversations),
 )

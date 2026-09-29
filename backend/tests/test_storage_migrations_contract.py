@@ -342,6 +342,35 @@ def test_generate_job_preset_id_migration(tmp_path):
     assert name == "generate_job_preset_id"
 
 
+def test_agent_conversations_migration(tmp_path):
+    _configure_runtime(tmp_path)
+    db_repo.verify_storage_writable()
+    with db_repo._connect() as conn:
+        tables = {
+            row["name"]
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+        }
+        indexes = {
+            row["name"]
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'index'")
+        }
+        name = conn.execute("SELECT name FROM schema_migrations WHERE version = 31").fetchone()["name"]
+        image_fks = {
+            (row["table"], row["on_delete"])
+            for row in conn.execute("PRAGMA foreign_key_list(agent_message_images)")
+        }
+    assert {
+        "agent_conversations",
+        "agent_turns",
+        "agent_messages",
+        "agent_message_images",
+        "agent_turn_events",
+    }.issubset(tables)
+    assert "idx_agent_turns_single_active" in indexes
+    assert name == "agent_conversations"
+    assert ("gallery_entries", "SET NULL") in image_fks
+
+
 def test_performance_indexes_are_created(tmp_path):
     _configure_runtime(tmp_path)
     db_repo.verify_storage_writable()

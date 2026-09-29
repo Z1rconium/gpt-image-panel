@@ -246,6 +246,18 @@ def _normalize_prompt_optimizer_settings(settings: dict | None) -> dict:
     }
 
 
+def _normalize_agent_settings(settings: dict, default: dict) -> dict:
+    return {
+        "agent_enabled": _coerce_bool(settings.get("agent_enabled"), default["agent_enabled"]),
+        "agent_model": str(settings.get("agent_model") or "").strip()[:200],
+        "agent_max_tool_rounds": min(
+            max(1, _coerce_positive_int(settings.get("agent_max_tool_rounds"), default["agent_max_tool_rounds"])),
+            config.AGENT_MAX_TOOL_ROUNDS_CEILING,
+        ),
+        "agent_system_prompt": str(settings.get("agent_system_prompt") or "").strip()[:4000],
+    }
+
+
 def _normalize_ai_assistant_settings(settings: dict | None) -> dict:
     default = _default_ai_assistant_settings()
     if not isinstance(settings, dict):
@@ -257,6 +269,7 @@ def _normalize_ai_assistant_settings(settings: dict | None) -> dict:
     return {
         "enabled": _coerce_bool(settings.get("enabled"), default["enabled"]),
         "vision_model": vision_model,
+        **_normalize_agent_settings(settings, default),
     }
 
 

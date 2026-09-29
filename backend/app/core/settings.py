@@ -365,6 +365,21 @@ AI_ASSISTANT_IMAGE_MAX_BYTES = max(
     int(os.getenv("AI_ASSISTANT_IMAGE_MAX_BYTES", str(1024 * 1024))),
 )
 
+# ── Agent conversations ─────────────────────────────────────────
+AGENT_MAX_CONVERSATIONS = max(1, int(os.getenv("AGENT_MAX_CONVERSATIONS", "200")))
+AGENT_MAX_TURNS_PER_CONVERSATION = max(1, int(os.getenv("AGENT_MAX_TURNS_PER_CONVERSATION", "100")))
+AGENT_MAX_USER_TEXT_CHARS = max(1, int(os.getenv("AGENT_MAX_USER_TEXT_CHARS", "8000")))
+AGENT_MAX_IMAGE_PROMPT_CHARS = max(1, int(os.getenv("AGENT_MAX_IMAGE_PROMPT_CHARS", "4000")))
+AGENT_MAX_ATTACHMENTS_PER_MESSAGE = max(0, int(os.getenv("AGENT_MAX_ATTACHMENTS_PER_MESSAGE", "8")))
+AGENT_MAX_IMAGES_PER_BATCH = max(1, int(os.getenv("AGENT_MAX_IMAGES_PER_BATCH", "4")))
+AGENT_MAX_IMAGES_PER_TURN = max(1, int(os.getenv("AGENT_MAX_IMAGES_PER_TURN", "12")))
+AGENT_MAX_TOOL_ROUNDS_CEILING = max(1, int(os.getenv("AGENT_MAX_TOOL_ROUNDS_CEILING", "12")))
+AGENT_MAX_HISTORY_IMAGES = max(0, int(os.getenv("AGENT_MAX_HISTORY_IMAGES", "8")))
+AGENT_IMAGE_JOB_TIMEOUT_SECONDS = max(10, int(os.getenv("AGENT_IMAGE_JOB_TIMEOUT_SECONDS", "900")))
+AGENT_TURN_LEASE_SECONDS = max(10, int(os.getenv("AGENT_TURN_LEASE_SECONDS", "60")))
+AGENT_EVENT_RETENTION_SECONDS = max(60, int(os.getenv("AGENT_EVENT_RETENTION_SECONDS", "3600")))
+AGENT_MAX_ACTIVE_TURNS = max(1, int(os.getenv("AGENT_MAX_ACTIVE_TURNS", "4")))
+
 # ── Cloudflare R2 gallery backup ─────────────────────────────────
 R2_BACKUP_ENABLED = env_flag("R2_BACKUP_ENABLED")
 R2_ENDPOINT_URL = os.getenv("R2_ENDPOINT_URL", "").strip()

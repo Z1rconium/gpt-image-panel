@@ -29,6 +29,10 @@ def default_ai_assistant_settings() -> dict:
     return {
         "enabled": config.AI_ASSISTANT_ENABLED,
         "vision_model": config.AI_ASSISTANT_VISION_MODEL or config.PROMPT_OPTIMIZER_MODEL,
+        "agent_enabled": False,
+        "agent_model": "",
+        "agent_max_tool_rounds": 4,
+        "agent_system_prompt": "",
     }
 
 

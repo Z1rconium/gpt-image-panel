@@ -195,6 +195,13 @@ def normalize_ai_assistant_settings(raw: dict | None) -> dict:
     return {
         "enabled": bool(raw.get("enabled", defaults["enabled"])),
         "vision_model": vision_model,
+        "agent_enabled": bool(raw.get("agent_enabled", defaults["agent_enabled"])),
+        "agent_model": str(raw.get("agent_model") or "").strip()[:200],
+        "agent_max_tool_rounds": min(
+            max(1, _coerce_positive_int(raw.get("agent_max_tool_rounds"), defaults["agent_max_tool_rounds"])),
+            config.AGENT_MAX_TOOL_ROUNDS_CEILING,
+        ),
+        "agent_system_prompt": str(raw.get("agent_system_prompt") or "").strip()[:4000],
     }
 
 
@@ -480,6 +487,10 @@ def build_ai_assistant_settings_response(raw: dict | None) -> AIAssistantSetting
             config.PROMPT_OPTIMIZER_TIMEOUT_SECONDS,
         ),
         api_path=_normalize_assistant_api_path(raw.get("api_path")),
+        agent_enabled=bool(raw.get("agent_enabled", False)),
+        agent_model=str(raw.get("agent_model") or "").strip(),
+        agent_max_tool_rounds=int(raw.get("agent_max_tool_rounds") or 4),
+        agent_system_prompt=str(raw.get("agent_system_prompt") or ""),
         **key_fields,
     )
 
@@ -706,7 +717,15 @@ def apply_ai_assistant_settings(current: dict | None, req_assistant: object) -> 
         current["enabled"] = req_assistant.enabled
     if hasattr(req_assistant, "vision_model") and req_assistant.vision_model is not None:
         current["vision_model"] = req_assistant.vision_model.strip()
-    return current
+    if getattr(req_assistant, "agent_enabled", None) is not None:
+        current["agent_enabled"] = bool(req_assistant.agent_enabled)
+    if getattr(req_assistant, "agent_model", None) is not None:
+        current["agent_model"] = req_assistant.agent_model.strip()
+    if getattr(req_assistant, "agent_max_tool_rounds", None) is not None:
+        current["agent_max_tool_rounds"] = int(req_assistant.agent_max_tool_rounds)
+    if getattr(req_assistant, "agent_system_prompt", None) is not None:
+        current["agent_system_prompt"] = req_assistant.agent_system_prompt.strip()
+    return normalize_ai_assistant_settings(current)
 
 
 def apply_r2_backup_settings(current: dict | None, req_r2: object) -> dict:
