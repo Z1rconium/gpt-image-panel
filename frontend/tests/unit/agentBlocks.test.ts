@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AgentBlock, AgentImageTaskBlock, AgentStreamEvent } from '$lib/api/types/agent';
-import { agentBlocksText, applyAgentEvent, isTerminalAgentEvent, upsertAgentBlock } from '$lib/utils/agentBlocks';
+import { agentBlocksText, applyAgentEvent, groupAgentBlocks, isTerminalAgentEvent, upsertAgentBlock } from '$lib/utils/agentBlocks';
 
 function task(overrides: Partial<AgentImageTaskBlock> = {}): AgentImageTaskBlock {
   return {
@@ -77,5 +77,35 @@ describe('isTerminalAgentEvent', () => {
   it('flags only the events that end a turn', () => {
     expect(['turn.completed', 'turn.failed', 'turn.cancelled'].every((name) => isTerminalAgentEvent(name as never))).toBe(true);
     expect(['turn.started', 'block.upsert', 'block.text'].some((name) => isTerminalAgentEvent(name as never))).toBe(false);
+  });
+});
+
+describe('groupAgentBlocks', () => {
+  it('merges consecutive image tasks, ignoring blank text between them', () => {
+    const groups = groupAgentBlocks([
+      { id: 't1', type: 'text', text: 'Making three.' },
+      { id: 'p1', type: 'batch_params', call_id: 'c1', status: 'ready', items: [] },
+      task({ id: 'i1' }),
+      task({ id: 'i2', image_index: 2, ref_label: 'round-1-image-2' }),
+      { id: 't2', type: 'text', text: '   ' },
+      task({ id: 'i3', image_index: 3, ref_label: 'round-1-image-3' }),
+      { id: 'e1', type: 'error', message: 'boom' }
+    ]);
+    expect(groups.map((group) => group.kind)).toEqual(['text', 'batch', 'images', 'error']);
+    const images = groups[2];
+    expect(images.kind === 'images' && images.blocks.map((block) => block.id)).toEqual(['i1', 'i2', 'i3']);
+  });
+
+  it('starts a new image group after real text', () => {
+    const groups = groupAgentBlocks([
+      task({ id: 'i1' }),
+      { id: 't1', type: 'text', text: 'Now the second batch.' },
+      task({ id: 'i2', image_index: 2, ref_label: 'round-1-image-2' })
+    ]);
+    expect(groups.map((group) => group.kind)).toEqual(['images', 'text', 'images']);
+  });
+
+  it('returns nothing for an empty message', () => {
+    expect(groupAgentBlocks([])).toEqual([]);
   });
 });

@@ -121,6 +121,38 @@ type MockOptions = {
   nodeImageCancelFailure?: boolean;
   nodeImageCancelStatusFailure?: boolean;
   nodeImageCancelReturnsCompleted?: boolean;
+  /** How the mocked Agent answers a turn: a full reply, a failure, or a reply that never finishes. */
+  agentScenario?: 'reply' | 'fail' | 'hold';
+  agentConversations?: AgentConversationFixture[];
+};
+
+type AgentBlockFixture = Record<string, unknown> & { id: string; type: string };
+type AgentEventFixture = { event: string; data: Record<string, unknown> };
+type AgentMessageFixture = {
+  id: string;
+  turn_id: string;
+  seq: number;
+  round_no: number;
+  role: 'user' | 'assistant';
+  text: string;
+  blocks: AgentBlockFixture[];
+  status: string;
+  created_at: string;
+  updated_at: string;
+};
+type AgentTurnFixture = {
+  id: string;
+  conversationId: string;
+  roundNo: number;
+  status: 'running' | 'completed' | 'failed' | 'cancelled';
+  events: AgentEventFixture[];
+  attachments: string[];
+};
+type AgentConversationFixture = {
+  id: string;
+  title: string;
+  messages: AgentMessageFixture[];
+  turns: AgentTurnFixture[];
 };
 
 const baseGalleryImages: GalleryImageFixture[] = [
@@ -199,6 +231,10 @@ const settingsResponse = {
     api_url: 'https://example.com',
     model: 'gpt-4o-mini',
     vision_model: 'gpt-4o-mini',
+    agent_enabled: false,
+    agent_model: '',
+    agent_max_tool_rounds: 4,
+    agent_system_prompt: '',
     timeout_seconds: 60,
     api_path: '/v1/chat/completions',
     api_key_masked: '********',
@@ -522,6 +558,150 @@ async function mockApi(page: Page, options: MockOptions = {}) {
       presets: mockedSettings.presets.map((preset) => ({ ...preset, supports_mask: false }))
     };
   }
+  const agentConversations: AgentConversationFixture[] = structuredClone(options.agentConversations ?? []);
+  let agentIdSeq = 0;
+  const agentScenario = options.agentScenario ?? 'reply';
+
+  function agentNow() {
+    return '2026-05-18T12:00:00Z';
+  }
+
+  function reduceAgentBlocks(events: AgentEventFixture[]): AgentBlockFixture[] {
+    let blocks: AgentBlockFixture[] = [];
+    for (const { event, data } of events) {
+      if (event === 'block.upsert') {
+        const block = data.block as AgentBlockFixture;
+        const index = blocks.findIndex((item) => item.id === block.id);
+        blocks = index === -1 ? [...blocks, block] : blocks.map((item, i) => (i === index ? block : item));
+      } else if (event === 'block.text') {
+        blocks = blocks.map((item) =>
+          item.id === data.block_id ? { ...item, text: `${item.text as string}${data.delta as string}` } : item
+        );
+      }
+    }
+    return blocks;
+  }
+
+  function agentScript(roundNo: number): AgentEventFixture[] {
+    const started: AgentEventFixture = { event: 'turn.started', data: { turn_id: 'ignored', round_no: roundNo, model: 'agent-model' } };
+    if (agentScenario === 'fail') {
+      return [
+        started,
+        { event: 'block.upsert', data: { block: { id: 'e1', type: 'error', message: 'The model endpoint rejected the request.' } } },
+        { event: 'turn.failed', data: { message: 'The model endpoint rejected the request.' } }
+      ];
+    }
+    const task = (status: string, stage: string) => ({
+      id: 'i1',
+      type: 'image_task',
+      call_id: 'call-1',
+      item_id: 'fox',
+      ref_label: `round-${roundNo}-image-1`,
+      round_no: roundNo,
+      image_index: 1,
+      job_id: 'job-agent-1',
+      prompt: 'a red fox in snow',
+      mode: 'generate',
+      source_refs: [],
+      status,
+      stage,
+      error: null,
+      image_id: status === 'succeeded' ? 'img-1' : null,
+      filename: status === 'succeeded' ? 'img-1.png' : null
+    });
+    const events: AgentEventFixture[] = [
+      started,
+      { event: 'block.upsert', data: { block: { id: 't1', type: 'text', text: '' } } },
+      { event: 'block.text', data: { block_id: 't1', delta: 'Here are ' } },
+      { event: 'block.text', data: { block_id: 't1', delta: 'your images.' } },
+      { event: 'block.upsert', data: { block: { id: 'p1', type: 'batch_params', call_id: 'call-1', status: 'ready', items: [{ id: 'fox', prompt: 'a red fox in snow' }] } } },
+      { event: 'block.upsert', data: { block: task('pending', 'queued') } },
+      { event: 'block.upsert', data: { block: task('succeeded', 'completed') } }
+    ];
+    if (agentScenario === 'reply') events.push({ event: 'turn.completed', data: { rounds_used: 1 } });
+    return events;
+  }
+
+  function agentSse(turn: AgentTurnFixture, afterId: number) {
+    const frames = turn.events
+      .map((event, index) => ({ id: index + 1, ...event }))
+      .filter((event) => event.id > afterId)
+      .map((event) => `id: ${event.id}\nevent: ${event.event}\ndata: ${JSON.stringify(event.data)}\n\n`);
+    return `retry: 100\n\n${frames.join('')}`;
+  }
+
+  function agentDetail(conversation: AgentConversationFixture) {
+    const active = conversation.turns.find((turn) => turn.status === 'running');
+    const messages = conversation.messages.map((message) => {
+      if (message.role !== 'assistant') return message;
+      const turn = conversation.turns.find((candidate) => candidate.id === message.turn_id);
+      if (!turn || turn.status === 'running') return { ...message, blocks: [], status: 'streaming' };
+      return {
+        ...message,
+        blocks: reduceAgentBlocks(turn.events),
+        status: turn.status === 'completed' ? 'complete' : turn.status
+      };
+    });
+    const imageRefs = conversation.turns.flatMap((turn) => {
+      const blocks = turn.status === 'running' ? [] : reduceAgentBlocks(turn.events);
+      const inputs = turn.attachments.map((imageId, index) => ({
+        ref_label: `round-${turn.roundNo}-input-${index + 1}`,
+        round_no: turn.roundNo,
+        image_index: index + 1,
+        role: 'input',
+        image_id: imageId,
+        filename: `${imageId}.png`,
+        job_id: null,
+        item_id: null,
+        prompt: '',
+        mode: 'generate',
+        status: 'succeeded',
+        error: null,
+        deleted: false,
+        message_id: conversation.messages.find((m) => m.turn_id === turn.id && m.role === 'user')?.id ?? ''
+      }));
+      const outputs = blocks
+        .filter((block) => block.type === 'image_task' && block.status === 'succeeded')
+        .map((block) => ({
+          ref_label: block.ref_label,
+          round_no: block.round_no,
+          image_index: block.image_index,
+          role: 'output',
+          image_id: block.image_id,
+          filename: block.filename,
+          job_id: block.job_id,
+          item_id: block.item_id,
+          prompt: block.prompt,
+          mode: 'generate',
+          status: 'succeeded',
+          error: null,
+          deleted: false,
+          message_id: conversation.messages.find((m) => m.turn_id === turn.id && m.role === 'assistant')?.id ?? ''
+        }));
+      return [...inputs, ...outputs];
+    });
+    return {
+      conversation: agentSummary(conversation),
+      messages,
+      image_refs: imageRefs,
+      active_turn: active ? { id: active.id, status: 'running', round_no: active.roundNo } : null,
+      has_more: false
+    };
+  }
+
+  function agentSummary(conversation: AgentConversationFixture) {
+    const active = conversation.turns.find((turn) => turn.status === 'running');
+    return {
+      id: conversation.id,
+      title: conversation.title,
+      message_count: conversation.messages.length,
+      turn_count: conversation.turns.length,
+      created_at: agentNow(),
+      updated_at: agentNow(),
+      active_turn_id: active?.id ?? null
+    };
+  }
+
   let mockedOverallConfig: any = structuredClone(overallConfigResponse);
   let optimizerSystemPrompt = 'Default optimizer system prompt';
   let selectionTokenSeq = 0;
@@ -1536,6 +1716,121 @@ async function mockApi(page: Page, options: MockOptions = {}) {
       const generatedJob = generatedJobs.find((candidate) => (candidate as { job_id?: string }).job_id === id);
       await route.fulfill(json(generatedJob ?? job(id, 'polled prompt')));
       return;
+    }
+
+    if (url.pathname === '/api/agent/conversations' && request.method() === 'GET') {
+      await route.fulfill(json({ items: agentConversations.map(agentSummary) }));
+      return;
+    }
+    if (url.pathname === '/api/agent/conversations' && request.method() === 'POST') {
+      const body = JSON.parse(request.postData() || '{}');
+      agentIdSeq += 1;
+      const conversation: AgentConversationFixture = { id: `conv-${agentIdSeq}`, title: body.title || '', messages: [], turns: [] };
+      agentConversations.unshift(conversation);
+      await route.fulfill(json(agentSummary(conversation), 201));
+      return;
+    }
+    const agentConversationMatch = url.pathname.match(/^\/api\/agent\/conversations\/([^/]+)$/);
+    if (agentConversationMatch) {
+      const conversation = agentConversations.find((item) => item.id === agentConversationMatch[1]);
+      if (!conversation) {
+        await route.fulfill(json({ detail: 'Agent conversation not found' }, 404));
+        return;
+      }
+      if (request.method() === 'PATCH') {
+        conversation.title = JSON.parse(request.postData() || '{}').title;
+        await route.fulfill(json(agentSummary(conversation)));
+        return;
+      }
+      if (request.method() === 'DELETE') {
+        agentConversations.splice(agentConversations.indexOf(conversation), 1);
+        await route.fulfill(json({ status: 'success', message: 'Agent conversation deleted' }));
+        return;
+      }
+      await route.fulfill(json(agentDetail(conversation)));
+      return;
+    }
+    const agentTurnCreateMatch = url.pathname.match(/^\/api\/agent\/conversations\/([^/]+)\/turns$/);
+    if (agentTurnCreateMatch && request.method() === 'POST') {
+      const conversation = agentConversations.find((item) => item.id === agentTurnCreateMatch[1]);
+      if (!conversation) {
+        await route.fulfill(json({ detail: 'Agent conversation not found' }, 404));
+        return;
+      }
+      const body = JSON.parse(request.postData() || '{}');
+      const roundNo = conversation.turns.length + 1;
+      agentIdSeq += 1;
+      const turn: AgentTurnFixture = {
+        id: `turn-${agentIdSeq}`,
+        conversationId: conversation.id,
+        roundNo,
+        status: 'running',
+        events: agentScript(roundNo),
+        attachments: (body.attachments || []).map((item: { image_id: string }) => item.image_id)
+      };
+      conversation.turns.push(turn);
+      if (!conversation.title) conversation.title = String(body.text).slice(0, 40);
+      const seq = conversation.messages.length;
+      const userId = `msg-${agentIdSeq}-u`;
+      const assistantId = `msg-${agentIdSeq}-a`;
+      conversation.messages.push(
+        { id: userId, turn_id: turn.id, seq: seq + 1, round_no: roundNo, role: 'user', text: body.text, blocks: [], status: 'complete', created_at: agentNow(), updated_at: agentNow() },
+        { id: assistantId, turn_id: turn.id, seq: seq + 2, round_no: roundNo, role: 'assistant', text: '', blocks: [], status: 'streaming', created_at: agentNow(), updated_at: agentNow() }
+      );
+      await route.fulfill(
+        json(
+          {
+            turn_id: turn.id,
+            conversation_id: conversation.id,
+            round_no: roundNo,
+            status: 'running',
+            user_message_id: userId,
+            assistant_message_id: assistantId,
+            replayed: false
+          },
+          202
+        )
+      );
+      return;
+    }
+    const agentTurnEventsMatch = url.pathname.match(/^\/api\/agent\/turns\/([^/]+)\/events$/);
+    if (agentTurnEventsMatch) {
+      const turn = agentConversations.flatMap((item) => item.turns).find((item) => item.id === agentTurnEventsMatch[1]);
+      if (!turn) {
+        await route.fulfill(json({ detail: 'Agent turn not found' }, 404));
+        return;
+      }
+      const lastEventId = Number(request.headers()['last-event-id'] || url.searchParams.get('after') || 0);
+      if (turn.status === 'running' && turn.events.some((event) => event.event.startsWith('turn.') && event.event !== 'turn.started')) {
+        const last = turn.events.at(-1)?.event;
+        turn.status = last === 'turn.failed' ? 'failed' : last === 'turn.cancelled' ? 'cancelled' : 'completed';
+      }
+      await route.fulfill({ status: 200, contentType: 'text/event-stream', body: agentSse(turn, lastEventId) });
+      return;
+    }
+    const agentTurnCancelMatch = url.pathname.match(/^\/api\/agent\/turns\/([^/]+)\/cancel$/);
+    if (agentTurnCancelMatch && request.method() === 'POST') {
+      const turn = agentConversations.flatMap((item) => item.turns).find((item) => item.id === agentTurnCancelMatch[1]);
+      if (!turn) {
+        await route.fulfill(json({ detail: 'Agent turn not found' }, 404));
+        return;
+      }
+      turn.events.push({ event: 'turn.cancelled', data: {} });
+      await route.fulfill(
+        json(
+          { turn_id: turn.id, conversation_id: turn.conversationId, round_no: turn.roundNo, status: 'cancelled', rounds_used: 0, error_message: null },
+          202
+        )
+      );
+      return;
+    }
+    const galleryItemMatch = url.pathname.match(/^\/api\/gallery\/([^/]+)$/);
+    if (galleryItemMatch && request.method() === 'GET') {
+      const entry = galleryImages.find((item) => item.id === galleryItemMatch[1]);
+      if (entry) {
+        await route.fulfill(json(entry));
+        return;
+      }
     }
 
     await route.continue();
