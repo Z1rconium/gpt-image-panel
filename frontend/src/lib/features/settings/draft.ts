@@ -30,6 +30,10 @@ export type SettingsDraft = {
   promptOptimizerApiKey: string;
   aiAssistantEnabled: boolean;
   aiAssistantVisionModel: string;
+  agentEnabled: boolean;
+  agentModel: string;
+  agentMaxToolRounds: number;
+  agentSystemPrompt: string;
   r2BackupEnabled: boolean;
   r2EndpointUrl: string;
   r2BucketName: string;
@@ -45,6 +49,11 @@ export type SettingsDraft = {
 export function promptOptimizerTimeoutValue(value: number | string | null | undefined): number {
   const parsed = Number.parseInt(String(value), 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 60;
+}
+
+export function agentMaxToolRoundsValue(value: number | string | null | undefined): number {
+  const parsed = Number.parseInt(String(value), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, 64) : 4;
 }
 
 export function r2SyncIntervalHoursValue(value: number | string | null | undefined): number {
@@ -106,6 +115,10 @@ export function hasSettingsChanges(
     draft.aiAssistantEnabled !== Boolean(settings?.ai_assistant?.enabled) ||
     draft.aiAssistantVisionModel !==
       (settings?.ai_assistant?.vision_model || settings?.prompt_optimizer?.model || 'gpt-4o-mini') ||
+    draft.agentEnabled !== Boolean(settings?.ai_assistant?.agent_enabled) ||
+    draft.agentModel !== (settings?.ai_assistant?.agent_model || '') ||
+    agentMaxToolRoundsValue(draft.agentMaxToolRounds) !== (settings?.ai_assistant?.agent_max_tool_rounds ?? 4) ||
+    draft.agentSystemPrompt.trim() !== (settings?.ai_assistant?.agent_system_prompt || '') ||
     draft.r2BackupEnabled !== Boolean(settings?.r2_backup?.enabled) ||
     draft.r2EndpointUrl !== (settings?.r2_backup?.endpoint_url || '') ||
     draft.r2BucketName !== (settings?.r2_backup?.bucket_name || '') ||
@@ -138,7 +151,11 @@ export function hasSettingsChanges(
 export function aiAssistantPayload(draft: SettingsDraft): AIAssistantSettingsInput {
   return {
     enabled: draft.aiAssistantEnabled,
-    vision_model: draft.aiAssistantVisionModel.trim()
+    vision_model: draft.aiAssistantVisionModel.trim(),
+    agent_enabled: draft.agentEnabled,
+    agent_model: draft.agentModel.trim(),
+    agent_max_tool_rounds: agentMaxToolRoundsValue(draft.agentMaxToolRounds),
+    agent_system_prompt: draft.agentSystemPrompt.trim()
   };
 }
 

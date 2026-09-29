@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   MASKED_API_KEY_VALUE,
+  agentMaxToolRoundsValue,
   buildSettingsPayload,
   hasSettingsChanges,
   r2SyncIntervalHoursValue,
@@ -84,6 +85,10 @@ function pristineDraft(): SettingsDraft {
     promptOptimizerApiKey: MASKED_API_KEY_VALUE,
     aiAssistantEnabled: true,
     aiAssistantVisionModel: 'gpt-4o-mini',
+    agentEnabled: false,
+    agentModel: '',
+    agentMaxToolRounds: 4,
+    agentSystemPrompt: '',
     r2BackupEnabled: false,
     r2EndpointUrl: '',
     r2BucketName: '',
@@ -129,6 +134,40 @@ describe('buildSettingsPayload', () => {
     const draft = { ...pristineDraft(), promptGuard: true };
     expect(hasSettingsChanges(draft, settings, activePreset)).toBe(true);
     expect(buildSettingsPayload(draft, settings).prompt_guard).toBe(true);
+  });
+});
+
+describe('agent settings', () => {
+  it('is pristine with defaults and forwards trimmed agent fields', () => {
+    expect(hasSettingsChanges(pristineDraft(), settings, activePreset)).toBe(false);
+    const draft = {
+      ...pristineDraft(),
+      agentEnabled: true,
+      agentModel: ' agent-model ',
+      agentMaxToolRounds: 6,
+      agentSystemPrompt: '  Be brief.  '
+    };
+    expect(hasSettingsChanges(draft, settings, activePreset)).toBe(true);
+    expect(buildSettingsPayload(draft, settings).ai_assistant).toMatchObject({
+      agent_enabled: true,
+      agent_model: 'agent-model',
+      agent_max_tool_rounds: 6,
+      agent_system_prompt: 'Be brief.'
+    });
+  });
+
+  it('normalizes the tool round count into 1..64 and reads saved values', () => {
+    expect(agentMaxToolRoundsValue('abc')).toBe(4);
+    expect(agentMaxToolRoundsValue(0)).toBe(4);
+    expect(agentMaxToolRoundsValue('7')).toBe(7);
+    expect(agentMaxToolRoundsValue(500)).toBe(64);
+    const saved = {
+      ...settings,
+      ai_assistant: { ...settings.ai_assistant, agent_enabled: true, agent_model: 'm', agent_max_tool_rounds: 2, agent_system_prompt: 'x' }
+    } as unknown as SettingsResponse;
+    const draft = { ...pristineDraft(), agentEnabled: true, agentModel: 'm', agentMaxToolRounds: 2, agentSystemPrompt: 'x' };
+    expect(hasSettingsChanges(draft, saved, activePreset)).toBe(false);
+    expect(hasSettingsChanges({ ...draft, agentMaxToolRounds: 3 }, saved, activePreset)).toBe(true);
   });
 });
 

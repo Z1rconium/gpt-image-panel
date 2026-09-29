@@ -52,6 +52,10 @@
   export let promptOptimizerHealthChecking = false;
   export let aiAssistantEnabled = false;
   export let aiAssistantVisionModel = '';
+  export let agentEnabled = false;
+  export let agentModel = '';
+  export let agentMaxToolRounds: number | string = 4;
+  export let agentSystemPrompt = '';
   export let aiAssistantHealthChecking = false;
   export let onCreate: () => void = () => {};
   export let onDelete: (presetId: string) => void = () => {};
@@ -218,6 +222,10 @@
           <AiAssistantSettingsSection
             bind:enabled={aiAssistantEnabled}
             bind:visionModel={aiAssistantVisionModel}
+            bind:agentEnabled
+            bind:agentModel
+            bind:agentMaxToolRounds
+            bind:agentSystemPrompt
             healthChecking={aiAssistantHealthChecking}
             onCheck={checkAiAssistantHealth}
           />

@@ -87,6 +87,10 @@ export type AIAssistantSettings = {
   api_url: string;
   model: string;
   vision_model: string;
+  agent_enabled: boolean;
+  agent_model: string;
+  agent_max_tool_rounds: number;
+  agent_system_prompt: string;
   timeout_seconds: number;
   api_path: AssistantApiPath;
   api_key_masked: string;
@@ -99,6 +103,10 @@ export type AIAssistantSettings = {
 export type AIAssistantSettingsInput = {
   enabled?: boolean | null;
   vision_model?: string | null;
+  agent_enabled?: boolean | null;
+  agent_model?: string | null;
+  agent_max_tool_rounds?: number | null;
+  agent_system_prompt?: string | null;
 };
 
 export type R2BackupSettings = {

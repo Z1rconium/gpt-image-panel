@@ -6,6 +6,7 @@
   import { normalizeResponseFormat } from '$lib/utils/promptForm';
   import {
     MASKED_API_KEY_VALUE,
+    agentMaxToolRoundsValue,
     aiAssistantPayload,
     buildSettingsPayload,
     hasSettingsChanges,
@@ -97,9 +98,10 @@
 
   // Editable timeout/interval inputs hold raw text until their normalizers run.
   type EditableCount = number | string;
-  type SettingsDrawerDraft = Omit<SettingsDraft, 'promptOptimizerTimeoutSeconds' | 'r2SyncIntervalHours'> & {
+  type SettingsDrawerDraft = Omit<SettingsDraft, 'promptOptimizerTimeoutSeconds' | 'r2SyncIntervalHours' | 'agentMaxToolRounds'> & {
     promptOptimizerTimeoutSeconds: EditableCount;
     r2SyncIntervalHours: EditableCount;
+    agentMaxToolRounds: EditableCount;
   };
 
   const initialDraft: SettingsDrawerDraft = {
@@ -121,6 +123,10 @@
     promptOptimizerApiKey: '',
     aiAssistantEnabled: false,
     aiAssistantVisionModel: 'gpt-4o-mini',
+    agentEnabled: false,
+    agentModel: '',
+    agentMaxToolRounds: 4,
+    agentSystemPrompt: '',
     r2BackupEnabled: false,
     r2EndpointUrl: '',
     r2BucketName: '',
@@ -187,6 +193,10 @@
           : '';
     draft.aiAssistantEnabled = Boolean(settings.ai_assistant?.enabled);
     draft.aiAssistantVisionModel = settings.ai_assistant?.vision_model || settings.prompt_optimizer?.model || 'gpt-4o-mini';
+    draft.agentEnabled = Boolean(settings.ai_assistant?.agent_enabled);
+    draft.agentModel = settings.ai_assistant?.agent_model || '';
+    draft.agentMaxToolRounds = settings.ai_assistant?.agent_max_tool_rounds ?? 4;
+    draft.agentSystemPrompt = settings.ai_assistant?.agent_system_prompt || '';
     draft.r2BackupEnabled = Boolean(settings.r2_backup?.enabled);
     draft.r2EndpointUrl = settings.r2_backup?.endpoint_url || '';
     draft.r2BucketName = settings.r2_backup?.bucket_name || '';
@@ -242,7 +252,8 @@
     {
       ...draft,
       promptOptimizerTimeoutSeconds: promptOptimizerTimeoutValue(draft.promptOptimizerTimeoutSeconds),
-      r2SyncIntervalHours: r2SyncIntervalHoursValue(draft.r2SyncIntervalHours)
+      r2SyncIntervalHours: r2SyncIntervalHoursValue(draft.r2SyncIntervalHours),
+      agentMaxToolRounds: agentMaxToolRoundsValue(draft.agentMaxToolRounds)
     } satisfies SettingsDraft
   );
   const settingsDirty = $derived(Boolean(settings && activePreset) && hasSettingsChanges(settingsDraft, settings, activePreset));
@@ -511,6 +522,10 @@
         {promptOptimizerHealthChecking}
         bind:aiAssistantEnabled={draft.aiAssistantEnabled}
         bind:aiAssistantVisionModel={draft.aiAssistantVisionModel}
+        bind:agentEnabled={draft.agentEnabled}
+        bind:agentModel={draft.agentModel}
+        bind:agentMaxToolRounds={draft.agentMaxToolRounds}
+        bind:agentSystemPrompt={draft.agentSystemPrompt}
         {aiAssistantHealthChecking}
         {onCreate}
         {onDelete}
