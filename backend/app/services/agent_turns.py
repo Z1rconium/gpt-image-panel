@@ -449,6 +449,7 @@ class _TurnRun:
                 "stage": "queued",
                 "error": None,
                 "image_id": None,
+                "filename": None,
             }
             await self.upsert_block(block)
             plans.append((image, row, ref_rows, block))
@@ -571,7 +572,13 @@ class _TurnRun:
                 image_id=str(image_id),
                 metric_name="agent_settle_image",
             )
-            block.update(status="succeeded", stage="completed", error=None, image_id=(settled or {}).get("image_id"))
+            block.update(
+                status="succeeded",
+                stage="completed",
+                error=None,
+                image_id=(settled or {}).get("image_id"),
+                filename=(settled or {}).get("filename"),
+            )
             await self.upsert_block(block)
             return {"id": image.id, "status": "created", "ref": row["ref_label"]}, settled
         if status == "cancelled":

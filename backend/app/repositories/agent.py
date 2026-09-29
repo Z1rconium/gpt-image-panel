@@ -130,8 +130,16 @@ def _image_from_row(row: sqlite3.Row) -> dict[str, Any]:
         "mode": row["mode"],
         "status": row["status"],
         "error": row["error"],
+        "filename": row["filename"] if "filename" in row.keys() else None,
         "created_at": row["created_at"],
     }
+
+
+_IMAGE_SELECT_SQL = """
+    SELECT i.*, e.filename AS filename
+    FROM agent_message_images AS i
+    LEFT JOIN gallery_entries AS e ON e.id = i.image_id
+"""
 
 
 # ── Conversations ──────────────────────────────────────────────
@@ -560,10 +568,10 @@ def list_conversation_images(conversation_id: str) -> list[dict[str, Any]]:
     _ensure_database()
     with _connect() as conn:
         rows = conn.execute(
-            """
-            SELECT * FROM agent_message_images
-            WHERE conversation_id = ?
-            ORDER BY round_no ASC, role DESC, image_index ASC
+            f"""
+            {_IMAGE_SELECT_SQL}
+            WHERE i.conversation_id = ?
+            ORDER BY i.round_no ASC, i.role DESC, i.image_index ASC
             """,
             (conversation_id,),
         ).fetchall()
@@ -574,7 +582,7 @@ def get_image_by_label(conversation_id: str, ref_label: str) -> dict[str, Any] |
     _ensure_database()
     with _connect() as conn:
         row = conn.execute(
-            "SELECT * FROM agent_message_images WHERE conversation_id = ? AND ref_label = ?",
+            f"{_IMAGE_SELECT_SQL} WHERE i.conversation_id = ? AND i.ref_label = ?",
             (conversation_id, ref_label),
         ).fetchone()
     return _image_from_row(row) if row else None
@@ -626,7 +634,7 @@ def insert_pending_output_image(
                     now,
                 ),
             )
-            row = conn.execute("SELECT * FROM agent_message_images WHERE id = ?", (row_id,)).fetchone()
+            row = conn.execute(f"{_IMAGE_SELECT_SQL} WHERE i.id = ?", (row_id,)).fetchone()
     return _image_from_row(row)
 
 
@@ -664,7 +672,7 @@ def settle_image(
                 """,
                 (status, image_id, error, row_id),
             )
-            row = conn.execute("SELECT * FROM agent_message_images WHERE id = ?", (row_id,)).fetchone()
+            row = conn.execute(f"{_IMAGE_SELECT_SQL} WHERE i.id = ?", (row_id,)).fetchone()
     return _image_from_row(row) if row else None
 
 
@@ -672,7 +680,7 @@ def list_pending_images_for_turn(turn_id: str) -> list[dict[str, Any]]:
     _ensure_database()
     with _connect() as conn:
         rows = conn.execute(
-            "SELECT * FROM agent_message_images WHERE turn_id = ? AND status = 'pending'",
+            f"{_IMAGE_SELECT_SQL} WHERE i.turn_id = ? AND i.status = 'pending'",
             (turn_id,),
         ).fetchall()
     return [_image_from_row(row) for row in rows]

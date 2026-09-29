@@ -78,6 +78,7 @@ class AgentImageRef(BaseModel):
     image_index: int
     role: Literal["input", "output"]
     image_id: Optional[str] = None
+    filename: Optional[str] = None
     job_id: Optional[str] = None
     item_id: Optional[str] = None
     prompt: str = ""
