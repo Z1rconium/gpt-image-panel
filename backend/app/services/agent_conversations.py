@@ -284,21 +284,24 @@ async def get_conversation_detail(
     conversation = await run_db_operation(
         agent_repo.get_conversation, conversation_id, metric_name="agent_get_conversation"
     ) or conversation
-    messages, image_rows = await asyncio.gather(
-        run_db_operation(
-            agent_repo.list_messages,
-            conversation_id,
-            before_seq=before_seq,
-            limit=limit + 1,
-            metric_name="agent_list_messages",
-        ),
-        run_db_operation(
-            agent_repo.list_conversation_images, conversation_id, metric_name="agent_list_images"
-        ),
+    messages = await run_db_operation(
+        agent_repo.list_messages,
+        conversation_id,
+        before_seq=before_seq,
+        limit=limit + 1,
+        metric_name="agent_list_messages",
     )
     has_more = len(messages) > limit
     if has_more:
         messages = messages[1:]
+    # Image refs are only needed for the messages in this page, so the response
+    # stays bounded by the message limit instead of the whole conversation.
+    image_rows = await run_db_operation(
+        agent_repo.list_conversation_images,
+        conversation_id,
+        message_ids=[message["id"] for message in messages],
+        metric_name="agent_list_images",
+    )
     by_label = {row["ref_label"]: row for row in image_rows}
     active_turn = None
     if conversation.get("active_turn_id"):

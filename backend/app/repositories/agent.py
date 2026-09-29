@@ -58,12 +58,10 @@ def _conversation_from_row(row: sqlite3.Row) -> dict[str, Any]:
 _CONVERSATION_SELECT_SQL = """
     SELECT
         c.id, c.title, c.message_count, c.turn_count, c.created_at, c.updated_at,
-        (
-            SELECT t.id FROM agent_turns AS t
-            WHERE t.conversation_id = c.id AND t.status IN ('queued', 'running')
-            LIMIT 1
-        ) AS active_turn_id
+        t.id AS active_turn_id
     FROM agent_conversations AS c
+    LEFT JOIN agent_turns AS t
+        ON t.conversation_id = c.id AND t.status IN ('queued', 'running')
 """
 
 
@@ -168,12 +166,13 @@ def create_conversation(title: str = "") -> dict[str, Any]:
     return _conversation_from_row(row)
 
 
-def list_conversations(limit: int = 200) -> list[dict[str, Any]]:
+def list_conversations(limit: int | None = None) -> list[dict[str, Any]]:
     _ensure_database()
+    effective = config.AGENT_MAX_CONVERSATIONS if limit is None else limit
     with _connect() as conn:
         rows = conn.execute(
             f"{_CONVERSATION_SELECT_SQL} ORDER BY c.updated_at DESC, c.id DESC LIMIT ?",
-            (max(1, int(limit)),),
+            (max(1, int(effective)),),
         ).fetchall()
     return [_conversation_from_row(row) for row in rows]
 
@@ -477,19 +476,23 @@ def finish_turn(
 
 
 def sweep_stale_turns() -> list[dict[str, Any]]:
-    """Interrupt turns whose lease expired (worker died or never started them)."""
+    """Interrupt turns whose lease expired (worker died or never started them).
+
+    The candidate lookup is a plain read: idle sweeps must not take the write
+    lock, and they run from every conversation read and open event stream.
+    """
     _ensure_database()
     now = utc_now()
     with _connect() as conn:
-        with _transaction(conn):
-            stale = conn.execute(
-                """
-                SELECT id FROM agent_turns
-                WHERE status IN ('queued', 'running')
-                  AND lease_expires_at IS NOT NULL AND lease_expires_at < ?
-                """,
-                (now,),
-            ).fetchall()
+        stale = conn.execute(
+            """
+            SELECT id FROM agent_turns
+            WHERE status IN ('queued', 'running')
+              AND lease_expires_at IS NOT NULL AND lease_expires_at < ?
+            LIMIT 100
+            """,
+            (now,),
+        ).fetchall()
     interrupted = []
     for row in stale:
         turn = finish_turn(
@@ -564,16 +567,28 @@ def update_message_content(message_id: str, *, text: str, blocks: list[dict[str,
 # ── Message images ─────────────────────────────────────────────
 
 
-def list_conversation_images(conversation_id: str) -> list[dict[str, Any]]:
+def list_conversation_images(
+    conversation_id: str,
+    *,
+    message_ids: Sequence[str] | None = None,
+) -> list[dict[str, Any]]:
     _ensure_database()
+    params: list[Any] = [conversation_id]
+    where = "i.conversation_id = ?"
+    if message_ids is not None:
+        if not message_ids:
+            return []
+        placeholders = ",".join("?" for _ in message_ids)
+        where += f" AND i.message_id IN ({placeholders})"
+        params.extend(message_ids)
     with _connect() as conn:
         rows = conn.execute(
             f"""
             {_IMAGE_SELECT_SQL}
-            WHERE i.conversation_id = ?
+            WHERE {where}
             ORDER BY i.round_no ASC, i.role DESC, i.image_index ASC
             """,
-            (conversation_id,),
+            params,
         ).fetchall()
     return [_image_from_row(row) for row in rows]
 
@@ -687,6 +702,55 @@ def list_pending_images_for_turn(turn_id: str) -> list[dict[str, Any]]:
 
 
 # ── Turn events ────────────────────────────────────────────────
+
+
+def read_event_cursor(turn_id: str) -> int:
+    """Last persisted event sequence for a turn (0 when it has none)."""
+    _ensure_database()
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT COALESCE(MAX(seq), 0) FROM agent_turn_events WHERE turn_id = ?",
+            (turn_id,),
+        ).fetchone()
+    return int(row[0] or 0)
+
+
+def append_turn_events(
+    turn_id: str,
+    events: Sequence[tuple[str, dict[str, Any]]],
+    *,
+    start_seq: int,
+) -> int:
+    """Persist a contiguous batch of turn events in one write transaction.
+
+    The caller owns sequence numbering (a turn has exactly one writer holding
+    its lease), so the batch needs no per-event MAX(seq) scan. Returns the last
+    sequence written, or ``start_seq - 1`` when the batch is empty.
+    """
+    if not events:
+        return int(start_seq) - 1
+    _ensure_database()
+    now = utc_now()
+    rows = [
+        (
+            turn_id,
+            int(start_seq) + offset,
+            event_type,
+            json.dumps(data, ensure_ascii=False, separators=(",", ":")),
+            now,
+        )
+        for offset, (event_type, data) in enumerate(events)
+    ]
+    with _connect() as conn:
+        with _transaction(conn):
+            conn.executemany(
+                """
+                INSERT INTO agent_turn_events (turn_id, seq, type, data_json, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                rows,
+            )
+    return rows[-1][1]
 
 
 def append_turn_event(turn_id: str, event_type: str, data: dict[str, Any]) -> int:

@@ -371,6 +371,31 @@ def test_agent_conversations_migration(tmp_path):
     assert ("gallery_entries", "SET NULL") in image_fks
 
 
+def test_agent_performance_indexes_migration(tmp_path):
+    _configure_runtime(tmp_path)
+    db_repo.verify_storage_writable()
+    with db_repo._connect() as conn:
+        indexes = {
+            row["name"]
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'index'")
+        }
+        name = conn.execute("SELECT name FROM schema_migrations WHERE version = 32").fetchone()["name"]
+        plan = [
+            row["detail"]
+            for row in conn.execute(
+                "EXPLAIN QUERY PLAN SELECT * FROM agent_message_images "
+                "WHERE conversation_id = 'c' ORDER BY round_no ASC, role DESC, image_index ASC"
+            )
+        ]
+    assert {
+        "idx_agent_message_images_conversation_order",
+        "idx_agent_message_images_pending",
+        "idx_agent_turns_finished",
+    }.issubset(indexes)
+    assert name == "agent_performance_indexes"
+    assert any("idx_agent_message_images_conversation_order" in detail for detail in plan)
+
+
 def test_performance_indexes_are_created(tmp_path):
     _configure_runtime(tmp_path)
     db_repo.verify_storage_writable()

@@ -117,3 +117,40 @@ def test_stale_sweep_and_events(tmp_path):
     # Terminal turns stay terminal.
     assert agent_repo.finish_turn(turn["id"], "completed")["status"] == "interrupted"
     assert agent_repo.purge_turn_events(1) == 0
+
+
+def test_batched_events_scoped_images_and_idle_sweep(tmp_path):
+    _configure_runtime(tmp_path)
+    db_repo.verify_storage_writable()
+    conversation = agent_repo.create_conversation()
+    turn, _ = _turn(conversation["id"])
+
+    listed = agent_repo.list_conversations()
+    assert [row["active_turn_id"] for row in listed] == [turn["id"]]
+
+    assert agent_repo.read_event_cursor(turn["id"]) == 0
+    assert agent_repo.append_turn_events(
+        turn["id"],
+        [("turn.started", {"n": 1}), ("block.text", {"n": 2}), ("block.text", {"n": 3})],
+        start_seq=1,
+    ) == 3
+    assert agent_repo.read_event_cursor(turn["id"]) == 3
+    assert agent_repo.append_turn_events(turn["id"], [], start_seq=4) == 3
+    events = agent_repo.list_turn_events(turn["id"], after_seq=1)
+    assert [event["seq"] for event in events] == [2, 3]
+
+    pending = agent_repo.insert_pending_output_image(
+        conversation_id=conversation["id"], turn_id=turn["id"],
+        message_id=turn["assistant_message_id"], round_no=1, item_id="a", prompt="p", mode="generate",
+    )
+    scoped = agent_repo.list_conversation_images(
+        conversation["id"], message_ids=[turn["assistant_message_id"]]
+    )
+    assert [row["ref_label"] for row in scoped] == [pending["ref_label"]]
+    assert agent_repo.list_conversation_images(
+        conversation["id"], message_ids=[turn["user_message_id"]]
+    ) == []
+    assert agent_repo.list_conversation_images(conversation["id"], message_ids=[]) == []
+
+    # A queued turn with a future lease is not stale, so the sweep is a read-only no-op.
+    assert agent_repo.sweep_stale_turns() == []

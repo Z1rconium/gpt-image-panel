@@ -1315,6 +1315,27 @@ def _migration_agent_conversations(conn: sqlite3.Connection):
     )
 
 
+def _migration_agent_performance_indexes(conn: sqlite3.Connection):
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_agent_message_images_conversation_order
+            ON agent_message_images(conversation_id, round_no, role, image_index)
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_agent_message_images_pending
+            ON agent_message_images(turn_id) WHERE status = 'pending'
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_agent_turns_finished
+            ON agent_turns(finished_at) WHERE finished_at IS NOT NULL
+        """
+    )
+
+
 SCHEMA_MIGRATIONS = (
     (1, "baseline_legacy_schema", _migration_baseline_legacy_schema),
     (2, "gallery_filter_options", _migration_gallery_filter_options),
@@ -1347,4 +1368,5 @@ SCHEMA_MIGRATIONS = (
     (29, "gallery_diagnostics", _migration_gallery_diagnostics),
     (30, "generate_job_preset_id", _migration_generate_job_preset_id),
     (31, "agent_conversations", _migration_agent_conversations),
+    (32, "agent_performance_indexes", _migration_agent_performance_indexes),
 )
