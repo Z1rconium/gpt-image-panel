@@ -30,6 +30,7 @@
   let scroller: HTMLDivElement | undefined = $state();
   let stickToBottom = true;
   let lastCount = 0;
+  let scrollFrame: number | null = null;
 
   const inputsByMessage = $derived.by(() => {
     const map = new Map<string, AgentImageRef[]>();
@@ -55,14 +56,35 @@
     stickToBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < NEAR_BOTTOM_PX;
   }
 
+  function scrollToBottom() {
+    if (scroller && stickToBottom) scroller.scrollTop = scroller.scrollHeight;
+  }
+
+  /** One pending scroll per frame, however many stream deltas arrive. */
+  function scheduleScrollToBottom() {
+    if (typeof requestAnimationFrame !== 'function') {
+      void tick().then(scrollToBottom);
+      return;
+    }
+    if (scrollFrame !== null) return;
+    scrollFrame = requestAnimationFrame(() => {
+      scrollFrame = null;
+      void tick().then(scrollToBottom);
+    });
+  }
+
   $effect(() => {
     contentSignature;
     const count = messages.length;
     if (count > lastCount) stickToBottom = true;
     lastCount = count;
-    void tick().then(() => {
-      if (scroller && stickToBottom) scroller.scrollTop = scroller.scrollHeight;
-    });
+    scheduleScrollToBottom();
+    return () => {
+      if (scrollFrame !== null && typeof cancelAnimationFrame === 'function') {
+        cancelAnimationFrame(scrollFrame);
+      }
+      scrollFrame = null;
+    };
   });
 </script>
 

@@ -81,7 +81,7 @@ export function getAgentTurn(turnId: string) {
 }
 
 export type AgentTurnEventHandlers = {
-  onEvent: (event: AgentStreamEvent) => void;
+  onEvent: (event: AgentStreamEvent, lastEventId: number) => void;
   onError?: (error?: unknown) => void;
   onNetworkError?: (event: Event) => void;
 };
@@ -95,7 +95,8 @@ export function openAgentTurnEvents(turnId: string, after: number, handlers: Age
   return openJsonEventSource<AgentStreamEvent['data']>(
     url,
     {
-      onEvent: ({ event, data }) => handlers.onEvent({ event, data } as AgentStreamEvent),
+      onEvent: ({ event, data, lastEventId }) =>
+        handlers.onEvent({ event, data } as AgentStreamEvent, lastEventId),
       onError: handlers.onError,
       onNetworkError: handlers.onNetworkError
     },

@@ -4,6 +4,7 @@ import {
   createAgentConversation,
   deleteAgentConversation,
   getAgentConversation,
+  getAgentTurn,
   listAgentConversations,
   openAgentTurnEvents,
   renameAgentConversation,
@@ -17,10 +18,11 @@ import type {
   AgentImageParams,
   AgentImageRef,
   AgentMessage,
-  AgentStreamEvent
+  AgentStreamEvent,
+  AgentTurnStatusResponse
 } from '$lib/api/types/agent';
 import { t } from '$lib/i18n';
-import { applyAgentEvent, isTerminalAgentEvent } from '$lib/utils/agentBlocks';
+import { applyAgentEvent } from '$lib/utils/agentBlocks';
 import { isAbortError } from './assistant';
 
 export type AgentState = {
@@ -62,6 +64,11 @@ export const AGENT_MAX_ATTACHMENTS = 8;
 const IMAGE_SYNC_DEBOUNCE_MS = 350;
 const RECOVER_DELAY_MS = 1500;
 const MAX_RECOVER_ATTEMPTS = 5;
+const CANCEL_POLL_INTERVAL_MS = 1500;
+const CANCEL_POLL_ATTEMPTS = 10;
+
+type TerminalEventName = 'turn.completed' | 'turn.failed' | 'turn.cancelled';
+type PendingAgentEvent = { event: AgentStreamEvent; seq: number };
 
 export type AgentSendInput = {
   text: string;
@@ -119,7 +126,12 @@ function createAgentStore() {
   let imageSyncHandler: (() => void) | null = null;
   let imageSyncTimer: ReturnType<typeof setTimeout> | null = null;
   let recoverTimer: ReturnType<typeof setTimeout> | null = null;
+  let cancelPollTimer: ReturnType<typeof setTimeout> | null = null;
   let recoverAttempts = 0;
+  let streamTurnId: string | null = null;
+  let lastEventSeq = 0;
+  let pendingEvents: PendingAgentEvent[] = [];
+  let frameHandle: number | null = null;
 
   function announce(message: string) {
     update((current) => ({ ...current, announcement: message }));
@@ -128,6 +140,19 @@ function createAgentStore() {
   function closeSource() {
     if (source) source.close();
     source = null;
+    streamTurnId = null;
+  }
+
+  function cancelFrame() {
+    if (frameHandle !== null && typeof cancelAnimationFrame === 'function') {
+      cancelAnimationFrame(frameHandle);
+    }
+    frameHandle = null;
+  }
+
+  function clearCancelPoll() {
+    if (cancelPollTimer) clearTimeout(cancelPollTimer);
+    cancelPollTimer = null;
   }
 
   function scheduleImageSync() {
@@ -202,53 +227,111 @@ function createAgentStore() {
     }));
   }
 
-  function handleEvent(turnId: string, event: AgentStreamEvent) {
+  function finishTurn(eventName: TerminalEventName) {
+    clearCancelPoll();
+    closeSource();
+    recoverAttempts = 0;
     const labels = get(t).agent;
-    if (event.event === 'turn.started') {
-      announce(labels.announceStarted);
+    announce(
+      eventName === 'turn.completed'
+        ? labels.announceCompleted
+        : eventName === 'turn.cancelled'
+          ? labels.announceCancelled
+          : labels.announceFailed
+    );
+    update((current) => ({ ...current, activeTurnId: null, cancelling: false }));
+    scheduleImageSync();
+    const conversationId = state.activeId;
+    if (conversationId) void refreshDetail(conversationId);
+    void loadList();
+  }
+
+  /**
+   * Fold every buffered event into the store in one pass, so a burst of
+   * stream frames costs a single notification instead of one per frame.
+   */
+  function flushPendingEvents() {
+    cancelFrame();
+    if (!pendingEvents.length || !streamTurnId) {
+      pendingEvents = [];
       return;
     }
-    if (event.event === 'block.upsert' || event.event === 'block.text') {
+    const batch = pendingEvents;
+    pendingEvents = [];
+    const turnId = streamTurnId;
+    const labels = get(t).agent;
+
+    let started = false;
+    let terminal: TerminalEventName | null = null;
+    const blockEvents: PendingAgentEvent[] = [];
+    for (const entry of batch) {
+      if (entry.seq > lastEventSeq) lastEventSeq = entry.seq;
+      const name = entry.event.event;
+      if (name === 'turn.started') started = true;
+      if (name === 'turn.completed' || name === 'turn.failed' || name === 'turn.cancelled') {
+        terminal = name;
+      }
+      if (name === 'block.upsert' || name === 'block.text') {
+        blockEvents.push(entry);
+      }
+    }
+
+    if (blockEvents.length) {
       let messageId = '';
+      const refUpdates: AgentImageRef[] = [];
       updateAssistantMessage(turnId, (message) => {
         messageId = message.id;
-        return { ...message, blocks: applyAgentEvent(message.blocks, event) };
+        let blocks = message.blocks;
+        for (const entry of blockEvents) {
+          blocks = applyAgentEvent(blocks, entry.event);
+          if (entry.event.event === 'block.upsert' && entry.event.data.block.type === 'image_task') {
+            refUpdates.push(blockToImageRef(entry.event.data.block, messageId));
+          }
+        }
+        return { ...message, blocks };
       });
-      if (event.event === 'block.upsert' && event.data.block.type === 'image_task' && messageId) {
-        const block = event.data.block;
-        update((current) => ({ ...current, imageRefs: upsertRef(current.imageRefs, blockToImageRef(block, messageId)) }));
-        if (block.status === 'succeeded') {
-          announce(labels.announceImage(block.ref_label));
+      for (const ref of refUpdates) {
+        update((current) => ({ ...current, imageRefs: upsertRef(current.imageRefs, ref) }));
+        if (ref.status === 'succeeded') {
+          announce(labels.announceImage(ref.ref_label));
           scheduleImageSync();
         }
       }
-      return;
     }
-    if (isTerminalAgentEvent(event.event)) {
-      closeSource();
-      recoverAttempts = 0;
-      announce(
-        event.event === 'turn.completed'
-          ? labels.announceCompleted
-          : event.event === 'turn.cancelled'
-            ? labels.announceCancelled
-            : labels.announceFailed
-      );
-      update((current) => ({ ...current, activeTurnId: null, cancelling: false }));
-      scheduleImageSync();
-      const conversationId = state.activeId;
-      if (conversationId) void refreshDetail(conversationId);
-      void loadList();
-    }
+
+    if (started) announce(labels.announceStarted);
+    if (terminal) finishTurn(terminal);
   }
 
-  /** Follow a turn from its first event; the message is rebuilt from an empty state. */
-  function attachStream(turnId: string) {
+  function enqueueEvent(turnId: string, event: AgentStreamEvent, seq: number) {
+    if (streamTurnId !== turnId) return;
+    pendingEvents.push({ event, seq });
+    if (typeof requestAnimationFrame !== 'function') {
+      flushPendingEvents();
+      return;
+    }
+    if (frameHandle !== null) return;
+    frameHandle = requestAnimationFrame(() => {
+      frameHandle = null;
+      flushPendingEvents();
+    });
+  }
+
+  /**
+   * Follow a turn. `resume` keeps the already-rendered blocks and replays from
+   * the last applied event id; a fresh attach rebuilds the message from scratch.
+   */
+  function attachStream(turnId: string, resume = false) {
+    flushPendingEvents();
     closeSource();
-    updateAssistantMessage(turnId, (message) => ({ ...message, blocks: [], status: 'streaming' }));
+    if (!resume) {
+      lastEventSeq = 0;
+      updateAssistantMessage(turnId, (message) => ({ ...message, blocks: [], status: 'streaming' }));
+    }
+    streamTurnId = turnId;
     update((current) => ({ ...current, activeTurnId: turnId }));
-    source = openAgentTurnEvents(turnId, 0, {
-      onEvent: (event) => handleEvent(turnId, event),
+    source = openAgentTurnEvents(turnId, lastEventSeq, {
+      onEvent: (event, lastEventId) => enqueueEvent(turnId, event, lastEventId),
       onError: () => scheduleRecover(turnId),
       // EventSource reconnects by itself and resumes through Last-Event-ID.
       onNetworkError: () => {}
@@ -256,8 +339,11 @@ function createAgentStore() {
   }
 
   function scheduleRecover(turnId: string) {
+    flushPendingEvents();
     closeSource();
-    if (state.activeTurnId !== turnId || recoverAttempts >= MAX_RECOVER_ATTEMPTS) {
+    if (state.activeTurnId !== turnId) return;
+    if (recoverAttempts >= MAX_RECOVER_ATTEMPTS) {
+      updateAssistantMessage(turnId, (message) => ({ ...message, status: 'interrupted' }));
       update((current) => ({ ...current, activeTurnId: null, actionError: get(t).agent.errorLoadConversation }));
       return;
     }
@@ -271,7 +357,9 @@ function createAgentStore() {
   }
 
   async function open(conversationId: string | null) {
+    flushPendingEvents();
     closeSource();
+    clearCancelPoll();
     if (recoverTimer) clearTimeout(recoverTimer);
     recoverTimer = null;
     if (!conversationId) {
@@ -291,6 +379,7 @@ function createAgentStore() {
       return;
     }
     const switching = state.activeId !== conversationId;
+    if (switching) recoverAttempts = 0;
     update((current) => ({
       ...current,
       activeId: conversationId,
@@ -392,6 +481,7 @@ function createAgentStore() {
     update((current) => ({ ...current, cancelling: true, actionError: null }));
     try {
       await cancelAgentTurn(turnId);
+      pollTurnAfterCancel(turnId);
     } catch (error) {
       update((current) => ({
         ...current,
@@ -399,6 +489,53 @@ function createAgentStore() {
         actionError: errorMessage(error, get(t).agent.errorStop)
       }));
     }
+  }
+
+  /**
+   * The cancel POST can succeed without the stream delivering a terminal event
+   * (dead socket, exhausted recover). Poll the turn status so the UI leaves the
+   * "stopping" state instead of hanging on it.
+   */
+  function pollTurnAfterCancel(turnId: string) {
+    clearCancelPoll();
+    let attempts = 0;
+    const tick = async () => {
+      cancelPollTimer = null;
+      if (state.activeTurnId !== turnId) return;
+      attempts += 1;
+      let status: AgentTurnStatusResponse | null = null;
+      try {
+        status = await getAgentTurn(turnId);
+      } catch {
+        status = null;
+      }
+      if (state.activeTurnId !== turnId) return;
+      if (status && status.status !== 'queued' && status.status !== 'running') {
+        if (status.status === 'completed') {
+          finishTurn('turn.completed');
+        } else if (status.status === 'cancelled') {
+          finishTurn('turn.cancelled');
+        } else if (status.status === 'failed') {
+          finishTurn('turn.failed');
+        } else {
+          // Interrupted: the server stopped the turn without a stream terminal.
+          updateAssistantMessage(turnId, (message) => ({ ...message, status: 'interrupted' }));
+          update((current) => ({ ...current, activeTurnId: null, cancelling: false }));
+          const conversationId = state.activeId;
+          if (conversationId) void refreshDetail(conversationId);
+        }
+        return;
+      }
+      if (attempts >= CANCEL_POLL_ATTEMPTS) {
+        updateAssistantMessage(turnId, (message) => ({ ...message, status: 'interrupted' }));
+        update((current) => ({ ...current, activeTurnId: null, cancelling: false }));
+        const conversationId = state.activeId;
+        if (conversationId) void refreshDetail(conversationId);
+        return;
+      }
+      cancelPollTimer = setTimeout(() => void tick(), CANCEL_POLL_INTERVAL_MS);
+    };
+    cancelPollTimer = setTimeout(() => void tick(), CANCEL_POLL_INTERVAL_MS);
   }
 
   async function loadEarlier() {
@@ -430,24 +567,29 @@ function createAgentStore() {
     if (typeof document === 'undefined') return () => {};
     const onChange = () => {
       if (document.hidden) {
+        flushPendingEvents();
         closeSource();
         return;
       }
       const turnId = state.activeTurnId;
-      if (turnId && !source) attachStream(turnId);
+      if (turnId && !source) attachStream(turnId, true);
     };
     document.addEventListener('visibilitychange', onChange);
     return () => document.removeEventListener('visibilitychange', onChange);
   }
 
   function dispose() {
+    flushPendingEvents();
     closeSource();
+    cancelFrame();
+    clearCancelPoll();
     detailController?.abort();
     if (imageSyncTimer) clearTimeout(imageSyncTimer);
     if (recoverTimer) clearTimeout(recoverTimer);
     imageSyncTimer = null;
     recoverTimer = null;
     imageSyncHandler = null;
+    pendingEvents = [];
   }
 
   return {

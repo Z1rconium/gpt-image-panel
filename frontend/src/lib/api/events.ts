@@ -1,6 +1,8 @@
 export type JsonEvent<T> = {
   event: string;
   data: T;
+  /** SSE frame id; 0 when the server did not send one. */
+  lastEventId: number;
 };
 
 export type EventHandlers<T> = {
@@ -43,7 +45,8 @@ export function openJsonEventSource<T>(url: string, handlers: EventHandlers<T>, 
       handlers.onError?.(new JsonEventSourceParseError(eventName, error));
       return;
     }
-    handlers.onEvent({ event: eventName, data });
+    const frameId = Number((event as MessageEvent).lastEventId);
+    handlers.onEvent({ event: eventName, data, lastEventId: Number.isFinite(frameId) ? frameId : 0 });
   }
 
   for (const eventName of eventNames) {
