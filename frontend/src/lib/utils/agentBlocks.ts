@@ -1,4 +1,12 @@
-import type { AgentBlock, AgentStreamEvent, AgentStreamEventName } from '$lib/api/types/agent';
+import type {
+  AgentBatchParamsBlock,
+  AgentBlock,
+  AgentErrorBlock,
+  AgentImageTaskBlock,
+  AgentStreamEvent,
+  AgentStreamEventName,
+  AgentTextBlock
+} from '$lib/api/types/agent';
 
 const TERMINAL_EVENTS: ReadonlySet<AgentStreamEventName> = new Set(['turn.completed', 'turn.failed', 'turn.cancelled']);
 
@@ -45,4 +53,32 @@ export function agentBlocksText(blocks: AgentBlock[]): string {
     .map((block) => block.text)
     .join('\n\n')
     .trim();
+}
+
+export type AgentBlockGroup =
+  | { kind: 'text'; key: string; block: AgentTextBlock }
+  | { kind: 'batch'; key: string; block: AgentBatchParamsBlock }
+  | { kind: 'images'; key: string; blocks: AgentImageTaskBlock[] }
+  | { kind: 'error'; key: string; block: AgentErrorBlock };
+
+/** Consecutive image tasks render as one grid; everything else stays one block per row. */
+export function groupAgentBlocks(blocks: AgentBlock[]): AgentBlockGroup[] {
+  const groups: AgentBlockGroup[] = [];
+  for (const block of blocks) {
+    if (block.type === 'image_task') {
+      const last = groups[groups.length - 1];
+      if (last?.kind === 'images') {
+        last.blocks.push(block);
+      } else {
+        groups.push({ kind: 'images', key: block.id, blocks: [block] });
+      }
+    } else if (block.type === 'text') {
+      if (block.text.trim()) groups.push({ kind: 'text', key: block.id, block });
+    } else if (block.type === 'batch_params') {
+      groups.push({ kind: 'batch', key: block.id, block });
+    } else {
+      groups.push({ kind: 'error', key: block.id, block });
+    }
+  }
+  return groups;
 }

@@ -892,7 +892,6 @@ const zh: Translation = {
     sizeAuto: '自动',
     mentionList: '可引用的图片',
     mentionOption: (label: string) => `引用 ${label}`,
-    mentionEmpty: '还没有可引用的图片。',
     statusStreaming: '回复中…',
     statusFailed: '这条回复失败了。',
     statusCancelled: '已停止。',

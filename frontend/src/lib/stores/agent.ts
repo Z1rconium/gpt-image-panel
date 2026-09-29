@@ -302,7 +302,12 @@ function createAgentStore() {
         : {})
     }));
     const detail = await refreshDetail(conversationId);
-    if (detail?.active_turn) attachStream(detail.active_turn.id);
+    if (detail?.active_turn) {
+      attachStream(detail.active_turn.id);
+    } else if (detail) {
+      // The turn finished while we were away; do not stay in the running state.
+      update((current) => ({ ...current, activeTurnId: null, cancelling: false }));
+    }
   }
 
   async function create(title = ''): Promise<string | null> {

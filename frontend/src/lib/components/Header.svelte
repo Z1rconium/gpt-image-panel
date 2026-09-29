@@ -12,6 +12,9 @@
   export let jobsOpen = false;
   export let settingsOpen = false;
   export let preferencesOpen = false;
+  export let agentAvailable = false;
+  export let mode: 'studio' | 'agent' = 'studio';
+  export let onModeChange: (mode: 'studio' | 'agent') => void = () => {};
   export let onOpenPromptSnippets: () => void = () => {};
   export let onOpenImagePrompt: () => void = () => {};
   export let onOpenJobs: () => void = () => {};
@@ -95,6 +98,27 @@
     </div>
 
     <div class="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto sm:flex-none">
+      {#if agentAvailable || mode === 'agent'}
+        <div
+          role="group"
+          aria-label={$t.agent.modeLabel}
+          class="inline-flex h-10 items-center rounded-lg border border-stone-300 p-0.5 dark:border-zinc-700"
+          data-testid="mode-switch"
+        >
+          {#each [['studio', $t.agent.modeStudio], ['agent', $t.agent.modeAgent]] as [value, label]}
+            <button
+              type="button"
+              class="control-focus mobile-touch-target h-full min-w-[4.5rem] rounded-md px-3 text-sm font-semibold transition-colors {mode === value
+                ? 'bg-emerald-600 text-white'
+                : 'text-stone-600 hover:bg-stone-100 dark:text-zinc-300 dark:hover:bg-zinc-800'}"
+              aria-pressed={mode === value}
+              on:click={() => onModeChange(value as 'studio' | 'agent')}
+            >
+              {label}
+            </button>
+          {/each}
+        </div>
+      {/if}
       <button
         type="button"
         class="mobile-touch-target control-focus inline-flex h-10 min-w-10 items-center justify-center rounded-lg border border-emerald-500/35 px-2 text-emerald-700 transition-colors hover:bg-emerald-500/10 dark:text-emerald-200"

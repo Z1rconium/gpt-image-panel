@@ -891,7 +891,6 @@ const en = {
     sizeAuto: 'Auto',
     mentionList: 'Images you can reference',
     mentionOption: (label: string) => `Reference ${label}`,
-    mentionEmpty: 'No images to reference yet.',
     statusStreaming: 'Replying…',
     statusFailed: 'This reply failed.',
     statusCancelled: 'Stopped.',

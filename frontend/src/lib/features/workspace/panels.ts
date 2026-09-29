@@ -40,6 +40,9 @@ export const optimizerPanel = lazyPanels.optimizer;
 // it should not sit in the homepage dependency graph.
 export const aiAssistantPanel = createLazyComponent(() => import('$lib/components/AiAssistantPanel.svelte'));
 
+// Agent mode is a whole alternate workspace view; it loads only when entered.
+export const agentViewPanel = createLazyComponent(() => import('$lib/features/agent/AgentView.svelte'));
+
 // Demand-loaded dialogs: they only render after the user opens them (or after
 // a background prefetch), so they stay out of the homepage graph.
 export const nodeImageResultPanel = createLazyComponent(() => import('$lib/components/NodeImageResultDialog.svelte'));

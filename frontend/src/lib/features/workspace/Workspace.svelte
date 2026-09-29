@@ -29,11 +29,13 @@
   import { settingsActivityStore, settingsStore } from '$lib/stores/settings';
   import { toastStore, uiStore, type ToastOptions } from '$lib/stores/ui';
   import { versionStore } from '$lib/stores/version';
+  import { workspaceModeStore, type WorkspaceMode } from '$lib/stores/workspaceMode';
   import { extractImageFilesFromClipboard } from '$lib/utils/clipboard';
   import { copyText, imageUrl } from '$lib/utils/format';
   import { canPrefetchNonCritical } from '$lib/utils/network';
   import { buildPromptOptimizeRequest } from '$lib/utils/promptOptimizer';
   import {
+    agentViewPanel,
     aiAssistantPanel,
     editGalleryDialogPanel,
     editPreviewPanel,
@@ -158,6 +160,7 @@
         (aiAssistantSettings.vision_model.trim() || optimizerSettings?.model.trim())
     )
   );
+  const agentAvailable = $derived(Boolean(aiAssistantAvailable && aiAssistantSettings?.agent_enabled));
   const r2BackupSettings = $derived($settingsStore.settings?.r2_backup || null);
   const r2BackupAvailable = $derived(
     Boolean(
@@ -179,7 +182,9 @@
         page: $galleryStore.page,
         filters: $galleryStore.filters,
         imageId: $lightboxStore.image?.id || null,
-        jobsTab: $uiStore.jobsOpen ? jobsTab : null
+        jobsTab: $uiStore.jobsOpen ? jobsTab : null,
+        mode: $workspaceModeStore.mode,
+        conversationId: $workspaceModeStore.conversationId
       },
       mode
     );
@@ -362,10 +367,11 @@
   async function applyUrlStateToApp() {
     if (typeof window === 'undefined') return;
     const url = new URL(window.location.href);
-    const { gallery: state, jobsTab: nextJobsTab, imageId } = readPageUrl(url);
+    const { gallery: state, jobsTab: nextJobsTab, imageId, mode: nextMode, conversationId } = readPageUrl(url);
 
     urlSync.setApplying(true);
     try {
+      workspaceModeStore.apply({ mode: nextMode, conversationId: nextMode === 'agent' ? conversationId : null });
       galleryStore.setPageAndFilters(state.page, state.filters);
       jobsTab = nextJobsTab || 'running';
       if (nextJobsTab && (await ensurePanel('jobs'))) setUi('jobsOpen', true);
@@ -382,6 +388,29 @@
     }
     urlSync.schedule();
   }
+
+  function changeWorkspaceMode(next: WorkspaceMode) {
+    if (next === $workspaceModeStore.mode) return;
+    workspaceModeStore.setMode(next);
+    urlSync.schedule('push');
+  }
+
+  function changeAgentConversation(id: string | null) {
+    workspaceModeStore.setConversation(id);
+    urlSync.schedule('replace');
+  }
+
+  // Agent mode is only offered while the assistant and Agent are both enabled.
+  $effect(() => {
+    if ($settingsStore.settings && $workspaceModeStore.mode === 'agent' && !agentAvailable) {
+      workspaceModeStore.apply({ mode: 'studio', conversationId: null });
+      urlSync.schedule('replace');
+    }
+  });
+
+  $effect(() => {
+    if ($workspaceModeStore.mode === 'agent') void agentViewPanel.prefetch();
+  });
 
   function setUi<K extends keyof typeof $uiStore>(key: K, value: (typeof $uiStore)[K]) {
     uiStore.setKey(key, value);
@@ -1306,6 +1335,9 @@
   imagePromptOpen={$uiStore.imagePromptOpen}
   jobsOpen={$uiStore.jobsOpen}
   settingsOpen={$uiStore.settingsOpen}
+  {agentAvailable}
+  mode={$workspaceModeStore.mode}
+  onModeChange={changeWorkspaceMode}
   onOpenPromptSnippets={openPromptSnippetsDrawer}
   onOpenImagePrompt={openImagePromptDialog}
   onOpenJobs={openJobsDrawer}
@@ -1420,54 +1452,68 @@
 <main id="main-content" tabindex="-1" class:optimizer-gutter={optimizerAssistantEnabled} class="mx-auto max-w-5xl space-y-6 px-4 py-6 pb-28 sm:px-6 sm:pb-32">
   <ToastHost toast={$toastStore} />
 
-  <PromptForm
-    loading={$previewStore.loading}
-    optimizing={optimizingPrompt}
-    optimizerEnabled={optimizerAvailable}
-    editPlannerEnabled={aiAssistantAvailable}
-    editPlanning={$assistantStore.editPlanLoading}
-    onSubmit={submitPrompt}
-    {hasEditSource}
-    onPlanEdit={planEdit}
-    onOptimize={optimizePrompt}
-    onAppendPromptTag={appendPromptTag}
-    onOpenSize={() => void openUiPanel('size', 'sizeDialogOpen')}
-  >
-    {#snippet editSource()}
-      <EditSourcePicker
-        bind:this={editPicker}
-        sources={editSources}
-        onChange={handleEditFile}
-        onDropFiles={handleEditFiles}
-        onPreview={openEditPreview}
-        onRemove={removeEditSource}
-        onClear={clearEditSource}
-        onEditMask={openMaskEditor}
-        onRemoveMask={removeEditMask}
-        pasteBack={promptForm.pasteBack}
-        onPasteBackChange={(enabled: boolean) => {
-          promptForm.pasteBack = enabled;
-          try { localStorage.setItem('maskEditor.pasteBack', String(enabled)); } catch { /* storage may be disabled */ }
-        }}
-        {maskSupported}
+  {#if $workspaceModeStore.mode === 'agent'}
+    {#if $agentViewPanel.component}
+      {@const Panel = $agentViewPanel.component}
+      <Panel
+        conversationId={$workspaceModeStore.conversationId}
+        onConversationChange={changeAgentConversation}
+        onImagesChanged={scheduleGalleryRefreshAfterSuccess}
+        onOpenGalleryImage={openLightbox}
       />
-    {/snippet}
-  </PromptForm>
-
-  {#if $aiAssistantPanel.component}
-    {@const Panel = $aiAssistantPanel.component}
-    <Panel
-      enabled={aiAssistantAvailable}
+    {:else if $agentViewPanel.status === 'error'}
+      <p role="alert" class="status-error px-3 py-2 text-sm">{$t.messages.requestFailed}</p>
+    {/if}
+  {:else}
+    <PromptForm
+      loading={$previewStore.loading}
+      optimizing={optimizingPrompt}
       optimizerEnabled={optimizerAvailable}
-      loading={$assistantStore.promptLoading || $assistantStore.paramsLoading}
-      onApplyPrompt={applyAssistantPrompt}
-      onInsertPrompt={insertAssistantPrompt}
-      onSaveSnippet={saveAssistantSnippet}
-      onApplyParams={applyAssistantParams}
-    />
-  {/if}
+      editPlannerEnabled={aiAssistantAvailable}
+      editPlanning={$assistantStore.editPlanLoading}
+      onSubmit={submitPrompt}
+      {hasEditSource}
+      onPlanEdit={planEdit}
+      onOptimize={optimizePrompt}
+      onAppendPromptTag={appendPromptTag}
+      onOpenSize={() => void openUiPanel('size', 'sizeDialogOpen')}
+    >
+      {#snippet editSource()}
+        <EditSourcePicker
+          bind:this={editPicker}
+          sources={editSources}
+          onChange={handleEditFile}
+          onDropFiles={handleEditFiles}
+          onPreview={openEditPreview}
+          onRemove={removeEditSource}
+          onClear={clearEditSource}
+          onEditMask={openMaskEditor}
+          onRemoveMask={removeEditMask}
+          pasteBack={promptForm.pasteBack}
+          onPasteBackChange={(enabled: boolean) => {
+            promptForm.pasteBack = enabled;
+            try { localStorage.setItem('maskEditor.pasteBack', String(enabled)); } catch { /* storage may be disabled */ }
+          }}
+          {maskSupported}
+        />
+      {/snippet}
+    </PromptForm>
 
-  <PreviewPanel onRegenerate={regenerate} onClear={clearPreview} />
+    {#if $aiAssistantPanel.component}
+      {@const Panel = $aiAssistantPanel.component}
+      <Panel
+        enabled={aiAssistantAvailable}
+        optimizerEnabled={optimizerAvailable}
+        loading={$assistantStore.promptLoading || $assistantStore.paramsLoading}
+        onApplyPrompt={applyAssistantPrompt}
+        onInsertPrompt={insertAssistantPrompt}
+        onSaveSnippet={saveAssistantSnippet}
+        onApplyParams={applyAssistantParams}
+      />
+    {/if}
+
+    <PreviewPanel onRegenerate={regenerate} onClear={clearPreview} />
+  {/if}
 
   {#if $galleryGridPanel.component}
     {@const Panel = $galleryGridPanel.component}

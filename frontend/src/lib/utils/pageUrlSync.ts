@@ -1,5 +1,6 @@
 import type { GalleryFilters } from '$lib/stores/gallery';
 import { readGalleryUrlState, writeGalleryUrlState } from '$lib/stores/galleryUrlState';
+import type { WorkspaceMode } from '$lib/stores/workspaceMode';
 
 export type JobsTab = 'running' | 'history';
 export type HistoryMode = 'replace' | 'push';
@@ -9,12 +10,21 @@ export function readPageUrl(url: URL) {
   return {
     gallery: readGalleryUrlState(url.searchParams),
     jobsTab: jobsValue === 'history' || jobsValue === 'running' ? jobsValue : null,
-    imageId: url.searchParams.get('image')
+    imageId: url.searchParams.get('image'),
+    mode: (url.searchParams.get('mode') === 'agent' ? 'agent' : 'studio') as WorkspaceMode,
+    conversationId: url.searchParams.get('conversation')
   } as const;
 }
 
 export function writePageUrl(
-  state: { page: number; filters: GalleryFilters; imageId: string | null; jobsTab: JobsTab | null },
+  state: {
+    page: number;
+    filters: GalleryFilters;
+    imageId: string | null;
+    jobsTab: JobsTab | null;
+    mode?: WorkspaceMode;
+    conversationId?: string | null;
+  },
   mode: HistoryMode
 ) {
   if (typeof window === 'undefined') return;
@@ -24,6 +34,14 @@ export function writePageUrl(
   else url.searchParams.delete('image');
   if (state.jobsTab) url.searchParams.set('jobs', state.jobsTab);
   else url.searchParams.delete('jobs');
+  if (state.mode === 'agent') {
+    url.searchParams.set('mode', 'agent');
+    if (state.conversationId) url.searchParams.set('conversation', state.conversationId);
+    else url.searchParams.delete('conversation');
+  } else {
+    url.searchParams.delete('mode');
+    url.searchParams.delete('conversation');
+  }
 
   const nextUrl = `${url.pathname}${url.search}${url.hash}`;
   const currentUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;

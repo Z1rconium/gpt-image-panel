@@ -20,7 +20,11 @@ const BUDGETS = {
   // actions add 22 utility rules (+262 B gzip, measured with the Tailwind CLI
   // against the pre-change tree) and are loaded lazily, but Tailwind's utility
   // CSS is global, so the main stylesheet carries them.
-  mainCssGzipBytes: 12.9 * 1024,
+  // 12.9 -> 13.3 KiB: the Agent conversation view (thread, composer, mention
+  // list, conversation list) adds about 40 utility rules (+371 B gzip, measured
+  // against the pre-change tree). The view loads lazily, but Tailwind's utility
+  // CSS is global, so the main stylesheet carries them.
+  mainCssGzipBytes: 13.3 * 1024,
   oglGzipBytes: 39.4 * 1024,
   oglReduction: 0.2
 };
