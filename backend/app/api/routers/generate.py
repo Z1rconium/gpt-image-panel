@@ -15,18 +15,14 @@ from ...services.job_events import (
     get_cached_generate_job_previews,
     get_job_subscribers,
     get_jobs_subscribers,
-    publish_generate_job_row_async,
     publish_queue,
     reconcile_active_generate_jobs,
     resolve_generate_job_view,
     serialize_sse_event,
 )
 from ...runtime.blocking import run_db_operation, run_image_operation
-from ...services.job_queue import (
-    cleanup_parent_edit_sources,
-    queue_image_job,
-    trim_generate_jobs,
-)
+from ...services.job_cancel import cancel_image_job
+from ...services.job_queue import queue_image_job
 from ...services.poll_backoff import next_poll_delay
 from ...repositories.sse_limiter import sse_limiter
 from ...core import security as auth
@@ -38,12 +34,10 @@ from ...repositories.gallery.queries import get_gallery_entry
 from ...core.observability import metrics
 from ...repositories.image_jobs import (
     aggregate_image_job_units,
-    cancel_generate_job_tx,
     clear_generate_job_history as clear_persisted_generate_job_history,
     get_generate_job as get_persisted_generate_job,
     get_generate_sse_edges,
     list_generate_jobs as list_persisted_generate_jobs,
-    release_edit_source_reservation,
 )
 from ...schemas.common import MessageResponse
 from ...schemas.generation import (
@@ -513,48 +507,5 @@ async def stream_generate_job(job_id: str, request: Request):
 
 @router.delete("/api/generate/{job_id}", response_model=MessageResponse)
 async def cancel_generate_job(job_id: str):
-    job = await resolve_generate_job_view(job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail="Generation job not found")
-    if job.get("status") not in {"queued", "running"}:
-        raise HTTPException(status_code=409, detail="Generation job already finished")
-
-    aggregate = await run_db_operation(
-        aggregate_image_job_units,
-        job_id,
-        metric_name="aggregate_cancelled_image_job",
-    )
-    cancel_message = (
-        "Image edit job cancelled"
-        if job.get("operation") == "edit"
-        else "Generation job cancelled"
-    )
-    row, cancelled = await run_db_operation(
-        cancel_generate_job_tx,
-        job_id,
-        cancel_message,
-        metric_name="cancel_generate_job",
-        critical=True,
-    )
-    if row is None:
-        raise HTTPException(status_code=404, detail="Generation job not found")
-    if not cancelled:
-        raise HTTPException(status_code=409, detail="Generation job already finished")
-    await publish_generate_job_row_async(row, dispatch_webhook=True)
-    await run_db_operation(trim_generate_jobs, metric_name="trim_generate_jobs")
-
-    if job.get("operation") == "edit":
-        if int(aggregate.get("running_count") or 0) > 0:
-            await run_db_operation(
-                release_edit_source_reservation,
-                job_id,
-                metric_name="release_edit_source_reservation",
-            )
-        else:
-            await run_db_operation(
-                cleanup_parent_edit_sources,
-                job_id,
-                metric_name="cleanup_parent_edit_sources",
-            )
-
+    await cancel_image_job(job_id)
     return MessageResponse(status="success", message="Generation job cancelled")

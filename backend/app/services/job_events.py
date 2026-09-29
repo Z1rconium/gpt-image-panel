@@ -98,9 +98,10 @@ def clear_generate_job_preview_cache(job_id: str) -> None:
         cache.pop(key, None)
 
 
-def serialize_sse_event(event: str, data: dict | list) -> str:
+def serialize_sse_event(event: str, data: dict | list, *, event_id: int | None = None) -> str:
     payload = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
-    return f"event: {event}\ndata: {payload}\n\n"
+    id_line = f"id: {event_id}\n" if event_id is not None else ""
+    return f"{id_line}event: {event}\ndata: {payload}\n\n"
 
 
 def publish_queue(queue: asyncio.Queue, event: dict):
