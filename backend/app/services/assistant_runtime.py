@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re
+import time
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
@@ -233,7 +234,23 @@ async def _release_assistant_slot(slot_name: str, owner: str) -> None:
 
 
 @asynccontextmanager
-async def _assistant_request_limit(timeout_seconds: int, *, wait_for_slot: bool = False):
+async def _assistant_request_limit(
+    timeout_seconds: int,
+    *,
+    wait_for_slot: bool = False,
+    max_wait_seconds: float | None = None,
+):
+    """Hold one global assistant request slot.
+
+    ``wait_for_slot`` retries a saturated slot pool instead of failing; callers
+    that must not wait forever (Agent turns) pass ``max_wait_seconds`` so the
+    retry loop ends with a 429 instead of holding their own capacity indefinitely.
+    """
+    wait_deadline = (
+        time.monotonic() + max_wait_seconds
+        if wait_for_slot and max_wait_seconds is not None
+        else None
+    )
     while True:
         semaphore = _assistant_request_semaphore()
         slot_name = ""
@@ -243,6 +260,8 @@ async def _assistant_request_limit(timeout_seconds: int, *, wait_for_slot: bool 
                 slot_name, slot_owner = await _acquire_assistant_slot(timeout_seconds)
             except DomainError as e:
                 if not wait_for_slot or e.status_code != 429:
+                    raise
+                if wait_deadline is not None and time.monotonic() >= wait_deadline:
                     raise
             else:
                 try:

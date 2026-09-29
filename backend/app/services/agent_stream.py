@@ -1,6 +1,7 @@
 """Outbound SSE for an Agent turn, tailing the persisted turn events."""
 
 import asyncio
+import logging
 import time
 from typing import Any
 
@@ -15,9 +16,11 @@ from .agent_turns import TERMINAL_EVENT_TYPES
 from .gallery_common import PRIVATE_GALLERY_CACHE_CONTROL
 from .job_events import serialize_sse_event
 
+logger = logging.getLogger(__name__)
+
 EVENT_POLL_SECONDS = 0.4
 KEEP_ALIVE_SECONDS = 15.0
-STALE_SWEEP_SECONDS = 5.0
+STALE_SWEEP_SECONDS = 30.0
 EVENT_BATCH = 200
 
 
@@ -102,6 +105,12 @@ async def stream_turn_events(
                     await asyncio.wait_for(wakeup.wait(), timeout=EVENT_POLL_SECONDS)
                 except asyncio.TimeoutError:
                     pass
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            # A transient backend failure closes the stream; EventSource then
+            # reconnects and resumes from Last-Event-ID.
+            logger.exception("Agent event stream for turn %s failed", turn_id)
         finally:
             await sse_limiter.release(sse_lease)
 

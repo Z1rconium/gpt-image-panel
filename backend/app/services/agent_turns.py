@@ -11,7 +11,7 @@ import json
 import logging
 import os
 import time
-from contextlib import aclosing
+from contextlib import aclosing, suppress
 from typing import Any
 
 from ..core import settings as config
@@ -54,11 +54,15 @@ TERMINAL_EVENT_TYPES = frozenset({"turn.completed", "turn.failed", "turn.cancell
 TEXT_FLUSH_CHARS = 256
 TEXT_FLUSH_SECONDS = 0.15
 PERSIST_INTERVAL_SECONDS = 1.0
+EVENT_FLUSH_INTERVAL_SECONDS = 0.25
+EVENT_FLUSH_MAX = 16
 CANCEL_POLL_SECONDS = 1.0
 IMAGE_POLL_MIN_SECONDS = 0.5
 IMAGE_POLL_MAX_SECONDS = 2.0
 MAX_REFS_PER_IMAGE = 8
 MAX_INVALID_TOOL_CALLS = 2
+MAX_TOOL_CALLS_PER_ROUND = 8
+AGENT_SLOT_WAIT_SECONDS = 240.0
 MAX_OUTPUT_TOKENS = 4096
 HISTORY_MESSAGE_LIMIT = 400
 TOOLS_UNSUPPORTED_MESSAGE = (
@@ -116,6 +120,9 @@ class _TurnRun:
         self._pending_text = ""
         self._last_text_emit = time.monotonic()
         self._last_persist = 0.0
+        self._blocks_dirty = False
+        self._pending_events: list[tuple[str, dict[str, Any]]] = []
+        self._next_event_seq: int | None = None
         self._cancelled = False
         self._batch_blocks: dict[str, dict[str, Any]] = {}
         self._wakeup = state.agent_turn_wakeups.setdefault(self.turn_id, asyncio.Event())
@@ -131,16 +138,55 @@ class _TurnRun:
         return f"{prefix}{self._block_seq}"
 
     async def emit(self, event_type: str, data: dict[str, Any]) -> None:
-        snapshot = copy.deepcopy(data)
+        """Buffer one event; `_event_flush_loop` and `flush_events` write it out.
+
+        Only the top level is snapshotted: callers must not mutate nested
+        containers after emitting (block upserts pass a fresh ``dict(block)``),
+        which is what the previous deepcopy protected against.
+        """
         async with self._emit_lock:
-            await run_db_operation(
-                agent_repo.append_turn_event,
+            self._pending_events.append((event_type, dict(data)))
+            if len(self._pending_events) >= EVENT_FLUSH_MAX:
+                await self._flush_events_locked()
+
+    async def flush_events(self) -> None:
+        async with self._emit_lock:
+            await self._flush_events_locked()
+
+    async def _flush_events_locked(self) -> None:
+        if not self._pending_events:
+            return
+        if self._next_event_seq is None:
+            self._next_event_seq = (
+                await run_db_operation(
+                    agent_repo.read_event_cursor,
+                    self.turn_id,
+                    metric_name="agent_read_event_cursor",
+                )
+            ) + 1
+        events, self._pending_events = self._pending_events, []
+        try:
+            last = await run_db_operation(
+                agent_repo.append_turn_events,
                 self.turn_id,
-                event_type,
-                snapshot,
-                metric_name="agent_append_turn_event",
+                events,
+                start_seq=self._next_event_seq,
+                metric_name="agent_append_turn_events",
             )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            # Put the batch back so a later flush can retry it.
+            self._pending_events = events + self._pending_events
+            raise
+        self._next_event_seq = last + 1
         self._wakeup.set()
+
+    async def maybe_persist(self) -> None:
+        if not self._blocks_dirty:
+            return
+        if time.monotonic() - self._last_persist >= PERSIST_INTERVAL_SECONDS:
+            await self.persist()
 
     async def upsert_block(self, block: dict[str, Any]) -> None:
         for index, existing in enumerate(self.blocks):
@@ -149,10 +195,11 @@ class _TurnRun:
                 break
         else:
             self.blocks.append(block)
-        await self.emit("block.upsert", {"block": block})
-        # Structural changes are rare, so persist each one: a reload mid-turn then
-        # reads the same blocks the event stream has shown so far.
-        await self.persist()
+        await self.emit("block.upsert", {"block": dict(block)})
+        # Snapshot writes are coalesced with the persist cadence: a reload
+        # mid-turn reads at most one interval behind the event stream.
+        self._blocks_dirty = True
+        await self.maybe_persist()
 
     async def add_text(self, text: str) -> None:
         if not text:
@@ -180,6 +227,7 @@ class _TurnRun:
     async def persist(self) -> None:
         async with self._persist_lock:
             self._last_persist = time.monotonic()
+            self._blocks_dirty = False
             text = "\n\n".join(
                 block["text"] for block in self.blocks if block["type"] == "text" and block["text"].strip()
             )
@@ -216,6 +264,8 @@ class _TurnRun:
             tools_enabled = self.rounds_used < agent.max_tool_rounds
             self._text_block = None
             result = await self._model_round(items, tools, instructions, tools_enabled)
+            if len(result.calls) > MAX_TOOL_CALLS_PER_ROUND:
+                raise TurnFailed("The model requested too many tool calls at once.")
             if not result.calls:
                 if not result.text.strip() and not any(
                     block["type"] in {"text", "image_task"} and (block.get("text") or block.get("ref_label"))
@@ -304,7 +354,9 @@ class _TurnRun:
         visible_parts: list[str] = []
         calls: list[ToolCallComplete] = []
         finish: Finish | None = None
-        async with assistant_runtime.assistant_request_limit(runtime.timeout_seconds, wait_for_slot=True):
+        async with assistant_runtime.assistant_request_limit(
+            runtime.timeout_seconds, wait_for_slot=True, max_wait_seconds=AGENT_SLOT_WAIT_SECONDS
+        ):
             stream = agent_client.stream_agent_response(
                 api_url=runtime.api_url,
                 api_key=runtime.api_key,
@@ -640,6 +692,10 @@ class _TurnRun:
             await self.flush_text()
             if status == "cancelled":
                 await self._cancel_pending_images()
+            # Everything is persisted before the turn status flips: a stream
+            # reader that sees the terminal status synthesizes its own terminal
+            # event and would never replay a later block event.
+            await self.flush_events()
             await self.persist()
         except Exception:
             logger.warning("Agent turn %s could not flush its final state", self.turn_id, exc_info=True)
@@ -658,10 +714,31 @@ class _TurnRun:
             await self.emit("turn.cancelled", {})
         else:
             await self.emit("turn.failed", {"message": message or "The Agent turn failed."})
+        try:
+            await self.flush_events()
+        except Exception:
+            logger.warning("Agent turn %s could not write its terminal event", self.turn_id, exc_info=True)
 
 
 def _item_error(item_id: str, message: str) -> dict[str, Any]:
     return {"id": item_id, "status": "error", "error": message}
+
+
+async def _stop_task(task: asyncio.Task) -> None:
+    task.cancel()
+    with suppress(asyncio.CancelledError):
+        await task
+
+
+async def _event_flush_loop(run: _TurnRun) -> None:
+    """Bound how long buffered events or block snapshots can sit unwritten."""
+    while True:
+        await asyncio.sleep(EVENT_FLUSH_INTERVAL_SECONDS)
+        try:
+            await run.flush_events()
+            await run.maybe_persist()
+        except Exception:
+            logger.warning("Agent turn %s could not flush events", run.turn_id, exc_info=True)
 
 
 async def _renew_lease_loop(turn_id: str, owner: str) -> None:
@@ -739,6 +816,7 @@ async def run_turn(turn_id: str) -> None:
         return
     run = _TurnRun(turn)
     renewer = asyncio.create_task(_renew_lease_loop(turn_id, owner), name=f"agent-lease-{turn_id}")
+    flusher = asyncio.create_task(_event_flush_loop(run), name=f"agent-flush-{turn_id}")
     status = "failed"
     message: str | None = None
     try:
@@ -753,7 +831,7 @@ async def run_turn(turn_id: str) -> None:
             try:
                 await main
             finally:
-                watcher.cancel()
+                await _stop_task(watcher)
             status = "completed"
         except TurnCancelled:
             status = "cancelled"
@@ -774,7 +852,8 @@ async def run_turn(turn_id: str) -> None:
                 logger.warning("Agent turn %s could not record its error block", turn_id, exc_info=True)
         await run.finalize(status, message)
     finally:
-        renewer.cancel()
+        await _stop_task(renewer)
+        await _stop_task(flusher)
         state.agent_turn_wakeups.pop(turn_id, None)
         state.agent_turn_cancel_events.pop(turn_id, None)
 
