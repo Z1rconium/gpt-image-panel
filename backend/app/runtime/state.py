@@ -66,6 +66,7 @@ def init_defaults() -> None:
     state.thumbnail_dispatcher_kick = asyncio.Event()
     state.agent_turn_tasks = {}
     state.agent_turn_wakeups = {}
+    state.agent_turn_cancel_events = {}
     state.agent_last_event_purge_at = 0.0
 
 

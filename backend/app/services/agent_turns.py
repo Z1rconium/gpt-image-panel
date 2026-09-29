@@ -684,10 +684,25 @@ async def _renew_lease_loop(turn_id: str, owner: str) -> None:
             return
 
 
+def wake_turn_cancel(turn_id: str) -> None:
+    """Tell a turn running in this process that its cancel flag was just set.
+
+    The DB flag stays the source of truth (and the only signal across workers,
+    which poll it); this only removes the polling delay when the cancel request
+    lands on the worker that runs the turn.
+    """
+    event = state.agent_turn_cancel_events.get(turn_id)
+    if event is not None:
+        event.set()
+
+
 async def _cancel_watcher(run: _TurnRun, main: asyncio.Task) -> None:
     """Cancel the main loop as soon as a cancel is requested, even mid model call."""
+    wake = state.agent_turn_cancel_events.setdefault(run.turn_id, asyncio.Event())
     while not main.done():
-        await asyncio.sleep(CANCEL_POLL_SECONDS)
+        # Clear before checking: a cancel landing after the clear leaves the event
+        # set, and one landing before it is already visible in the DB check.
+        wake.clear()
         try:
             requested = await run_db_operation(
                 agent_repo.is_turn_cancel_requested,
@@ -696,11 +711,15 @@ async def _cancel_watcher(run: _TurnRun, main: asyncio.Task) -> None:
             )
         except Exception:
             logger.warning("Agent turn %s cancel check failed", run.turn_id, exc_info=True)
-            continue
+            requested = False
         if requested:
             run._cancelled = True
             main.cancel()
             return
+        try:
+            await asyncio.wait_for(wake.wait(), timeout=CANCEL_POLL_SECONDS)
+        except asyncio.TimeoutError:
+            pass
 
 
 async def run_turn(turn_id: str) -> None:
@@ -757,6 +776,7 @@ async def run_turn(turn_id: str) -> None:
     finally:
         renewer.cancel()
         state.agent_turn_wakeups.pop(turn_id, None)
+        state.agent_turn_cancel_events.pop(turn_id, None)
 
 
 def spawn_turn(turn_id: str) -> asyncio.Task:

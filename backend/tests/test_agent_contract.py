@@ -16,6 +16,7 @@ from backend.app.integrations.agent_client import (
     UserItem,
 )
 from backend.app.repositories import agent as agent_repo
+from backend.app.services import agent_turns
 from backend.tests.support.contract import *  # noqa: F403
 
 TERMINAL = {"completed", "failed", "cancelled", "interrupted"}
@@ -368,6 +369,51 @@ def test_agent_cancel_stops_a_silent_model_call(client, monkeypatch):
     again = client.post(f"/api/agent/turns/{accepted['turn_id']}/cancel")
     assert again.status_code == 202 and again.json()["status"] == "cancelled"
     assert client.post("/api/agent/turns/missing/cancel").status_code == 404
+
+
+def test_agent_cancel_does_not_wait_for_the_poll_interval(client, monkeypatch):
+    """A cancel that lands on the runner's worker wakes it at once; the 1s poll is only the cross-worker fallback."""
+    enable_agent(client)
+    monkeypatch.setattr(agent_turns, "CANCEL_POLL_SECONDS", 60.0)
+    started = threading.Event()
+
+    async def silent(kwargs):
+        started.set()
+        while True:
+            await asyncio.sleep(0.05)
+        yield  # pragma: no cover
+
+    install_model(monkeypatch, [silent])
+    conversation_id = new_conversation(client)
+    accepted = start_turn(client, conversation_id, "go")
+    assert started.wait(5)
+    began = time.time()
+    assert client.post(f"/api/agent/turns/{accepted['turn_id']}/cancel").status_code == 202
+    status = wait_turn(client, accepted["turn_id"], timeout=5)
+    assert status["status"] == "cancelled"
+    assert time.time() - began < 3, "cancel waited for the poll interval instead of the wake-up"
+    assert not agent_turns.state.agent_turn_cancel_events
+
+
+def test_agent_cancel_before_the_watcher_starts_is_still_seen(client, monkeypatch):
+    enable_agent(client)
+    monkeypatch.setattr(agent_turns, "CANCEL_POLL_SECONDS", 60.0)
+    release = threading.Event()
+
+    async def held(kwargs):
+        while not release.is_set():
+            await asyncio.sleep(0.02)
+        while True:
+            await asyncio.sleep(0.05)
+        yield  # pragma: no cover
+
+    install_model(monkeypatch, [held])
+    conversation_id = new_conversation(client)
+    accepted = start_turn(client, conversation_id, "go")
+    # The flag is already set when the runner is still starting up.
+    agent_repo.request_turn_cancel(accepted["turn_id"])
+    release.set()
+    assert wait_turn(client, accepted["turn_id"], timeout=5)["status"] == "cancelled"
 
 
 def test_agent_cancel_cancels_pending_image_jobs(client, monkeypatch):

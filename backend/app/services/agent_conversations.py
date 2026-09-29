@@ -72,7 +72,7 @@ async def delete_conversation(conversation_id: str) -> None:
         raise NotFoundError("Agent conversation not found")
     active_turn_id = conversation.get("active_turn_id")
     if active_turn_id:
-        await run_db_operation(agent_repo.request_turn_cancel, active_turn_id, metric_name="agent_cancel_turn")
+        await _request_cancel(active_turn_id)
         deadline = time.monotonic() + DELETE_WAIT_SECONDS
         while time.monotonic() < deadline:
             turn = await run_db_operation(agent_repo.get_turn, active_turn_id, metric_name="agent_get_turn")
@@ -142,8 +142,16 @@ async def start_turn(conversation_id: str, req: AgentTurnRequest) -> AgentTurnAc
     )
 
 
-async def cancel_turn(turn_id: str) -> AgentTurnStatus:
+async def _request_cancel(turn_id: str) -> dict[str, Any] | None:
+    """Set the durable cancel flag, then wake the runner if it lives in this process."""
     turn = await run_db_operation(agent_repo.request_turn_cancel, turn_id, metric_name="agent_cancel_turn")
+    if turn is not None:
+        agent_turns.wake_turn_cancel(turn_id)
+    return turn
+
+
+async def cancel_turn(turn_id: str) -> AgentTurnStatus:
+    turn = await _request_cancel(turn_id)
     if turn is None:
         raise NotFoundError("Agent turn not found")
     return _turn_status(turn)
