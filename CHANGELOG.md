@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.7.1
+
+- Security hardening for Agent mode: message text and attachments are validated against the configured limits in the request schema, oversized Last-Event-ID cursors are ignored instead of raising, edit-source temp files only reuse known image suffixes, and the startup sweep no longer deletes staging files a running turn may still use. All `AGENT_*` overall-config overrides now have upper bounds.
+- Agent runner reliability: tool calls per model round are capped, a saturated AI Assistant concurrency pool fails the turn after a bounded wait instead of holding it open, background tasks are awaited on turn teardown, and the SSE tail closes cleanly on backend errors so the browser can reconnect.
+- Agent performance: turn events are written in batches with caller-owned sequence numbers, block snapshots persist on the existing 1s cadence, idle stale-turn sweeps no longer take the write lock, and migration 32 adds image-order, pending-image and finished-turn indexes. Vision previews are cached in-process (bounded LRU) and loaded concurrently, the model request body is serialized off the event loop, and conversation detail only returns image references for the messages in the page.
+- Agent web UI: returning to a tab resumes the event stream from the last applied event instead of replaying the turn, cancel leaves the "stopping" state through a status-poll fallback, stream frames paint once per animation frame, recovery attempts reset per conversation, and an abandoned reply is marked interrupted.
+
 ## v1.7.0
 
 - Agent conversation mode: a Studio/Agent switch in the header opens a multi-turn chat in which the model plans and creates images. Enable it under Settings → AI Assistant; it reuses the Prompt Optimizer endpoint and needs a model that supports function calling (chat/completions or responses).
