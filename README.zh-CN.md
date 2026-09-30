@@ -292,7 +292,8 @@ Overall Config 会把 override 持久化到 SQLite。部分配置可热更新；
 7. 保存预设，必要时执行健康检查。
 8. 输入 prompt 生成图片，或上传/选择源图执行编辑。
 9. 在 Gallery 中复用参数、筛选、收藏、批量操作、导入导出、执行 R2 同步或上传到 NodeImage。
-10. 按需在“设置 → AI 助手”中开启 Agent 模式（选择支持 function calling 的模型），然后在页眉切换到 **Agent**。描述需求，用 `@`（如 `@round-1-image-1` 或 `@第1轮图1`）引用之前的图片，也可从 Gallery 添加图片，按 Ctrl/Cmd+Enter 发送。运行中可点“停止”取消；生成的图片会出现在 Gallery。
+10. 可以把 `/?apiUrl=https://api.example.com&apiModel=gpt-image-2` 存为书签。打开后会提示用该 URL 和模型新建预设；确认前不会保存任何内容，API 密钥保持为空，并且这些参数会立即从地址栏移除。只接受 `https` URL，也不会从 URL 读取任何凭据。（`?model=` 已被 Gallery 筛选占用，所以参数名是 `apiModel`。）
+11. 按需在“设置 → AI 助手”中开启 Agent 模式（选择支持 function calling 的模型），然后在页眉切换到 **Agent**。描述需求，用 `@`（如 `@round-1-image-1` 或 `@第1轮图1`）引用之前的图片，也可从 Gallery 添加图片，按 Ctrl/Cmd+Enter 发送。运行中可点“停止”取消；生成的图片会出现在 Gallery。
 
 ## GPT Image 2.5
 
@@ -329,6 +330,28 @@ Overall Config 会把 override 持久化到 SQLite。部分配置可热更新；
 
 使用 `/v1/responses` 和 `/v1/chat/completions` 时，尺寸、质量、格式、压缩率、数量控件会禁用，因为这些路径的参数契约不同。
 
+## 自定义异步供应商
+
+有些网关（例如 fal.ai 的队列接口）会先接收任务、返回状态/结果 URL，稍后才完成。预设可以用声明式 JSON 映射代替 OpenAI 路径：在设置中选择 **自定义异步供应商**，或点击 **套用 fal.ai 模板**。
+
+```json
+{
+  "version": 1,
+  "auth": {"header": "Authorization", "scheme": "Key"},
+  "submit": {"path": "/{{model}}", "body": {"prompt": "{{prompt}}", "num_images": "{{n}}", "image_size": {"width": "{{width}}", "height": "{{height}}"}}},
+  "poll": {"url_path": "$.status_url", "status_path": "$.status", "done": ["COMPLETED"], "failed": ["FAILED"], "interval_seconds": 2, "timeout_seconds": 600},
+  "result": {"url_path": "$.response_url", "images_path": "$.images[*].url", "image_kind": "url"},
+  "cancel": {"url_path": "$.cancel_url", "method": "PUT"}
+}
+```
+
+- **流程**：把渲染后的请求体 `POST` 到 `API URL + submit.path`，从响应里取状态 URL，轮询直到 `status_path` 的值属于 `done`（或 `failed`），按需再请求 `result.url_path`，最后从 `images_path` 读取图片（URL 或 base64）。
+- **变量**：`prompt`、`model`、`n`、`width`、`height`、`size`、`quality`、`output_format`、`background`。值只是一个没有内容的变量（例如尺寸为 `auto` 时的 `width`）时，该字段会被省略。`submit.path` 只能使用 `{{model}}`。不会把任何内容当作代码执行；路径只支持 `$.a.b[0]` 和 `[*]`。
+- **凭据**：映射里不放任何密钥。预设的 API 密钥（环境变量引用或 Secret Registry ID）按 `header: scheme key` 发送；`header` 为 `Authorization` 或 `X-API-Key`，`scheme` 为 `Bearer`、`Key`、`Token` 或留空。
+- **安全**：状态、结果和取消 URL 来自上游响应，因此必须与预设 API URL 同源（密钥会随请求发送），并通过与提交 URL 相同的 SSRF 和对端 IP 检查。图片下载不带凭据，错误信息会脱敏。
+- **限制**：不支持图片编辑、流式预览和本地色键抠图，蒙版被强制关闭。超时或取消时会尽力发送一次 `cancel` 请求。Worker 租约过期会重新提交整个任务，因为远端任务 ID 不会持久化。
+- 健康检查只校验映射并探测提交 URL，不会真正提交任务。`GET /api/settings/provider-templates` 列出内置模板。fal.ai 模板依据 fal 公开的队列接口编写，目前仅有模拟会话测试覆盖。
+
 ## 流式预览与费用估算
 
 - 流式预览需在生成表单中主动开启，仅适用于数量为 1 的 `/v1/images/generations` 和 `/v1/images/edits`——每张请求图片都作为独立执行单元排队，流式与批量无法组合。可选 1–3 个预览帧，帧数越多上游输出 token 越多，费用也略高。
@@ -349,6 +372,7 @@ Overall Config 会把 override 持久化到 SQLite。部分配置可热更新；
 | `GET/PUT` | `/api/settings/overall-config` | 读取/保存 Overall Config override。 |
 | `GET/POST` | `/api/settings` | 读取/保存当前预设、提示词优化器、R2 备份、代理和 webhook 设置。 |
 | `POST` | `/api/settings/presets` | 创建 API 预设。 |
+| `GET` | `/api/settings/provider-templates` | 列出内置的自定义异步供应商映射。 |
 | `POST` | `/api/settings/presets/{preset_id}/activate` | 激活已保存 API 预设。 |
 | `DELETE` | `/api/settings/presets/{preset_id}` | 删除 API 预设。 |
 | `POST` | `/api/settings/presets/{preset_id}/health` | 校验已保存上游预设。 |

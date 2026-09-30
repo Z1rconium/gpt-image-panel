@@ -317,7 +317,8 @@ With `ENABLE_METRICS=true`, `/api/metrics` exposes diagnostics for sizing SQLite
 7. Save the preset and run its health check if needed.
 8. Generate images from a prompt, or upload/select source images and run edits.
 9. Use Gallery for reuse, filtering, favorites, batch actions, import/export, and R2 sync.
-10. Optionally enable Agent mode in Settings → AI Assistant (pick a model that supports function calling), then switch to **Agent** in the header. Describe what you want, reference earlier images with `@` (for example `@round-1-image-1`), attach gallery images, and press Ctrl/Cmd+Enter. Use Stop to cancel a running reply; generated images appear in the gallery.
+10. Bookmark a preset shortcut with `/?apiUrl=https://api.example.com&apiModel=gpt-image-2`. Opening it offers to create a new preset with that URL and model; nothing is saved until you confirm, the API key stays empty, and the parameters are removed from the address bar. Only `https` URLs are accepted and credentials are never read from the URL. (`?model=` is the gallery filter, hence `apiModel`.)
+11. Optionally enable Agent mode in Settings → AI Assistant (pick a model that supports function calling), then switch to **Agent** in the header. Describe what you want, reference earlier images with `@` (for example `@round-1-image-1`), attach gallery images, and press Ctrl/Cmd+Enter. Use Stop to cancel a running reply; generated images appear in the gallery.
 
 ## GPT Image 2.5
 
@@ -354,6 +355,28 @@ API rules checked on 2026-09-10: [image generation guide](https://developers.ope
 
 For `/v1/responses` and `/v1/chat/completions`, size/quality/format/compression/quantity controls are disabled because those paths do not share the same parameter contract.
 
+## Custom Async Providers
+
+Some gateways, such as fal.ai's queue API, accept a task, return status/result URLs and finish later. A preset can use a declarative JSON mapping instead of the OpenAI paths: choose **Custom async provider** in Settings, or click **Apply fal.ai template**.
+
+```json
+{
+  "version": 1,
+  "auth": {"header": "Authorization", "scheme": "Key"},
+  "submit": {"path": "/{{model}}", "body": {"prompt": "{{prompt}}", "num_images": "{{n}}", "image_size": {"width": "{{width}}", "height": "{{height}}"}}},
+  "poll": {"url_path": "$.status_url", "status_path": "$.status", "done": ["COMPLETED"], "failed": ["FAILED"], "interval_seconds": 2, "timeout_seconds": 600},
+  "result": {"url_path": "$.response_url", "images_path": "$.images[*].url", "image_kind": "url"},
+  "cancel": {"url_path": "$.cancel_url", "method": "PUT"}
+}
+```
+
+- **Flow**: `POST` the rendered body to `API URL + submit.path`, read the status URL from the response, poll until `status_path` is in `done` (or `failed`), optionally fetch `result.url_path`, then read images at `images_path` (URLs or base64).
+- **Variables**: `prompt`, `model`, `n`, `width`, `height`, `size`, `quality`, `output_format`, `background`. A field whose only content is a variable without a value (for example `width` when the size is `auto`) is left out. `submit.path` may use only `{{model}}`. Nothing is evaluated as code; paths support `$.a.b[0]` and `[*]` only.
+- **Credentials**: the mapping never contains a key. The preset's API key (env reference or Secret Registry ID) is sent as `header: scheme key`; `header` is `Authorization` or `X-API-Key`, `scheme` is `Bearer`, `Key`, `Token` or empty.
+- **Safety**: status, result and cancel URLs come from upstream responses, so they must be on the same origin as the preset's API URL (the key travels with them) and pass the same SSRF and peer-IP checks as the submit URL. Images are downloaded without credentials. Errors are redacted.
+- **Limits**: image edits, streaming preview and local chroma removal are unavailable, and masks are forced off. On timeout or cancellation a best-effort `cancel` request is sent. If a worker's lease expires the whole task is resubmitted, because the remote task id is not persisted.
+- The health check validates the mapping and probes the submit URL; it never submits a task. `GET /api/settings/provider-templates` lists the bundled templates. The fal.ai template follows fal's documented queue API and is covered by fake-session tests only.
+
 ## Streaming Preview & Cost Estimation
 
 - Streaming preview is opt-in per request (the "Streaming preview" toggle), applies only to `/v1/images/generations` and `/v1/images/edits` with a quantity of 1 — streaming and batching don't compose, since each requested image queues as a separate unit. Choose 1–3 preview frames; more frames means more output tokens and a somewhat higher cost.
@@ -374,6 +397,7 @@ Key backend routes:
 | `GET/PUT` | `/api/settings/overall-config` | Read/save Overall Config overrides. |
 | `GET/POST` | `/api/settings` | Read/save active preset, prompt optimizer, R2 backup, proxy, and webhook settings. |
 | `POST` | `/api/settings/presets` | Create an API preset. |
+| `GET` | `/api/settings/provider-templates` | List bundled custom async provider mappings. |
 | `POST` | `/api/settings/presets/{preset_id}/activate` | Activate a saved API preset. |
 | `DELETE` | `/api/settings/presets/{preset_id}` | Delete an API preset. |
 | `POST` | `/api/settings/presets/{preset_id}/health` | Validate a saved upstream preset. |
