@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.7.3
+
+- Custom async providers: an API preset can now use `provider_kind: async_json` with a declarative `provider_config` JSON mapping (submit → poll → fetch result) instead of the OpenAI paths. A bundled fal.ai queue template is available from Settings and `GET /api/settings/provider-templates`. Request bodies use a fixed set of `{{placeholders}}` (fields whose variable has no value, such as `width` for size `auto`, are omitted) and responses are read with a small JSONPath subset; nothing is evaluated as code.
+- The mapping never holds credentials: the preset's API key is sent as `header: scheme key` (`Authorization` or `X-API-Key`; `Bearer`, `Key`, `Token` or none). Status, result and cancel URLs come from upstream responses and must share the preset API URL's origin and pass the SSRF and peer-IP checks; images are downloaded without credentials and errors are redacted. Timeouts and cancellation send a best-effort remote cancel.
+- Async providers do not support image edits, streaming previews or local chroma removal (rejected at admission with a clear error), and masks are forced off. A lease that expires mid-task resubmits the task because the remote task id is not persisted. The preset health check validates the mapping and probes the submit URL without submitting a task. The fal.ai template follows fal's documented queue API and is covered by fake-session tests only.
+- Migration 33 adds `provider_kind` (default `openai`) and a nullable `provider_config` to `api_presets`; existing presets are unchanged.
+- URL quick fill: opening `/?apiUrl=https://…&apiModel=…` offers to create a new preset with that URL and model. Nothing is saved until the user confirms, the API key stays empty, and the parameters are removed from the address bar immediately. Only `https` URLs are accepted, credentials are never read from the URL, and the parameter is `apiModel` because `?model=` is the gallery filter.
+
 ## v1.7.2
 
 - Agent turn admission now reserves capacity before database waits, including pending creates in the per-worker `AGENT_MAX_ACTIVE_TURNS` limit. Idempotent replays remain available at capacity, and request cancellation completes admission so queued turns receive a runner.
