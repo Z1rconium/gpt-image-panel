@@ -1,7 +1,7 @@
 <script lang="ts">
   import { t } from '$lib/i18n';
   import type { ResponseFormatDefault } from '$lib/api/types/common';
-  import type { AIAssistantSettingsInput, ApiPreset, AssistantHealthResponse, OverallConfigItem, OverallConfigResponse, OverallConfigUpdateRequest, PromptOptimizerHealthResponse, PresetHealthResponse, PromptOptimizerSystemPromptResponse, R2BackupSettingsInput, R2HealthResponse, SettingsInput, SettingsResponse } from '$lib/api/types/settings';
+  import type { AIAssistantSettingsInput, ApiPreset, AssistantHealthResponse, OverallConfigItem, OverallConfigResponse, OverallConfigUpdateRequest, PromptOptimizerHealthResponse, PresetHealthResponse, PromptOptimizerSystemPromptResponse, ProviderTemplate, R2BackupSettingsInput, R2HealthResponse, SettingsInput, SettingsResponse } from '$lib/api/types/settings';
   import { confirmStore } from '$lib/stores/confirm';
   import type { SettingsPrefill } from '$lib/utils/settingsPrefill';
   import { normalizeResponseFormat } from '$lib/utils/promptForm';
@@ -10,8 +10,10 @@
     agentMaxToolRoundsValue,
     aiAssistantPayload,
     buildSettingsPayload,
+    formatProviderConfig,
     hasSettingsChanges,
     promptOptimizerTimeoutValue,
+    providerConfigBlocksSave,
     r2BackupPayload,
     r2SyncIntervalHoursValue,
     secretDraftValue,
@@ -52,6 +54,7 @@
     onClearAiAssistantHealth?: () => void;
     onLoadPromptOptimizerSystemPrompt?: () => Promise<PromptOptimizerSystemPromptResponse>;
     onSavePromptOptimizerSystemPrompt?: (systemPrompt: string) => Promise<PromptOptimizerSystemPromptResponse>;
+    onLoadProviderTemplates?: () => Promise<ProviderTemplate[]>;
     onLoadOverallConfig?: () => Promise<OverallConfigResponse>;
     onSaveOverallConfig?: (body: OverallConfigUpdateRequest) => Promise<OverallConfigResponse>;
   }
@@ -93,6 +96,7 @@
       default_system_prompt: '',
       customized: true
     }),
+    onLoadProviderTemplates = async () => [],
     onLoadOverallConfig = async () => ({
       items: [],
       restart_required_names: []
@@ -121,6 +125,8 @@
     promptGuard: false,
     apiKey: '',
     apiPath: '/v1/images/generations',
+    providerKind: 'openai',
+    providerConfigText: '',
     upstreamSocks5Proxy: '',
     webhookUrl: '',
     promptOptimizerEnabled: false,
@@ -183,6 +189,8 @@
           ? MASKED_API_KEY_VALUE
           : '';
     draft.apiPath = activePreset.api_path || settings.api_path || '/v1/images/generations';
+    draft.providerKind = activePreset.provider_kind ?? settings.provider_kind ?? 'openai';
+    draft.providerConfigText = formatProviderConfig(activePreset.provider_config);
     draft.defaultResponseFormat = normalizeResponseFormat(activePreset.default_response_format ?? settings.default_response_format, 'url');
     draft.supportsMask = activePreset.supports_mask ?? settings.supports_mask ?? true;
     draft.promptGuard = activePreset.prompt_guard ?? settings.prompt_guard ?? false;
@@ -305,6 +313,7 @@
   }
 
   async function save() {
+    if (providerConfigBlocksSave(settingsDraft)) return;
     await onSave(buildSettingsPayload(settingsDraft, settings));
   }
 
@@ -513,6 +522,9 @@
         bind:presetName={draft.presetName}
         bind:apiUrl={draft.apiUrl}
         bind:apiPath={draft.apiPath}
+        bind:providerKind={draft.providerKind}
+        bind:providerConfigText={draft.providerConfigText}
+        {onLoadProviderTemplates}
         bind:defaultModel={draft.defaultModel}
         bind:defaultResponseFormat={draft.defaultResponseFormat}
         bind:supportsMask={draft.supportsMask}
@@ -582,7 +594,7 @@
           </button>
           <button
             type="button"
-            disabled={saving}
+            disabled={saving || providerConfigBlocksSave(settingsDraft)}
             class="control-focus rounded-xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
             onclick={save}
           >

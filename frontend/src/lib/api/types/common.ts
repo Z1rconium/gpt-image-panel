@@ -1,5 +1,6 @@
 export type ApiPath = '/v1/images/generations' | '/v1/responses' | '/v1/chat/completions';
 export type AssistantApiPath = '/v1/chat/completions' | '/v1/responses';
+export type ProviderKind = 'openai' | 'async_json';
 export type ApiKeySource = 'empty' | 'stored' | 'env' | 'registry';
 export type OverallConfigValueType = 'string' | 'secret' | 'bool' | 'int' | 'float';
 export type OverallConfigValueSource = 'override' | 'env' | 'default';

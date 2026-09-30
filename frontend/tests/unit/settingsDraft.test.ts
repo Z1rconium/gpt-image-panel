@@ -3,12 +3,15 @@ import {
   MASKED_API_KEY_VALUE,
   agentMaxToolRoundsValue,
   buildSettingsPayload,
+  formatProviderConfig,
   hasSettingsChanges,
+  parseProviderConfigText,
+  providerConfigBlocksSave,
   r2SyncIntervalHoursValue,
   secretDraftValue,
   type SettingsDraft
 } from '$lib/features/settings/draft';
-import type { SettingsResponse } from '$lib/api/types/settings';
+import type { ApiPreset, SettingsResponse } from '$lib/api/types/settings';
 
 const settings = {
   active_preset_id: 'default',
@@ -76,6 +79,8 @@ function pristineDraft(): SettingsDraft {
     promptGuard: false,
     apiKey: MASKED_API_KEY_VALUE,
     apiPath: '/v1/images/generations',
+    providerKind: 'openai',
+    providerConfigText: '',
     upstreamSocks5Proxy: '',
     webhookUrl: '',
     promptOptimizerEnabled: true,
@@ -185,5 +190,54 @@ describe('r2SyncIntervalHoursValue', () => {
     expect(r2SyncIntervalHoursValue('12')).toBe(12);
     expect(r2SyncIntervalHoursValue(-3)).toBe(0);
     expect(r2SyncIntervalHoursValue('abc')).toBe(0);
+  });
+});
+
+describe('async provider mapping', () => {
+  const stored = { version: 1, submit: { path: '/{{model}}', body: { prompt: '{{prompt}}' } }, poll: { done: ['COMPLETED'] } };
+  const asyncPreset = { ...activePreset, provider_kind: 'async_json', provider_config: stored } as unknown as ApiPreset;
+  const asyncSettings = { ...settings, provider_kind: 'async_json', presets: [asyncPreset] } as unknown as SettingsResponse;
+  const asyncDraft = (): SettingsDraft => ({
+    ...pristineDraft(),
+    providerKind: 'async_json',
+    providerConfigText: formatProviderConfig(stored)
+  });
+
+  it('is pristine when the draft text matches the stored mapping, regardless of key order or spacing', () => {
+    expect(hasSettingsChanges(asyncDraft(), asyncSettings, asyncPreset)).toBe(false);
+    const reordered = JSON.stringify({ poll: stored.poll, submit: stored.submit, version: 1 });
+    expect(hasSettingsChanges({ ...asyncDraft(), providerConfigText: reordered }, asyncSettings, asyncPreset)).toBe(false);
+  });
+
+  it('detects kind and mapping edits, including unparsable text', () => {
+    expect(hasSettingsChanges({ ...pristineDraft(), providerKind: 'async_json' }, settings, activePreset)).toBe(true);
+    expect(hasSettingsChanges({ ...asyncDraft(), providerKind: 'openai' }, asyncSettings, asyncPreset)).toBe(true);
+    expect(hasSettingsChanges({ ...asyncDraft(), providerConfigText: '{"version": 2}' }, asyncSettings, asyncPreset)).toBe(true);
+    expect(hasSettingsChanges({ ...asyncDraft(), providerConfigText: '{oops' }, asyncSettings, asyncPreset)).toBe(true);
+  });
+
+  it('sends the parsed mapping only for async providers', () => {
+    const payload = buildSettingsPayload(asyncDraft(), asyncSettings);
+    expect(payload.provider_kind).toBe('async_json');
+    expect(payload.provider_config).toEqual(stored);
+
+    const openai = buildSettingsPayload({ ...asyncDraft(), providerKind: 'openai' }, asyncSettings);
+    expect(openai.provider_kind).toBe('openai');
+    expect(openai.provider_config).toBeNull();
+  });
+
+  it('blocks saving an async provider without a valid mapping', () => {
+    expect(providerConfigBlocksSave({ providerKind: 'openai', providerConfigText: '{oops' })).toBe(false);
+    expect(providerConfigBlocksSave({ providerKind: 'async_json', providerConfigText: '' })).toBe(true);
+    expect(providerConfigBlocksSave({ providerKind: 'async_json', providerConfigText: '[1]' })).toBe(true);
+    expect(providerConfigBlocksSave({ providerKind: 'async_json', providerConfigText: '{oops' })).toBe(true);
+    expect(providerConfigBlocksSave({ providerKind: 'async_json', providerConfigText: '{"a":1}' })).toBe(false);
+  });
+
+  it('parses only JSON objects', () => {
+    expect(parseProviderConfigText('  ')).toEqual({ ok: true, value: null });
+    expect(parseProviderConfigText('{"a":1}')).toEqual({ ok: true, value: { a: 1 } });
+    expect(parseProviderConfigText('null')).toEqual({ ok: false });
+    expect(parseProviderConfigText('"x"')).toEqual({ ok: false });
   });
 });

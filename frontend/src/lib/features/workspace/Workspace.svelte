@@ -487,6 +487,10 @@
     return settingsStore.savePromptOptimizerSystemPrompt(systemPrompt, showToast);
   }
 
+  function loadProviderTemplates() {
+    return settingsStore.loadProviderTemplates();
+  }
+
   function loadOverallConfig() {
     return settingsStore.loadOverallConfig();
   }
@@ -1424,6 +1428,7 @@
   onClearAiAssistantHealth={clearAiAssistantHealth}
   onLoadPromptOptimizerSystemPrompt={loadPromptOptimizerSystemPrompt}
   onSavePromptOptimizerSystemPrompt={savePromptOptimizerSystemPrompt}
+  onLoadProviderTemplates={loadProviderTemplates}
   onLoadOverallConfig={loadOverallConfig}
   onSaveOverallConfig={saveOverallConfig}
 />

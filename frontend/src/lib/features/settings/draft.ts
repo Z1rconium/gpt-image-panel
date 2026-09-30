@@ -2,11 +2,12 @@ import type {
   AIAssistantSettingsInput,
   ApiPreset,
   NodeImageSettingsInput,
+  ProviderConfig,
   R2BackupSettingsInput,
   SettingsInput,
   SettingsResponse
 } from '$lib/api/types/settings';
-import type { ApiPath, ResponseFormatDefault } from '$lib/api/types/common';
+import type { ApiPath, ProviderKind, ResponseFormatDefault } from '$lib/api/types/common';
 import { normalizeResponseFormat } from '$lib/utils/promptForm';
 
 export const MASKED_API_KEY_VALUE = '********';
@@ -21,6 +22,8 @@ export type SettingsDraft = {
   promptGuard: boolean;
   apiKey: string;
   apiPath: ApiPath;
+  providerKind: ProviderKind;
+  providerConfigText: string;
   upstreamSocks5Proxy: string;
   webhookUrl: string;
   promptOptimizerEnabled: boolean;
@@ -45,6 +48,47 @@ export type SettingsDraft = {
   nodeImageEnabled: boolean;
   nodeImageApiKey: string;
 };
+
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+  if (value && typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    return `{${entries.map(([key, entry]) => `${JSON.stringify(key)}:${stableStringify(entry)}`).join(',')}}`;
+  }
+  return JSON.stringify(value) ?? 'null';
+}
+
+export function formatProviderConfig(config: ProviderConfig | null | undefined): string {
+  return config ? JSON.stringify(config, null, 2) : '';
+}
+
+export type ProviderConfigParse = { ok: true; value: ProviderConfig | null } | { ok: false };
+
+export function parseProviderConfigText(text: string): ProviderConfigParse {
+  const trimmed = text.trim();
+  if (!trimmed) return { ok: true, value: null };
+  try {
+    const value: unknown = JSON.parse(trimmed);
+    return value && typeof value === 'object' && !Array.isArray(value)
+      ? { ok: true, value: value as ProviderConfig }
+      : { ok: false };
+  } catch {
+    return { ok: false };
+  }
+}
+
+/** An async provider needs a mapping the user can actually save. */
+export function providerConfigBlocksSave(draft: Pick<SettingsDraft, 'providerKind' | 'providerConfigText'>): boolean {
+  if (draft.providerKind !== 'async_json') return false;
+  const parsed = parseProviderConfigText(draft.providerConfigText);
+  return !parsed.ok || parsed.value === null;
+}
+
+function providerConfigChanged(text: string, stored: ProviderConfig | null | undefined): boolean {
+  const parsed = parseProviderConfigText(text);
+  if (!parsed.ok) return true;
+  return stableStringify(parsed.value) !== stableStringify(stored ?? null);
+}
 
 export function promptOptimizerTimeoutValue(value: number | string | null | undefined): number {
   const parsed = Number.parseInt(String(value), 10);
@@ -100,6 +144,8 @@ export function hasSettingsChanges(
     draft.promptGuard !== (activePreset?.prompt_guard ?? settings?.prompt_guard ?? false) ||
     draft.apiKey !== expectedSecretValue(activePreset?.api_key_source, activePreset?.has_api_key || settings?.has_api_key, activePreset?.api_key_env_var) ||
     draft.apiPath !== (activePreset?.api_path || settings?.api_path || '/v1/images/generations') ||
+    draft.providerKind !== (activePreset?.provider_kind ?? settings?.provider_kind ?? 'openai') ||
+    providerConfigChanged(draft.providerConfigText, activePreset?.provider_config) ||
     proxyValue !== currentProxyMask ||
     webhookValue !== currentWebhookMask ||
     draft.promptOptimizerEnabled !== Boolean(settings?.prompt_optimizer?.enabled) ||
@@ -179,6 +225,11 @@ export function nodeImagePayload(draft: SettingsDraft): NodeImageSettingsInput {
   };
 }
 
+function providerConfigFromText(text: string): ProviderConfig | null {
+  const parsed = parseProviderConfigText(text);
+  return parsed.ok ? parsed.value : null;
+}
+
 export function buildSettingsPayload(draft: SettingsDraft, settings: SettingsResponse | null): SettingsInput {
   const proxyValue = draft.upstreamSocks5Proxy.trim();
   const currentProxyMask = settings?.upstream_socks5_proxy_masked || '';
@@ -194,6 +245,8 @@ export function buildSettingsPayload(draft: SettingsDraft, settings: SettingsRes
     prompt_guard: draft.promptGuard,
     api_key: draft.apiKey.trim() === MASKED_API_KEY_VALUE ? null : draft.apiKey.trim(),
     api_path: draft.apiPath,
+    provider_kind: draft.providerKind,
+    provider_config: draft.providerKind === 'async_json' ? providerConfigFromText(draft.providerConfigText) : null,
     upstream_socks5_proxy: proxyValue === currentProxyMask ? null : proxyValue,
     webhook_url: webhookValue === currentWebhookMask ? null : webhookValue,
     prompt_optimizer: {

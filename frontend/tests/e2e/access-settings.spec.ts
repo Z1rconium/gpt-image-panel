@@ -460,3 +460,40 @@ test('dismissing the link suggestion creates nothing', async ({ page }) => {
   await expect(banner).toHaveCount(0);
   expect(created).toBe(false);
 });
+
+test('settings drawer configures a custom async provider from the fal.ai template', async ({ page }) => {
+  await loadApp(page);
+
+  await page.getByRole('button', { name: 'Settings' }).click();
+  const drawer = page.getByRole('dialog', { name: 'Settings' });
+  await expect(drawer.getByLabel('Provider mapping (JSON)')).toHaveCount(0);
+
+  await drawer.getByLabel('Provider type').selectOption('async_json');
+  await expect(drawer.getByLabel('API path')).toHaveCount(0);
+  await expect(drawer.getByRole('alert')).toContainText('needs a JSON mapping');
+  await expect(drawer.getByRole('button', { name: 'Save Preset' })).toBeDisabled();
+
+  await drawer.getByRole('button', { name: /Apply fal.ai template/ }).click();
+  await expect(drawer.getByLabel('API URL')).toHaveValue('https://queue.fal.run');
+  await expect(drawer.getByLabel('Provider mapping (JSON)')).toHaveValue(/"status_url"|\$\.status_url/);
+  const mask = drawer.getByLabel('Supports mask inpainting');
+  await expect(mask).toBeDisabled();
+  await expect(mask).not.toBeChecked();
+
+  await drawer.getByLabel('Provider mapping (JSON)').fill('{oops');
+  await expect(drawer.getByRole('alert')).toContainText('not a valid JSON object');
+  await expect(drawer.getByRole('button', { name: 'Save Preset' })).toBeDisabled();
+
+  await drawer.getByRole('button', { name: /Apply fal.ai template/ }).click();
+  await expect(drawer.getByRole('button', { name: 'Save Preset' })).toBeEnabled();
+  const saveRequest = page.waitForRequest((request) => new URL(request.url()).pathname === '/api/settings' && request.method() === 'POST');
+  await drawer.getByRole('button', { name: 'Save Preset' }).click();
+  const body = (await saveRequest).postDataJSON();
+
+  expect(body).toMatchObject({
+    api_url: 'https://queue.fal.run',
+    default_model: 'fal-ai/flux/dev',
+    provider_kind: 'async_json'
+  });
+  expect(body.provider_config.poll.done).toEqual(['COMPLETED']);
+});

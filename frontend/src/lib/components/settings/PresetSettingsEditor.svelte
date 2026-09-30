@@ -1,9 +1,10 @@
 <script lang="ts">
   import { t } from '$lib/i18n';
-  import type { ApiPath, ResponseFormatDefault } from '$lib/api/types/common';
+  import type { ApiPath, ProviderKind, ResponseFormatDefault } from '$lib/api/types/common';
   import type {
     AIAssistantSettingsInput,
     ApiPreset,
+    ProviderTemplate,
     R2HealthResponse,
     SettingsResponse
   } from '$lib/api/types/settings';
@@ -11,6 +12,7 @@
   import AiAssistantSettingsSection from './AiAssistantSettingsSection.svelte';
   import NodeImageSettingsSection from './NodeImageSettingsSection.svelte';
   import PromptOptimizerSettingsSection from './PromptOptimizerSettingsSection.svelte';
+  import CustomProviderSection from './CustomProviderSection.svelte';
   import R2SettingsSection from './R2SettingsSection.svelte';
   import ImageModelPicker from '$lib/components/ImageModelPicker.svelte';
   import { isImage25 } from '$lib/utils/imageModels';
@@ -21,6 +23,9 @@
   export let presetName = '';
   export let apiUrl = '';
   export let apiPath: ApiPath = '/v1/images/generations';
+  export let providerKind: ProviderKind = 'openai';
+  export let providerConfigText = '';
+  export let onLoadProviderTemplates: () => Promise<ProviderTemplate[]> = async () => [];
   export let defaultModel = '';
   export let defaultResponseFormat: ResponseFormatDefault = 'url';
   export let supportsMask = true;
@@ -117,7 +122,7 @@
                 </span>
               </div>
               <div class="mt-2 flex items-center justify-between gap-3 text-xs text-stone-500 dark:text-zinc-500">
-                <span class="truncate font-mono">{preset.api_path}</span>
+                <span class="truncate font-mono">{preset.provider_kind === 'async_json' ? $t.settings.providerAsyncShort : preset.api_path}</span>
                 <span class="shrink-0 font-mono">{keyLabel(preset)}</span>
               </div>
             </button>
@@ -133,6 +138,15 @@
             <span class="mb-1.5 block text-xs font-medium text-stone-600 dark:text-zinc-400">{$t.settings.apiUrl}</span>
             <input bind:value={apiUrl} class="control-focus w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-2.5 font-mono text-sm text-stone-900 focus:border-emerald-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100" placeholder="https://api.example.com" />
           </label>
+          <CustomProviderSection
+            bind:providerKind
+            bind:providerConfigText
+            bind:apiUrl
+            bind:defaultModel
+            bind:supportsMask
+            onLoadTemplates={onLoadProviderTemplates}
+          />
+          {#if providerKind !== 'async_json'}
           <label class="block">
             <span class="mb-1.5 block text-xs font-medium text-stone-600 dark:text-zinc-400">{$t.settings.apiPath}</span>
             <select bind:value={apiPath} class="control-focus form-select border-stone-300 bg-stone-50 text-stone-900 focus:border-emerald-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100">
@@ -141,6 +155,7 @@
               <option value="/v1/chat/completions">/v1/chat/completions</option>
             </select>
           </label>
+          {/if}
           <ImageModelPicker bind:value={defaultModel} label={$t.settings.defaultModel} />
           {#if isImage25(defaultModel) && apiPath !== '/v1/images/generations'}
             <p role="alert" class="text-xs text-amber-600">{$t.promptForm.image25Endpoint}</p>
@@ -155,7 +170,7 @@
           </label>
           {#if isImage25(defaultModel)}<p class="text-xs text-stone-500">{$t.promptForm.base64Automatic}</p>{/if}
           <label class="flex items-start gap-2.5 rounded-lg border border-stone-300 bg-stone-50 px-3 py-2.5 dark:border-zinc-700 dark:bg-zinc-950">
-            <input type="checkbox" class="control-focus mt-0.5 accent-emerald-500" bind:checked={supportsMask} />
+            <input type="checkbox" class="control-focus mt-0.5 accent-emerald-500" bind:checked={supportsMask} disabled={providerKind === 'async_json'} />
             <span class="min-w-0">
               <span class="block text-sm text-stone-800 dark:text-zinc-200">{$t.settings.supportsMask}</span>
               <span class="mt-1 block text-xs text-stone-500 dark:text-zinc-500">{$t.settings.supportsMaskHint}</span>

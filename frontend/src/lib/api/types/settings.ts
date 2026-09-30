@@ -1,4 +1,15 @@
-import type { ApiKeySource, ApiPath, AssistantApiPath, OverallConfigValueSource, OverallConfigValueType, PresetHealthStatus, ResponseFormatDefault } from './common';
+import type { ApiKeySource, ApiPath, AssistantApiPath, OverallConfigValueSource, OverallConfigValueType, PresetHealthStatus, ProviderKind, ResponseFormatDefault } from './common';
+
+// Declarative async-provider mapping. The backend validates the full shape.
+export type ProviderConfig = Record<string, unknown>;
+
+export type ProviderTemplate = {
+  id: string;
+  name: string;
+  api_url: string;
+  default_model: string;
+  config: ProviderConfig;
+};
 
 export type ApiPreset = {
   id: string;
@@ -9,6 +20,8 @@ export type ApiPreset = {
   default_response_format: ResponseFormatDefault;
   supports_mask: boolean;
   prompt_guard?: boolean;
+  provider_kind?: ProviderKind;
+  provider_config?: ProviderConfig | null;
   api_key_masked: string;
   has_api_key: boolean;
   api_key_source: ApiKeySource;
@@ -29,6 +42,7 @@ export type SettingsResponse = {
   default_response_format: ResponseFormatDefault;
   supports_mask: boolean;
   prompt_guard?: boolean;
+  provider_kind?: ProviderKind;
   has_upstream_socks5_proxy: boolean;
   upstream_socks5_proxy_masked: string;
   has_webhook_url: boolean;
@@ -170,6 +184,8 @@ export type SettingsInput = {
   default_response_format?: ResponseFormatDefault | null;
   supports_mask?: boolean | null;
   prompt_guard?: boolean | null;
+  provider_kind?: ProviderKind | null;
+  provider_config?: ProviderConfig | null;
   upstream_socks5_proxy?: string | null;
   webhook_url?: string | null;
   prompt_optimizer?: PromptOptimizerSettingsInput | null;

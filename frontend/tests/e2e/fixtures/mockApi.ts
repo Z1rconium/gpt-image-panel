@@ -999,6 +999,22 @@ async function mockApi(page: Page, options: MockOptions = {}) {
             )
           } as typeof mockedSettings;
         }
+        if (body.provider_kind === 'openai' || body.provider_kind === 'async_json') {
+          mockedSettings = {
+            ...mockedSettings,
+            provider_kind: body.provider_kind,
+            presets: mockedSettings.presets.map((preset) =>
+              preset.id === mockedSettings.active_preset_id
+                ? {
+                    ...preset,
+                    provider_kind: body.provider_kind,
+                    provider_config: body.provider_config ?? (preset as { provider_config?: unknown }).provider_config ?? null,
+                    ...(body.provider_kind === 'async_json' ? { supports_mask: false } : {})
+                  }
+                : preset
+            )
+          } as typeof mockedSettings;
+        }
         if (typeof body.supports_mask === 'boolean') {
           mockedSettings = applyActivePresetFields({
             ...mockedSettings,
@@ -1012,6 +1028,28 @@ async function mockApi(page: Page, options: MockOptions = {}) {
         }
       }
       await route.fulfill(json(mockedSettings));
+      return;
+    }
+    if (url.pathname === '/api/settings/provider-templates') {
+      await route.fulfill(
+        json({
+          templates: [
+            {
+              id: 'fal',
+              name: 'fal.ai (queue)',
+              api_url: 'https://queue.fal.run',
+              default_model: 'fal-ai/flux/dev',
+              config: {
+                version: 1,
+                auth: { header: 'Authorization', scheme: 'Key' },
+                submit: { path: '/{{model}}', body: { prompt: '{{prompt}}' } },
+                poll: { url_path: '$.status_url', status_path: '$.status', done: ['COMPLETED'], failed: ['FAILED'] },
+                result: { url_path: '$.response_url', images_path: '$.images[*].url', image_kind: 'url' }
+              }
+            }
+          ]
+        })
+      );
       return;
     }
     if (url.pathname === '/api/settings/presets' && request.method() === 'POST') {
