@@ -1,7 +1,7 @@
 <script lang="ts">
   import { t } from '$lib/i18n';
   import type { ResponseFormatDefault } from '$lib/api/types/common';
-  import type { AIAssistantSettingsInput, ApiPreset, AssistantHealthResponse, OverallConfigItem, OverallConfigResponse, OverallConfigUpdateRequest, PromptOptimizerHealthResponse, PresetHealthResponse, PromptOptimizerSystemPromptResponse, ProviderTemplate, R2BackupSettingsInput, R2HealthResponse, SettingsInput, SettingsResponse } from '$lib/api/types/settings';
+  import type { AIAssistantSettingsInput, ApiPreset, AssistantHealthResponse, OverallConfigItem, OverallConfigResponse, OverallConfigUpdateRequest, PromptOptimizerHealthResponse, PresetHealthResponse, PromptOptimizerSystemPromptResponse, R2BackupSettingsInput, R2HealthResponse, SettingsInput, SettingsResponse } from '$lib/api/types/settings';
   import { confirmStore } from '$lib/stores/confirm';
   import type { SettingsPrefill } from '$lib/utils/settingsPrefill';
   import { normalizeResponseFormat } from '$lib/utils/promptForm';
@@ -54,7 +54,6 @@
     onClearAiAssistantHealth?: () => void;
     onLoadPromptOptimizerSystemPrompt?: () => Promise<PromptOptimizerSystemPromptResponse>;
     onSavePromptOptimizerSystemPrompt?: (systemPrompt: string) => Promise<PromptOptimizerSystemPromptResponse>;
-    onLoadProviderTemplates?: () => Promise<ProviderTemplate[]>;
     onLoadOverallConfig?: () => Promise<OverallConfigResponse>;
     onSaveOverallConfig?: (body: OverallConfigUpdateRequest) => Promise<OverallConfigResponse>;
   }
@@ -96,7 +95,6 @@
       default_system_prompt: '',
       customized: true
     }),
-    onLoadProviderTemplates = async () => [],
     onLoadOverallConfig = async () => ({
       items: [],
       restart_required_names: []
@@ -524,7 +522,6 @@
         bind:apiPath={draft.apiPath}
         bind:providerKind={draft.providerKind}
         bind:providerConfigText={draft.providerConfigText}
-        {onLoadProviderTemplates}
         bind:defaultModel={draft.defaultModel}
         bind:defaultResponseFormat={draft.defaultResponseFormat}
         bind:supportsMask={draft.supportsMask}

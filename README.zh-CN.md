@@ -332,7 +332,7 @@ Overall Config 会把 override 持久化到 SQLite。部分配置可热更新；
 
 ## 自定义异步供应商
 
-有些网关（例如 fal.ai 的队列接口）会先接收任务、返回状态/结果 URL，稍后才完成。预设可以用声明式 JSON 映射代替 OpenAI 路径：在设置中选择 **自定义异步供应商**，或点击 **套用 fal.ai 模板**。
+有些网关会先接收任务、返回状态/结果 URL，稍后才完成。预设可以用声明式 JSON 映射代替 OpenAI 路径：在设置中选择 **自定义异步供应商**，再粘贴你的网关对应的映射（下面的示例列出了全部字段；输入框为空时会以灰色显示同样的骨架）。
 
 ```json
 {
@@ -350,7 +350,7 @@ Overall Config 会把 override 持久化到 SQLite。部分配置可热更新；
 - **凭据**：映射里不放任何密钥。预设的 API 密钥（环境变量引用或 Secret Registry ID）按 `header: scheme key` 发送；`header` 为 `Authorization` 或 `X-API-Key`，`scheme` 为 `Bearer`、`Key`、`Token` 或留空。
 - **安全**：状态、结果和取消 URL 来自上游响应，因此必须与预设 API URL 同源（密钥会随请求发送），并通过与提交 URL 相同的 SSRF 和对端 IP 检查。图片下载不带凭据，错误信息会脱敏。
 - **限制**：不支持图片编辑、流式预览和本地色键抠图，蒙版被强制关闭。超时或取消时会尽力发送一次 `cancel` 请求。Worker 租约过期会重新提交整个任务，因为远端任务 ID 不会持久化。
-- 健康检查只校验映射并探测提交 URL，不会真正提交任务。`GET /api/settings/provider-templates` 列出内置模板。fal.ai 模板依据 fal 公开的队列接口编写，目前仅有模拟会话测试覆盖。
+- 健康检查只校验映射并探测提交 URL，不会真正提交任务。引擎目前仅有模拟会话测试覆盖，未内置任何特定供应商。
 
 ## 流式预览与费用估算
 
@@ -372,7 +372,6 @@ Overall Config 会把 override 持久化到 SQLite。部分配置可热更新；
 | `GET/PUT` | `/api/settings/overall-config` | 读取/保存 Overall Config override。 |
 | `GET/POST` | `/api/settings` | 读取/保存当前预设、提示词优化器、R2 备份、代理和 webhook 设置。 |
 | `POST` | `/api/settings/presets` | 创建 API 预设。 |
-| `GET` | `/api/settings/provider-templates` | 列出内置的自定义异步供应商映射。 |
 | `POST` | `/api/settings/presets/{preset_id}/activate` | 激活已保存 API 预设。 |
 | `DELETE` | `/api/settings/presets/{preset_id}` | 删除 API 预设。 |
 | `POST` | `/api/settings/presets/{preset_id}/health` | 校验已保存上游预设。 |

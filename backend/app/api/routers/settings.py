@@ -34,7 +34,6 @@ from ...services.presets import (
 from ...core import settings as config
 from ...core import secrets
 from ...core import overall_config
-from ...core.provider_templates import PROVIDER_TEMPLATES
 from ...core import validators as ssrf
 from ...core.api_paths import (
     ALLOWED_API_PATHS,
@@ -64,7 +63,6 @@ from ...schemas.settings import (
     CredentialProbeRequest,
     PresetCreateRequest,
     PresetHealthResponse,
-    ProviderTemplatesResponse,
     R2BackupSettingsRequest,
     R2HealthResponse,
     SettingsRequest,
@@ -273,11 +271,6 @@ async def update_overall_config(req: OverallConfigUpdateRequest):
         )
     ]
     return _serialize_overall_config(rows, restart_required_names=restart_required_names)
-
-
-@router.get("/api/settings/provider-templates", response_model=ProviderTemplatesResponse)
-async def list_provider_templates():
-    return ProviderTemplatesResponse(templates=PROVIDER_TEMPLATES)
 
 
 @router.post("/api/settings", response_model=SettingsResponse)

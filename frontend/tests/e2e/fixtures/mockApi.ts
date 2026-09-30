@@ -1030,28 +1030,6 @@ async function mockApi(page: Page, options: MockOptions = {}) {
       await route.fulfill(json(mockedSettings));
       return;
     }
-    if (url.pathname === '/api/settings/provider-templates') {
-      await route.fulfill(
-        json({
-          templates: [
-            {
-              id: 'fal',
-              name: 'fal.ai (queue)',
-              api_url: 'https://queue.fal.run',
-              default_model: 'fal-ai/flux/dev',
-              config: {
-                version: 1,
-                auth: { header: 'Authorization', scheme: 'Key' },
-                submit: { path: '/{{model}}', body: { prompt: '{{prompt}}' } },
-                poll: { url_path: '$.status_url', status_path: '$.status', done: ['COMPLETED'], failed: ['FAILED'] },
-                result: { url_path: '$.response_url', images_path: '$.images[*].url', image_kind: 'url' }
-              }
-            }
-          ]
-        })
-      );
-      return;
-    }
     if (url.pathname === '/api/settings/presets' && request.method() === 'POST') {
       // Mirrors the backend: the created preset becomes the active one.
       const body = JSON.parse(request.postData() || '{}');

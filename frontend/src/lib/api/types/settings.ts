@@ -3,14 +3,6 @@ import type { ApiKeySource, ApiPath, AssistantApiPath, OverallConfigValueSource,
 // Declarative async-provider mapping. The backend validates the full shape.
 export type ProviderConfig = Record<string, unknown>;
 
-export type ProviderTemplate = {
-  id: string;
-  name: string;
-  api_url: string;
-  default_model: string;
-  config: ProviderConfig;
-};
-
 export type ApiPreset = {
   id: string;
   name: string;

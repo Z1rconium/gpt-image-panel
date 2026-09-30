@@ -332,7 +332,7 @@ Overall Config 會將 Override 持久化至 SQLite。部分設定可熱更新；
 
 ## 自訂非同步供應商
 
-部分閘道（例如 fal.ai 的佇列介面）會先接收任務、回傳狀態/結果 URL，稍後才完成。預設可以用宣告式 JSON 對映取代 OpenAI 路徑：在設定中選擇 **自訂非同步供應商**，或按 **套用 fal.ai 範本**。
+部分閘道會先接收任務、回傳狀態/結果 URL，稍後才完成。預設可以用宣告式 JSON 對映取代 OpenAI 路徑：在設定中選擇 **自訂非同步供應商**，再貼上你的閘道對應的對映（下方範例列出全部欄位；輸入框為空時會以灰色顯示相同的骨架）。
 
 ```json
 {
@@ -350,7 +350,7 @@ Overall Config 會將 Override 持久化至 SQLite。部分設定可熱更新；
 - **憑證**：對映中不放任何金鑰。預設的 API 金鑰（環境變數參照或 Secret Registry ID）以 `header: scheme key` 傳送；`header` 為 `Authorization` 或 `X-API-Key`，`scheme` 為 `Bearer`、`Key`、`Token` 或留空。
 - **安全**：狀態、結果與取消 URL 來自上游回應，因此必須與預設 API URL 同源（金鑰會隨請求傳送），並通過與提交 URL 相同的 SSRF 與對端 IP 檢查。圖片下載不帶憑證，錯誤訊息會遮蔽敏感內容。
 - **限制**：不支援圖片編輯、串流預覽與本機色鍵去背，遮罩會被強制關閉。逾時或取消時會盡力送出一次 `cancel` 請求。Worker 租約到期會重新提交整個任務，因為遠端任務 ID 不會持久化。
-- 健康檢查只驗證對映並探測提交 URL，不會真的提交任務。`GET /api/settings/provider-templates` 列出內建範本。fal.ai 範本依據 fal 公開的佇列介面撰寫，目前僅有模擬連線測試涵蓋。
+- 健康檢查只驗證對映並探測提交 URL，不會真的提交任務。引擎目前僅有模擬連線測試涵蓋，未內建任何特定供應商。
 
 ## 串流預覽與費用估算
 
@@ -372,7 +372,6 @@ Overall Config 會將 Override 持久化至 SQLite。部分設定可熱更新；
 | `GET/PUT` | `/api/settings/overall-config` | 讀取/儲存 Overall Config Override。 |
 | `GET/POST` | `/api/settings` | 讀取/儲存目前預設、提示詞最佳化器、R2 備份、Proxy 與 webhook 設定。 |
 | `POST` | `/api/settings/presets` | 建立 API 預設。 |
-| `GET` | `/api/settings/provider-templates` | 列出內建的自訂非同步供應商對映。 |
 | `POST` | `/api/settings/presets/{preset_id}/activate` | 啟用已儲存的 API 預設。 |
 | `DELETE` | `/api/settings/presets/{preset_id}` | 刪除 API 預設。 |
 | `POST` | `/api/settings/presets/{preset_id}/health` | 驗證已儲存的上游預設。 |

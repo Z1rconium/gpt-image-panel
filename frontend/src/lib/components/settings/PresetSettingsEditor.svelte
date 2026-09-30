@@ -4,7 +4,6 @@
   import type {
     AIAssistantSettingsInput,
     ApiPreset,
-    ProviderTemplate,
     R2HealthResponse,
     SettingsResponse
   } from '$lib/api/types/settings';
@@ -25,7 +24,6 @@
   export let apiPath: ApiPath = '/v1/images/generations';
   export let providerKind: ProviderKind = 'openai';
   export let providerConfigText = '';
-  export let onLoadProviderTemplates: () => Promise<ProviderTemplate[]> = async () => [];
   export let defaultModel = '';
   export let defaultResponseFormat: ResponseFormatDefault = 'url';
   export let supportsMask = true;
@@ -141,10 +139,7 @@
           <CustomProviderSection
             bind:providerKind
             bind:providerConfigText
-            bind:apiUrl
-            bind:defaultModel
             bind:supportsMask
-            onLoadTemplates={onLoadProviderTemplates}
           />
           {#if providerKind !== 'async_json'}
           <label class="block">

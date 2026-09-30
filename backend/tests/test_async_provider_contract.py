@@ -3,18 +3,39 @@ import json
 
 import pytest
 
-from backend.app.core.provider_templates import FAL_QUEUE_TEMPLATE, PROVIDER_TEMPLATES
 from backend.app.integrations.upstream import async_provider, generation as upstream_client
 from backend.app.schemas.generation import GenerateRequest
-from backend.app.schemas.provider import ProviderConfig
 from backend.tests.support.contract import *  # noqa: F403
 from backend.tests.support.contract import _FakePool, _FakeResponse, _wait_for_job
 
-API_URL = "https://queue.fal.run"
-STATUS_URL = f"{API_URL}/fal-ai/flux/dev/requests/req-1/status"
-RESULT_URL = f"{API_URL}/fal-ai/flux/dev/requests/req-1"
-CANCEL_URL = f"{API_URL}/fal-ai/flux/dev/requests/req-1/cancel"
-IMAGE_URL = "https://v3.fal.media/files/out.png"
+API_URL = "https://queue.example.com"
+MODEL = "vendor/image-model"
+STATUS_URL = f"{API_URL}/{MODEL}/requests/req-1/status"
+RESULT_URL = f"{API_URL}/{MODEL}/requests/req-1"
+CANCEL_URL = f"{API_URL}/{MODEL}/requests/req-1/cancel"
+IMAGE_URL = "https://cdn.example.com/files/out.png"
+QUEUE_CONFIG = {
+    "version": 1,
+    "auth": {"header": "Authorization", "scheme": "Key"},
+    "submit": {
+        "path": "/{{model}}",
+        "body": {
+            "prompt": "{{prompt}}",
+            "num_images": "{{n}}",
+            "image_size": {"width": "{{width}}", "height": "{{height}}"},
+        },
+    },
+    "poll": {
+        "url_path": "$.status_url",
+        "status_path": "$.status",
+        "done": ["COMPLETED"],
+        "failed": ["FAILED", "ERROR"],
+        "interval_seconds": 2,
+        "timeout_seconds": 600,
+    },
+    "result": {"url_path": "$.response_url", "images_path": "$.images[*].url", "image_kind": "url"},
+    "cancel": {"url_path": "$.cancel_url", "method": "PUT"},
+}
 SUBMIT = {"request_id": "req-1", "status_url": STATUS_URL, "response_url": RESULT_URL, "cancel_url": CANCEL_URL}
 
 
@@ -75,7 +96,7 @@ def _use_session(monkeypatch, session):
 
 def _happy_routes(statuses=("IN_QUEUE", "COMPLETED")):
     return {
-        ("POST", f"{API_URL}/fal-ai/flux/dev"): [_json(SUBMIT)],
+        ("POST", f"{API_URL}/{MODEL}"): [_json(SUBMIT)],
         ("GET", STATUS_URL): [_json({"status": status}) for status in statuses],
         ("GET", RESULT_URL): [_json({"images": [{"url": IMAGE_URL}]})],
         ("GET", IMAGE_URL): [_FakeResponse(200, chunks=[PNG_BYTES])],  # noqa: F405
@@ -83,7 +104,7 @@ def _happy_routes(statuses=("IN_QUEUE", "COMPLETED")):
 
 
 def _request(**overrides):
-    fields = {"prompt": "a red fox", "model": "fal-ai/flux/dev", "size": "1024x1024"}
+    fields = {"prompt": "a red fox", "model": MODEL, "size": "1024x1024"}
     fields.update(overrides)
     return GenerateRequest(**fields)
 
@@ -96,21 +117,14 @@ def _run(session, monkeypatch, request=None, config=None, key="test-key", **kwar
             key,
             "/v1/images/generations",
             request or _request(),
-            "fal preset",
+            "queue preset",
             None,
             None,
-            provider_config=config or FAL_QUEUE_TEMPLATE,
+            provider_config=config or QUEUE_CONFIG,
             persist_gallery_entry=gallery_mutations.add_to_gallery_async,  # noqa: F405
             **kwargs,
         )
     )
-
-
-def test_bundled_templates_are_valid_provider_configs():
-    assert PROVIDER_TEMPLATES
-    for template in PROVIDER_TEMPLATES:
-        ProviderConfig.model_validate(template["config"])
-        assert template["api_url"].startswith("https://")
 
 
 def test_submit_poll_fetch_saves_gallery_image(client, monkeypatch, fast_provider):
@@ -119,7 +133,7 @@ def test_submit_poll_fetch_saves_gallery_image(client, monkeypatch, fast_provide
 
     assert len(entries) == 1
     assert session.methods() == [
-        ("POST", f"{API_URL}/fal-ai/flux/dev"),
+        ("POST", f"{API_URL}/{MODEL}"),
         ("GET", STATUS_URL),
         ("GET", STATUS_URL),
         ("GET", RESULT_URL),
@@ -185,21 +199,21 @@ def test_cancelled_task_cancels_remote_task(client, monkeypatch, fast_provider):
 
 def test_cross_origin_status_url_is_never_followed(client, monkeypatch, fast_provider):
     evil = {**SUBMIT, "status_url": "https://evil.example/steal"}
-    session = _ScriptedSession({("POST", f"{API_URL}/fal-ai/flux/dev"): [_json(evil)]})
+    session = _ScriptedSession({("POST", f"{API_URL}/{MODEL}"): [_json(evil)]})
     with pytest.raises(upstream_client.UpstreamApiError, match="same origin"):
         _run(session, monkeypatch)
-    assert session.methods() == [("POST", f"{API_URL}/fal-ai/flux/dev")]
+    assert session.methods() == [("POST", f"{API_URL}/{MODEL}")]
 
 
 def test_missing_status_url_is_reported(client, monkeypatch, fast_provider):
-    session = _ScriptedSession({("POST", f"{API_URL}/fal-ai/flux/dev"): [_json({"request_id": "x"})]})
+    session = _ScriptedSession({("POST", f"{API_URL}/{MODEL}"): [_json({"request_id": "x"})]})
     with pytest.raises(upstream_client.UpstreamApiError, match="did not include a status URL"):
         _run(session, monkeypatch)
 
 
 def test_ssrf_rejection_of_submit_url_is_reported(client, monkeypatch, fast_provider):
     def reject(*_args, **_kwargs):
-        raise ValueError("Hostname 'queue.fal.run' resolves to private/internal IP(s): '10.0.0.1'")
+        raise ValueError("Hostname 'queue.example.com' resolves to private/internal IP(s): '10.0.0.1'")
 
     monkeypatch.setattr(async_provider.ssrf, "validate_upstream_url", reject)
     session = _ScriptedSession({})
@@ -210,7 +224,7 @@ def test_ssrf_rejection_of_submit_url_is_reported(client, monkeypatch, fast_prov
 
 def test_upstream_error_text_is_redacted(client, monkeypatch, fast_provider):
     body = {"detail": "invalid credentials Bearer abc123verysecrettoken"}
-    session = _ScriptedSession({("POST", f"{API_URL}/fal-ai/flux/dev"): [_json(body, status=401)]})
+    session = _ScriptedSession({("POST", f"{API_URL}/{MODEL}"): [_json(body, status=401)]})
     with pytest.raises(upstream_client.UpstreamApiError) as error:
         _run(session, monkeypatch)
     assert "abc123verysecrettoken" not in str(error.value)
@@ -248,19 +262,19 @@ def test_streaming_and_chroma_are_rejected(client, monkeypatch, fast_provider):
 
 def _make_async_preset(client, monkeypatch):
     # A new origin clears the stored key, so bind one through an env reference.
-    monkeypatch.setenv("FAL_TEST_KEY", "fal-secret")
+    monkeypatch.setenv("QUEUE_TEST_KEY", "queue-secret")
     settings = client.get("/api/settings").json()
     saved = client.post(
         "/api/settings",
         json={
             "active_preset_id": settings["active_preset_id"],
-            "preset_name": "fal",
+            "preset_name": "queue",
             "api_url": API_URL,
-            "api_key": "${FAL_TEST_KEY}",
+            "api_key": "${QUEUE_TEST_KEY}",
             "api_path": "/v1/images/generations",
-            "default_model": "fal-ai/flux/dev",
+            "default_model": MODEL,
             "provider_kind": "async_json",
-            "provider_config": FAL_QUEUE_TEMPLATE,
+            "provider_config": QUEUE_CONFIG,
         },
     )
     assert saved.status_code == 200, saved.text
@@ -276,7 +290,7 @@ def test_queue_rejects_unsupported_operations_for_async_presets(client, monkeypa
     assert "chroma" in chroma.text
     edit = client.post(
         "/api/edits",
-        data={"prompt": "fox", "model": "fal-ai/flux/dev", "size": "auto"},
+        data={"prompt": "fox", "model": MODEL, "size": "auto"},
         files={"image": ("input.png", PNG_BYTES, "image/png")},  # noqa: F405
     )
     assert edit.status_code == 422
@@ -306,15 +320,6 @@ def test_executor_passes_provider_config_only_for_async_presets(client, monkeypa
     assert captured[1]["poll"]["done"] == ["COMPLETED"]
 
 
-def test_provider_templates_endpoint(client):
-    response = client.get("/api/settings/provider-templates")
-    assert response.status_code == 200
-    templates = response.json()["templates"]
-    fal = next(item for item in templates if item["id"] == "fal")
-    assert fal["api_url"] == "https://queue.fal.run"
-    assert fal["config"]["auth"] == {"header": "Authorization", "scheme": "Key"}
-
-
 def test_async_preset_health_validates_mapping_and_probes_submit_path(client, monkeypatch):
     _make_async_preset(client, monkeypatch)
     preset_id = client.get("/api/settings").json()["active_preset_id"]
@@ -331,7 +336,7 @@ def test_async_preset_health_validates_mapping_and_probes_submit_path(client, mo
     checks = {check["name"]: check for check in body["checks"]}
     assert checks["provider_config"]["status"] == "ok"
     assert "api_path" not in checks
-    assert probed == {"api_url": API_URL, "api_path": "/fal-ai/flux/dev"}
+    assert probed == {"api_url": API_URL, "api_path": f"/{MODEL}"}
     assert body["status"] == "ok"
 
 

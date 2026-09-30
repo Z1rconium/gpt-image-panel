@@ -357,7 +357,7 @@ For `/v1/responses` and `/v1/chat/completions`, size/quality/format/compression/
 
 ## Custom Async Providers
 
-Some gateways, such as fal.ai's queue API, accept a task, return status/result URLs and finish later. A preset can use a declarative JSON mapping instead of the OpenAI paths: choose **Custom async provider** in Settings, or click **Apply fal.ai template**.
+Some gateways accept a task, return status/result URLs and finish later. A preset can use a declarative JSON mapping instead of the OpenAI paths: choose **Custom async provider** in Settings and paste the mapping for your gateway (the example below shows every field; the empty field shows the same skeleton as a placeholder).
 
 ```json
 {
@@ -375,7 +375,7 @@ Some gateways, such as fal.ai's queue API, accept a task, return status/result U
 - **Credentials**: the mapping never contains a key. The preset's API key (env reference or Secret Registry ID) is sent as `header: scheme key`; `header` is `Authorization` or `X-API-Key`, `scheme` is `Bearer`, `Key`, `Token` or empty.
 - **Safety**: status, result and cancel URLs come from upstream responses, so they must be on the same origin as the preset's API URL (the key travels with them) and pass the same SSRF and peer-IP checks as the submit URL. Images are downloaded without credentials. Errors are redacted.
 - **Limits**: image edits, streaming preview and local chroma removal are unavailable, and masks are forced off. On timeout or cancellation a best-effort `cancel` request is sent. If a worker's lease expires the whole task is resubmitted, because the remote task id is not persisted.
-- The health check validates the mapping and probes the submit URL; it never submits a task. `GET /api/settings/provider-templates` lists the bundled templates. The fal.ai template follows fal's documented queue API and is covered by fake-session tests only.
+- The health check validates the mapping and probes the submit URL; it never submits a task. The engine is covered by fake-session tests only; no specific provider is built in.
 
 ## Streaming Preview & Cost Estimation
 
@@ -397,7 +397,6 @@ Key backend routes:
 | `GET/PUT` | `/api/settings/overall-config` | Read/save Overall Config overrides. |
 | `GET/POST` | `/api/settings` | Read/save active preset, prompt optimizer, R2 backup, proxy, and webhook settings. |
 | `POST` | `/api/settings/presets` | Create an API preset. |
-| `GET` | `/api/settings/provider-templates` | List bundled custom async provider mappings. |
 | `POST` | `/api/settings/presets/{preset_id}/activate` | Activate a saved API preset. |
 | `DELETE` | `/api/settings/presets/{preset_id}` | Delete an API preset. |
 | `POST` | `/api/settings/presets/{preset_id}/health` | Validate a saved upstream preset. |
