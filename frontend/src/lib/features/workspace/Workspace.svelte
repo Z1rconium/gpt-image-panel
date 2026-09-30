@@ -27,12 +27,14 @@
   import { preferencesStore } from '$lib/stores/preferences';
   import { promptSnippetsStore } from '$lib/stores/promptSnippets';
   import { settingsActivityStore, settingsStore } from '$lib/stores/settings';
+  import { settingsPrefillStore } from '$lib/stores/settingsPrefill';
   import { toastStore, uiStore, type ToastOptions } from '$lib/stores/ui';
   import { versionStore } from '$lib/stores/version';
   import { workspaceModeStore, type WorkspaceMode } from '$lib/stores/workspaceMode';
   import { extractImageFilesFromClipboard } from '$lib/utils/clipboard';
   import { copyText, imageUrl } from '$lib/utils/format';
   import { canPrefetchNonCritical } from '$lib/utils/network';
+  import { readSettingsPrefill, stripSettingsPrefill } from '$lib/utils/settingsPrefill';
   import { buildPromptOptimizeRequest } from '$lib/utils/promptOptimizer';
   import {
     agentViewPanel,
@@ -256,6 +258,7 @@
     urlSync.setReady();
     urlSync.flush();
     jobsStore.startJobsEvents();
+    if ($settingsPrefillStore) void openUiPanel('settings', 'settingsOpen');
   }
 
   async function loadAuthenticatedData() {
@@ -424,6 +427,20 @@
 
   function createPreset() {
     void settingsStore.createPreset(showToast);
+  }
+
+  function applySettingsPrefill() {
+    const prefill = $settingsPrefillStore;
+    if (!prefill) return;
+    settingsPrefillStore.set(null);
+    void settingsStore.createPreset(showToast, {
+      ...(prefill.apiUrl ? { api_url: prefill.apiUrl } : {}),
+      ...(prefill.apiModel ? { default_model: prefill.apiModel } : {})
+    });
+  }
+
+  function dismissSettingsPrefill() {
+    settingsPrefillStore.set(null);
   }
 
   function activatePreset(presetId: string) {
@@ -1226,6 +1243,14 @@
   }
 
   onMount(() => {
+    // Read before any URL sync runs, then clear the one-shot parameters so a
+    // bookmark is never rewritten and popstate cannot re-apply them.
+    const pageUrl = new URL(window.location.href);
+    const prefill = readSettingsPrefill(pageUrl);
+    if (prefill) settingsPrefillStore.set(prefill);
+    const strippedUrl = stripSettingsPrefill(pageUrl);
+    if (strippedUrl) window.history.replaceState(window.history.state, '', strippedUrl);
+
     accessStore.installUnauthorizedHandler();
     const initialData = loadAuthenticatedData();
     void initialData.catch(() => undefined);
@@ -1385,6 +1410,9 @@
   onClose={() => closeUiPanel('settings', 'settingsOpen')}
   onSave={saveSettings}
   onCreate={createPreset}
+  prefill={$settingsPrefillStore}
+  onApplyPrefill={applySettingsPrefill}
+  onDismissPrefill={dismissSettingsPrefill}
   onActivate={activatePreset}
   onDelete={deletePreset}
   onHealthCheck={checkPresetHealth}

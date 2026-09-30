@@ -3,6 +3,7 @@
   import type { ResponseFormatDefault } from '$lib/api/types/common';
   import type { AIAssistantSettingsInput, ApiPreset, AssistantHealthResponse, OverallConfigItem, OverallConfigResponse, OverallConfigUpdateRequest, PromptOptimizerHealthResponse, PresetHealthResponse, PromptOptimizerSystemPromptResponse, R2BackupSettingsInput, R2HealthResponse, SettingsInput, SettingsResponse } from '$lib/api/types/settings';
   import { confirmStore } from '$lib/stores/confirm';
+  import type { SettingsPrefill } from '$lib/utils/settingsPrefill';
   import { normalizeResponseFormat } from '$lib/utils/promptForm';
   import {
     MASKED_API_KEY_VALUE,
@@ -37,6 +38,9 @@
     onClose?: () => void;
     onSave?: (body: SettingsInput) => Promise<void> | void;
     onCreate?: () => Promise<void> | void;
+    prefill?: SettingsPrefill | null;
+    onApplyPrefill?: () => void;
+    onDismissPrefill?: () => void;
     onActivate?: (presetId: string) => Promise<void> | void;
     onDelete?: (presetId: string) => Promise<void> | void;
     onHealthCheck?: (presetId: string) => Promise<void> | void;
@@ -67,6 +71,9 @@
     onClose = () => {},
     onSave = () => {},
     onCreate = () => {},
+    prefill = null,
+    onApplyPrefill = () => {},
+    onDismissPrefill = () => {},
     onActivate = () => {},
     onDelete = () => {},
     onHealthCheck = () => {},
@@ -483,6 +490,21 @@
         </div>
         <button type="button" class="mobile-touch-target control-focus rounded-lg p-1.5 text-stone-500 hover:bg-stone-100 hover:text-stone-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100" aria-label={$t.settings.closeLabel} onclick={requestCloseDrawer}>x</button>
       </div>
+
+      {#if prefill}
+        <div class="mx-5 mt-4 rounded-lg border border-emerald-300 bg-emerald-50 p-3 text-xs text-stone-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-zinc-300" role="status" data-testid="settings-prefill-banner">
+          <p class="font-medium text-stone-900 dark:text-zinc-100">{$t.settings.prefillTitle}</p>
+          <dl class="mt-1 break-all">
+            {#if prefill.apiUrl}<div>{$t.settings.apiUrl}: <span class="font-mono">{prefill.apiUrl}</span></div>{/if}
+            {#if prefill.apiModel}<div>{$t.settings.defaultModel}: <span class="font-mono">{prefill.apiModel}</span></div>{/if}
+          </dl>
+          <p class="mt-1 text-stone-500 dark:text-zinc-500">{$t.settings.prefillHint}</p>
+          <div class="mt-2 flex gap-2">
+            <button type="button" class="control-focus rounded-lg border border-emerald-600 px-3 py-1.5 text-emerald-800 hover:bg-emerald-100 dark:border-emerald-500 dark:text-emerald-300 dark:hover:bg-emerald-900/40" onclick={onApplyPrefill}>{$t.settings.prefillCreate}</button>
+            <button type="button" class="control-focus rounded-lg border border-stone-300 px-3 py-1.5 text-stone-700 hover:bg-stone-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800" onclick={onDismissPrefill}>{$t.settings.prefillDismiss}</button>
+          </div>
+        </div>
+      {/if}
 
       <PresetSettingsEditor
         {settings}

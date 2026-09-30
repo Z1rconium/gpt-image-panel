@@ -423,3 +423,40 @@ test('settings drawer deletes the active preset and switches to fallback', async
   await expect(page.getByRole('main').getByRole('textbox', { name: 'Model' })).toHaveValue('alt-model');
   await expect(page.getByRole('main').getByLabel('Response format')).toHaveValue('b64_json');
 });
+
+test('link parameters offer a new preset without saving anything', async ({ page }) => {
+  await mockApi(page);
+  await page.goto('/?apiUrl=https%3A%2F%2Fnew-gateway.example%2Fv1&apiModel=gateway-model&apiKey=sk-leak&mode=studio');
+
+  const drawer = page.getByRole('dialog', { name: 'Settings' });
+  const banner = drawer.getByTestId('settings-prefill-banner');
+  await expect(banner).toContainText('https://new-gateway.example/v1', { timeout: 15_000 });
+  await expect(banner).toContainText('gateway-model');
+  await expect(page).not.toHaveURL(/apiUrl|apiModel|apiKey/);
+
+  const createRequest = page.waitForRequest(
+    (request) => new URL(request.url()).pathname === '/api/settings/presets' && request.method() === 'POST'
+  );
+  await banner.getByRole('button', { name: 'Create preset' }).click();
+  expect((await createRequest).postDataJSON()).toMatchObject({
+    api_url: 'https://new-gateway.example/v1',
+    default_model: 'gateway-model'
+  });
+  await expect(page.getByRole('status')).toContainText('Preset created');
+  await expect(banner).toHaveCount(0);
+});
+
+test('dismissing the link suggestion creates nothing', async ({ page }) => {
+  let created = false;
+  page.on('request', (request) => {
+    if (new URL(request.url()).pathname === '/api/settings/presets' && request.method() === 'POST') created = true;
+  });
+  await mockApi(page);
+  await page.goto('/?apiUrl=https%3A%2F%2Fnew-gateway.example');
+
+  const banner = page.getByTestId('settings-prefill-banner');
+  await expect(banner).toBeVisible({ timeout: 15_000 });
+  await banner.getByRole('button', { name: 'Dismiss' }).click();
+  await expect(banner).toHaveCount(0);
+  expect(created).toBe(false);
+});

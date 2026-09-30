@@ -155,14 +155,14 @@ function createSettingsStore() {
     }
   }
 
-  async function createPreset(showToast: ShowToast) {
+  async function createPreset(showToast: ShowToast, overrides: { api_url?: string; default_model?: string } = {}) {
     const activePresetId = get(settingsStore).settings?.active_preset_id;
     const settings = await apiFetch<SettingsResponse>(
       '/api/settings/presets',
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ source_preset_id: activePresetId })
+      body: JSON.stringify({ source_preset_id: activePresetId, ...overrides })
       },
       'creating preset'
     );

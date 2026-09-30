@@ -1014,6 +1014,29 @@ async function mockApi(page: Page, options: MockOptions = {}) {
       await route.fulfill(json(mockedSettings));
       return;
     }
+    if (url.pathname === '/api/settings/presets' && request.method() === 'POST') {
+      // Mirrors the backend: the created preset becomes the active one.
+      const body = JSON.parse(request.postData() || '{}');
+      const source =
+        mockedSettings.presets.find((preset) => preset.id === body.source_preset_id) || mockedSettings.presets[0];
+      const created = {
+        ...source,
+        id: `preset-${mockedSettings.presets.length + 1}`,
+        name: `Preset ${mockedSettings.presets.length + 1}`,
+        api_url: body.api_url ?? source.api_url,
+        default_model: body.default_model ?? source.default_model,
+        has_api_key: false,
+        api_key_masked: '',
+        api_key_source: 'none'
+      } as typeof source;
+      mockedSettings = applyActivePresetFields({
+        ...mockedSettings,
+        active_preset_id: created.id,
+        presets: [...mockedSettings.presets, created]
+      });
+      await route.fulfill(json(mockedSettings));
+      return;
+    }
     if (url.pathname.match(/^\/api\/settings\/presets\/[^/]+\/activate$/) && request.method() === 'POST') {
       const id = decodeURIComponent(url.pathname.split('/').at(-2) || '');
       if (!mockedSettings.presets.some((preset) => preset.id === id)) {
