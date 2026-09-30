@@ -216,7 +216,7 @@ async def test_load_preview_data_urls_reuses_cached_previews(tmp_path, monkeypat
     first = await agent_context.load_preview_data_urls(rows)
     assert len(first) == 1
     image_path = (Path(config.IMAGES_DIR) / entry.filename).resolve()
-    assert vision_previews.load_preview_data_url(image_path)[0] == first[0][1]
+    assert (await vision_previews.load_preview_data_url(image_path))[0] == first[0][1]
 
     calls = {"count": 0}
     real_prepare = vision_previews.assistant_client.prepare_vision_preview

@@ -355,7 +355,7 @@ def _image_has_alpha(image) -> bool:
     return "A" in image.getbands() or (image.mode == "P" and "transparency" in image.info)
 
 
-def _fit_preview(image, *, has_alpha: bool, byte_limit_error: str) -> tuple[bytes, str]:
+def _fit_preview(image, *, has_alpha: bool, byte_limit_error: str, max_bytes: int) -> tuple[bytes, str]:
     scale = 1.0
     while True:
         candidate = image.copy()
@@ -376,12 +376,12 @@ def _fit_preview(image, *, has_alpha: bool, byte_limit_error: str) -> tuple[byte
                 output.seek(0)
                 output.truncate(0)
                 candidate.save(output, format="JPEG", quality=quality, optimize=True)
-                if output.tell() <= config.AI_ASSISTANT_IMAGE_MAX_BYTES or quality <= 45:
+                if output.tell() <= max_bytes or quality <= 45:
                     break
                 quality -= 10
             mime_type = "image/jpeg"
         data = output.getvalue()
-        if len(data) <= config.AI_ASSISTANT_IMAGE_MAX_BYTES:
+        if len(data) <= max_bytes:
             return data, mime_type
         if min(candidate.size) <= 1:
             raise AssistantError(byte_limit_error, status=400)
@@ -396,7 +396,11 @@ def _prepare_vision_preview(
     content_type: str,
     decode_error: str,
     byte_limit_error: str,
+    limits: tuple[int, int, int] | None = None,
 ) -> dict[str, str | int | bool]:
+    max_side, max_bytes, max_pixels = limits or (
+        config.AI_ASSISTANT_IMAGE_MAX_SIDE, config.AI_ASSISTANT_IMAGE_MAX_BYTES, config.MAX_IMAGE_PIXELS
+    )
     if Image is None or ImageOps is None:
         raise AssistantError("Pillow is required for AI Assistant image analysis", status=400)
     try:
@@ -405,6 +409,8 @@ def _prepare_vision_preview(
         with warnings.catch_warnings():
             warnings.simplefilter("error", DecompressionBombWarning)
             with opener() as image:
+                if image.width * image.height > max_pixels:
+                    raise ValueError("Image exceeds pixel safety limit")
                 if str(getattr(image, "format", "")).lower().replace("jpg", "jpeg") != expected_format:
                     raise ValueError("Image decoder format does not match image data")
                 image.verify()
@@ -414,13 +420,13 @@ def _prepare_vision_preview(
                 if str(getattr(image, "format", "")).lower().replace("jpg", "jpeg") != expected_format:
                     raise ValueError("Image decoder format does not match image data")
                 if expected_format == "jpeg":
-                    image.draft("RGB", (config.AI_ASSISTANT_IMAGE_MAX_SIDE, config.AI_ASSISTANT_IMAGE_MAX_SIDE))
+                    image.draft("RGB", (max_side, max_side))
                 image.load()
                 image = ImageOps.exif_transpose(image)
                 source_width, source_height = image.size
                 source_has_alpha = _image_has_alpha(image)
-                image.thumbnail((config.AI_ASSISTANT_IMAGE_MAX_SIDE, config.AI_ASSISTANT_IMAGE_MAX_SIDE))
-                data, mime_type = _fit_preview(image, has_alpha=source_has_alpha, byte_limit_error=byte_limit_error)
+                image.thumbnail((max_side, max_side))
+                data, mime_type = _fit_preview(image, has_alpha=source_has_alpha, byte_limit_error=byte_limit_error, max_bytes=max_bytes)
                 width, height = image.size
     except AssistantError:
         raise
@@ -445,7 +451,7 @@ def _prepare_vision_preview(
     }
 
 
-def prepare_vision_preview(path: Path) -> dict[str, str | int | bool]:
+def prepare_vision_preview(path: Path, *, limits: tuple[int, int, int] | None = None) -> dict[str, str | int | bool]:
     try:
         with path.open("rb") as file:
             header = file.read(512)
@@ -458,6 +464,7 @@ def prepare_vision_preview(path: Path) -> dict[str, str | int | bool]:
         content_type="",
         decode_error="Gallery image could not be decoded for AI analysis",
         byte_limit_error="Gallery image preview exceeds AI Assistant byte limit",
+        limits=limits,
     )
 
 
@@ -466,6 +473,7 @@ def prepare_vision_preview_bytes(
     *,
     filename: str = "",
     content_type: str = "",
+    limits: tuple[int, int, int] | None = None,
 ) -> dict[str, str | int | bool]:
     return _prepare_vision_preview(
         lambda: Image.open(io.BytesIO(image_bytes)),
@@ -474,4 +482,5 @@ def prepare_vision_preview_bytes(
         content_type=content_type,
         decode_error="Image data must be a fully decodable supported raster image",
         byte_limit_error="Uploaded image preview exceeds AI Assistant byte limit",
+        limits=limits,
     )

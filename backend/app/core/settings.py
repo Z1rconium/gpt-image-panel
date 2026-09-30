@@ -171,6 +171,7 @@ UPSTREAM_MEMORY_BUDGET_MB = _env_or_derived(
 )
 MAX_IMAGE_PIXELS = max(1, int(os.getenv("MAX_IMAGE_PIXELS", "100000000")))
 IMAGE_CPU_CONCURRENCY = max(1, int(os.getenv("IMAGE_CPU_CONCURRENCY", "2")))
+VISION_PREVIEW_MEMORY_BUDGET_MB = min(16384, max(32, int(os.getenv("VISION_PREVIEW_MEMORY_BUDGET_MB", "256"))))
 FILE_IO_CONCURRENCY = max(1, int(os.getenv("FILE_IO_CONCURRENCY", "4")))
 MAX_ACTIVE_GENERATE_JOBS = max(1, int(os.getenv("MAX_ACTIVE_GENERATE_JOBS", "2")))
 # The DB executor runs short polling reads and the occasional critical write

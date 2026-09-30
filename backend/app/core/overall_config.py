@@ -152,6 +152,7 @@ OVERALL_CONFIG_REGISTRY: tuple[OverallConfigSpec, ...] = (
     _spec("MASK_PASTE_BACK_DEFAULT", "bool", "true", "Image Editing", "Paste masked edit results onto the primary image by default."),
     _spec("NODEIMAGE_UPLOAD_CONCURRENCY", "int", "4", "NodeImage", "Concurrent NodeImage uploads per worker process.", min_value=1),
     _spec("MAX_JSON_BODY_MB", "int", "1", "Limits", "Max JSON request body size.", min_value=1),
+    _spec("VISION_PREVIEW_MEMORY_BUDGET_MB", "int", "256", "Limits", "Per-process vision preview decode memory budget; oversized previews are skipped.", min_value=32, max_value=16384),
     _spec("MAX_UPSTREAM_JSON_MB", "int", "128", "Limits", "Max upstream JSON/SSE response size.", min_value=1),
     _spec("MAX_IMAGE_PIXELS", "int", "100000000", "Limits", "Max decoded image pixels.", min_value=1),
     _spec("IMPORT_ARCHIVE_MAX_MB", "int", str(config.IMPORT_ARCHIVE_MAX_MB), "Limits", "Max uploaded import ZIP size.", min_value=1),

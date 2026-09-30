@@ -11,7 +11,7 @@ from ..core.media import safe_image_path
 from ..integrations import assistant_client
 from ..integrations.agent_client import AgentItem, AssistantTextItem, UserItem
 from ..repositories.gallery.queries import get_gallery_entry
-from ..runtime.blocking import run_db_operation
+from ..runtime.blocking import run_db_operation, run_file_operation
 from . import vision_previews
 from .agent_refs import (
     parse_user_mentions,
@@ -155,40 +155,55 @@ async def load_preview_data_urls(
     images: Sequence[dict[str, Any]],
     *,
     max_total_bytes: int = MAX_INPUT_IMAGE_BYTES,
+    max_images: int | None = None,
 ) -> list[tuple[dict[str, Any], str]]:
     """Downscaled data URLs for gallery images; unreadable or over-budget ones are skipped."""
-    semaphore = asyncio.Semaphore(PREVIEW_LOAD_CONCURRENCY)
-
     async def load(image: dict[str, Any]) -> tuple[str, int] | None:
         image_id = image.get("image_id")
         if not image_id:
             return None
-        async with semaphore:
-            try:
-                entry = await run_db_operation(
-                    get_gallery_entry, image_id, metric_name="agent_get_gallery_entry"
-                )
-                if entry is None:
-                    return None
-                path = await asyncio.to_thread(safe_image_path, entry.filename)
-                if not path:
-                    return None
-                return await asyncio.to_thread(vision_previews.load_preview_data_url, Path(path))
-            except (assistant_client.AssistantError, OSError, ValueError):
-                logger.warning("Agent could not load image %s as visual context", image.get("ref_label"))
+        try:
+            entry = await run_db_operation(
+                get_gallery_entry, image_id, metric_name="agent_get_gallery_entry"
+            )
+            if entry is None:
                 return None
+            path = await run_file_operation(safe_image_path, entry.filename)
+            if not path:
+                return None
+            return await vision_previews.load_preview_data_url(Path(path))
+        except (assistant_client.AssistantError, OSError, ValueError):
+            logger.warning("Agent could not load image %s as visual context", image.get("ref_label"))
+            return None
 
-    previews = await asyncio.gather(*(load(image) for image in images))
     loaded: list[tuple[dict[str, Any], str]] = []
     total = 0
-    for image, preview in zip(images, previews):
-        if preview is None:
-            continue
-        data_url, size = preview
-        if total + size > max_total_bytes:
-            break
-        total += size
-        loaded.append((image, data_url))
+    if max_total_bytes <= 0 or (max_images is not None and max_images <= 0):
+        return loaded
+    pending: dict[int, asyncio.Task] = {}
+    next_index = 0
+    try:
+        for index, image in enumerate(images):
+            window = PREVIEW_LOAD_CONCURRENCY
+            if max_images is not None:
+                window = min(window, max_images - len(loaded))
+            while next_index < len(images) and len(pending) < window:
+                pending[next_index] = asyncio.create_task(load(images[next_index]))
+                next_index += 1
+            preview = await pending.pop(index)
+            if preview is None:
+                continue
+            data_url, size = preview
+            if total + size > max_total_bytes:
+                break
+            total += size
+            loaded.append((image, data_url))
+            if total >= max_total_bytes or (max_images is not None and len(loaded) >= max_images):
+                break
+    finally:
+        for task in pending.values():
+            task.cancel()
+        await asyncio.gather(*pending.values(), return_exceptions=True)
     return loaded
 
 

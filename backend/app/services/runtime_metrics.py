@@ -14,6 +14,7 @@ from ..repositories.db import optimize_database_if_due
 from ..repositories.image_jobs import get_image_queue_runtime_metrics
 from ..runtime.blocking import executor_gauges, run_db_operation
 from .job_queue import snapshot_queue_metrics
+from .vision_previews import preview_gauges
 
 
 logger = logging.getLogger(__name__)
@@ -39,6 +40,7 @@ async def refresh_runtime_metrics_once(worker_id: str) -> None:
 
     gauges = snapshot_queue_metrics()
     gauges.update(executor_gauges())
+    gauges.update(preview_gauges())
     gauges.update(_resource_gauges())
     local_snapshot = build_metrics_snapshot(gauges=gauges)
     local_snapshot["rates"] = failure_rates(local_snapshot["counters"])

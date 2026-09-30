@@ -15,7 +15,7 @@ from typing import Any, Literal
 
 
 from ..core.image_models import MAX_PROMPT_CHARS
-from . import presets
+from . import presets, vision_previews
 from ..core.errors import (
     DomainError,
     InvalidRequestError,
@@ -106,8 +106,7 @@ async def prompt_from_uploaded_image(
 ):
     runtime = await _resolve_runtime_async(vision=True)
     try:
-        preview = await asyncio.to_thread(
-            assistant_client.prepare_vision_preview_bytes,
+        preview = await vision_previews.prepare_preview(
             image_bytes,
             filename=filename or "image",
             content_type=content_type,
@@ -236,8 +235,7 @@ async def optimize_uploaded_image_prompt(
         _prompt_preview_generation_config
     )
     try:
-        target_preview = await asyncio.to_thread(
-            assistant_client.prepare_vision_preview_bytes,
+        target_preview = await vision_previews.prepare_preview(
             image_bytes,
             filename=filename or "image",
             content_type=content_type,
@@ -285,8 +283,7 @@ async def optimize_uploaded_image_prompt(
     generation_duration_ms = int((time.monotonic() - generation_started) * 1000)
 
     try:
-        generated_preview = await asyncio.to_thread(
-            assistant_client.prepare_vision_preview_bytes,
+        generated_preview = await vision_previews.prepare_preview(
             generated_bytes,
             filename="assistant-preview",
             content_type="",
@@ -361,7 +358,7 @@ async def _gallery_entry_and_preview(image_id: str) -> tuple[Any, dict[str, Any]
         raise NotFoundError("Gallery image file not found")
     if not await asyncio.to_thread(is_gallery_filename_referenced, entry.filename):
         raise NotFoundError("Gallery image file is not referenced")
-    preview = await asyncio.to_thread(assistant_client.prepare_vision_preview, Path(path))
+    preview = await vision_previews.prepare_preview(Path(path))
     return entry, preview  # type: ignore[return-value]
 
 

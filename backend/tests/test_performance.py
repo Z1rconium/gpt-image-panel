@@ -486,3 +486,69 @@ def test_multiprocess_image_unit_claim_no_duplicates(tmp_path, record_property):
     assert busy_retries <= unit_count
     assert lock_wait_p95 < config.SQLITE_CRITICAL_BUSY_TIMEOUT_MS
     assert hold_p95 < config.SQLITE_CRITICAL_BUSY_TIMEOUT_MS
+
+
+@pytest.mark.anyio
+async def test_vision_preview_cold_hot_and_concurrent_baseline(tmp_path, monkeypatch):
+    """Run with -s in a fresh pytest process to capture comparable JSON output."""
+    import asyncio
+    import json
+    import resource
+
+    from backend.app.services import vision_previews
+
+    monkeypatch.setattr(config, "AI_ASSISTANT_IMAGE_MAX_SIDE", 1024)
+    monkeypatch.setattr(config, "AI_ASSISTANT_IMAGE_MAX_BYTES", 1024 * 1024)
+    monkeypatch.setattr(config, "MAX_IMAGE_PIXELS", 100000000)
+    monkeypatch.setattr(config, "VISION_PREVIEW_MEMORY_BUDGET_MB", 256)
+    paths = []
+    image = Image.effect_noise((2048, 2048), 50).convert("RGB")
+    for i in range(4):
+        path = tmp_path / f"preview-{i}.png"
+        image.save(path)
+        paths.append(path)
+    records = []
+
+    async def scenario(name, selected, expected_decodes, clear=True):
+        if clear:
+            vision_previews.clear_preview_cache()
+        before = metrics.snapshot()["counters"].get("vision_preview.decodes", 0)
+        peak_memory = 0
+        peak_cpu = 0
+        done = False
+
+        async def monitor():
+            nonlocal peak_memory, peak_cpu
+            while not done:
+                gauges = blocking.executor_gauges()
+                gauges.update(vision_previews.preview_gauges())
+                peak_memory = max(peak_memory, gauges["vision_preview.decode_memory_bytes"])
+                peak_cpu = max(peak_cpu, gauges["executor.image_cpu.running"])
+                await asyncio.sleep(0.002)
+
+        sample = asyncio.create_task(monitor())
+        start = time.perf_counter()
+        try:
+            results = await asyncio.gather(*(vision_previews.load_preview_data_url(path) for path in selected))
+        finally:
+            done = True
+            await sample
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        decodes = metrics.snapshot()["counters"].get("vision_preview.decodes", 0) - before
+        assert all(result is not None for result in results)
+        assert decodes == expected_decodes
+        assert peak_memory <= config.VISION_PREVIEW_MEMORY_BUDGET_MB * 1024 * 1024
+        assert peak_cpu <= config.IMAGE_CPU_CONCURRENCY
+        records.append({"scenario": name, "requests": len(selected), "decodes": decodes,
+                        "elapsed_ms": round(elapsed_ms, 2), "cache_bytes": vision_previews.preview_gauges()["vision_preview.cache_bytes"],
+                        "peak_decode_budget_bytes": peak_memory, "peak_cpu_workers": peak_cpu,
+                        "process_peak_rss_kib": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss})
+
+    try:
+        await scenario("cold", [paths[0]], 1)
+        await scenario("hot", [paths[0]], 0, clear=False)
+        await scenario("concurrent_shared", [paths[0]] * 12, 1)
+        await scenario("concurrent_distinct", paths, 4)
+        print("\nVISION_PREVIEW_BASELINE " + json.dumps(records, sort_keys=True))
+    finally:
+        vision_previews.clear_preview_cache()

@@ -254,6 +254,7 @@ ALLOW_UNAUTHENTICATED=true .venv/bin/granian --interface asgi backend.app.main:a
 | `MAX_UPSTREAM_IMAGE_BYTES_PER_TASK_MB` / `UPSTREAM_MEMORY_BUDGET_MB` | 单任务解码图片上限和进程内上游内存加权准入预算。 |
 | `DB_EXECUTOR_WORKERS` / `SQLITE_BUSY_*` | SQLite 专用执行器大小，以及短超时和抖动重试参数。 |
 | `IMAGE_CPU_CONCURRENCY` / `FILE_IO_CONCURRENCY` | 每个进程完整图片解码和阻塞文件 I/O 的有界并发数。 |
+| `VISION_PREVIEW_MEMORY_BUDGET_MB` | 独立的视觉预览解码预算，默认每进程 **256 MiB**，范围 **32–16384**，支持环境变量和 Overall Config。Agent 超出保守内存估算预算的图片跳过视觉预览，文字引用、原图及生成／编辑仍可使用；直接 AI Assistant 图片分析无法容纳预览时返回 400。 |
 | `IMAGE_JOB_PROGRESS_PERSIST_INTERVAL_SECONDS` | 合并 image unit 进度写入的最小间隔。 |
 | `RUNTIME_METRICS_REFRESH_SECONDS` / `EVENT_LOOP_LAG_SAMPLE_SECONDS` | 后台协调快照和事件循环延迟采样间隔。 |
 | `MAX_ACTIVE_GENERATE_JOBS` | 全局运行中的生成/编辑 image unit 上限。 |
