@@ -2651,3 +2651,14 @@ def test_hot_overriding_a_base_setting_moves_its_derived_settings(client):
     assert config.MAX_PENDING_EDIT_SOURCE_MB == 100
     assert config.IMPORT_ARCHIVE_MAX_MB == 500
     assert config.IMPORT_TEMP_RESERVATION_MAX_MB == 1000
+
+
+@pytest.mark.parametrize("content_type", [None, "text/plain", "application/octet-stream", "application/json"])
+@pytest.mark.parametrize("chunked", [False, True])
+def test_json_route_body_limit_ignores_client_content_type(client, monkeypatch, content_type, chunked):
+    monkeypatch.setattr(config, "MAX_JSON_BODY_MB", 1)
+    headers = {} if content_type is None else {"Content-Type": content_type}
+    body = b"x" * (1024 * 1024 + 1)
+    content = iter([body[:700000], body[700000:]]) if chunked else body
+    response = client.post("/api/agent/conversations", content=content, headers=headers)
+    assert response.status_code == 413, response.text

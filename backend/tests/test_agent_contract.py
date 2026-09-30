@@ -608,3 +608,44 @@ def test_agent_limits_and_validation(client, monkeypatch):
     )
     assert limited.status_code == 409
 
+
+
+@pytest.mark.parametrize("after", [-1, 2**63, 10**100])
+def test_agent_cursor_rejects_out_of_sqlite_range(client, after):
+    response = client.get(f"/api/agent/turns/missing/events?after={after}")
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize("header", ["²", "١", str(2**63), "-1", "1.0", "9" * 100])
+def test_agent_last_event_id_invalid_values_are_ignored(client, monkeypatch, header):
+    from backend.app.services import agent_stream
+    from backend.app.core.streaming import StreamedBody
+    seen = []
+
+    async def stream(**kwargs):
+        seen.append(kwargs["after"])
+        async def body():
+            yield ": done\n\n"
+        return StreamedBody(chunks=body(), media_type="text/event-stream", headers={})
+
+    monkeypatch.setattr(agent_stream, "stream_turn_events", stream)
+    # httpx only permits ASCII header strings; bytes cover malicious wire input.
+    response = client.get("/api/agent/turns/missing/events?after=7", headers={b"Last-Event-ID": header.encode("utf-8")})
+    assert response.status_code == 200 and seen == [7]
+
+
+def test_agent_last_event_id_accepts_full_sqlite_range(client, monkeypatch):
+    from backend.app.services import agent_stream
+    from backend.app.core.streaming import StreamedBody
+    seen = []
+
+    async def stream(**kwargs):
+        seen.append(kwargs["after"])
+        async def body():
+            yield ": done\n\n"
+        return StreamedBody(chunks=body(), media_type="text/event-stream", headers={})
+
+    monkeypatch.setattr(agent_stream, "stream_turn_events", stream)
+    response = client.get("/api/agent/turns/missing/events", headers={"Last-Event-ID": str(2**63 - 1)})
+    assert response.status_code == 200 and seen == [2**63 - 1]
+

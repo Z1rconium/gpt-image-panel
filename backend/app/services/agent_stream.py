@@ -22,6 +22,7 @@ EVENT_POLL_SECONDS = 0.4
 KEEP_ALIVE_SECONDS = 15.0
 STALE_SWEEP_SECONDS = 30.0
 EVENT_BATCH = 200
+MAX_CURSOR = (1 << 63) - 1
 
 
 def _terminal_event_for(turn: dict[str, Any]) -> tuple[str, dict[str, Any]]:
@@ -83,7 +84,7 @@ async def stream_turn_events(
                     # Terminal with nothing left to replay: its events were purged or
                     # the turn was interrupted by a stale-lease sweep.
                     event_type, data = _terminal_event_for(current)
-                    yield serialize_sse_event(event_type, data, event_id=cursor + 1)
+                    yield serialize_sse_event(event_type, data, event_id=min(MAX_CURSOR, cursor + 1))
                     return
                 now = time.monotonic()
                 if now - start > config.SSE_CONNECTION_TTL_SECONDS:

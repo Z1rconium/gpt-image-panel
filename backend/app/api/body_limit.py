@@ -3,6 +3,10 @@ ASGI middleware that enforces request body size limits before Starlette/FastAPI
 parses multipart forms, preventing disk/memory exhaustion from oversized uploads.
 """
 
+from fastapi import HTTPException
+from fastapi.params import Body, File, Form
+from fastapi.routing import APIRoute
+from starlette.routing import Match
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
@@ -46,6 +50,17 @@ def _max_body_for_path(path: str, content_type: str = "") -> int:
     return config.MAX_FILE_SIZE_MB * 1024 * 1024
 
 
+def _body_routes(routes):
+    for route in routes:
+        # FastAPI versions with lazy included routers expose effective contexts
+        # carrying the prefixed matcher and the resolved request body field.
+        contexts = getattr(route, "effective_route_contexts", None)
+        if contexts is not None:
+            yield from contexts()
+        elif isinstance(route, APIRoute):
+            yield route
+
+
 class BodyLimitMiddleware:
     """Reject requests whose body exceeds a per-path size limit."""
 
@@ -63,6 +78,16 @@ class BodyLimitMiddleware:
         headers = dict(scope.get("headers", []))
         content_type = headers.get(b"content-type", b"").decode("latin1")
         max_bytes = _max_body_for_path(path, content_type)
+        json_body = False
+        for route in _body_routes(scope["app"].routes):
+            if route.matches(scope)[0] == Match.FULL:
+                field = getattr(route, "body_field", None)
+                if field is not None:
+                    info = field.field_info
+                    if isinstance(info, Body) and not isinstance(info, (File, Form)):
+                        max_bytes = config.MAX_JSON_BODY_MB * 1024 * 1024
+                        json_body = True
+                break
         content_length_raw = headers.get(b"content-length")
         if content_length_raw is not None:
             try:
@@ -76,6 +101,31 @@ class BodyLimitMiddleware:
                     return
             except (ValueError, TypeError):
                 pass
+
+        if json_body:
+            # Validate the complete bounded JSON body before routing or parsing.
+            # BaseHTTPMiddleware can wrap receive exceptions in ExceptionGroup,
+            # which FastAPI otherwise translates into an incorrect generic 400.
+            messages = []
+            total = 0
+            while True:
+                message = await receive()
+                total += len(message.get("body", b""))
+                if total > max_bytes:
+                    response = JSONResponse(status_code=413, content={"status": "error", "detail": "Request body too large"})
+                    await response(scope, receive, send)
+                    return
+                messages.append(message)
+                if message["type"] != "http.request" or not message.get("more_body", False):
+                    break
+            buffered = iter(messages)
+
+            async def replay_receive() -> Message:
+                message = next(buffered, None)
+                return message if message is not None else await receive()
+
+            await self.app(scope, replay_receive, send)
+            return
 
         # Wrap receive to count bytes as they stream in
         total_received = 0
@@ -100,5 +150,6 @@ class BodyLimitMiddleware:
             await response(scope, receive, send)
 
 
-class _BodyTooLargeError(Exception):
-    pass
+class _BodyTooLargeError(HTTPException):
+    def __init__(self):
+        super().__init__(status_code=413, detail="Request body too large")

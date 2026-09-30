@@ -82,13 +82,15 @@ async def cancel_agent_turn(turn_id: str):
 async def stream_agent_turn_events(
     turn_id: str,
     request: Request,
-    after: int = Query(default=0, ge=0),
+    after: int = Query(default=0, ge=0, le=agent_stream.MAX_CURSOR),
     last_event_id: str | None = Header(default=None),
 ):
     cursor = after
     # Only short digit strings are usable cursors; longer ones would raise on int().
-    if last_event_id and last_event_id.isdigit() and len(last_event_id) <= 18:
-        cursor = max(cursor, int(last_event_id))
+    if last_event_id and last_event_id.isascii() and last_event_id.isdigit() and len(last_event_id) <= 19:
+        value = int(last_event_id)
+        if value <= agent_stream.MAX_CURSOR:
+            cursor = max(cursor, value)
     body = await agent_stream.stream_turn_events(
         turn_id=turn_id,
         after=cursor,
