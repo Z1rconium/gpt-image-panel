@@ -8,6 +8,7 @@ from ...runtime.state import state
 from ...services.presets import (
     apply_api_preset,
     apply_ai_assistant_settings,
+    apply_preset_provider,
     apply_r2_backup_settings,
     apply_nodeimage_settings,
     apply_upstream_socks5_proxy,
@@ -305,6 +306,7 @@ async def update_settings(req: SettingsRequest):
             preset["supports_mask"] = bool(req.supports_mask)
         if req.prompt_guard is not None:
             preset["prompt_guard"] = bool(req.prompt_guard)
+        apply_preset_provider(preset, req.provider_kind, req.provider_config)
         if req.upstream_socks5_proxy is not None:
             current_proxy = get_upstream_socks5_proxy(raw=True)
             requested_proxy = req.upstream_socks5_proxy.strip()
@@ -453,6 +455,9 @@ async def create_settings_preset(req: PresetCreateRequest):
         if req.prompt_guard is not None
         else bool(source.get("prompt_guard", False))
     )
+    preset["provider_kind"] = source.get("provider_kind", "openai")
+    preset["provider_config"] = source.get("provider_config")
+    apply_preset_provider(preset, req.provider_kind, req.provider_config)
     begin_api_settings_write()
     try:
         presets.append(preset)

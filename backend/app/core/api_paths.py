@@ -1,3 +1,4 @@
+import json
 from typing import Any
 
 from . import settings as config
@@ -9,6 +10,9 @@ ALLOWED_API_PATHS = {DEFAULT_API_PATH, RESPONSES_API_PATH, CHAT_COMPLETIONS_API_
 DEFAULT_IMAGE_MODEL = "gpt-image-2"
 DEFAULT_RESPONSE_FORMAT = "url"
 ALLOWED_RESPONSE_FORMATS = {"", "url", "b64_json"}
+PROVIDER_KIND_OPENAI = "openai"
+PROVIDER_KIND_ASYNC_JSON = "async_json"
+ALLOWED_PROVIDER_KINDS = {PROVIDER_KIND_OPENAI, PROVIDER_KIND_ASYNC_JSON}
 
 
 def normalize_api_path(api_path: str | None) -> str:
@@ -64,10 +68,26 @@ def normalize_prompt_guard(value: Any | None) -> bool:
     return bool(value)
 
 
+def normalize_provider_kind(value: Any | None) -> str:
+    text = str(value or "").strip()
+    return text if text in ALLOWED_PROVIDER_KINDS else PROVIDER_KIND_OPENAI
+
+
+def normalize_provider_config(value: Any | None) -> dict[str, Any] | None:
+    """Shape-only normalisation; ProviderConfig validates it on write and on use."""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value) if value.strip() else None
+        except json.JSONDecodeError:
+            return None
+    return value if isinstance(value, dict) and value else None
+
+
 def normalize_api_preset(raw: dict[str, Any] | None, fallback_id: str = "default") -> dict[str, Any]:
     preset = raw if isinstance(raw, dict) else {}
     preset_id = str(preset.get("id") or fallback_id)
     api_path = normalize_api_path(str(preset.get("api_path") or config.DEFAULT_API_PATH))
+    provider_kind = normalize_provider_kind(preset.get("provider_kind"))
     return {
         "id": preset_id,
         "name": str(preset.get("name") or "Untitled preset").strip() or "Untitled preset",
@@ -78,6 +98,12 @@ def normalize_api_preset(raw: dict[str, Any] | None, fallback_id: str = "default
         "default_response_format": normalize_default_response_format(
             preset.get("default_response_format")
         ),
-        "supports_mask": normalize_supports_mask(preset.get("supports_mask")),
+        "supports_mask": (
+            False
+            if provider_kind == PROVIDER_KIND_ASYNC_JSON
+            else normalize_supports_mask(preset.get("supports_mask"))
+        ),
         "prompt_guard": normalize_prompt_guard(preset.get("prompt_guard")),
+        "provider_kind": provider_kind,
+        "provider_config": normalize_provider_config(preset.get("provider_config")),
     }

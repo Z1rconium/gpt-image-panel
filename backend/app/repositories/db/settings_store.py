@@ -658,11 +658,13 @@ def _replace_settings_on_conn(conn: sqlite3.Connection, settings: dict):
                 default_response_format,
                 supports_mask,
                 prompt_guard,
+                provider_kind,
+                provider_config,
                 position,
                 created_at,
                 updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 preset["id"],
@@ -674,6 +676,12 @@ def _replace_settings_on_conn(conn: sqlite3.Connection, settings: dict):
                 preset["default_response_format"],
                 1 if preset.get("supports_mask", True) else 0,
                 1 if preset.get("prompt_guard", False) else 0,
+                preset.get("provider_kind", "openai"),
+                (
+                    json.dumps(preset["provider_config"], separators=(",", ":"))
+                    if preset.get("provider_config")
+                    else None
+                ),
                 position,
                 now,
                 now,
@@ -712,7 +720,8 @@ def _replace_settings_on_conn(conn: sqlite3.Connection, settings: dict):
 def _load_settings_from_conn(conn: sqlite3.Connection) -> dict | None:
     rows = conn.execute(
         """
-        SELECT id, name, api_url, api_key, api_path, default_model, default_response_format, supports_mask, prompt_guard
+        SELECT id, name, api_url, api_key, api_path, default_model, default_response_format, supports_mask, prompt_guard,
+               provider_kind, provider_config
         FROM api_presets
         ORDER BY position ASC, id ASC
         """
@@ -731,6 +740,8 @@ def _load_settings_from_conn(conn: sqlite3.Connection) -> dict | None:
             "default_response_format": row["default_response_format"],
             "supports_mask": bool(row["supports_mask"]),
             "prompt_guard": bool(row["prompt_guard"]),
+            "provider_kind": row["provider_kind"],
+            "provider_config": row["provider_config"],
         }
         for row in rows
     ]

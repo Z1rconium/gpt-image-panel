@@ -1170,6 +1170,16 @@ def _migration_api_preset_prompt_guard(conn: sqlite3.Connection):
         )
 
 
+def _migration_api_preset_provider(conn: sqlite3.Connection):
+    columns = _table_columns(conn, "api_presets")
+    if "provider_kind" not in columns:
+        conn.execute(
+            "ALTER TABLE api_presets ADD COLUMN provider_kind TEXT NOT NULL DEFAULT 'openai'"
+        )
+    if "provider_config" not in columns:
+        conn.execute("ALTER TABLE api_presets ADD COLUMN provider_config TEXT")
+
+
 def _migration_gallery_diagnostics(conn: sqlite3.Connection):
     if "diagnostics" not in _table_columns(conn, "gallery_entries"):
         conn.execute("ALTER TABLE gallery_entries ADD COLUMN diagnostics TEXT")
@@ -1369,4 +1379,5 @@ SCHEMA_MIGRATIONS = (
     (30, "generate_job_preset_id", _migration_generate_job_preset_id),
     (31, "agent_conversations", _migration_agent_conversations),
     (32, "agent_performance_indexes", _migration_agent_performance_indexes),
+    (33, "api_preset_provider", _migration_api_preset_provider),
 )

@@ -9,6 +9,7 @@ from ..core.validators import (
     normalize_upstream_base_url,
     normalize_webhook_url,
 )
+from .provider import ProviderConfig
 from .common import (
     ApiKeySource,
     ApiPath,
@@ -17,6 +18,7 @@ from .common import (
     OverallConfigValueSource,
     OverallConfigValueType,
     PresetHealthStatus,
+    ProviderKind,
     ResponseFormatDefault,
     StrictRequestModel,
 )
@@ -30,6 +32,8 @@ class ApiPresetResponse(BaseModel):
     default_response_format: ResponseFormatDefault = "url"
     supports_mask: bool = True
     prompt_guard: bool = False
+    provider_kind: ProviderKind = "openai"
+    provider_config: Optional[ProviderConfig] = None
     api_key_masked: str
     has_api_key: bool
     api_key_source: ApiKeySource = "empty"
@@ -52,6 +56,8 @@ class PresetCreateRequest(StrictRequestModel):
     default_response_format: Optional[ResponseFormatDefault] = None
     supports_mask: Optional[bool] = None
     prompt_guard: Optional[bool] = None
+    provider_kind: Optional[ProviderKind] = None
+    provider_config: Optional[ProviderConfig] = None
     source_preset_id: Optional[str] = Field(default=None, max_length=128)
 
     @field_validator("api_url")
@@ -94,6 +100,12 @@ class SettingsRequest(StrictRequestModel):
     default_response_format: Optional[ResponseFormatDefault] = None
     supports_mask: Optional[bool] = None
     prompt_guard: Optional[bool] = None
+    provider_kind: Optional[ProviderKind] = Field(
+        default=None, description="Null keeps the current provider kind."
+    )
+    provider_config: Optional[ProviderConfig] = Field(
+        default=None, description="Null keeps the current provider mapping."
+    )
     upstream_socks5_proxy: Optional[str] = Field(
         default=None,
         max_length=2048,
@@ -173,6 +185,7 @@ class SettingsResponse(BaseModel):
     default_response_format: ResponseFormatDefault = "url"
     supports_mask: bool = True
     prompt_guard: bool = False
+    provider_kind: ProviderKind = "openai"
     has_upstream_socks5_proxy: bool = False
     upstream_socks5_proxy_masked: str = ""
     has_webhook_url: bool = False

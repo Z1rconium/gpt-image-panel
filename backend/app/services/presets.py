@@ -9,14 +9,19 @@ from ..core.settings_defaults import (
     default_prompt_optimizer_settings as _default_prompt_optimizer_settings,
     default_secret_reference as _default_secret_reference,
 )
+from pydantic import ValidationError
+
 from ..core.api_paths import (
+    PROVIDER_KIND_ASYNC_JSON,
     normalize_api_path,
     normalize_api_preset,
     normalize_default_model,
     normalize_default_response_format,
     normalize_prompt_guard,
+    normalize_provider_kind,
     normalize_supports_mask,
 )
+from ..schemas.provider import ProviderConfig
 from ..core.validators import (
     get_env_var_ref_name,
     mask_socks5_proxy_url,
@@ -399,6 +404,36 @@ def webhook_url_response_fields() -> dict:
     }
 
 
+def apply_preset_provider(
+    preset: dict,
+    provider_kind: str | None,
+    provider_config: ProviderConfig | None,
+) -> None:
+    """Apply requested provider fields to ``preset`` and enforce async_json invariants."""
+    if provider_kind is not None:
+        preset["provider_kind"] = normalize_provider_kind(provider_kind)
+    if provider_config is not None:
+        preset["provider_config"] = provider_config.model_dump(mode="json")
+    if normalize_provider_kind(preset.get("provider_kind")) == PROVIDER_KIND_ASYNC_JSON:
+        if not preset.get("provider_config"):
+            raise UnprocessableRequestError(
+                "provider_config is required when provider_kind is async_json"
+            )
+        # Async providers have no edit endpoint, so masks can never be honoured.
+        preset["supports_mask"] = False
+
+
+def _stored_provider_config(preset: dict) -> ProviderConfig | None:
+    raw = preset.get("provider_config")
+    if not raw:
+        return None
+    try:
+        return ProviderConfig.model_validate(raw)
+    except ValidationError:
+        # A hand-edited row must not break the whole settings response.
+        return None
+
+
 def serialize_api_preset(preset: dict) -> ApiPresetResponse:
     key_fields = api_key_response_fields(preset.get("api_key", ""))
     return ApiPresetResponse(
@@ -417,6 +452,8 @@ def serialize_api_preset(preset: dict) -> ApiPresetResponse:
         ),
         supports_mask=normalize_supports_mask(preset.get("supports_mask")),
         prompt_guard=normalize_prompt_guard(preset.get("prompt_guard")),
+        provider_kind=normalize_provider_kind(preset.get("provider_kind")),
+        provider_config=_stored_provider_config(preset),
         **key_fields,
     )
 
@@ -442,6 +479,7 @@ def build_settings_response() -> SettingsResponse:
         ),
         supports_mask=normalize_supports_mask(active_preset.get("supports_mask")),
         prompt_guard=normalize_prompt_guard(active_preset.get("prompt_guard")),
+        provider_kind=normalize_provider_kind(active_preset.get("provider_kind")),
         **upstream_socks5_proxy_response_fields(),
         **webhook_url_response_fields(),
         presets=[serialize_api_preset(preset) for preset in get_api_presets()],

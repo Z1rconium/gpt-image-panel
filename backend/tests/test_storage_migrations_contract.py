@@ -779,3 +779,23 @@ def test_legacy_null_token_units_are_claimable_and_expire(tmp_path):
     assert exhausted[0]["stage"] == "interrupted"
     assert exhausted[0].get("claim_token") is None
     assert str(exhausted[0]["parent_job_id"]) == parent["job_id"]
+
+
+def test_api_preset_provider_migration_adds_defaulted_columns(tmp_path):
+    _configure_runtime(tmp_path)
+    db_repo.verify_storage_writable()
+    with db_repo._connect() as conn:
+        columns = {row["name"]: row for row in conn.execute("PRAGMA table_info(api_presets)")}
+        name = conn.execute("SELECT name FROM schema_migrations WHERE version = 33").fetchone()["name"]
+        conn.execute(
+            "INSERT INTO api_presets (id, name, api_url, api_key, api_path, default_model, position, created_at, updated_at) "
+            "VALUES ('legacy', 'Legacy', 'https://a.example', '', '/v1/images/generations', 'm', 0, 't', 't')"
+        )
+        legacy = conn.execute(
+            "SELECT provider_kind, provider_config FROM api_presets WHERE id = 'legacy'"
+        ).fetchone()
+    assert name == "api_preset_provider"
+    assert columns["provider_kind"]["notnull"] == 1
+    assert columns["provider_config"]["notnull"] == 0
+    assert legacy["provider_kind"] == "openai"
+    assert legacy["provider_config"] is None
