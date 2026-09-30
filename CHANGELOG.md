@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.7.2
+
+- Agent turn admission now reserves capacity before database waits, including pending creates in the per-worker `AGENT_MAX_ACTIVE_TURNS` limit. Idempotent replays remain available at capacity, and request cancellation completes admission so queued turns receive a runner.
+- Assistant slot acquisition uses one deadline for local semaphore waits, SQLite attempts and retries. Late leases are released after timeout or cancellation; the deadline does not shorten an admitted model request.
+- JSON body limits follow registered route declarations even with absent or incorrect Content-Type, including chunked bodies rejected before parsing with 413. Agent `after` cursors must fit a nonnegative SQLite 64-bit integer (422 otherwise); invalid or non-ASCII Last-Event-ID values are ignored and synthetic terminal cursors cannot overflow.
+- Stale-turn cleanup rechecks expiration inside its write transaction. Lost or expired execution leases stop the Agent and fence business writes; interruption, cancellation, shutdown and failures clean up pending jobs and edit-source staging files while preserving established terminal states and gallery images. Text snapshots track modification versions and retry failed writes without losing changes made during persistence.
+- Vision previews use the bounded image/file executors and a separate strict `VISION_PREVIEW_MEMORY_BUDGET_MB` budget (256 MiB per process by default, range 32–16384, configurable in Overall Config). Estimates use decoded pixels × 16 plus three preview byte limits, with JPEG draft dimensions. Oversized Agent previews are skipped without removing text references or original images; direct Assistant analysis returns 400 if a preview cannot fit.
+- Preview loading uses an ordered window of at most three items and stops scheduling at byte/image limits; tool results load at most four successful previews. Concurrent cache misses share a decode unaffected by caller cancellation. Cache keys include file state and all preview safety settings; clear operations fence older fills, and the 32-entry / 15-minute / 24-MiB LRU accounts for retained data-URL string memory, expires old entries and does not cache oversized entries.
+- Added resource/cache counters and gauges, boundary regressions, and reproducible cold/hot/shared/distinct preview benchmarks. See `VISION_PREVIEW_PERFORMANCE.md` for commands, measurements and interpretation. No SQLite migration is required.
+
 ## v1.7.1
 
 - Security hardening for Agent mode: message text and attachments are validated against the configured limits in the request schema, oversized Last-Event-ID cursors are ignored instead of raising, edit-source temp files only reuse known image suffixes, and the startup sweep no longer deletes staging files a running turn may still use. All `AGENT_*` overall-config overrides now have upper bounds.
