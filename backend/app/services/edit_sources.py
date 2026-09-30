@@ -1,5 +1,6 @@
 """Edit-source staging shared by the edit routes and the agent tools."""
 
+import asyncio
 import hashlib
 import os
 import tempfile
@@ -223,7 +224,7 @@ async def read_gallery_edit_source(
 
     image_content_type = image_content_type_for_filename(path.name)
 
-    return await run_image_operation(
+    task = asyncio.create_task(run_image_operation(
         copy_edit_source_file_to_temp,
         path,
         path.name,
@@ -234,4 +235,15 @@ async def read_gallery_edit_source(
         metric_name="copy_validate_gallery_edit_source",
         orientation_mask_size=orientation_mask_size,
         gallery_image_id=image_id,
-    )
+    ))
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        # The worker can still create a staging file after its caller leaves.
+        # Collect its result before deleting the file.
+        try:
+            source = await asyncio.shield(task)
+            cleanup_edit_sources([source])
+        except Exception:
+            pass
+        raise

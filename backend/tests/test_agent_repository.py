@@ -154,3 +154,42 @@ def test_batched_events_scoped_images_and_idle_sweep(tmp_path):
 
     # A queued turn with a future lease is not stale, so the sweep is a read-only no-op.
     assert agent_repo.sweep_stale_turns() == []
+
+
+def test_sweep_rechecks_expiry_after_candidate_read(tmp_path, monkeypatch):
+    _configure_runtime(tmp_path)
+    db_repo.verify_storage_writable()
+    conversation = agent_repo.create_conversation()
+    turn, _ = _turn(conversation["id"], lease_expires_at=_future(-5))
+    agent_repo.claim_turn(turn["id"], owner="worker", lease_expires_at=_future(-5))
+    original = agent_repo.finish_turn
+
+    def renew_before_write(turn_id, status, **kwargs):
+        # Simulate a renewal committed after candidate selection and before the
+        # sweep acquires its write lock (an expired row cannot renew normally).
+        with agent_repo._connect() as conn:
+            with agent_repo._transaction(conn):
+                conn.execute("UPDATE agent_turns SET lease_expires_at = ? WHERE id = ?", (_future(), turn_id))
+        return original(turn_id, status, **kwargs)
+
+    monkeypatch.setattr(agent_repo, "finish_turn", renew_before_write)
+    assert agent_repo.sweep_stale_turns() == []
+    assert agent_repo.get_turn(turn["id"])["status"] == "running"
+    assert agent_repo.get_message(turn["assistant_message_id"])["status"] == "streaming"
+
+
+def test_lost_owner_cannot_write_events_snapshots_or_images(tmp_path):
+    _configure_runtime(tmp_path)
+    db_repo.verify_storage_writable()
+    conversation = agent_repo.create_conversation()
+    turn, _ = _turn(conversation["id"])
+    agent_repo.claim_turn(turn["id"], owner="new-owner", lease_expires_at=_future())
+    with pytest.raises(agent_repo.AgentLeaseLostError):
+        agent_repo.append_turn_events(turn["id"], [("block.text", {"delta": "stale"})], start_seq=1, owner="old-owner")
+    with pytest.raises(agent_repo.AgentLeaseLostError):
+        agent_repo.update_message_content(turn["assistant_message_id"], text="stale", blocks=[], owner="old-owner")
+    with pytest.raises(agent_repo.AgentLeaseLostError):
+        agent_repo.insert_pending_output_image(conversation_id=conversation["id"], turn_id=turn["id"],
+            message_id=turn["assistant_message_id"], round_no=1, item_id="image", prompt="fox", mode="generate", owner="old-owner")
+    assert agent_repo.finish_turn(turn["id"], "failed", owner="old-owner")["status"] == "running"
+    assert agent_repo.list_turn_events(turn["id"]) == []

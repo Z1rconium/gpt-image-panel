@@ -65,6 +65,9 @@ def init_defaults() -> None:
     state.gallery_job_sse_poller_tasks = {}
     state.thumbnail_dispatcher_kick = asyncio.Event()
     state.agent_turn_tasks = {}
+    state.agent_turn_reservations = 0
+    state.agent_turn_admissions = set()
+    state.assistant_slot_cleanup_tasks = set()
     state.agent_turn_wakeups = {}
     state.agent_turn_cancel_events = {}
     state.agent_last_event_purge_at = 0.0

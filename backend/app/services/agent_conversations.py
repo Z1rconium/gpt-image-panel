@@ -95,6 +95,41 @@ async def _purge_events_if_due() -> None:
 
 
 async def start_turn(conversation_id: str, req: AgentTurnRequest) -> AgentTurnAccepted:
+    # No await before reserving: all request coroutines on this worker observe
+    # both running tasks and admissions still waiting for the database.
+    if len(state.agent_turn_tasks) + state.agent_turn_reservations >= config.AGENT_MAX_ACTIVE_TURNS:
+        turn = await run_db_operation(
+            agent_repo.get_turn_by_client_id, conversation_id, req.client_turn_id,
+            metric_name="agent_replay_turn",
+        )
+        if turn is not None:
+            return _accepted(turn, created=False)
+        raise RateLimitedError("Too many Agent turns are running. Try again shortly.")
+    state.agent_turn_reservations += 1
+    task = asyncio.create_task(_start_reserved_turn(conversation_id, req))
+    admissions = state.agent_turn_admissions
+    admissions.add(task)
+    task.add_done_callback(admissions.discard)
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        # A database worker cannot be cancelled. Finish admission and launch the
+        # runner even when the HTTP caller leaves, so no queued row is orphaned.
+        try:
+            await asyncio.shield(task)
+        except Exception:
+            logger.warning("Cancelled Agent admission failed", exc_info=True)
+        raise
+
+
+async def _start_reserved_turn(conversation_id: str, req: AgentTurnRequest) -> AgentTurnAccepted:
+    try:
+        return await _create_reserved_turn(conversation_id, req)
+    finally:
+        state.agent_turn_reservations -= 1
+
+
+async def _create_reserved_turn(conversation_id: str, req: AgentTurnRequest) -> AgentTurnAccepted:
     agent = await assistant_runtime.resolve_agent_runtime_async()
     text = req.text.strip()
     if len(text) > config.AGENT_MAX_USER_TEXT_CHARS:
@@ -107,8 +142,6 @@ async def start_turn(conversation_id: str, req: AgentTurnRequest) -> AgentTurnAc
         )
     await run_db_operation(agent_repo.sweep_stale_turns, metric_name="agent_sweep_stale_turns")
     await _purge_events_if_due()
-    if len(state.agent_turn_tasks) >= config.AGENT_MAX_ACTIVE_TURNS:
-        raise RateLimitedError("Too many Agent turns are running. Try again shortly.")
     try:
         result = await run_db_operation(
             agent_repo.create_turn,
@@ -131,6 +164,10 @@ async def start_turn(conversation_id: str, req: AgentTurnRequest) -> AgentTurnAc
     turn, created = result
     if created:
         agent_turns.spawn_turn(turn["id"])
+    return _accepted(turn, created)
+
+
+def _accepted(turn: dict[str, Any], created: bool) -> AgentTurnAccepted:
     return AgentTurnAccepted(
         turn_id=turn["id"],
         conversation_id=turn["conversation_id"],

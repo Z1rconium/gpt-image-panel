@@ -12,6 +12,7 @@ import logging
 import os
 import time
 from contextlib import aclosing, suppress
+from datetime import datetime, timezone
 from typing import Any
 
 from ..core import settings as config
@@ -120,7 +121,13 @@ class _TurnRun:
         self._pending_text = ""
         self._last_text_emit = time.monotonic()
         self._last_persist = 0.0
-        self._blocks_dirty = False
+        self._revision = 0
+        self._saved_revision = 0
+        self._lease_lost = False
+        self._queued_jobs: set[str] = set()
+        self._main_task: asyncio.Task | None = None
+        self._finishing = False
+        self._finalized = False
         self._pending_events: list[tuple[str, dict[str, Any]]] = []
         self._next_event_seq: int | None = None
         self._cancelled = False
@@ -130,6 +137,37 @@ class _TurnRun:
         # stored event order and the persisted snapshot in call order.
         self._emit_lock = asyncio.Lock()
         self._persist_lock = asyncio.Lock()
+
+    async def _db(self, callback, *args, **kwargs):
+        owned = {
+            agent_repo.append_turn_events, agent_repo.update_message_content,
+            agent_repo.set_turn_rounds_used, agent_repo.insert_pending_output_image,
+            agent_repo.set_image_job, agent_repo.settle_image,
+        }
+        if callback in owned:
+            kwargs["owner"] = self.turn.get("lease_owner") if not self._finalized else None
+        try:
+            return await run_db_operation(callback, *args, **kwargs)
+        except agent_repo.AgentLeaseLostError:
+            self._lease_lost = True
+            if not self._finishing and self._main_task is not None and self._main_task is not asyncio.current_task():
+                self._main_task.cancel()
+            raise asyncio.CancelledError()
+
+    async def _queue_owned(self, awaitable):
+        task = asyncio.create_task(awaitable)
+        try:
+            job = await asyncio.shield(task)
+            self._queued_jobs.add(job.job_id)
+            await self.check_cancel()
+            return job
+        except (asyncio.CancelledError, TurnCancelled):
+            try:
+                job = await asyncio.shield(task)
+                await job_cancel.cancel_image_job(job.job_id)
+            except Exception:
+                logger.warning("Could not clean up a cancelled Agent queue operation", exc_info=True)
+            raise
 
     # ── events and persistence ─────────────────────────────────
 
@@ -145,6 +183,8 @@ class _TurnRun:
         which is what the previous deepcopy protected against.
         """
         async with self._emit_lock:
+            if self._lease_lost:
+                return
             self._pending_events.append((event_type, dict(data)))
             if len(self._pending_events) >= EVENT_FLUSH_MAX:
                 await self._flush_events_locked()
@@ -154,11 +194,14 @@ class _TurnRun:
             await self._flush_events_locked()
 
     async def _flush_events_locked(self) -> None:
+        if self._lease_lost:
+            self._pending_events.clear()
+            return
         if not self._pending_events:
             return
         if self._next_event_seq is None:
             self._next_event_seq = (
-                await run_db_operation(
+                await self._db(
                     agent_repo.read_event_cursor,
                     self.turn_id,
                     metric_name="agent_read_event_cursor",
@@ -166,7 +209,7 @@ class _TurnRun:
             ) + 1
         events, self._pending_events = self._pending_events, []
         try:
-            last = await run_db_operation(
+            last = await self._db(
                 agent_repo.append_turn_events,
                 self.turn_id,
                 events,
@@ -183,12 +226,13 @@ class _TurnRun:
         self._wakeup.set()
 
     async def maybe_persist(self) -> None:
-        if not self._blocks_dirty:
+        if self._saved_revision == self._revision or self._lease_lost:
             return
         if time.monotonic() - self._last_persist >= PERSIST_INTERVAL_SECONDS:
             await self.persist()
 
     async def upsert_block(self, block: dict[str, Any]) -> None:
+        self._revision += 1
         for index, existing in enumerate(self.blocks):
             if existing["id"] == block["id"]:
                 self.blocks[index] = block
@@ -198,7 +242,6 @@ class _TurnRun:
         await self.emit("block.upsert", {"block": dict(block)})
         # Snapshot writes are coalesced with the persist cadence: a reload
         # mid-turn reads at most one interval behind the event stream.
-        self._blocks_dirty = True
         await self.maybe_persist()
 
     async def add_text(self, text: str) -> None:
@@ -208,6 +251,7 @@ class _TurnRun:
             self._text_block = {"id": self._next_block_id("t"), "type": "text", "text": ""}
             await self.upsert_block(self._text_block)
         self._text_block["text"] += text
+        self._revision += 1
         self._pending_text += text
         if (
             len(self._pending_text) >= TEXT_FLUSH_CHARS
@@ -226,18 +270,21 @@ class _TurnRun:
 
     async def persist(self) -> None:
         async with self._persist_lock:
-            self._last_persist = time.monotonic()
-            self._blocks_dirty = False
+            if self._lease_lost:
+                return
+            revision = self._revision
             text = "\n\n".join(
                 block["text"] for block in self.blocks if block["type"] == "text" and block["text"].strip()
             )
-            await run_db_operation(
+            await self._db(
                 agent_repo.update_message_content,
                 self.message_id,
                 text=text,
                 blocks=copy.deepcopy(self.blocks),
                 metric_name="agent_update_message",
             )
+            self._saved_revision = revision
+            self._last_persist = time.monotonic()
 
     async def add_error_block(self, message: str) -> None:
         await self.flush_text()
@@ -247,6 +294,8 @@ class _TurnRun:
         """Cooperative check; the DB polling lives in `_cancel_watcher`."""
         if self._cancelled:
             raise TurnCancelled()
+        if self._lease_lost:
+            raise asyncio.CancelledError()
 
     # ── the loop ───────────────────────────────────────────────
 
@@ -277,7 +326,7 @@ class _TurnRun:
                 # The model ignored tool_choice=none; stop instead of looping.
                 return
             self.rounds_used += 1
-            await run_db_operation(
+            await self._db(
                 agent_repo.set_turn_rounds_used,
                 self.turn_id,
                 self.rounds_used,
@@ -295,7 +344,9 @@ class _TurnRun:
                 items.append(ToolCallItem(call.call_id, call.name, call.arguments_json))
             for call, output in outputs:
                 items.append(ToolResultItem(call.call_id, output))
-            visuals = await agent_context.load_preview_data_urls(created_rows)
+            visuals = await agent_context.load_preview_data_urls(
+                created_rows, max_images=agent_context.MAX_RESULT_IMAGES_PER_ROUND
+            )
             result_item = agent_context.build_result_images_item(visuals)
             if result_item is not None:
                 items.append(result_item)
@@ -303,18 +354,18 @@ class _TurnRun:
 
     async def _initial_items(self) -> list[Any]:
         messages, image_refs, user_message = await asyncio.gather(
-            run_db_operation(
+            self._db(
                 agent_repo.list_messages,
                 self.conversation_id,
                 limit=HISTORY_MESSAGE_LIMIT,
                 metric_name="agent_history_messages",
             ),
-            run_db_operation(
+            self._db(
                 agent_repo.list_conversation_images,
                 self.conversation_id,
                 metric_name="agent_history_images",
             ),
-            run_db_operation(
+            self._db(
                 agent_repo.get_message,
                 self.turn["user_message_id"],
                 metric_name="agent_user_message",
@@ -448,6 +499,7 @@ class _TurnRun:
         results: dict[str, dict[str, Any]] = {}
         plans: list[tuple[agent_tools.BatchImage, dict[str, Any], list[dict[str, Any]], dict[str, Any]]] = []
         for image in images:
+            await self.check_cancel()
             labels = agent_refs.extract_ref_tags(image.prompt)
             if len(labels) > MAX_REFS_PER_IMAGE:
                 results[image.id] = _item_error(image.id, f"At most {MAX_REFS_PER_IMAGE} references per image.")
@@ -455,7 +507,7 @@ class _TurnRun:
             ref_rows: list[dict[str, Any]] = []
             problem = None
             for label in labels:
-                row = await run_db_operation(
+                row = await self._db(
                     agent_repo.get_image_by_label,
                     self.conversation_id,
                     label,
@@ -473,7 +525,7 @@ class _TurnRun:
                 results[image.id] = _item_error(image.id, problem)
                 continue
             mode = "edit" if ref_rows else "generate"
-            row = await run_db_operation(
+            row = await self._db(
                 agent_repo.insert_pending_output_image,
                 conversation_id=self.conversation_id,
                 turn_id=self.turn_id,
@@ -547,6 +599,7 @@ class _TurnRun:
         params = self.turn.get("image_params") or {}
         sources: list[job_queue.EditImageSource] = []
         try:
+            await self.check_cancel()
             common = {
                 "prompt": self._send_prompt(image.prompt, [ref["ref_label"] for ref in ref_rows]),
                 "size": params.get("size", "auto"),
@@ -557,18 +610,20 @@ class _TurnRun:
                 request = EditRequest(**common)
                 for ref in ref_rows:
                     sources.append(await edit_sources.read_gallery_edit_source(ref["image_id"]))
-                job = await job_queue.queue_edit_job(req=request, image_sources=sources)
+                await self.check_cancel()
+                job = await self._queue_owned(job_queue.queue_edit_job(req=request, image_sources=sources))
                 sources = []
             else:
-                job = await job_queue.queue_image_job(
+                await self.check_cancel()
+                job = await self._queue_owned(job_queue.queue_image_job(
                     req=GenerateRequest(**common),
                     operation="generation",
                     api_path=lambda preset: normalize_api_path(
                         str(preset.get("api_path") or "/v1/images/generations")
                     ),
                     queued_message="Queued image generation",
-                )
-        except asyncio.CancelledError:
+                ))
+        except (asyncio.CancelledError, TurnCancelled):
             edit_sources.cleanup_edit_sources(sources)
             raise
         except DomainError as error:
@@ -583,7 +638,7 @@ class _TurnRun:
             return await self._fail_image(image, row, block, "The image job could not be queued.")
 
         job_id = job.job_id
-        await run_db_operation(agent_repo.set_image_job, row["id"], job_id, metric_name="agent_set_image_job")
+        await self._db(agent_repo.set_image_job, row["id"], job_id, metric_name="agent_set_image_job")
         block["job_id"] = job_id
         await self.upsert_block(block)
 
@@ -617,7 +672,7 @@ class _TurnRun:
         first = images_out[0] if images_out and isinstance(images_out[0], dict) else {}
         image_id = first.get("image_id") or view.get("image_id")
         if status in {"success", "partial_failure"} and image_id:
-            settled = await run_db_operation(
+            settled = await self._db(
                 agent_repo.settle_image,
                 row["id"],
                 status="succeeded",
@@ -634,7 +689,7 @@ class _TurnRun:
             await self.upsert_block(block)
             return {"id": image.id, "status": "created", "ref": row["ref_label"]}, settled
         if status == "cancelled":
-            settled = await run_db_operation(
+            settled = await self._db(
                 agent_repo.settle_image, row["id"], status="cancelled", metric_name="agent_settle_image"
             )
             block.update(status="cancelled", stage="cancelled", error=None)
@@ -652,7 +707,7 @@ class _TurnRun:
         block: dict[str, Any],
         message: str,
     ) -> tuple[dict[str, Any], dict[str, Any] | None]:
-        settled = await run_db_operation(
+        settled = await self._db(
             agent_repo.settle_image,
             row["id"],
             status="failed",
@@ -666,7 +721,14 @@ class _TurnRun:
     # ── finishing ──────────────────────────────────────────────
 
     async def _cancel_pending_images(self) -> None:
-        pending = await run_db_operation(
+        for job_id in self._queued_jobs:
+            try:
+                view = await resolve_generate_job_view(job_id)
+                if view and view.get("status") in ACTIVE_GENERATE_JOB_STATUSES:
+                    await job_cancel.cancel_image_job(job_id)
+            except Exception:
+                logger.warning("Failed to clean up Agent image job %s", job_id, exc_info=True)
+        pending = await self._db(
             agent_repo.list_pending_images_for_turn,
             self.turn_id,
             metric_name="agent_pending_images",
@@ -688,26 +750,41 @@ class _TurnRun:
                     await self.upsert_block(block)
 
     async def finalize(self, status: str, message: str | None) -> None:
+        self._finishing = True
+        if self._lease_lost:
+            status, message = "interrupted", "The Agent turn lost its execution lease."
+        if status != "completed":
+            try:
+                await self._cancel_pending_images()
+            except Exception:
+                logger.warning("Agent turn %s could not clean up pending images", self.turn_id, exc_info=True)
         try:
             await self.flush_text()
-            if status == "cancelled":
-                await self._cancel_pending_images()
             # Everything is persisted before the turn status flips: a stream
             # reader that sees the terminal status synthesizes its own terminal
             # event and would never replay a later block event.
             await self.flush_events()
             await self.persist()
+        except asyncio.CancelledError:
+            if not self._lease_lost:
+                raise
+            status, message = "interrupted", "The Agent turn lost its execution lease."
+            await self._cancel_pending_images()
         except Exception:
             logger.warning("Agent turn %s could not flush its final state", self.turn_id, exc_info=True)
-        await run_db_operation(
+        settled = await self._db(
             agent_repo.finish_turn,
             self.turn_id,
             status,
             error_message=message,
             rounds_used=self.rounds_used,
+            owner=self.turn.get("lease_owner"),
             metric_name="agent_finish_turn",
             critical=True,
         )
+        if settled is None or settled["status"] != status or self._lease_lost:
+            return
+        self._finalized = True
         if status == "completed":
             await self.emit("turn.completed", {"rounds_used": self.rounds_used})
         elif status == "cancelled":
@@ -726,7 +803,7 @@ def _item_error(item_id: str, message: str) -> dict[str, Any]:
 
 async def _stop_task(task: asyncio.Task) -> None:
     task.cancel()
-    with suppress(asyncio.CancelledError):
+    with suppress(asyncio.CancelledError, Exception):
         await task
 
 
@@ -741,24 +818,37 @@ async def _event_flush_loop(run: _TurnRun) -> None:
             logger.warning("Agent turn %s could not flush events", run.turn_id, exc_info=True)
 
 
-async def _renew_lease_loop(turn_id: str, owner: str) -> None:
+async def _renew_lease_loop(run: _TurnRun, owner: str, main: asyncio.Task) -> None:
+    turn_id = run.turn_id
     interval = max(1.0, min(10.0, config.AGENT_TURN_LEASE_SECONDS / 3))
+    remaining = config.AGENT_TURN_LEASE_SECONDS
+    if run.turn.get("lease_expires_at"):
+        remaining = (
+            datetime.fromisoformat(run.turn["lease_expires_at"]) - datetime.now(timezone.utc)
+        ).total_seconds()
+    expires = time.monotonic() + max(0, remaining)
     while True:
-        await asyncio.sleep(interval)
+        await asyncio.sleep(min(interval, max(0, expires - time.monotonic())))
         try:
-            renewed = await run_db_operation(
+            started = time.monotonic()
+            renewed = await asyncio.wait_for(run_db_operation(
                 agent_repo.renew_turn_lease,
                 turn_id,
                 owner=owner,
                 lease_expires_at=utc_lease_expires_at(config.AGENT_TURN_LEASE_SECONDS),
                 metric_name="agent_renew_lease",
                 critical=True,
-            )
+            ), timeout=max(0, expires - time.monotonic()))
         except Exception:
             logger.warning("Agent turn %s lease renewal failed", turn_id, exc_info=True)
-            continue
+            if time.monotonic() < expires:
+                continue
+            renewed = False
         if not renewed:
+            run._lease_lost = True
+            main.cancel()
             return
+        expires = started + config.AGENT_TURN_LEASE_SECONDS
 
 
 def wake_turn_cancel(turn_id: str) -> None:
@@ -801,21 +891,38 @@ async def _cancel_watcher(run: _TurnRun, main: asyncio.Task) -> None:
 
 async def run_turn(turn_id: str) -> None:
     owner = f"{state.worker_id}-{os.urandom(4).hex()}"
-    claimed = await run_db_operation(
+    claim = asyncio.create_task(run_db_operation(
         agent_repo.claim_turn,
         turn_id,
         owner=owner,
         lease_expires_at=utc_lease_expires_at(config.AGENT_TURN_LEASE_SECONDS),
         metric_name="agent_claim_turn",
         critical=True,
-    )
+    ))
+    try:
+        claimed = await asyncio.shield(claim)
+    except asyncio.CancelledError:
+        if await asyncio.shield(claim):
+            await asyncio.shield(run_db_operation(
+                agent_repo.finish_turn, turn_id, "interrupted", owner=owner,
+                error_message="The server stopped before the turn started.", critical=True,
+            ))
+        raise
     if not claimed:
         return
-    turn = await run_db_operation(agent_repo.get_turn, turn_id, metric_name="agent_get_turn")
+    try:
+        turn = await run_db_operation(agent_repo.get_turn, turn_id, metric_name="agent_get_turn")
+    except BaseException:
+        await asyncio.shield(run_db_operation(
+            agent_repo.finish_turn, turn_id, "interrupted", owner=owner,
+            error_message="The turn could not start.", critical=True,
+        ))
+        raise
     if turn is None:
         return
     run = _TurnRun(turn)
-    renewer = asyncio.create_task(_renew_lease_loop(turn_id, owner), name=f"agent-lease-{turn_id}")
+    run._main_task = asyncio.current_task()
+    renewer = asyncio.create_task(_renew_lease_loop(run, owner, asyncio.current_task()), name=f"agent-lease-{turn_id}")
     flusher = asyncio.create_task(_event_flush_loop(run), name=f"agent-flush-{turn_id}")
     status = "failed"
     message: str | None = None
@@ -836,7 +943,10 @@ async def run_turn(turn_id: str) -> None:
         except TurnCancelled:
             status = "cancelled"
         except asyncio.CancelledError:
-            if run._cancelled:
+            if run._lease_lost:
+                status = "interrupted"
+                message = "The Agent turn lost its execution lease."
+            elif run._cancelled:
                 status = "cancelled"
             else:
                 await asyncio.shield(
@@ -850,7 +960,14 @@ async def run_turn(turn_id: str) -> None:
                 await run.add_error_block(message or "The Agent turn failed.")
             except Exception:
                 logger.warning("Agent turn %s could not record its error block", turn_id, exc_info=True)
-        await run.finalize(status, message)
+        await _stop_task(flusher)
+        await _stop_task(renewer)
+        finalizer = asyncio.create_task(run.finalize(status, message))
+        try:
+            await asyncio.shield(finalizer)
+        except asyncio.CancelledError:
+            await asyncio.shield(finalizer)
+            raise
     finally:
         await _stop_task(renewer)
         await _stop_task(flusher)

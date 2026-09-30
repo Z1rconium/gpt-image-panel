@@ -33,6 +33,34 @@ class AgentAttachmentError(ValueError):
     """An attached gallery image no longer exists."""
 
 
+class AgentLeaseLostError(RuntimeError):
+    """A stale runner attempted to write after losing its lease."""
+
+
+def _require_owner(
+    conn: sqlite3.Connection,
+    owner: str | None,
+    *,
+    turn_id: str | None = None,
+    message_id: str | None = None,
+    image_row_id: str | None = None,
+) -> None:
+    if owner is None:
+        return
+    if message_id is not None:
+        message = conn.execute("SELECT turn_id FROM agent_messages WHERE id = ?", (message_id,)).fetchone()
+        turn_id = message[0] if message else None
+    if image_row_id is not None:
+        image = conn.execute("SELECT turn_id FROM agent_message_images WHERE id = ?", (image_row_id,)).fetchone()
+        turn_id = image[0] if image else None
+    row = conn.execute("SELECT status, lease_owner, lease_expires_at FROM agent_turns WHERE id = ?", (turn_id,)).fetchone()
+    if (
+        row is None or row["status"] != "running" or row["lease_owner"] != owner
+        or not row["lease_expires_at"] or row["lease_expires_at"] <= utc_now()
+    ):
+        raise AgentLeaseLostError("Agent turn lease was lost")
+
+
 def _new_id() -> str:
     return uuid.uuid4().hex
 
@@ -372,6 +400,16 @@ def get_turn(turn_id: str) -> dict[str, Any] | None:
     return _turn_from_row(row) if row else None
 
 
+def get_turn_by_client_id(conversation_id: str, client_turn_id: str) -> dict[str, Any] | None:
+    _ensure_database()
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM agent_turns WHERE conversation_id = ? AND client_turn_id = ?",
+            (conversation_id, client_turn_id),
+        ).fetchone()
+    return _turn_from_row(row) if row else None
+
+
 def claim_turn(turn_id: str, *, owner: str, lease_expires_at: str) -> bool:
     _ensure_database()
     now = utc_now()
@@ -395,9 +433,9 @@ def renew_turn_lease(turn_id: str, *, owner: str, lease_expires_at: str) -> bool
             cursor = conn.execute(
                 """
                 UPDATE agent_turns SET lease_expires_at = ?
-                WHERE id = ? AND status = 'running' AND lease_owner = ?
+                WHERE id = ? AND status = 'running' AND lease_owner = ? AND lease_expires_at > ?
                 """,
-                (lease_expires_at, turn_id, owner),
+                (lease_expires_at, turn_id, owner, utc_now()),
             )
             return cursor.rowcount > 0
 
@@ -428,10 +466,11 @@ def is_turn_cancel_requested(turn_id: str) -> bool:
     return bool(row and row["cancel_requested"])
 
 
-def set_turn_rounds_used(turn_id: str, rounds_used: int) -> None:
+def set_turn_rounds_used(turn_id: str, rounds_used: int, *, owner: str | None = None) -> None:
     _ensure_database()
     with _connect() as conn:
         with _transaction(conn):
+            _require_owner(conn, owner, turn_id=turn_id)
             conn.execute(
                 "UPDATE agent_turns SET rounds_used = ? WHERE id = ?",
                 (int(rounds_used), turn_id),
@@ -444,6 +483,8 @@ def finish_turn(
     *,
     error_message: str | None = None,
     rounds_used: int | None = None,
+    expired_before: str | None = None,
+    owner: str | None = None,
 ) -> dict[str, Any] | None:
     """Move a non-terminal turn to a terminal status and settle its assistant message."""
     if status not in TERMINAL_TURN_STATUSES:
@@ -456,6 +497,12 @@ def finish_turn(
             if current is None:
                 return None
             if current["status"] in TERMINAL_TURN_STATUSES:
+                return None if expired_before is not None else _turn_from_row(current)
+            if expired_before is not None and (
+                current["lease_expires_at"] is None or current["lease_expires_at"] >= expired_before
+            ):
+                return None
+            if owner is not None and current["lease_owner"] != owner:
                 return _turn_from_row(current)
             conn.execute(
                 """
@@ -499,6 +546,7 @@ def sweep_stale_turns() -> list[dict[str, Any]]:
             row["id"],
             "interrupted",
             error_message="The turn was interrupted before it finished.",
+            expired_before=now,
         )
         if turn is not None:
             interrupted.append(turn)
@@ -554,10 +602,11 @@ def get_message(message_id: str) -> dict[str, Any] | None:
     return _message_from_row(row) if row else None
 
 
-def update_message_content(message_id: str, *, text: str, blocks: list[dict[str, Any]]) -> None:
+def update_message_content(message_id: str, *, text: str, blocks: list[dict[str, Any]], owner: str | None = None) -> None:
     _ensure_database()
     with _connect() as conn:
         with _transaction(conn):
+            _require_owner(conn, owner, message_id=message_id)
             conn.execute(
                 "UPDATE agent_messages SET text = ?, blocks_json = ?, updated_at = ? WHERE id = ?",
                 (text, json.dumps(blocks, ensure_ascii=False, separators=(",", ":")), utc_now(), message_id),
@@ -612,11 +661,13 @@ def insert_pending_output_image(
     item_id: str,
     prompt: str,
     mode: str,
+    owner: str | None = None,
 ) -> dict[str, Any]:
     _ensure_database()
     now = utc_now()
     with _connect() as conn:
         with _transaction(conn):
+            _require_owner(conn, owner, turn_id=turn_id)
             index = int(
                 conn.execute(
                     """
@@ -653,10 +704,11 @@ def insert_pending_output_image(
     return _image_from_row(row)
 
 
-def set_image_job(row_id: str, job_id: str) -> None:
+def set_image_job(row_id: str, job_id: str, *, owner: str | None = None) -> None:
     _ensure_database()
     with _connect() as conn:
         with _transaction(conn):
+            _require_owner(conn, owner, image_row_id=row_id)
             conn.execute("UPDATE agent_message_images SET job_id = ? WHERE id = ?", (job_id, row_id))
 
 
@@ -666,6 +718,7 @@ def settle_image(
     status: str,
     image_id: str | None = None,
     error: str | None = None,
+    owner: str | None = None,
 ) -> dict[str, Any] | None:
     """Record an image outcome; a gallery image deleted meanwhile is stored as NULL."""
     if status not in {"pending", "succeeded", "failed", "cancelled"}:
@@ -673,6 +726,7 @@ def settle_image(
     _ensure_database()
     with _connect() as conn:
         with _transaction(conn):
+            _require_owner(conn, owner, image_row_id=row_id)
             if image_id:
                 exists = conn.execute(
                     "SELECT 1 FROM gallery_entries WHERE id = ?", (image_id,)
@@ -720,6 +774,7 @@ def append_turn_events(
     events: Sequence[tuple[str, dict[str, Any]]],
     *,
     start_seq: int,
+    owner: str | None = None,
 ) -> int:
     """Persist a contiguous batch of turn events in one write transaction.
 
@@ -743,6 +798,7 @@ def append_turn_events(
     ]
     with _connect() as conn:
         with _transaction(conn):
+            _require_owner(conn, owner, turn_id=turn_id)
             conn.executemany(
                 """
                 INSERT INTO agent_turn_events (turn_id, seq, type, data_json, created_at)

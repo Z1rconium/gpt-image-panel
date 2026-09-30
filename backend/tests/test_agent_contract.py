@@ -649,3 +649,31 @@ def test_agent_last_event_id_accepts_full_sqlite_range(client, monkeypatch):
     response = client.get("/api/agent/turns/missing/events", headers={"Last-Event-ID": str(2**63 - 1)})
     assert response.status_code == 200 and seen == [2**63 - 1]
 
+
+def test_renewal_loss_interrupts_running_model_and_preserves_terminal(client, monkeypatch):
+    import asyncio
+
+    enable_agent(client)
+    monkeypatch.setattr(config, "AGENT_TURN_LEASE_SECONDS", 3)
+    entered, stopped = threading.Event(), threading.Event()
+
+    async def blocked(_kwargs):
+        entered.set()
+        try:
+            yield TextDelta("Before losing the lease.")
+            await asyncio.sleep(30)
+            yield TextDelta("This must never be written.")
+        finally:
+            stopped.set()
+
+    install_model(monkeypatch, [blocked])
+    monkeypatch.setattr(agent_repo, "renew_turn_lease", lambda *args, **kwargs: False)
+    conversation_id = new_conversation(client)
+    accepted = start_turn(client, conversation_id, "wait for my reply")
+    assert entered.wait(3)
+    terminal = wait_turn(client, accepted["turn_id"], timeout=5)
+    assert terminal["status"] == "interrupted" and stopped.is_set()
+    stored = detail(client, conversation_id)
+    assert stored["messages"][-1]["status"] == "interrupted"
+    assert "This must never be written" not in stored["messages"][-1]["text"]
+    assert agent_repo.finish_turn(accepted["turn_id"], "cancelled")["status"] == "interrupted"

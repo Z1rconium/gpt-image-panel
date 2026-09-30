@@ -35,6 +35,7 @@ from ..repositories.coordination import (
     update_gallery_job,
     update_gallery_job_progress,
 )
+from ..runtime.blocking import run_db_operation
 from ..repositories.gallery.mutations import is_gallery_filename_referenced
 from ..repositories.gallery.queries import (
     get_gallery_entries_by_ids,
@@ -208,7 +209,7 @@ def _assistant_slot_owner() -> str:
 
 async def _acquire_assistant_slot(timeout_seconds: int) -> tuple[str, str]:
     owner = _assistant_slot_owner()
-    slot_name = await asyncio.to_thread(
+    slot_name = await run_db_operation(
         acquire_background_slot,
         name_prefix="ai_assistant_request",
         owner=owner,
@@ -251,26 +252,56 @@ async def _assistant_request_limit(
         if wait_for_slot and max_wait_seconds is not None
         else None
     )
+    async def before_deadline(awaitable):
+        if wait_deadline is None:
+            return await awaitable
+        return await asyncio.wait_for(awaitable, max(0, wait_deadline - time.monotonic()))
+
     while True:
         semaphore = _assistant_request_semaphore()
-        slot_name = ""
-        slot_owner = ""
-        async with semaphore:
+        try:
+            await before_deadline(semaphore.acquire())
+        except asyncio.TimeoutError as error:
+            raise DomainError("AI Assistant is busy. Try again shortly.", status_code=429) from error
+        acquisition = asyncio.create_task(_acquire_assistant_slot(timeout_seconds))
+        slot = None
+        retry = False
+        try:
             try:
-                slot_name, slot_owner = await _acquire_assistant_slot(timeout_seconds)
-            except DomainError as e:
-                if not wait_for_slot or e.status_code != 429:
+                slot = await before_deadline(asyncio.shield(acquisition))
+            except (asyncio.CancelledError, asyncio.TimeoutError) as error:
+                # Leave the worker operation alive and release any late lease.
+                async def release_late():
+                    try:
+                        late = await acquisition
+                        await _release_assistant_slot(*late)
+                    except Exception:
+                        logger.warning("Assistant late slot acquisition failed", exc_info=True)
+                cleanup = asyncio.create_task(release_late())
+                cleanups = state.assistant_slot_cleanup_tasks
+                cleanups.add(cleanup)
+                cleanup.add_done_callback(cleanups.discard)
+                cleanup.add_done_callback(lambda task: task.exception() if not task.cancelled() else None)
+                if isinstance(error, asyncio.TimeoutError):
+                    raise DomainError("AI Assistant is busy. Try again shortly.", status_code=429) from error
+                raise
+            except DomainError as error:
+                if not wait_for_slot or error.status_code != 429:
                     raise
-                if wait_deadline is not None and time.monotonic() >= wait_deadline:
-                    raise
-            else:
-                try:
-                    yield
-                finally:
-                    if slot_name and slot_owner:
-                        await _release_assistant_slot(slot_name, slot_owner)
+                retry = True
+            if not retry:
+                yield
                 return
-        await asyncio.sleep(AI_ASSISTANT_SLOT_RETRY_SECONDS)
+        finally:
+            try:
+                if slot is not None:
+                    await asyncio.shield(_release_assistant_slot(*slot))
+            finally:
+                semaphore.release()
+        try:
+            await before_deadline(asyncio.sleep(AI_ASSISTANT_SLOT_RETRY_SECONDS))
+        except asyncio.TimeoutError as error:
+            raise DomainError("AI Assistant is busy. Try again shortly.", status_code=429) from error
 
 
 def _warnings(value: Any) -> list[str]:

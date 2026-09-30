@@ -11,6 +11,7 @@ from ..integrations.session_pool import close_pool
 from ..repositories.db import close_database_connections
 from ..runtime.blocking import close_blocking_executors
 from ..runtime.state import state
+from .vision_previews import drain_preview_tasks
 from . import (
     assistant_batch,
     gallery_jobs,
@@ -82,6 +83,10 @@ def start() -> None:
 
 
 async def shutdown() -> None:
+    # Admissions may still be committing a queued turn in a database thread.
+    # Let them launch their runner before collecting the shutdown task set.
+    await asyncio.gather(*getattr(state, "agent_turn_admissions", set()), return_exceptions=True)
+    agent_tasks = set(getattr(state, "agent_turn_tasks", {}).values())
     pending: list[asyncio.Task] = []
     for attribute, _runner in DISPATCHER_TASKS:
         pending.append(getattr(state, attribute, None))
@@ -105,15 +110,24 @@ async def shutdown() -> None:
         # shutdown instead of finishing it.
         done, still_running = await asyncio.wait(tasks, timeout=SHUTDOWN_GRACE_SECONDS)
         for task in still_running:
-            logger.warning(
-                "Shutdown left a background task running after %ss: %s",
-                SHUTDOWN_GRACE_SECONDS,
-                task.get_name(),
-            )
+            if task in agent_tasks:
+                logger.info("Waiting for Agent finalization during shutdown: %s", task.get_name())
+            else:
+                logger.warning(
+                    "Shutdown left a background task running after %ss: %s",
+                    SHUTDOWN_GRACE_SECONDS,
+                    task.get_name(),
+                )
         for task in done:
             if not task.cancelled() and task.exception():
                 logger.warning("Background task failed during shutdown", exc_info=task.exception())
 
+    # Agent finalizers use bounded database retries and may exceed the generic
+    # grace period. Their writes and cleanup must finish before shared clients
+    # and executors close, or a retry could recreate an executor at shutdown.
+    await asyncio.gather(*agent_tasks, return_exceptions=True)
+    await asyncio.gather(*getattr(state, "assistant_slot_cleanup_tasks", set()), return_exceptions=True)
     await close_pool()
+    await drain_preview_tasks()
     await close_blocking_executors()
     close_database_connections()
