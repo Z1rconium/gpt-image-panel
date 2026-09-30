@@ -34,15 +34,18 @@ from ...services.presets import (
 from ...core import settings as config
 from ...core import secrets
 from ...core import overall_config
+from ...core.provider_templates import PROVIDER_TEMPLATES
 from ...core import validators as ssrf
 from ...core.api_paths import (
     ALLOWED_API_PATHS,
+    PROVIDER_KIND_ASYNC_JSON,
     build_upstream_url,
     normalize_api_path,
     normalize_default_model,
     normalize_default_response_format,
+    normalize_provider_kind,
 )
-from ...integrations.upstream import generation as proxy
+from ...integrations.upstream import async_provider, generation as proxy
 from ...integrations.r2.client import probe_r2_settings
 from ...repositories.settings import (
     save_ai_assistant_settings,
@@ -61,6 +64,7 @@ from ...schemas.settings import (
     CredentialProbeRequest,
     PresetCreateRequest,
     PresetHealthResponse,
+    ProviderTemplatesResponse,
     R2BackupSettingsRequest,
     R2HealthResponse,
     SettingsRequest,
@@ -269,6 +273,11 @@ async def update_overall_config(req: OverallConfigUpdateRequest):
         )
     ]
     return _serialize_overall_config(rows, restart_required_names=restart_required_names)
+
+
+@router.get("/api/settings/provider-templates", response_model=ProviderTemplatesResponse)
+async def list_provider_templates():
+    return ProviderTemplatesResponse(templates=PROVIDER_TEMPLATES)
 
 
 @router.post("/api/settings", response_model=SettingsResponse)
@@ -589,6 +598,27 @@ def validate_health_api_path(api_path: str, checks: list[dict]) -> bool:
     return True
 
 
+def validate_health_provider(preset: dict, checks: list[dict]) -> str | None:
+    """Check an async_json mapping; returns the submit path to probe, or None."""
+    try:
+        provider = async_provider.load_provider_config(preset.get("provider_config"))
+        submit_path = async_provider.render_submit_path(
+            provider.submit.path,
+            str(preset.get("default_model") or ""),
+        )
+    except proxy.UpstreamApiError as e:
+        add_health_check(checks, "provider_config", "error", str(e))
+        return None
+
+    add_health_check(
+        checks,
+        "provider_config",
+        "ok",
+        "Async provider mapping is valid; no task was submitted",
+    )
+    return submit_path
+
+
 def validate_health_api_key(api_key: str, checks: list[dict]) -> str:
     raw_key = str(api_key or "").strip()
     if raw_key:
@@ -615,7 +645,12 @@ async def check_settings_preset_health(
     api_url = str(preset.get("api_url") or "").rstrip("/")
     api_path = str(preset.get("api_path") or "")
 
-    api_path_ok = validate_health_api_path(api_path, checks)
+    if normalize_provider_kind(preset.get("provider_kind")) == PROVIDER_KIND_ASYNC_JSON:
+        provider_path = validate_health_provider(preset, checks)
+        api_path_ok = provider_path is not None
+        api_path = provider_path or ""
+    else:
+        api_path_ok = validate_health_api_path(api_path, checks)
     url_ok = (
         await validate_health_api_url(api_url, api_path, checks)
         if api_path_ok

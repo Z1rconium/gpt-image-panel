@@ -24,7 +24,12 @@ from ..core.errors import (
 )
 from ..core import settings as config
 from ..core import validators as ssrf
-from ..core.api_paths import normalize_default_model, normalize_default_response_format
+from ..core.api_paths import (
+    PROVIDER_KIND_ASYNC_JSON,
+    normalize_default_model,
+    normalize_default_response_format,
+    normalize_provider_kind,
+)
 from ..core.image_models import is_image_25
 from ..core.constants import ACTIVE_GENERATE_JOB_STATUSES
 from ..core.observability import metrics
@@ -420,6 +425,14 @@ async def queue_image_job(
                 raise UnprocessableRequestError("GPT Image 2.5 edit inputs must be PNG, JPEG or WebP; convert this image before editing")
             if int(source.get("byte_size") or 0) >= 50 * 1024 * 1024:
                 raise UnprocessableRequestError("GPT Image 2.5 edit inputs must be smaller than 50 MB")
+
+    if normalize_provider_kind(active_preset.get("provider_kind")) == PROVIDER_KIND_ASYNC_JSON:
+        if operation == "edit":
+            raise UnprocessableRequestError("Async providers do not support image edits")
+        if getattr(req, "stream", False):
+            raise UnprocessableRequestError("Streaming preview is not available for async providers")
+        if req.background.startswith("chroma_"):
+            raise UnprocessableRequestError("Local chroma removal is not available for async providers")
 
     if getattr(req, "stream", False) and resolved_api_path not in {
         "/v1/images/generations",

@@ -14,7 +14,11 @@ from .presets import (
 )
 from ..core import settings as config
 from ..core import validators as ssrf
-from ..core.api_paths import normalize_prompt_guard
+from ..core.api_paths import (
+    PROVIDER_KIND_ASYNC_JSON,
+    normalize_prompt_guard,
+    normalize_provider_kind,
+)
 from ..core.observability import (
     JobStageTimer,
     UsageSink,
@@ -388,6 +392,9 @@ async def run_claimed_image_unit(unit: dict, worker_id: str):
     )
     api_key = get_effective_preset_api_key(preset)
     prompt_guard = normalize_prompt_guard(preset.get("prompt_guard"))
+    provider_kwargs: dict = {}
+    if normalize_provider_kind(preset.get("provider_kind")) == PROVIDER_KIND_ASYNC_JSON:
+        provider_kwargs["provider_config"] = preset.get("provider_config") or {}
     socks5_proxy = get_upstream_socks5_proxy()
 
     progress_pending: tuple[str, str] | None = None
@@ -682,6 +689,10 @@ async def run_claimed_image_unit(unit: dict, worker_id: str):
                         (source for source in edit_sources if source.role == "mask"),
                         None,
                     )
+                    if provider_kwargs:
+                        raise proxy.UpstreamApiError(
+                            "Async providers do not support image edits"
+                        )
                     if not image_sources:
                         raise proxy.UpstreamApiError(
                             "At least one edit source image is required"
@@ -709,6 +720,7 @@ async def run_claimed_image_unit(unit: dict, worker_id: str):
                     socks5_proxy=socks5_proxy,
                     persist_gallery_entry=add_to_gallery_async,
                     **stream_kwargs,
+                    **provider_kwargs,
                 )
 
         lease_task = asyncio.create_task(renew_lease_loop())

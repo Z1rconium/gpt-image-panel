@@ -62,11 +62,22 @@ def test_template_keeps_types_for_whole_placeholders():
     assert rendered == {"p": "fox", "n": 2, "mixed": "w=1024px", "list": [2], "flag": True}
 
 
-def test_template_rejects_unknown_or_unset_variables():
+def test_template_omits_fields_whose_variable_has_no_value():
+    body = {"p": "{{prompt}}", "image_size": {"width": "{{width}}", "height": "{{height}}"}, "keep": {}}
+    assert provider_mapping.render_template(body, {"prompt": "fox"}) == {"p": "fox", "keep": {}}
+    assert provider_mapping.render_template(body, {"prompt": "fox", "width": 512}) == {
+        "p": "fox",
+        "image_size": {"width": 512},
+        "keep": {},
+    }
+    assert provider_mapping.render_template(["{{width}}"], {}) == {}
+
+
+def test_template_rejects_unknown_variables_and_unset_embedded_ones():
     with pytest.raises(provider_mapping.ProviderMappingError):
         provider_mapping.render_template("{{secret}}", {"secret": "x"})
     with pytest.raises(provider_mapping.ProviderMappingError):
-        provider_mapping.render_template("{{width}}", {"width": None})
+        provider_mapping.render_template("w={{width}}", {})
 
 
 def test_provider_config_accepts_queue_style_mapping():

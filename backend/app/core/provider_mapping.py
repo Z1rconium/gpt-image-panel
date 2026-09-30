@@ -119,24 +119,48 @@ def validate_template_shape(node: Any) -> None:
     visit(node, 0)
 
 
+class _Omit:
+    def __repr__(self) -> str:
+        return "<omitted>"
+
+
+_OMIT = _Omit()
+
+
 def render_template(node: Any, variables: dict[str, Any]) -> Any:
-    """Substitute placeholders. A value that is exactly one placeholder keeps its type."""
+    """Substitute placeholders.
+
+    A value that is exactly one placeholder keeps its type. If that variable has
+    no value for this request (for example ``width`` when ``size`` is ``auto``)
+    the field is left out, and a container emptied that way is left out too. A
+    placeholder embedded inside a longer string must have a value.
+    """
+    rendered = _render(node, variables)
+    return {} if rendered is _OMIT else rendered
+
+
+def _render(node: Any, variables: dict[str, Any]) -> Any:
     if isinstance(node, str):
         whole = _WHOLE_PLACEHOLDER.match(node)
         if whole:
-            return _variable(variables, whole.group(1))
+            return _variable(variables, whole.group(1), optional=True)
         return _PLACEHOLDER.sub(lambda m: str(_variable(variables, m.group(1))), node)
     if isinstance(node, dict):
-        return {key: render_template(value, variables) for key, value in node.items()}
+        rendered = {key: _render(value, variables) for key, value in node.items()}
+        kept = {key: value for key, value in rendered.items() if value is not _OMIT}
+        return kept if kept or not node else _OMIT
     if isinstance(node, list):
-        return [render_template(value, variables) for value in node]
+        kept_items = [item for item in (_render(value, variables) for value in node) if item is not _OMIT]
+        return kept_items if kept_items or not node else _OMIT
     return node
 
 
-def _variable(variables: dict[str, Any], name: str) -> Any:
+def _variable(variables: dict[str, Any], name: str, *, optional: bool = False) -> Any:
     if name not in TEMPLATE_VARIABLES:
         raise ProviderMappingError(f"unknown template variable: {name}")
     value = variables.get(name)
     if value is None:
+        if optional:
+            return _OMIT
         raise ProviderMappingError(f"template variable '{name}' has no value for this request")
     return value

@@ -28,6 +28,7 @@ from ...core.media import (
     validate_image_header_bytes,
 )
 from ...core.observability import metrics
+from .async_provider import run_async_provider
 from .edit_paste_back import PasteBackOutcome, paste_back_image
 from .chroma import remove_chroma_background
 from .diagnostics import image_diagnostics
@@ -379,6 +380,64 @@ async def consume_streaming_image_response(
     return final_data, raw_usage
 
 
+async def _call_async_provider_api(
+    api_url: str,
+    api_key: str,
+    api_path: str,
+    payload: GenerateRequest,
+    api_preset_name: str | None,
+    progress: ProgressCallback | None,
+    socks5_proxy: str | None,
+    *,
+    provider_config: dict,
+    persist_gallery_entry: PersistGalleryEntry,
+    prompt_guard: bool,
+) -> list[GalleryEntry]:
+    api_path = normalize_api_path(api_path)
+    payload.normalize_model_options(api_path)
+    if payload.background.startswith("chroma_"):
+        raise UpstreamApiError("Local chroma removal is not available for async providers")
+
+    format_info = get_output_format_info(payload.output_format)
+    gallery_metadata = build_gallery_metadata(payload, api_path, api_preset_name)
+    gallery_metadata["sent_prompt"] = sent_generation_prompt(payload, prompt_guard=prompt_guard)
+
+    download_session = get_pool().get(timeout_kind=TIMEOUT_UPSTREAM)
+    memory_lease = upstream_memory_lease(upstream_task_memory_weight(None))
+    await memory_lease.__aenter__()
+    try:
+        upstream_started = time.monotonic()
+        with observe_job_stage("upstream_wait"):
+            data, response_preview = await run_async_provider(
+                api_url=api_url,
+                api_key=api_key,
+                provider_config=provider_config,
+                payload=payload,
+                progress=progress,
+                socks5_proxy=socks5_proxy,
+                prompt_guard=prompt_guard,
+            )
+        gallery_metadata["upstream_duration_ms"] = max(
+            0, round((time.monotonic() - upstream_started) * 1000)
+        )
+        data = validate_upstream_image_data(data, payload.n)
+        return await save_gallery_entries_from_upstream_data(
+            download_session=download_session,
+            data=data,
+            response_preview=response_preview,
+            payload=payload,
+            format_extension=format_info["extension"],
+            gallery_metadata=gallery_metadata,
+            save_message="Saving generated images",
+            progress=progress,
+            persist_gallery_entry=persist_gallery_entry,
+            chroma_mode=None,
+            prompt_guard=prompt_guard,
+        )
+    finally:
+        await memory_lease.__aexit__(None, None, None)
+
+
 async def call_image_generation_api(
     api_url: str,
     api_key: str,
@@ -393,7 +452,23 @@ async def call_image_generation_api(
     preview: "PreviewCallback | None" = None,
     persist_gallery_entry: PersistGalleryEntry,
     prompt_guard: bool = False,
+    provider_config: dict | None = None,
 ) -> list[GalleryEntry]:
+    if provider_config is not None:
+        if stream:
+            raise UpstreamApiError("Streaming preview is not available for async providers")
+        return await _call_async_provider_api(
+            api_url,
+            api_key,
+            api_path,
+            payload,
+            api_preset_name,
+            progress,
+            socks5_proxy,
+            provider_config=provider_config,
+            persist_gallery_entry=persist_gallery_entry,
+            prompt_guard=prompt_guard,
+        )
     api_path = normalize_api_path(api_path)
     payload.normalize_model_options(api_path)
     if payload.background.startswith("chroma_") and api_path != "/v1/images/generations":

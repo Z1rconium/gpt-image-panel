@@ -167,6 +167,18 @@ class SettingsRequest(StrictRequestModel):
         )
 
 
+class ProviderTemplateResponse(BaseModel):
+    id: str
+    name: str
+    api_url: str
+    default_model: str
+    config: ProviderConfig
+
+
+class ProviderTemplatesResponse(BaseModel):
+    templates: list[ProviderTemplateResponse]
+
+
 class ImageUploadLimitsResponse(BaseModel):
     max_file_size_bytes: int
     max_image_pixels: int
