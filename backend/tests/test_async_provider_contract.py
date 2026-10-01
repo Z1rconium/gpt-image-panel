@@ -167,13 +167,18 @@ def test_failed_status_raises_without_fetching_result(client, monkeypatch, fast_
 
 
 def test_timeout_cancels_remote_task(client, monkeypatch, fast_provider):
+    from datetime import datetime, timedelta, timezone
+
     clock = [0.0]
+    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
     async def advancing_sleep(_seconds):
         clock[0] += 400.0
 
     monkeypatch.setattr(async_provider, "_sleep", advancing_sleep)
-    monkeypatch.setattr(async_provider, "_monotonic", lambda: clock[0])
+    monkeypatch.setattr(
+        async_provider, "_now", lambda: base + timedelta(seconds=clock[0])
+    )
     routes = _happy_routes(("IN_PROGRESS",))
     routes[("PUT", CANCEL_URL)] = [_json({"status": "CANCELLATION_REQUESTED"})]
     session = _ScriptedSession(routes)

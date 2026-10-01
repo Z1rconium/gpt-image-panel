@@ -636,6 +636,20 @@ def _image_job_unit_from_row(row: sqlite3.Row) -> dict[str, Any]:
     unit["edit_sources"] = _json_loads_list(unit.pop("edit_sources_json", None))
     unit["result"] = _json_loads_dict(unit.pop("result_json", None))
     unit["stage_timings"] = _json_loads_dict(unit.pop("stage_timings_json", None))
+    remote_json = unit.pop("remote_json", None)
+    if remote_json:
+        try:
+            unit["remote"] = json.loads(remote_json)
+        except json.JSONDecodeError:
+            pass
+    diagnostics_json = unit.pop("diagnostics_json", None)
+    if diagnostics_json:
+        try:
+            unit["diagnostics"] = json.loads(diagnostics_json)
+        except json.JSONDecodeError:
+            pass
+    unit["checkpointed"] = int(unit.get("checkpointed") or 0)
+    unit["recovery_count"] = int(unit.get("recovery_count") or 0)
     usage_json = unit.pop("usage_json", None)
     if usage_json:
         try:
@@ -660,6 +674,8 @@ def _image_job_unit_values(unit: dict[str, Any]) -> tuple[Any, ...]:
         ("stage_timings", "stage_timings_json"),
         ("usage", "usage_json"),
         ("cost", "cost_json"),
+        ("remote", "remote_json"),
+        ("diagnostics", "diagnostics_json"),
     ):
         if json_key not in normalized and source_key in normalized:
             normalized[json_key] = json.dumps(
@@ -667,6 +683,8 @@ def _image_job_unit_values(unit: dict[str, Any]) -> tuple[Any, ...]:
                 ensure_ascii=False,
                 sort_keys=True,
             )
+    normalized.setdefault("checkpointed", 0)
+    normalized.setdefault("recovery_count", 0)
     return tuple(normalized.get(column) for column in IMAGE_JOB_UNIT_COLUMNS)
 
 

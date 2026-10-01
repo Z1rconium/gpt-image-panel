@@ -11,6 +11,9 @@ import mimetypes
 import struct
 import uuid
 import warnings
+from contextlib import contextmanager
+from contextvars import ContextVar
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 from . import settings as config
@@ -123,6 +126,40 @@ configure_pillow_image_limits()
 
 def generate_image_id() -> str:
     return str(uuid.uuid4())
+
+
+def generate_stable_image_id(unit_id: str, image_index: int) -> str:
+    """Deterministic gallery id for one job unit's result index.
+
+    Replaying a query, download, or terminal write for the same unit and result
+    index upserts the same gallery row instead of adding a duplicate.
+    """
+    return str(
+        uuid.uuid5(uuid.NAMESPACE_URL, f"gpt-image-panel:{unit_id}:{int(image_index)}")
+    )
+
+
+_current_image_id_factory: ContextVar[Callable[[int], str] | None] = ContextVar(
+    "current_image_id_factory",
+    default=None,
+)
+
+
+@contextmanager
+def use_image_id_factory(factory: Callable[[int], str]) -> Iterator[None]:
+    """Make result saving use deterministic gallery ids inside this scope."""
+    token = _current_image_id_factory.set(factory)
+    try:
+        yield
+    finally:
+        _current_image_id_factory.reset(token)
+
+
+def stable_image_id_for(image_index: int) -> str | None:
+    factory = _current_image_id_factory.get()
+    if factory is None:
+        return None
+    return factory(int(image_index))
 
 
 def detect_image_format(image_bytes: bytes) -> str | None:

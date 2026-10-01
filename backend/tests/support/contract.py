@@ -563,6 +563,7 @@ def patch_upstream(monkeypatch):
         progress=None,
         socks5_proxy=None,
         persist_gallery_entry=None,
+        **kwargs,
     ):
         if progress:
             progress("building_generation_payload", "Building generation payload")
@@ -610,6 +611,7 @@ def patch_upstream(monkeypatch):
         persist_gallery_entry=None,
         mask_source=None,
         mask_coverage=None,
+        **kwargs,
     ):
         assert len(image_sources) == 1
         source_path = image_sources[0].temp_path

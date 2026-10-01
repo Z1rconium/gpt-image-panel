@@ -20,15 +20,21 @@ from ...core.api_paths import (
     normalize_api_path,
 )
 from ...core.observability import observe_job_stage, record_upstream_usage
+from ...core.diagnostics import UnitDiagnostics
 from ...core import validators as ssrf
 from ...core.media import (
     detect_image_format,
     generate_image_id,
     get_image_dimensions,
+    stable_image_id_for,
     validate_image_header_bytes,
 )
 from ...core.observability import metrics
-from .async_provider import run_async_provider
+from .async_provider import (
+    CheckpointCallback,
+    ShouldCancelRemote,
+    run_async_provider,
+)
 from .edit_paste_back import PasteBackOutcome, paste_back_image
 from .chroma import remove_chroma_background
 from .diagnostics import image_diagnostics
@@ -202,7 +208,7 @@ async def save_gallery_entries_from_upstream_data(
                     detected_format or "",
                     format_extension,
                 )
-                image_id = generate_image_id()
+                image_id = stable_image_id_for(image_index) or generate_image_id()
                 filename = f"{image_id}.{detected_extension}"
                 validate_image_header_bytes(image_bytes, filename=filename)
             entry_metadata = {**gallery_metadata}
@@ -392,6 +398,10 @@ async def _call_async_provider_api(
     provider_config: dict,
     persist_gallery_entry: PersistGalleryEntry,
     prompt_guard: bool,
+    async_remote: dict[str, Any] | None = None,
+    async_checkpoint: CheckpointCallback | None = None,
+    async_cancel_remote: ShouldCancelRemote | None = None,
+    async_diagnostics: UnitDiagnostics | None = None,
 ) -> list[GalleryEntry]:
     api_path = normalize_api_path(api_path)
     payload.normalize_model_options(api_path)
@@ -416,6 +426,10 @@ async def _call_async_provider_api(
                 progress=progress,
                 socks5_proxy=socks5_proxy,
                 prompt_guard=prompt_guard,
+                remote=async_remote,
+                checkpoint=async_checkpoint,
+                should_cancel_remote=async_cancel_remote,
+                diagnostics=async_diagnostics,
             )
         gallery_metadata["upstream_duration_ms"] = max(
             0, round((time.monotonic() - upstream_started) * 1000)
@@ -453,6 +467,10 @@ async def call_image_generation_api(
     persist_gallery_entry: PersistGalleryEntry,
     prompt_guard: bool = False,
     provider_config: dict | None = None,
+    async_remote: dict[str, Any] | None = None,
+    async_checkpoint: CheckpointCallback | None = None,
+    async_cancel_remote: ShouldCancelRemote | None = None,
+    async_diagnostics: UnitDiagnostics | None = None,
 ) -> list[GalleryEntry]:
     if provider_config is not None:
         if stream:
@@ -468,6 +486,10 @@ async def call_image_generation_api(
             provider_config=provider_config,
             persist_gallery_entry=persist_gallery_entry,
             prompt_guard=prompt_guard,
+            async_remote=async_remote,
+            async_checkpoint=async_checkpoint,
+            async_cancel_remote=async_cancel_remote,
+            async_diagnostics=async_diagnostics,
         )
     api_path = normalize_api_path(api_path)
     payload.normalize_model_options(api_path)
@@ -672,6 +694,7 @@ async def call_image_edit_api(
     mask_source: ImageEditSource | None = None,
     mask_coverage: float | None = None,
     prompt_guard: bool = False,
+    image_id_factory: Callable[[int], str] | None = None,
 ) -> list[GalleryEntry]:
     if not image_sources:
         raise UpstreamApiError("At least one edit source image is required")

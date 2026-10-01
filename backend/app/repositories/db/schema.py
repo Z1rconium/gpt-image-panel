@@ -1190,6 +1190,26 @@ def _migration_generate_job_preset_id(conn: sqlite3.Connection):
         conn.execute("ALTER TABLE generate_jobs ADD COLUMN api_preset_id TEXT")
 
 
+def _migration_image_job_unit_recovery(conn: sqlite3.Connection):
+    """Remote task checkpoints and bounded recovery for image units."""
+    columns = _table_columns(conn, "image_job_units")
+    if "remote_json" not in columns:
+        conn.execute("ALTER TABLE image_job_units ADD COLUMN remote_json TEXT")
+    if "checkpointed" not in columns:
+        conn.execute(
+            "ALTER TABLE image_job_units ADD COLUMN checkpointed INTEGER NOT NULL DEFAULT 0"
+        )
+    if "recovery_count" not in columns:
+        conn.execute(
+            "ALTER TABLE image_job_units ADD COLUMN recovery_count INTEGER NOT NULL DEFAULT 0"
+        )
+
+
+def _migration_image_job_unit_diagnostics(conn: sqlite3.Connection):
+    if "diagnostics_json" not in _table_columns(conn, "image_job_units"):
+        conn.execute("ALTER TABLE image_job_units ADD COLUMN diagnostics_json TEXT")
+
+
 def _migration_agent_conversations(conn: sqlite3.Connection):
     conn.execute(
         """
@@ -1380,4 +1400,6 @@ SCHEMA_MIGRATIONS = (
     (31, "agent_conversations", _migration_agent_conversations),
     (32, "agent_performance_indexes", _migration_agent_performance_indexes),
     (33, "api_preset_provider", _migration_api_preset_provider),
+    (34, "image_job_unit_recovery", _migration_image_job_unit_recovery),
+    (35, "image_job_unit_diagnostics", _migration_image_job_unit_diagnostics),
 )

@@ -6,6 +6,7 @@ import time
 import uuid
 
 from ..core import settings as config
+from ..core.constants import IMAGE_JOB_UNIT_MAX_RECOVERIES
 from ..core.observability import metrics
 from ..core.utils import utc_now
 from ..repositories.coordination import mark_worker_heartbeat
@@ -68,6 +69,7 @@ async def run_image_unit_dispatcher(worker_id: str):
             expire_exhausted_image_job_units,
             utc_now(),
             config.IMAGE_JOB_UNIT_MAX_ATTEMPTS,
+            IMAGE_JOB_UNIT_MAX_RECOVERIES,
             metric_name="expire_exhausted_image_job_units",
         )
         for unit in expired:
@@ -92,6 +94,7 @@ async def run_image_unit_dispatcher(worker_id: str):
             now=utc_now(),
             running_limit=config.MAX_ACTIVE_GENERATE_JOBS,
             max_attempts=config.IMAGE_JOB_UNIT_MAX_ATTEMPTS,
+            max_recoveries=IMAGE_JOB_UNIT_MAX_RECOVERIES,
             metric_name="claim_image_job_unit",
             critical=True,
         )
@@ -105,6 +108,7 @@ async def run_image_unit_dispatcher(worker_id: str):
             utc_now(),
             config.IMAGE_JOB_UNIT_MAX_ATTEMPTS,
             running_limit=config.MAX_ACTIVE_GENERATE_JOBS,
+            max_recoveries=IMAGE_JOB_UNIT_MAX_RECOVERIES,
             metric_name="precheck_image_job_unit",
             retry_busy=False,
         )

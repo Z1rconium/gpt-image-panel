@@ -4,7 +4,7 @@ import logging
 from collections.abc import Callable
 
 from ..core import settings as config
-from ..core.constants import ACTIVE_GENERATE_JOB_STATUSES
+from ..core.constants import ACTIVE_GENERATE_JOB_STATUSES, IMAGE_JOB_UNIT_MAX_RECOVERIES
 from ..core.observability import metrics
 from ..core.utils import utc_now
 from .image_files import delete_mask_file
@@ -428,6 +428,7 @@ def has_claimable_image_job_unit(
     now: str,
     max_attempts: int | None = None,
     running_limit: int | None = None,
+    max_recoveries: int | None = None,
 ) -> bool:
     """Read-only precheck used to skip an empty claim write transaction.
 
@@ -443,6 +444,7 @@ def has_claimable_image_job_unit(
     if max_attempts is None:
         max_attempts = getattr(config, "IMAGE_JOB_UNIT_MAX_ATTEMPTS", 2)
     max_attempts = max(1, int(max_attempts or 1))
+    max_recoveries = max(1, int(max_recoveries or IMAGE_JOB_UNIT_MAX_RECOVERIES))
 
     candidates_sql = """
                 expired_candidate(unit_id) AS (
@@ -451,7 +453,10 @@ def has_claimable_image_job_unit(
                     WHERE status = 'running'
                         AND claim_expires_at IS NOT NULL
                         AND claim_expires_at <= ?
-                        AND attempts < ?
+                        AND (
+                            attempts < ?
+                            OR (checkpointed = 1 AND recovery_count < ?)
+                        )
                     LIMIT 1
                 ),
                 queued_candidate(unit_id) AS (
@@ -473,7 +478,7 @@ def has_claimable_image_job_unit(
             )
             LIMIT 1
         """
-        params: tuple[Any, ...] = (now, max_attempts)
+        params: tuple[Any, ...] = (now, max_attempts, max_recoveries)
     else:
         query = f"""
             WITH
@@ -494,7 +499,7 @@ def has_claimable_image_job_unit(
             WHERE (SELECT value FROM running_count) < ?
             LIMIT 1
         """
-        params = (now, now, max_attempts, max(1, int(running_limit)))
+        params = (now, now, max_attempts, max_recoveries, max(1, int(running_limit)))
 
     with _connect() as conn:
         row = conn.execute(query, params).fetchone()
@@ -509,11 +514,13 @@ def claim_next_image_job_unit(
     now: str,
     running_limit: int,
     max_attempts: int | None = None,
+    max_recoveries: int | None = None,
 ) -> dict[str, Any] | None:
     _ensure_database()
     if max_attempts is None:
         max_attempts = getattr(config, "IMAGE_JOB_UNIT_MAX_ATTEMPTS", 2)
     max_attempts = max(1, int(max_attempts or 1))
+    max_recoveries = max(1, int(max_recoveries or IMAGE_JOB_UNIT_MAX_RECOVERIES))
     with _connect() as conn:
         with _transaction(conn):
             # `running_count` only counts leases that have not expired. A unit
@@ -521,6 +528,12 @@ def claim_next_image_job_unit(
             # concurrency slot, otherwise the queue can deadlock. The cost is
             # that concurrency can briefly exceed `running_limit` by the number
             # of not-yet-reclaimed expired units.
+            #
+            # Expired candidates are eligible while they still have a
+            # generation attempt left, or while they hold a remote checkpoint
+            # and stay under the independent recovery bound. A checkpointed
+            # unit is recovered (polled), never resubmitted, so re-claiming it
+            # must not count as a new upstream generation.
             row = conn.execute(
                 f"""
                 WITH
@@ -537,7 +550,10 @@ def claim_next_image_job_unit(
                         WHERE status = 'running'
                             AND claim_expires_at IS NOT NULL
                             AND claim_expires_at <= ?
-                            AND attempts < ?
+                            AND (
+                                attempts < ?
+                                OR (checkpointed = 1 AND recovery_count < ?)
+                            )
                         ORDER BY claim_expires_at ASC, created_at ASC, unit_index ASC
                         LIMIT 1
                     ),
@@ -560,6 +576,7 @@ def claim_next_image_job_unit(
                     claimed_by = ?,
                     claim_token = ?,
                     attempts = attempts + 1,
+                    recovery_count = recovery_count + CASE WHEN status = 'running' THEN 1 ELSE 0 END,
                     claim_expires_at = ?,
                     stage = COALESCE(NULLIF(stage, 'queued'), stage),
                     message = COALESCE(message, 'Running image unit'),
@@ -573,6 +590,7 @@ def claim_next_image_job_unit(
                     now,
                     now,
                     max_attempts,
+                    max_recoveries,
                     worker_id,
                     claim_token,
                     lease_expires_at,
@@ -585,6 +603,8 @@ def claim_next_image_job_unit(
         reclaimed_unit = _image_job_unit_from_row(row)
         if int(reclaimed_unit.get("attempts") or 0) > 1:
             metrics.increment("image_jobs.unit_reclaimed")
+        if int(reclaimed_unit.get("recovery_count") or 0) > 1:
+            metrics.increment("image_jobs.unit_recovered")
         return reclaimed_unit
     return None
 
@@ -616,17 +636,57 @@ def renew_image_job_unit_lease(
             return cursor.rowcount == 1
 
 
+def write_image_job_unit_remote(
+    unit_id: str,
+    *,
+    claim_token: str,
+    remote: dict[str, Any] | None,
+    checkpointed: bool,
+    now: str | None = None,
+) -> bool:
+    """Persist (or clear) this unit's remote task checkpoint under its fence.
+
+    Returns False when the claim token no longer owns the unit; the caller must
+    treat that as a lost lease and stop touching the remote task.
+    """
+    _ensure_database()
+    timestamp = now or utc_now()
+    with _connect() as conn:
+        with _transaction(conn):
+            cursor = conn.execute(
+                """
+                UPDATE image_job_units
+                SET remote_json = ?, checkpointed = ?, updated_at = ?
+                WHERE unit_id = ? AND status = 'running' AND claim_token = ?
+                """,
+                (
+                    json.dumps(remote, ensure_ascii=False, sort_keys=True)
+                    if remote is not None
+                    else None,
+                    1 if checkpointed else 0,
+                    timestamp,
+                    unit_id,
+                    claim_token,
+                ),
+            )
+            return cursor.rowcount == 1
+
+
 def expire_exhausted_image_job_units(
     now: str,
     max_attempts: int,
+    max_recoveries: int | None = None,
 ) -> list[dict[str, Any]]:
-    """Terminate running units whose lease expired after their final attempt.
+    """Terminate running units whose lease expired with no recovery path left.
 
+    A unit is exhausted when it has spent all generation attempts and either has
+    no remote checkpoint, or has already used the independent recovery bound.
     Returns the affected unit rows (with `parent_job_id`) so the caller can
     re-aggregate their parent jobs.
     """
     _ensure_database()
     max_attempts = max(1, int(max_attempts or 1))
+    max_recoveries = max(1, int(max_recoveries or IMAGE_JOB_UNIT_MAX_RECOVERIES))
     with _connect() as conn:
         with _transaction(conn):
             rows = conn.execute(
@@ -637,9 +697,10 @@ def expire_exhausted_image_job_units(
                     AND claim_expires_at IS NOT NULL
                     AND claim_expires_at <= ?
                     AND attempts >= ?
+                    AND (checkpointed = 0 OR recovery_count >= ?)
                 ORDER BY claim_expires_at ASC, created_at ASC, unit_index ASC
                 """,
-                (now, max_attempts),
+                (now, max_attempts, max_recoveries),
             ).fetchall()
             if not rows:
                 return []
@@ -650,8 +711,14 @@ def expire_exhausted_image_job_units(
                 UPDATE image_job_units
                 SET status = 'interrupted',
                     stage = 'interrupted',
-                    message = 'Unit lease expired after repeated attempts',
-                    error = 'Unit lease expired after multiple attempts',
+                    message = CASE
+                        WHEN checkpointed = 1 THEN 'Unit recovery limit reached'
+                        ELSE 'Unit lease expired after repeated attempts'
+                    END,
+                    error = CASE
+                        WHEN checkpointed = 1 THEN 'Remote task recovery was interrupted too many times'
+                        ELSE 'Unit lease expired after multiple attempts'
+                    END,
                     claimed_by = NULL,
                     claim_token = NULL,
                     claim_expires_at = NULL,
@@ -782,6 +849,7 @@ def fail_image_job_unit(
     completed_at: str | None = None,
     usage: dict[str, Any] | None = None,
     cost: dict[str, Any] | None = None,
+    diagnostics: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     _ensure_database()
     now = utc_now()
@@ -797,6 +865,7 @@ def fail_image_job_unit(
                     stage_timings_json = ?,
                     usage_json = COALESCE(?, usage_json),
                     cost_json = COALESCE(?, cost_json),
+                    diagnostics_json = COALESCE(?, diagnostics_json),
                     duration = ?,
                     completed_at = ?,
                     updated_at = ?,
@@ -813,6 +882,9 @@ def fail_image_job_unit(
                     json.dumps(stage_timings or {}, ensure_ascii=False, sort_keys=True),
                     json.dumps(usage, ensure_ascii=False, sort_keys=True) if usage is not None else None,
                     json.dumps(cost, ensure_ascii=False, sort_keys=True) if cost is not None else None,
+                    json.dumps(diagnostics, ensure_ascii=False, sort_keys=True)
+                    if diagnostics is not None
+                    else None,
                     duration,
                     completed_at or now,
                     now,

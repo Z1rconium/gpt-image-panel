@@ -124,6 +124,10 @@ IMAGE_JOB_UNIT_COLUMNS = (
     "api_path",
     "claim_token",
     "attempts",
+    "remote_json",
+    "checkpointed",
+    "recovery_count",
+    "diagnostics_json",
 )
 GALLERY_JOB_COLUMNS = (
     "job_id",

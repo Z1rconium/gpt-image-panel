@@ -19,6 +19,8 @@ from ..core.api_paths import (
     normalize_prompt_guard,
     normalize_provider_kind,
 )
+from ..core.diagnostics import UnitDiagnostics
+from ..core.media import generate_stable_image_id, use_image_id_factory
 from ..core.observability import (
     JobStageTimer,
     UsageSink,
@@ -35,9 +37,12 @@ from ..repositories.image_jobs import (
     finalize_parent_job_from_units,
     get_generate_job,
     get_generate_job_with_unit_aggregate,
+    get_image_job_unit,
     renew_image_job_unit_lease,
     update_image_job_unit_progress,
+    write_image_job_unit_remote,
 )
+from ..schemas.provider import resolve_provider_config
 from ..core import image_cost
 from .job_events import (
     publish_generate_job,
@@ -392,10 +397,23 @@ async def run_claimed_image_unit(unit: dict, worker_id: str):
     )
     api_key = get_effective_preset_api_key(preset)
     prompt_guard = normalize_prompt_guard(preset.get("prompt_guard"))
+    async_provider = (
+        normalize_provider_kind(preset.get("provider_kind")) == PROVIDER_KIND_ASYNC_JSON
+    )
+    remote = unit.get("remote") if isinstance(unit.get("remote"), dict) else None
+    remote_phase = str((remote or {}).get("phase") or "")
+    diagnostics = UnitDiagnostics() if async_provider else None
     provider_kwargs: dict = {}
-    if normalize_provider_kind(preset.get("provider_kind")) == PROVIDER_KIND_ASYNC_JSON:
-        provider_kwargs["provider_config"] = preset.get("provider_config") or {}
+    if async_provider:
+        provider_kwargs["provider_config"] = (
+            (remote or {}).get("provider_config") or preset.get("provider_config") or {}
+        )
     socks5_proxy = get_upstream_socks5_proxy()
+
+    def stable_image_id(image_index: int) -> str:
+        # Unit + result index is stable across recovery replays, so re-downloading
+        # or re-saving a result upserts the same gallery row instead of duplicating it.
+        return generate_stable_image_id(unit_id, image_index)
 
     progress_pending: tuple[str, str] | None = None
     progress_task: asyncio.Task | None = None
@@ -609,9 +627,150 @@ async def run_claimed_image_unit(unit: dict, worker_id: str):
         )
         return bool(current and current.get("status") == "cancelled")
 
+    async def write_remote_checkpoint(state: dict) -> None:
+        """Persist the remote checkpoint under this claim; a lost fence aborts."""
+        wrote = await run_db_operation(
+            write_image_job_unit_remote,
+            unit_id,
+            claim_token=claim_token,
+            remote=state,
+            checkpointed=True,
+            metric_name="write_image_job_unit_remote",
+            critical=True,
+        )
+        if not wrote:
+            mark_lease_lost()
+            raise UnitLeaseLostError()
+
+    async def should_cancel_remote() -> bool:
+        """Only a user cancellation authorizes a best-effort remote cancel.
+
+        A lease loss (or shutdown) must leave the remote task alone: a newer
+        owner may already be polling it.
+        """
+        row = await run_db_operation(
+            get_image_job_unit,
+            unit_id,
+            metric_name="classify_image_unit_lease_loss",
+        )
+        return bool(row and row.get("status") == "cancelled")
+
+    def unit_diagnostics_payload() -> dict | None:
+        if diagnostics is None or not diagnostics.has_records:
+            return None
+        diagnostics.set_recovery(
+            attempts=int(unit.get("attempts") or 0),
+            recovery_count=int(unit.get("recovery_count") or 0),
+        )
+        return diagnostics.payload()
+
+    async def complete_unit_from_checkpoint(state: dict) -> None:
+        """Write the terminal success state staged by a previous owner.
+
+        The gallery results were already saved (with stable ids) before the
+        checkpoint was written, so replaying this never duplicates rows.
+        """
+        completion = state.get("completion") or {}
+        metrics.increment(f"image_jobs.{operation}.recovered_completion")
+        metrics.increment(f"image_jobs.{operation}.succeeded")
+        if (
+            await run_db_operation(
+                complete_image_job_unit,
+                unit_id,
+                claim_token=claim_token,
+                result=completion.get("result") or {"images": []},
+                stage_timings=completion.get("stage_timings") or {},
+                duration=completion.get("duration"),
+                completed_at=completion.get("completed_at") or utc_now(),
+                usage=completion.get("usage"),
+                cost=completion.get("cost"),
+                metric_name="complete_recovered_image_job_unit",
+                critical=True,
+            )
+            is None
+        ):
+            raise UnitLeaseLostError()
+
+    async def interrupt_unknown_submit(state: dict | None) -> None:
+        """Stop a unit whose upstream submit result can never be known locally.
+
+        The plan is explicit that this must not resubmit: without an idempotency
+        key or a recorded task id, a second submit could bill a second
+        generation that the first response never proved was not already sent.
+        """
+        recorded = UnitDiagnostics()
+        recorded.set_code("submit_unknown")
+        recorded.set_recovery(
+            attempts=int(unit.get("attempts") or 0),
+            recovery_count=int(unit.get("recovery_count") or 0),
+            phase=(state or {}).get("phase"),
+            submitted_at=(state or {}).get("submitted_at"),
+        )
+        recorded.record_event(
+            "submit",
+            "A provider submit may have been sent but its result was not recorded",
+        )
+        metrics.increment("image_jobs.unit_submit_unknown")
+        await run_db_operation(
+            fail_image_job_unit,
+            unit_id,
+            claim_token=claim_token,
+            status="interrupted",
+            stage="interrupted",
+            message=(
+                "Provider submit result is unknown; start a new generation to retry"
+            ),
+            error=(
+                "Provider submit result is unknown: the worker stopped before "
+                "recording the remote task, so no automatic resubmission was attempted"
+            ),
+            stage_timings={},
+            completed_at=utc_now(),
+            diagnostics=recorded.payload(),
+            metric_name="interrupt_unknown_submit_image_job_unit",
+            critical=True,
+        )
+
     try:
         if await parent_was_cancelled():
             raise asyncio.CancelledError()
+        if remote is not None and remote_phase == "results_ready":
+            # A previous owner saved the results but could not write the
+            # terminal state; replay it instead of querying upstream again.
+            await complete_unit_from_checkpoint(remote)
+            return
+        if async_provider:
+            if remote_phase == "submitting":
+                has_idempotency_key = False
+                try:
+                    resolved_provider = resolve_provider_config(
+                        provider_kwargs.get("provider_config")
+                    )
+                    has_idempotency_key = bool(
+                        resolved_provider.submit.idempotency_header
+                        and remote.get("idempotency_key")
+                    )
+                except Exception:
+                    has_idempotency_key = False
+                if not has_idempotency_key:
+                    await interrupt_unknown_submit(remote)
+                    return
+            elif remote_phase == "submitted":
+                provider_kwargs["async_remote"] = remote
+            elif remote_phase == "" and int(unit.get("attempts") or 0) > 1:
+                # Reclaimed running unit without a checkpoint (pre-upgrade or a
+                # crash before the first checkpoint write): the upstream submit
+                # result cannot be inferred, so it is never auto-resubmitted.
+                await interrupt_unknown_submit(None)
+                return
+        if async_provider:
+            provider_kwargs.update(
+                {
+                    "async_checkpoint": write_remote_checkpoint,
+                    "async_cancel_remote": should_cancel_remote,
+                    "async_diagnostics": diagnostics,
+                }
+            )
         start_stage = "starting_edit" if operation == "edit" else "starting_generation"
         start_message = (
             "Starting image edit" if operation == "edit" else "Starting image generation"
@@ -676,7 +835,11 @@ async def run_claimed_image_unit(unit: dict, worker_id: str):
             stream_kwargs["prompt_guard"] = True
 
         async def run_upstream() -> list:
-            with use_job_stage_timer(stage_timer), use_usage_sink(usage_sink):
+            with (
+                use_job_stage_timer(stage_timer),
+                use_usage_sink(usage_sink),
+                use_image_id_factory(stable_image_id),
+            ):
                 if operation == "edit":
                     edit_sources = [
                         edit_source_from_payload(source)
@@ -791,10 +954,27 @@ async def run_claimed_image_unit(unit: dict, worker_id: str):
                 completed_at=utc_now(),
                 usage=usage,
                 cost=cost,
+                diagnostics=unit_diagnostics_payload(),
                 metric_name="cancel_completed_image_job_unit",
                 critical=True,
             )
             return
+        # Stage the finished results before the terminal write: if this worker
+        # dies here, a recovery owner replays only the terminal write.
+        await write_remote_checkpoint(
+            {
+                **(remote or {}),
+                "phase": "results_ready",
+                "completion": {
+                    "result": {"images": result_images},
+                    "stage_timings": stage_timings,
+                    "duration": duration,
+                    "completed_at": completed_at,
+                    "usage": usage,
+                    "cost": cost,
+                },
+            }
+        )
         if (
             await run_db_operation(
                 complete_image_job_unit,
@@ -821,8 +1001,29 @@ async def run_claimed_image_unit(unit: dict, worker_id: str):
         stage_timings = stage_timer.snapshot()
         usage = image_cost.normalize_usage(usage_sink.raw_usage)
         cost = image_cost.estimate_image_cost(req.model, usage) if usage else None
-        metrics.increment(f"image_jobs.{operation}.cancelled")
         await flush_progress_before_terminal(suppress_cancelled=True)
+        if async_provider:
+            # Do not terminalize a mapped provider unit here: a user cancel
+            # already marked it cancelled, and a shutdown must leave the
+            # checkpoint for a new owner to resume (or classify as unknown).
+            current = await run_db_operation(
+                get_image_job_unit,
+                unit_id,
+                metric_name="classify_cancelled_image_unit",
+            )
+            if current and current.get("status") == "cancelled":
+                metrics.increment(f"image_jobs.{operation}.cancelled")
+            else:
+                metrics.increment("image_jobs.unit_recovery_pending")
+            logger.warning(
+                "Mapped provider unit stopped without a terminal write, recovery owns it: "
+                "unit_id=%s parent_job_id=%s worker_id=%s",
+                unit_id,
+                parent_job_id,
+                worker_id,
+            )
+            return
+        metrics.increment(f"image_jobs.{operation}.cancelled")
         await run_db_operation(
             fail_image_job_unit,
             unit_id,
@@ -895,6 +1096,7 @@ async def run_claimed_image_unit(unit: dict, worker_id: str):
             completed_at=utc_now(),
             usage=usage,
             cost=cost,
+            diagnostics=unit_diagnostics_payload(),
             metric_name="fail_image_job_unit",
             critical=True,
         )
