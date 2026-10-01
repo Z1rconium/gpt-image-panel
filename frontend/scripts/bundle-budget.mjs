@@ -15,7 +15,11 @@ const clientDir = join(frontendDir, '.svelte-kit', 'output', 'client');
 const manifestPath = join(clientDir, '.vite', 'manifest.json');
 
 const BUDGETS = {
-  homepageGzipBytes: 102 * 1024,
+  // 102 -> 116 KiB: 115.5 KiB gzip was already the measured homepage requirement
+  // at the agent-UI baseline (the conversation view grew the workspace chunk
+  // without a JS budget update), and the preset share/import plus job
+  // diagnostics work adds about 2.3 KiB gzip measured before/after.
+  homepageGzipBytes: 116 * 1024,
   // 12.3 -> 12.9 KiB: the mask editor dialog and the primary-source card
   // actions add 22 utility rules (+262 B gzip, measured with the Tailwind CLI
   // against the pre-change tree) and are loaded lazily, but Tailwind's utility
@@ -23,8 +27,12 @@ const BUDGETS = {
   // 12.9 -> 13.3 KiB: the Agent conversation view (thread, composer, mention
   // list, conversation list) adds about 40 utility rules (+371 B gzip, measured
   // against the pre-change tree). The view loads lazily, but Tailwind's utility
-  // CSS is global, so the main stylesheet carries them.
-  mainCssGzipBytes: 13.3 * 1024,
+  // CSS is global, so the main stylesheet carries it.
+  // 13.3 -> 13.4 KiB: the preset import dialog, mapping validation panel and
+  // parameter-diff badges add about 15 utility rules (+13 B gzip, measured
+  // against the pre-change build); the views load lazily, the utility CSS is
+  // global.
+  mainCssGzipBytes: 13.4 * 1024,
   oglGzipBytes: 39.4 * 1024,
   oglReduction: 0.2
 };
