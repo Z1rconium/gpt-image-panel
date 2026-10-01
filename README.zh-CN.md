@@ -293,7 +293,8 @@ Overall Config 会把 override 持久化到 SQLite。部分配置可热更新；
 8. 输入 prompt 生成图片，或上传/选择源图执行编辑。
 9. 在 Gallery 中复用参数、筛选、收藏、批量操作、导入导出、执行 R2 同步或上传到 NodeImage。
 10. 可以把 `/?apiUrl=https://api.example.com&apiModel=gpt-image-2` 存为书签。打开后会提示用该 URL 和模型新建预设；确认前不会保存任何内容，API 密钥保持为空，并且这些参数会立即从地址栏移除。只接受 `https` URL，也不会从 URL 读取任何凭据。（`?model=` 已被 Gallery 筛选占用，所以参数名是 `apiModel`。）
-11. 按需在“设置 → AI 助手”中开启 Agent 模式（选择支持 function calling 的模型），然后在页眉切换到 **Agent**。描述需求，用 `@`（如 `@round-1-image-1` 或 `@第1轮图1`）引用之前的图片，也可从 Gallery 添加图片，按 Ctrl/Cmd+Enter 发送。运行中可点“停止”取消；生成的图片会出现在 Gallery。
+11. 用“导出”把所选预设下载为带版本号、不含密钥的 JSON 包；用“分享链接”复制 `?preset=` 链接；用“导入”先预览文件、剪贴板 JSON 或分享链接，再确认应用。预设可通过拖拽手柄或上下箭头排序，顺序保存在 SQLite 中。
+12. 按需在“设置 → AI 助手”中开启 Agent 模式（选择支持 function calling 的模型），然后在页眉切换到 **Agent**。描述需求，用 `@`（如 `@round-1-image-1` 或 `@第1轮图1`）引用之前的图片，也可从 Gallery 添加图片，按 Ctrl/Cmd+Enter 发送。运行中可点“停止”取消；生成的图片会出现在 Gallery。
 
 ## GPT Image 2.5
 
@@ -347,10 +348,13 @@ Overall Config 会把 override 持久化到 SQLite。部分配置可热更新；
 
 - **流程**：把渲染后的请求体 `POST` 到 `API URL + submit.path`，从响应里取状态 URL，轮询直到 `status_path` 的值属于 `done`（或 `failed`），按需再请求 `result.url_path`，最后从 `images_path` 读取图片（URL 或 base64）。
 - **变量**：`prompt`、`model`、`n`、`width`、`height`、`size`、`quality`、`output_format`、`background`。值只是一个没有内容的变量（例如尺寸为 `auto` 时的 `width`）时，该字段会被省略。`submit.path` 只能使用 `{{model}}`。不会把任何内容当作代码执行；路径只支持 `$.a.b[0]` 和 `[*]`。
+- **仅返回任务 ID 的映射（version 2）**：若供应商只返回任务 ID，可设置 `"version": 2`，用 `poll.task_id_path` + `poll.url_template`（`result`/`cancel` 同理），例如 `{"task_id_path": "$.data.id", "url_template": "/v1/jobs/{{task_id}}"}`。模板必须是纯路径，任务 ID 会按路径段进行 URL 编码，绝对 URL 会被拒绝。可选 `submit.idempotency_header`（如 `Idempotency-Key`）让中断的提交用同一稳定键重试。
 - **凭据**：映射里不放任何密钥。预设的 API 密钥（环境变量引用或 Secret Registry ID）按 `header: scheme key` 发送；`header` 为 `Authorization` 或 `X-API-Key`，`scheme` 为 `Bearer`、`Key`、`Token` 或留空。
 - **安全**：状态、结果和取消 URL 来自上游响应，因此必须与预设 API URL 同源（密钥会随请求发送），并通过与提交 URL 相同的 SSRF 和对端 IP 检查。图片下载不带凭据，错误信息会脱敏。
-- **限制**：不支持图片编辑、流式预览和本地色键抠图，蒙版被强制关闭。超时或取消时会尽力发送一次 `cancel` 请求。Worker 租约过期会重新提交整个任务，因为远端任务 ID 不会持久化。
-- 健康检查只校验映射并探测提交 URL，不会真正提交任务。引擎目前仅有模拟会话测试覆盖，未内置任何特定供应商。
+- **恢复**：提交成功后，任务单元会持久化远端任务 ID、后续地址、绝对轮询截止时间和幂等键。Worker 意外退出后，由其他 Worker 继续轮询同一任务，而不是重新提交；截止时间和接管次数跨重启保留（默认最多接管 5 次）。提交已发出但结果未记录时，任务标记为 `interrupted` 并带 `submit_unknown` 诊断，不会自动重新提交。丢失租约不会取消远端任务；用户主动取消会尽力发送一次 `cancel`。轮询遇到 429、5xx 或断网会在截止时间内有上限地退避重试。
+- **限制**：不支持图片编辑、流式预览和本地色键抠图，蒙版被强制关闭。
+- 健康检查只校验映射并探测提交 URL，不会真正提交任务。设置中可复制“映射生成提示词”交给 LLM，并对粘贴的映射做实时校验；粘贴模拟响应还能在本地验证任务 ID、状态和图片提取（不会请求上游）。
+- **诊断**：失败的任务单元会保留一份受限、脱敏的提交/查询/结果阶段记录。在“任务历史 → 诊断”中可查看阶段、HTTP 状态、失败的映射路径和响应快照，并复制诊断信息用于排查。
 
 ## 流式预览与费用估算
 

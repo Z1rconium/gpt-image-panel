@@ -293,7 +293,8 @@ Overall Config 會將 Override 持久化至 SQLite。部分設定可熱更新；
 8. 輸入 Prompt 生成圖片，或上傳/選取來源圖片進行編輯。
 9. 在 Gallery 中沿用參數、篩選、收藏、批次操作、匯入/匯出、執行 R2 同步，或上傳至 NodeImage。
 10. 可以把 `/?apiUrl=https://api.example.com&apiModel=gpt-image-2` 存成書籤。開啟後會提示以該 URL 與模型建立新預設；確認前不會儲存任何內容，API 金鑰保持空白，且這些參數會立即從網址列移除。只接受 `https` URL，也不會從 URL 讀取任何憑證。（`?model=` 已被 Gallery 篩選占用，因此參數名稱是 `apiModel`。）
-11. 視需要在「設定 → AI Assistant」中開啟 Agent 模式（選擇支援 function calling 的模型），然後在頁首切換到 **Agent**。描述需求，用 `@`（例如 `@round-1-image-1` 或 `@第1輪圖1`）引用先前的圖片，也可從 Gallery 加入圖片，按 Ctrl/Cmd+Enter 送出。執行中可按「停止」取消；產生的圖片會出現在 Gallery。
+11. 用「匯出」把所選預設下載成帶版本、不含金鑰的 JSON 套件；用「分享連結」複製 `?preset=` 連結；用「匯入」先預覽檔案、剪貼簿 JSON 或分享連結，再確認套用。預設可透過拖曳手柄或上下箭頭排序，順序儲存在 SQLite。
+12. 視需要在「設定 → AI Assistant」中開啟 Agent 模式（選擇支援 function calling 的模型），然後在頁首切換到 **Agent**。描述需求，用 `@`（例如 `@round-1-image-1` 或 `@第1輪圖1`）引用先前的圖片，也可從 Gallery 加入圖片，按 Ctrl/Cmd+Enter 送出。執行中可按「停止」取消；產生的圖片會出現在 Gallery。
 
 ## GPT Image 2.5
 
@@ -347,10 +348,13 @@ Overall Config 會將 Override 持久化至 SQLite。部分設定可熱更新；
 
 - **流程**：把轉譯後的請求本文 `POST` 到 `API URL + submit.path`，從回應取得狀態 URL，輪詢直到 `status_path` 的值屬於 `done`（或 `failed`），視需要再請求 `result.url_path`，最後從 `images_path` 讀取圖片（URL 或 base64）。
 - **變數**：`prompt`、`model`、`n`、`width`、`height`、`size`、`quality`、`output_format`、`background`。值只是一個沒有內容的變數（例如尺寸為 `auto` 時的 `width`）時，該欄位會被省略。`submit.path` 只能使用 `{{model}}`。不會把任何內容當作程式碼執行；路徑只支援 `$.a.b[0]` 與 `[*]`。
+- **只回傳任務 ID 的對映（version 2）**：若供應商只回傳任務 ID，可設定 `"version": 2`，使用 `poll.task_id_path` + `poll.url_template`（`result`/`cancel` 同理），例如 `{"task_id_path": "$.data.id", "url_template": "/v1/jobs/{{task_id}}"}`。範本必須是純路徑，任務 ID 會以路徑片段進行 URL 編碼，絕對 URL 會被拒絕。可選 `submit.idempotency_header`（例如 `Idempotency-Key`）讓中斷的提交以同一穩定鍵重試。
 - **憑證**：對映中不放任何金鑰。預設的 API 金鑰（環境變數參照或 Secret Registry ID）以 `header: scheme key` 傳送；`header` 為 `Authorization` 或 `X-API-Key`，`scheme` 為 `Bearer`、`Key`、`Token` 或留空。
 - **安全**：狀態、結果與取消 URL 來自上游回應，因此必須與預設 API URL 同源（金鑰會隨請求傳送），並通過與提交 URL 相同的 SSRF 與對端 IP 檢查。圖片下載不帶憑證，錯誤訊息會遮蔽敏感內容。
-- **限制**：不支援圖片編輯、串流預覽與本機色鍵去背，遮罩會被強制關閉。逾時或取消時會盡力送出一次 `cancel` 請求。Worker 租約到期會重新提交整個任務，因為遠端任務 ID 不會持久化。
-- 健康檢查只驗證對映並探測提交 URL，不會真的提交任務。引擎目前僅有模擬連線測試涵蓋，未內建任何特定供應商。
+- **復原**：提交成功後，任務單元會持久化遠端任務 ID、後續位址、絕對輪詢截止時間與冪等鍵。Worker 意外結束後，由其他 Worker 繼續輪詢同一任務，而不是重新提交；截止時間與接管次數會跨重啟保留（預設最多接管 5 次）。提交已送出但結果未記錄時，任務標記為 `interrupted` 並帶 `submit_unknown` 診斷，不會自動重新提交。失去租約不會取消遠端任務；使用者主動取消會盡力送出一次 `cancel`。輪詢遇到 429、5xx 或斷網會在截止時間內有上限地退避重試。
+- **限制**：不支援圖片編輯、串流預覽與本機色鍵去背，遮罩會被強制關閉。
+- 健康檢查只驗證對映並探測提交 URL，不會真的提交任務。設定中可複製「對映生成提示詞」交給 LLM，並對貼上的對映做即時驗證；貼上模擬回應還能在本機驗證任務 ID、狀態與圖片擷取（不會請求上游）。
+- **診斷**：失敗的任務單元會保留一份受限、遮蔽的提交/查詢/結果階段記錄。在「任務歷史 → 診斷」中可查看階段、HTTP 狀態、失敗的對映路徑與回應快照，並複製診斷資訊用於排查。
 
 ## 串流預覽與費用估算
 
