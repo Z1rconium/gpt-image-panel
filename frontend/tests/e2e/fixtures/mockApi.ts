@@ -1208,6 +1208,35 @@ async function mockApi(page: Page, options: MockOptions = {}) {
       await route.fulfill(json(mockedSettings));
       return;
     }
+    if (url.pathname === '/api/settings/provider-mapping/prompt' && request.method() === 'GET') {
+      await route.fulfill(json({ prompt: 'Write a mapping using {{prompt}} and {{task_id}}; output "version": 2 JSON.' }));
+      return;
+    }
+    if (url.pathname === '/api/settings/provider-mapping/validate' && request.method() === 'POST') {
+      const body = JSON.parse(request.postData() || '{}') as { provider_config?: unknown };
+      const valid = Boolean(body.provider_config && typeof body.provider_config === 'object');
+      await route.fulfill(
+        json(
+          valid
+            ? {
+                valid: true,
+                errors: [],
+                extraction: {
+                  task_id: { found: true, value: 'job-1', source: 'submit', detail: null },
+                  status_url: { found: true, value: '/jobs/job-1', source: 'submit', detail: null },
+                  result_url: { found: false, value: null, source: null, detail: 'not configured' },
+                  status_value: { found: true, value: 'done', source: 'poll', detail: 'done (done=(done,), failed=())' },
+                  image_count: 1,
+                  image_kind: 'url',
+                  image_samples: [],
+                  notes: []
+                }
+              }
+            : { valid: false, errors: [{ path: 'submit', message: 'Field required' }], extraction: null }
+        )
+      );
+      return;
+    }
     if (url.pathname === '/api/prompt-snippets/search' && request.method() === 'POST') {
       const body = JSON.parse(request.postData() || '{}');
       const query = String(body.query || '').toLowerCase();

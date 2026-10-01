@@ -606,3 +606,37 @@ test('preset order buttons persist the new order', async ({ page }) => {
   expect(body.preset_ids).toEqual(['alt', 'default']);
   await expect(page.getByRole('status')).toContainText('Preset order saved');
 });
+
+test('mapping prompt copies and sample extraction verifies the mapping', async ({ page }) => {
+  await loadApp(page);
+  await page.getByRole('button', { name: 'Settings' }).click();
+  const drawer = page.getByRole('dialog', { name: 'Settings' });
+  await drawer.getByLabel('Provider type').selectOption('async_json');
+
+  const promptRequest = page.waitForRequest(
+    (request) => new URL(request.url()).pathname === '/api/settings/provider-mapping/prompt'
+  );
+  await drawer.getByRole('button', { name: 'Copy mapping prompt' }).click();
+  await promptRequest;
+  await expect(drawer.getByRole('button', { name: 'Prompt copied' })).toBeVisible();
+
+  const mapping = drawer.getByLabel('Provider mapping (JSON)');
+  await mapping.fill(
+    JSON.stringify({
+      version: 2,
+      submit: { path: '/submit', body: { prompt: '{{prompt}}' } },
+      poll: { task_id_path: '$.id', url_template: '/jobs/{{task_id}}', status_path: '$.state', done: ['done'] },
+      result: { images_path: '$.images[*].url' }
+    })
+  );
+  await drawer.getByText('Verify extraction with sample responses').click();
+  await drawer.getByLabel('Submit response sample').fill(JSON.stringify({ id: 'job-1' }));
+  await drawer.getByLabel('Poll response sample').fill(JSON.stringify({ state: 'done' }));
+  const validateRequest = page.waitForRequest(
+    (request) => new URL(request.url()).pathname === '/api/settings/provider-mapping/validate' && request.method() === 'POST'
+  );
+  await drawer.getByRole('button', { name: 'Verify mapping' }).click();
+  await validateRequest;
+  await expect(drawer).toContainText('job-1');
+  await expect(drawer).toContainText('/jobs/job-1');
+});

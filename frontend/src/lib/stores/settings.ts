@@ -2,7 +2,7 @@ import { get, writable } from 'svelte/store';
 import { apiFetch } from '$lib/api/client';
 import { t } from '$lib/i18n';
 import { confirmStore } from '$lib/stores/confirm';
-import type { AIAssistantSettingsInput, AssistantHealthResponse, OverallConfigResponse, OverallConfigUpdateRequest, PresetExportPackage, PresetHealthResponse, PresetImportInstruction, PresetImportPreviewResponse, PromptOptimizerHealthResponse, PromptOptimizerSystemPromptResponse, R2BackupSettingsInput, R2HealthResponse, SettingsInput, SettingsResponse } from '$lib/api/types/settings';
+import type { AIAssistantSettingsInput, AssistantHealthResponse, OverallConfigResponse, OverallConfigUpdateRequest, PresetExportPackage, PresetHealthResponse, PresetImportInstruction, PresetImportPreviewResponse, PromptOptimizerHealthResponse, PromptOptimizerSystemPromptResponse, ProviderMappingPromptResponse, ProviderMappingValidateResponse, R2BackupSettingsInput, R2HealthResponse, SettingsInput, SettingsResponse } from '$lib/api/types/settings';
 import type { ToastVariant } from '$lib/stores/ui';
 
 type ShowToast = (message: string, variant?: ToastVariant) => void;
@@ -302,6 +302,31 @@ function createSettingsStore() {
     return settings;
   }
 
+  async function loadProviderMappingPrompt() {
+    return apiFetch<ProviderMappingPromptResponse>(
+      '/api/settings/provider-mapping/prompt',
+      {},
+      'loading provider mapping prompt'
+    );
+  }
+
+  async function validateProviderMapping(body: {
+    provider_config: unknown;
+    sample_submit?: unknown;
+    sample_poll?: unknown;
+    sample_result?: unknown;
+  }) {
+    return apiFetch<ProviderMappingValidateResponse>(
+      '/api/settings/provider-mapping/validate',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      },
+      'validating provider mapping'
+    );
+  }
+
   async function checkR2Health(body: R2BackupSettingsInput) {
     settingsActivityStore.setR2HealthChecking(true);
     try {
@@ -421,6 +446,8 @@ function createSettingsStore() {
     previewPresetImport,
     importPresets,
     reorderPresets,
+    loadProviderMappingPrompt,
+    validateProviderMapping,
     checkR2Health,
     checkPromptOptimizerHealth,
     clearPromptOptimizerHealth,

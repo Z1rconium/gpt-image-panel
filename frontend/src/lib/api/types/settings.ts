@@ -282,3 +282,31 @@ export type PresetImportInstruction = {
   action: 'create' | 'update' | 'skip';
   target_preset_id?: string | null;
 };
+
+export type ProviderMappingFieldResult = {
+  found: boolean;
+  value?: string | null;
+  source?: string | null;
+  detail?: string | null;
+};
+
+export type ProviderMappingExtraction = {
+  task_id: ProviderMappingFieldResult;
+  status_url: ProviderMappingFieldResult;
+  result_url: ProviderMappingFieldResult;
+  status_value: ProviderMappingFieldResult;
+  image_count?: number | null;
+  image_kind?: string | null;
+  image_samples: string[];
+  notes: string[];
+};
+
+export type ProviderMappingValidateResponse = {
+  valid: boolean;
+  errors: PresetImportIssue[];
+  extraction?: ProviderMappingExtraction | null;
+};
+
+export type ProviderMappingPromptResponse = {
+  prompt: string;
+};

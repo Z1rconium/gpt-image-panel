@@ -73,10 +73,17 @@ from ...schemas.settings import (
     PresetImportPreviewRequest,
     PresetImportPreviewResponse,
     PresetOrderRequest,
+    ProviderMappingPromptResponse,
+    ProviderMappingValidateRequest,
+    ProviderMappingValidateResponse,
     R2BackupSettingsRequest,
     R2HealthResponse,
     SettingsRequest,
     SettingsResponse,
+)
+from ...services.provider_mapping_assist import (
+    build_mapping_prompt,
+    validate_provider_mapping_request,
 )
 from backend.app.integrations.upstream import transport as transport_client
 
@@ -417,6 +424,29 @@ async def check_r2_settings_health(req: R2BackupSettingsRequest):
         )
     result = await asyncio.to_thread(probe_r2_settings, draft)
     return R2HealthResponse(**result)
+
+
+@router.get(
+    "/api/settings/provider-mapping/prompt",
+    response_model=ProviderMappingPromptResponse,
+)
+async def get_settings_provider_mapping_prompt():
+    prompt = await asyncio.to_thread(build_mapping_prompt)
+    return ProviderMappingPromptResponse(prompt=prompt)
+
+
+@router.post(
+    "/api/settings/provider-mapping/validate",
+    response_model=ProviderMappingValidateResponse,
+)
+async def validate_settings_provider_mapping(req: ProviderMappingValidateRequest):
+    return await asyncio.to_thread(
+        validate_provider_mapping_request,
+        req.provider_config,
+        req.sample_submit,
+        req.sample_poll,
+        req.sample_result,
+    )
 
 
 @router.post("/api/settings/presets", response_model=SettingsResponse)

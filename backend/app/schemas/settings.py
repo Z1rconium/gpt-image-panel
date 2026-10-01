@@ -289,6 +289,41 @@ class PresetOrderRequest(StrictRequestModel):
     preset_ids: list[str] = Field(min_length=1, max_length=MAX_IMPORTED_PRESETS)
 
 
+class ProviderMappingValidateRequest(StrictRequestModel):
+    provider_config: Any = None
+    sample_submit: Any = None
+    sample_poll: Any = None
+    sample_result: Any = None
+
+
+class ProviderMappingFieldResult(BaseModel):
+    found: bool = False
+    value: Optional[str] = None
+    source: Optional[str] = None
+    detail: Optional[str] = None
+
+
+class ProviderMappingExtraction(BaseModel):
+    task_id: ProviderMappingFieldResult
+    status_url: ProviderMappingFieldResult
+    result_url: ProviderMappingFieldResult
+    status_value: ProviderMappingFieldResult
+    image_count: Optional[int] = None
+    image_kind: Optional[str] = None
+    image_samples: list[str] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+
+class ProviderMappingValidateResponse(BaseModel):
+    valid: bool
+    errors: list[PresetImportIssue] = Field(default_factory=list)
+    extraction: Optional[ProviderMappingExtraction] = None
+
+
+class ProviderMappingPromptResponse(BaseModel):
+    prompt: str
+
+
 class R2HealthResponse(PresetHealthResponse):
     pass
 
