@@ -1,5 +1,5 @@
 
-from ..core.errors import UnprocessableRequestError
+
 from ..runtime.state import state
 from ..core import secrets
 from ..core import settings as config
@@ -21,7 +21,7 @@ from ..core.api_paths import (
     normalize_provider_kind,
     normalize_supports_mask,
 )
-from ..schemas.provider import ProviderConfig
+from ..schemas.provider import ProviderConfigPayload, parse_provider_config
 from ..core.validators import (
     get_env_var_ref_name,
     mask_socks5_proxy_url,
@@ -407,7 +407,7 @@ def webhook_url_response_fields() -> dict:
 def apply_preset_provider(
     preset: dict,
     provider_kind: str | None,
-    provider_config: ProviderConfig | None,
+    provider_config: ProviderConfigPayload | None,
 ) -> None:
     """Apply requested provider fields to ``preset`` and enforce async_json invariants."""
     if provider_kind is not None:
@@ -423,13 +423,13 @@ def apply_preset_provider(
         preset["supports_mask"] = False
 
 
-def _stored_provider_config(preset: dict) -> ProviderConfig | None:
+def _stored_provider_config(preset: dict) -> ProviderConfigPayload | None:
     raw = preset.get("provider_config")
     if not raw:
         return None
     try:
-        return ProviderConfig.model_validate(raw)
-    except ValidationError:
+        return parse_provider_config(raw)
+    except (ValidationError, ValueError):
         # A hand-edited row must not break the whole settings response.
         return None
 

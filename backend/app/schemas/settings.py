@@ -1,4 +1,4 @@
-from typing import Annotated, Literal, Optional
+from typing import Annotated, Any, Literal, Optional
 
 from pydantic import BaseModel, Field, StrictInt, field_validator, model_validator
 
@@ -9,7 +9,7 @@ from ..core.validators import (
     normalize_upstream_base_url,
     normalize_webhook_url,
 )
-from .provider import ProviderConfig
+from .provider import ProviderConfigPayload
 from .common import (
     ApiKeySource,
     ApiPath,
@@ -33,7 +33,7 @@ class ApiPresetResponse(BaseModel):
     supports_mask: bool = True
     prompt_guard: bool = False
     provider_kind: ProviderKind = "openai"
-    provider_config: Optional[ProviderConfig] = None
+    provider_config: Optional[ProviderConfigPayload] = None
     api_key_masked: str
     has_api_key: bool
     api_key_source: ApiKeySource = "empty"
@@ -57,7 +57,7 @@ class PresetCreateRequest(StrictRequestModel):
     supports_mask: Optional[bool] = None
     prompt_guard: Optional[bool] = None
     provider_kind: Optional[ProviderKind] = None
-    provider_config: Optional[ProviderConfig] = None
+    provider_config: Optional[ProviderConfigPayload] = None
     source_preset_id: Optional[str] = Field(default=None, max_length=128)
 
     @field_validator("api_url")
@@ -103,7 +103,7 @@ class SettingsRequest(StrictRequestModel):
     provider_kind: Optional[ProviderKind] = Field(
         default=None, description="Null keeps the current provider kind."
     )
-    provider_config: Optional[ProviderConfig] = Field(
+    provider_config: Optional[ProviderConfigPayload] = Field(
         default=None, description="Null keeps the current provider mapping."
     )
     upstream_socks5_proxy: Optional[str] = Field(
