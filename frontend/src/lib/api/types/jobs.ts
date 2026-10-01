@@ -90,3 +90,33 @@ export type GenerateJobStatus = GenerateJobResponse & {
   paste_back?: boolean | null;
   error?: string | null;
 };
+
+export type JobUnitRemoteSummary = {
+  phase: string;
+  task_id?: string | null;
+  submitted_at?: string | null;
+  deadline_at?: string | null;
+  has_status_url: boolean;
+  has_result_url: boolean;
+  has_cancel_url: boolean;
+  has_idempotency_key: boolean;
+  poll_count?: number | null;
+};
+
+export type JobUnitDiagnostics = {
+  unit_id: string;
+  unit_index: number;
+  status: string;
+  stage?: string | null;
+  message?: string | null;
+  error?: string | null;
+  attempts: number;
+  recovery_count: number;
+  remote?: JobUnitRemoteSummary | null;
+  diagnostics?: Record<string, unknown> | null;
+};
+
+export type JobDiagnosticsResponse = {
+  job_id: string;
+  units: JobUnitDiagnostics[];
+};

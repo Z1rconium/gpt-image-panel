@@ -15,6 +15,7 @@
   import { measureItem, observeViewport } from '$lib/actions/virtualList';
   import { buildOffsets, computeRenderWindow, computeSpacers } from '$lib/virtualization/window';
   import ImageTrace from '$lib/components/ImageTrace.svelte';
+  import JobDiagnosticsPanel from '$lib/components/JobDiagnosticsPanel.svelte';
 
   type MaybePromise = void | Promise<void>;
   type Props = {
@@ -57,6 +58,7 @@
   let measuredHeights = $state<Record<string, number>>({});
   let expandedErrorIds = $state(new Set<string>());
   let expandedCostIds = $state(new Set<string>());
+  let expandedDiagnosticsIds = $state(new Set<string>());
   let selectedImageIds = $state<Record<string, string>>({});
   let loadMoreRequest = false;
   let previousResetKey = '';
@@ -195,6 +197,17 @@
     if (nextIds.has(jobId)) nextIds.delete(jobId);
     else nextIds.add(jobId);
     expandedErrorIds = nextIds;
+  }
+
+  function isDiagnosticsExpanded(jobId: string) {
+    return expandedDiagnosticsIds.has(jobId);
+  }
+
+  function toggleDiagnostics(jobId: string) {
+    const nextIds = new Set(expandedDiagnosticsIds);
+    if (nextIds.has(jobId)) nextIds.delete(jobId);
+    else nextIds.add(jobId);
+    expandedDiagnosticsIds = nextIds;
   }
 
   function hasCostInfo(job: GenerateJobStatus) {
@@ -354,7 +367,7 @@
               </div>
             {/if}
             {#if jobErrorMessage(job, $t.messages.jobFailed)}
-              <div class="mt-3">
+              <div class="mt-3 flex flex-wrap gap-2">
                 <button
                   type="button"
                   class={`control-focus rounded-lg border px-3 py-2 text-xs font-medium ${failureButtonClass(job)}`}
@@ -363,7 +376,16 @@
                 >
                   {isErrorExpanded(job.job_id) ? $t.jobs.hideError : $t.jobs.showError}
                 </button>
+                <button
+                  type="button"
+                  class="control-focus rounded-lg border border-stone-300 px-3 py-2 text-xs font-medium text-stone-600 hover:bg-stone-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                  aria-expanded={isDiagnosticsExpanded(job.job_id)}
+                  onclick={() => toggleDiagnostics(job.job_id)}
+                >
+                  {isDiagnosticsExpanded(job.job_id) ? $t.jobs.hideDiagnostics : $t.jobs.diagnostics}
+                </button>
               </div>
+              <JobDiagnosticsPanel jobId={job.job_id} expanded={isDiagnosticsExpanded(job.job_id)} />
             {/if}
             {#if diagnoses[job.job_id]}
               {@const diagnosis = diagnoses[job.job_id]}

@@ -158,6 +158,36 @@ class GeneratePreviewEvent(BaseModel):
     data_url: str
 
 
+class JobUnitRemoteSummary(BaseModel):
+    phase: str = ""
+    task_id: Optional[str] = None
+    submitted_at: Optional[str] = None
+    deadline_at: Optional[str] = None
+    has_status_url: bool = False
+    has_result_url: bool = False
+    has_cancel_url: bool = False
+    has_idempotency_key: bool = False
+    poll_count: Optional[int] = None
+
+
+class JobUnitDiagnostics(BaseModel):
+    unit_id: str
+    unit_index: int
+    status: str
+    stage: Optional[str] = None
+    message: Optional[str] = None
+    error: Optional[str] = None
+    attempts: int = 0
+    recovery_count: int = 0
+    remote: Optional[JobUnitRemoteSummary] = None
+    diagnostics: Optional[dict] = None
+
+
+class JobDiagnosticsResponse(BaseModel):
+    job_id: str
+    units: list[JobUnitDiagnostics] = Field(default_factory=list)
+
+
 class GenerateJobStatus(GenerateJobResponse):
     id: Optional[str] = None
     image_id: Optional[str] = None

@@ -87,3 +87,38 @@ test('diagnostics explain rewritten prompts and ignored parameters', async ({ pa
   await drawer.getByRole('button', { name: 'History', exact: true }).click();
   await expect(drawer.locator('article').filter({ hasText: 'plain fox' })).toContainText('Upstream diverged from the request');
 });
+
+test('history marks reported parameter differences and opens unit diagnostics', async ({ page }) => {
+  const failedJob = {
+    ...job('diag-job', 'diag flower'),
+    status: 'upstream_error' as const,
+    error: 'Provider response did not include a task id at $.id',
+    size: '1024x1024',
+    quality: 'high',
+    images: [
+      {
+        image_id: 'img-1',
+        image_url: '/api/image/img-1.png',
+        filename: 'img-1.png',
+        reported_size: '1536x1024',
+        reported_quality: 'high'
+      }
+    ]
+  };
+  await loadApp(page, { historyJobs: [failedJob] });
+  await page.getByRole('button', { name: 'Job History' }).click();
+  const drawer = page.getByRole('dialog', { name: 'Job History' });
+  await drawer.getByRole('button', { name: 'History', exact: true }).click();
+  const article = drawer.locator('article').filter({ hasText: 'diag flower' });
+  await expect(article).toContainText('Differs from request');
+  await expect(article).toContainText('Matches request');
+
+  const diagnosticsRequest = page.waitForRequest((candidate) =>
+    new URL(candidate.url()).pathname.endsWith('/diagnostics')
+  );
+  await article.getByRole('button', { name: 'Diagnostics', exact: true }).click();
+  await diagnosticsRequest;
+  await expect(article).toContainText('task_id_missing');
+  await expect(article).toContainText('Provider response did not include a task id at $.id');
+  await expect(article.getByRole('button', { name: 'Copy diagnostics' })).toBeVisible();
+});

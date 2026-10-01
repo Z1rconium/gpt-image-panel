@@ -1237,6 +1237,49 @@ async function mockApi(page: Page, options: MockOptions = {}) {
       );
       return;
     }
+    if (url.pathname.match(/^\/api\/generate\/[^/]+\/diagnostics$/) && request.method() === 'GET') {
+      const jobId = decodeURIComponent(url.pathname.split('/').at(-2) || '');
+      await route.fulfill(
+        json({
+          job_id: jobId,
+          units: [
+            {
+              unit_id: 'unit-1',
+              unit_index: 0,
+              status: 'upstream_error',
+              stage: 'generation_failed',
+              message: 'Provider response did not include a task id',
+              error: 'Provider response did not include a task id at $.id',
+              attempts: 2,
+              recovery_count: 1,
+              remote: {
+                phase: 'submitting',
+                task_id: null,
+                submitted_at: '2026-05-18T12:00:00Z',
+                deadline_at: null,
+                has_status_url: false,
+                has_result_url: false,
+                has_cancel_url: false,
+                has_idempotency_key: false,
+                poll_count: null
+              },
+              diagnostics: {
+                code: 'task_id_missing',
+                stages: [
+                  {
+                    phase: 'submit',
+                    http: { method: 'POST', url: 'https://api.example.com/submit', status: 200 },
+                    mapping_path: '$.id',
+                    snapshot: { id: null }
+                  }
+                ]
+              }
+            }
+          ]
+        })
+      );
+      return;
+    }
     if (url.pathname === '/api/prompt-snippets/search' && request.method() === 'POST') {
       const body = JSON.parse(request.postData() || '{}');
       const query = String(body.query || '').toLowerCase();

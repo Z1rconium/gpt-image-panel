@@ -44,6 +44,7 @@ from ...schemas.generation import (
     GenerateJobResponse,
     GenerateJobStatus,
     GenerateRequest,
+    JobDiagnosticsResponse,
 )
 
 
@@ -51,6 +52,39 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 SSE_IDLE_CHECK_SECONDS = 1.0
 SSE_QUEUE_MAXSIZE = 20
+MAX_DIAGNOSTIC_UNITS = 20
+MAX_DIAGNOSTIC_TASK_ID_CHARS = 64
+
+
+def _unit_diagnostics_entry(unit: dict) -> dict:
+    """Public, bounded per-unit diagnostics view (no raw follow-up URLs)."""
+    remote = unit.get("remote") if isinstance(unit.get("remote"), dict) else None
+    summary = None
+    if remote:
+        task_id = remote.get("task_id")
+        summary = {
+            "phase": str(remote.get("phase") or ""),
+            "task_id": str(task_id)[:MAX_DIAGNOSTIC_TASK_ID_CHARS] if task_id else None,
+            "submitted_at": remote.get("submitted_at"),
+            "deadline_at": remote.get("deadline_at"),
+            "has_status_url": bool(remote.get("status_url")),
+            "has_result_url": bool(remote.get("result_url")),
+            "has_cancel_url": bool(remote.get("cancel_url")),
+            "has_idempotency_key": bool(remote.get("idempotency_key")),
+            "poll_count": remote.get("poll_count"),
+        }
+    return {
+        "unit_id": str(unit.get("unit_id") or ""),
+        "unit_index": int(unit.get("unit_index") or 0),
+        "status": str(unit.get("status") or ""),
+        "stage": unit.get("stage"),
+        "message": unit.get("message"),
+        "error": unit.get("error"),
+        "attempts": int(unit.get("attempts") or 0),
+        "recovery_count": int(unit.get("recovery_count") or 0),
+        "remote": summary,
+        "diagnostics": unit.get("diagnostics"),
+    }
 
 
 def json_payload_key(payload: dict | list) -> str:
@@ -295,6 +329,29 @@ async def get_generate_job(job_id: str):
     if not job:
         raise HTTPException(status_code=404, detail="Generation job not found")
     return GenerateJobStatus(**job)
+
+
+@router.get("/api/generate/{job_id}/diagnostics", response_model=JobDiagnosticsResponse)
+async def get_generate_job_diagnostics(job_id: str):
+    job = await run_db_operation(
+        get_persisted_generate_job,
+        job_id,
+        metric_name="get_generate_job_diagnostics",
+    )
+    if not job:
+        raise HTTPException(status_code=404, detail="Generation job not found")
+    aggregate = await run_db_operation(
+        aggregate_image_job_units,
+        job_id,
+        metric_name="get_generate_job_diagnostics_units",
+    )
+    entries = [
+        _unit_diagnostics_entry(unit)
+        for unit in aggregate.get("units") or []
+        if unit.get("diagnostics") or unit.get("remote")
+    ]
+    entries.sort(key=lambda entry: entry["unit_index"])
+    return JobDiagnosticsResponse(job_id=job_id, units=entries[:MAX_DIAGNOSTIC_UNITS])
 
 
 async def _job_mask_coverage(job_id: str) -> float | None:
