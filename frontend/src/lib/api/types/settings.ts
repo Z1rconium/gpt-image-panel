@@ -234,3 +234,51 @@ export type OverallConfigUpdateItem = {
 export type OverallConfigUpdateRequest = {
   updates: OverallConfigUpdateItem[];
 };
+
+export type PresetExportItem = {
+  name: string;
+  api_url: string;
+  api_path: ApiPath;
+  default_model: string;
+  default_response_format: ResponseFormatDefault;
+  supports_mask: boolean;
+  prompt_guard: boolean;
+  provider_kind: ProviderKind;
+  provider_config?: ProviderConfig | null;
+};
+
+export type PresetExportPackage = {
+  format: string;
+  format_version: number;
+  exported_at?: string | null;
+  presets: PresetExportItem[];
+};
+
+export type PresetImportIssue = {
+  path: string;
+  message: string;
+};
+
+export type PresetImportPreviewItem = {
+  index: number;
+  name: string;
+  api_url: string;
+  provider_kind: string;
+  duplicate_preset_id?: string | null;
+  duplicate_preset_name?: string | null;
+  will_reuse_api_key: boolean;
+  warnings: string[];
+};
+
+export type PresetImportPreviewResponse = {
+  valid: boolean;
+  errors: PresetImportIssue[];
+  items: PresetImportPreviewItem[];
+  total_bytes: number;
+};
+
+export type PresetImportInstruction = {
+  index: number;
+  action: 'create' | 'update' | 'skip';
+  target_preset_id?: string | null;
+};

@@ -8,13 +8,17 @@ from ...runtime.state import state
 from ...services.presets import (
     apply_api_preset,
     apply_ai_assistant_settings,
+    apply_preset_import,
     apply_preset_provider,
     apply_r2_backup_settings,
     apply_nodeimage_settings,
     apply_upstream_socks5_proxy,
     apply_webhook_url,
     begin_api_settings_write,
+    build_preset_export,
+    build_preset_import_preview,
     build_settings_response,
+    reorder_api_presets,
     end_api_settings_write,
     get_active_preset,
     get_api_key_env_var,
@@ -62,7 +66,13 @@ from ...schemas.settings import (
     OverallConfigUpdateRequest,
     CredentialProbeRequest,
     PresetCreateRequest,
+    PresetExportPackage,
+    PresetExportRequest,
     PresetHealthResponse,
+    PresetImportApplyRequest,
+    PresetImportPreviewRequest,
+    PresetImportPreviewResponse,
+    PresetOrderRequest,
     R2BackupSettingsRequest,
     R2HealthResponse,
     SettingsRequest,
@@ -467,6 +477,38 @@ async def create_settings_preset(req: PresetCreateRequest):
         await asyncio.to_thread(persist_api_settings)
     finally:
         end_api_settings_write()
+    return await asyncio.to_thread(build_settings_response)
+
+
+@router.post("/api/settings/presets/export", response_model=PresetExportPackage)
+async def export_settings_preset(req: PresetExportRequest):
+    await asyncio.to_thread(load_api_settings)
+    return await asyncio.to_thread(build_preset_export, req.preset_id)
+
+
+@router.post(
+    "/api/settings/presets/import/preview", response_model=PresetImportPreviewResponse
+)
+async def preview_settings_presets_import(req: PresetImportPreviewRequest):
+    await asyncio.to_thread(load_api_settings)
+    return await asyncio.to_thread(build_preset_import_preview, req.package)
+
+
+@router.post("/api/settings/presets/import", response_model=SettingsResponse)
+async def import_settings_presets(req: PresetImportApplyRequest):
+    await asyncio.to_thread(load_api_settings)
+    await asyncio.to_thread(
+        apply_preset_import,
+        req.package,
+        [item.model_dump(mode="json") for item in req.items],
+    )
+    return await asyncio.to_thread(build_settings_response)
+
+
+@router.put("/api/settings/presets/order", response_model=SettingsResponse)
+async def update_settings_preset_order(req: PresetOrderRequest):
+    await asyncio.to_thread(load_api_settings)
+    await asyncio.to_thread(reorder_api_presets, req.preset_ids)
     return await asyncio.to_thread(build_settings_response)
 
 

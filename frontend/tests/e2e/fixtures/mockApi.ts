@@ -1087,6 +1087,127 @@ async function mockApi(page: Page, options: MockOptions = {}) {
       await route.fulfill(json(mockedSettings));
       return;
     }
+    if (url.pathname === '/api/settings/presets/export' && request.method() === 'POST') {
+      const body = JSON.parse(request.postData() || '{}');
+      const preset =
+        mockedSettings.presets.find((candidate) => candidate.id === body.preset_id) || mockedSettings.presets[0];
+      await route.fulfill(
+        json({
+          format: 'gpt-image-panel-presets',
+          format_version: 1,
+          exported_at: '2026-05-18T12:00:00Z',
+          presets: [
+            {
+              name: preset.name,
+              api_url: preset.api_url,
+              api_path: preset.api_path,
+              default_model: preset.default_model,
+              default_response_format: preset.default_response_format,
+              supports_mask: preset.supports_mask,
+              prompt_guard: Boolean((preset as { prompt_guard?: boolean }).prompt_guard),
+              provider_kind: (preset as { provider_kind?: string }).provider_kind || 'openai',
+              provider_config: (preset as { provider_config?: unknown }).provider_config ?? null
+            }
+          ]
+        })
+      );
+      return;
+    }
+    if (url.pathname === '/api/settings/presets/import/preview' && request.method() === 'POST') {
+      const body = JSON.parse(request.postData() || '{}');
+      const pkg = body.package as { format?: string; format_version?: number; presets?: unknown[] } | null;
+      const valid = Boolean(
+        pkg &&
+          pkg.format === 'gpt-image-panel-presets' &&
+          pkg.format_version === 1 &&
+          Array.isArray(pkg.presets) &&
+          pkg.presets.length
+      );
+      if (!valid) {
+        await route.fulfill(
+          json({
+            valid: false,
+            errors: [{ path: 'package', message: 'unexpected package shape' }],
+            items: [],
+            total_bytes: 10
+          })
+        );
+        return;
+      }
+      const items = (pkg?.presets || []).map((raw, index) => {
+        const item = raw as { name?: string; api_url?: string; provider_kind?: string };
+        const name = String(item.name || '');
+        const duplicate = mockedSettings.presets.find(
+          (candidate) => candidate.name.toLowerCase() === name.toLowerCase()
+        );
+        return {
+          index,
+          name,
+          api_url: String(item.api_url || ''),
+          provider_kind: String(item.provider_kind || 'openai'),
+          duplicate_preset_id: duplicate?.id ?? null,
+          duplicate_preset_name: duplicate?.name ?? null,
+          will_reuse_api_key: false,
+          warnings: ['The API key is not included; enter it after importing.']
+        };
+      });
+      await route.fulfill(json({ valid: true, errors: [], items, total_bytes: 128 }));
+      return;
+    }
+    if (url.pathname === '/api/settings/presets/import' && request.method() === 'POST') {
+      const body = JSON.parse(request.postData() || '{}') as {
+        package?: { presets?: unknown[] };
+        items?: { index: number; action: string; target_preset_id?: string }[];
+      };
+      const instructions = body.items || [];
+      const presets = [...mockedSettings.presets];
+      (body.package?.presets || []).forEach((raw, index) => {
+        const instruction = instructions.find((entry) => entry.index === index);
+        const action = instruction?.action || 'create';
+        if (action === 'skip') return;
+        const item = raw as Record<string, unknown>;
+        if (action === 'update') {
+          const targetIndex = presets.findIndex((preset) => preset.id === instruction?.target_preset_id);
+          if (targetIndex >= 0) {
+            presets[targetIndex] = {
+              ...presets[targetIndex],
+              name: String(item.name || presets[targetIndex].name),
+              api_url: String(item.api_url || presets[targetIndex].api_url),
+              default_model: String(item.default_model || presets[targetIndex].default_model),
+              has_api_key: false,
+              api_key_masked: ''
+            };
+          }
+          return;
+        }
+        presets.push({
+          ...mockedSettings.presets[0],
+          id: `preset-import-${index + 1}`,
+          name: String(item.name || `Imported ${index + 1}`),
+          api_url: String(item.api_url || 'https://import.example.com'),
+          has_api_key: false,
+          api_key_masked: '',
+          api_key_source: 'none'
+        } as (typeof mockedSettings.presets)[number]);
+      });
+      mockedSettings = { ...mockedSettings, presets } as typeof mockedSettings;
+      await route.fulfill(json(mockedSettings));
+      return;
+    }
+    if (url.pathname === '/api/settings/presets/order' && request.method() === 'PUT') {
+      const body = JSON.parse(request.postData() || '{}') as { preset_ids?: string[] };
+      const byId = new Map(mockedSettings.presets.map((preset) => [preset.id, preset]));
+      const ordered = (body.preset_ids || [])
+        .map((id) => byId.get(id))
+        .filter((preset): preset is (typeof mockedSettings.presets)[number] => Boolean(preset));
+      if (ordered.length !== mockedSettings.presets.length) {
+        await route.fulfill(json({ detail: 'preset_ids must list every existing preset exactly once' }, 422));
+        return;
+      }
+      mockedSettings = { ...mockedSettings, presets: ordered };
+      await route.fulfill(json(mockedSettings));
+      return;
+    }
     if (url.pathname === '/api/prompt-snippets/search' && request.method() === 'POST') {
       const body = JSON.parse(request.postData() || '{}');
       const query = String(body.query || '').toLowerCase();

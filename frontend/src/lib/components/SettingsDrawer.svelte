@@ -22,6 +22,7 @@
   import Overlay from '$lib/components/Overlay.svelte';
   import HealthResults from '$lib/components/settings/HealthResults.svelte';
   import PresetSettingsEditor from '$lib/components/settings/PresetSettingsEditor.svelte';
+  import PresetImportDialog from '$lib/components/settings/PresetImportDialog.svelte';
   import OverallConfigDialog from '$lib/components/settings/OverallConfigDialog.svelte';
   import SystemPromptDialog from '$lib/components/settings/SystemPromptDialog.svelte';
 
@@ -56,6 +57,11 @@
     onSavePromptOptimizerSystemPrompt?: (systemPrompt: string) => Promise<PromptOptimizerSystemPromptResponse>;
     onLoadOverallConfig?: () => Promise<OverallConfigResponse>;
     onSaveOverallConfig?: (body: OverallConfigUpdateRequest) => Promise<OverallConfigResponse>;
+    sharePackage?: unknown | null;
+    onSharePackageHandled?: () => void;
+    onExportPreset?: (presetId: string) => Promise<void> | void;
+    onSharePreset?: (presetId: string) => Promise<void> | void;
+    onReorderPresets?: (presetIds: string[]) => Promise<void> | void;
   }
 
   let {
@@ -102,7 +108,12 @@
     onSaveOverallConfig = async () => ({
       items: [],
       restart_required_names: []
-    })
+    }),
+    sharePackage = null,
+    onSharePackageHandled = () => {},
+    onExportPreset = () => {},
+    onSharePreset = () => {},
+    onReorderPresets = () => {}
   }: Props = $props();
 
   // Editable timeout/interval inputs hold raw text until their normalizers run.
@@ -154,6 +165,8 @@
   // effect below is the only writer that reflects server state into it.
   let draft = $state<SettingsDrawerDraft>({ ...initialDraft });
   let activatingPresetId = $state('');
+  let importOpen = $state(false);
+  let importPackage = $state<unknown>(null);
   let systemPromptOpen = $state(false);
   let systemPromptLoading = $state(false);
   let systemPromptSaving = $state(false);
@@ -468,8 +481,18 @@
     }
   }
 
+  function openImportDialog(packageValue: unknown = null) {
+    importPackage = packageValue;
+    importOpen = true;
+  }
+
   async function requestCloseDrawer() {
     if (saving) return;
+    if (importOpen) {
+      importOpen = false;
+      importPackage = null;
+      return;
+    }
     if (systemPromptOpen) {
       await closeSystemPromptEditor();
       return;
@@ -509,6 +532,17 @@
           <div class="mt-2 flex gap-2">
             <button type="button" class="control-focus rounded-lg border border-emerald-600 px-3 py-1.5 text-emerald-800 hover:bg-emerald-100 dark:border-emerald-500 dark:text-emerald-300 dark:hover:bg-emerald-900/40" onclick={onApplyPrefill}>{$t.settings.prefillCreate}</button>
             <button type="button" class="control-focus rounded-lg border border-stone-300 px-3 py-1.5 text-stone-700 hover:bg-stone-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800" onclick={onDismissPrefill}>{$t.settings.prefillDismiss}</button>
+          </div>
+        </div>
+      {/if}
+
+      {#if sharePackage}
+        <div class="mx-5 mt-4 rounded-lg border border-emerald-300 bg-emerald-50 p-3 text-xs text-stone-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-zinc-300" role="status" data-testid="settings-share-banner">
+          <p class="font-medium text-stone-900 dark:text-zinc-100">{$t.settings.shareTitle}</p>
+          <p class="mt-1 text-stone-500 dark:text-zinc-500">{$t.settings.shareHint}</p>
+          <div class="mt-2 flex gap-2">
+            <button type="button" class="control-focus rounded-lg border border-emerald-600 px-3 py-1.5 text-emerald-800 hover:bg-emerald-100 dark:border-emerald-500 dark:text-emerald-300 dark:hover:bg-emerald-900/40" onclick={() => openImportDialog(sharePackage)}>{$t.settings.shareImport}</button>
+            <button type="button" class="control-focus rounded-lg border border-stone-300 px-3 py-1.5 text-stone-700 hover:bg-stone-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800" onclick={onSharePackageHandled}>{$t.settings.prefillDismiss}</button>
           </div>
         </div>
       {/if}
@@ -560,6 +594,10 @@
         {aiAssistantHealthChecking}
         {onCreate}
         {onDelete}
+        onExport={onExportPreset}
+        onShare={onSharePreset}
+        onImport={() => openImportDialog(null)}
+        onReorder={onReorderPresets}
         {activateSelectedPreset}
         {keyLabel}
         {openOverallConfigModal}
@@ -625,4 +663,12 @@
   {systemPromptError}
   {closeSystemPromptEditor}
   {saveSystemPrompt}
+/>
+
+<PresetImportDialog
+  open={importOpen}
+  {settings}
+  initialPackage={importPackage}
+  onClose={() => { importOpen = false; importPackage = null; }}
+  onApplied={() => { importPackage = null; onSharePackageHandled(); }}
 />

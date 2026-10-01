@@ -28,6 +28,7 @@
   import { promptSnippetsStore } from '$lib/stores/promptSnippets';
   import { settingsActivityStore, settingsStore } from '$lib/stores/settings';
   import { settingsPrefillStore } from '$lib/stores/settingsPrefill';
+  import { presetShareStore } from '$lib/stores/presetShare';
   import { toastStore, uiStore, type ToastOptions } from '$lib/stores/ui';
   import { versionStore } from '$lib/stores/version';
   import { workspaceModeStore, type WorkspaceMode } from '$lib/stores/workspaceMode';
@@ -35,6 +36,7 @@
   import { copyText, imageUrl } from '$lib/utils/format';
   import { canPrefetchNonCritical } from '$lib/utils/network';
   import { readSettingsPrefill, stripSettingsPrefill } from '$lib/utils/settingsPrefill';
+  import { buildPresetShareUrl, readPresetShare, stripPresetShare } from '$lib/utils/presetShare';
   import { buildPromptOptimizeRequest } from '$lib/utils/promptOptimizer';
   import {
     agentViewPanel,
@@ -258,7 +260,7 @@
     urlSync.setReady();
     urlSync.flush();
     jobsStore.startJobsEvents();
-    if ($settingsPrefillStore) void openUiPanel('settings', 'settingsOpen');
+    if ($settingsPrefillStore || $presetShareStore) void openUiPanel('settings', 'settingsOpen');
   }
 
   async function loadAuthenticatedData() {
@@ -441,6 +443,53 @@
 
   function dismissSettingsPrefill() {
     settingsPrefillStore.set(null);
+  }
+
+  function downloadPresetPackage(packageValue: unknown) {
+    const blob = new Blob([JSON.stringify(packageValue, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `preset-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  async function exportPreset(presetId: string) {
+    if (!presetId) return;
+    try {
+      const packageValue = await settingsStore.exportPreset(presetId);
+      downloadPresetPackage(packageValue);
+      showToast($t.messages.presetExported);
+    } catch (error) {
+      showError(error);
+    }
+  }
+
+  async function sharePreset(presetId: string) {
+    if (!presetId) return;
+    try {
+      const packageValue = await settingsStore.exportPreset(presetId);
+      const link = buildPresetShareUrl(packageValue, window.location.href);
+      if (!link) {
+        showToast($t.messages.presetShareTooLarge, 'error');
+        return;
+      }
+      await copyText(link);
+      showToast($t.messages.presetShareCopied);
+    } catch (error) {
+      showError(error);
+    }
+  }
+
+  function reorderPresets(presetIds: string[]) {
+    void settingsStore.reorderPresets(presetIds, showToast).catch(showError);
+  }
+
+  function dismissPresetShare() {
+    presetShareStore.set(null);
   }
 
   function activatePreset(presetId: string) {
@@ -1248,8 +1297,15 @@
     const pageUrl = new URL(window.location.href);
     const prefill = readSettingsPrefill(pageUrl);
     if (prefill) settingsPrefillStore.set(prefill);
-    const strippedUrl = stripSettingsPrefill(pageUrl);
-    if (strippedUrl) window.history.replaceState(window.history.state, '', strippedUrl);
+    const sharedPackage = readPresetShare(pageUrl);
+    if (sharedPackage) presetShareStore.set(sharedPackage);
+    const strippedUrl = stripPresetShare(pageUrl);
+    if (strippedUrl) {
+      window.history.replaceState(window.history.state, '', strippedUrl);
+    } else {
+      const strippedPrefillUrl = stripSettingsPrefill(pageUrl);
+      if (strippedPrefillUrl) window.history.replaceState(window.history.state, '', strippedPrefillUrl);
+    }
 
     accessStore.installUnauthorizedHandler();
     const initialData = loadAuthenticatedData();
@@ -1413,6 +1469,11 @@
   prefill={$settingsPrefillStore}
   onApplyPrefill={applySettingsPrefill}
   onDismissPrefill={dismissSettingsPrefill}
+  sharePackage={$presetShareStore}
+  onSharePackageHandled={dismissPresetShare}
+  onExportPreset={exportPreset}
+  onSharePreset={sharePreset}
+  onReorderPresets={reorderPresets}
   onActivate={activatePreset}
   onDelete={deletePreset}
   onHealthCheck={checkPresetHealth}

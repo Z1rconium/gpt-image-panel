@@ -2,7 +2,7 @@ import { get, writable } from 'svelte/store';
 import { apiFetch } from '$lib/api/client';
 import { t } from '$lib/i18n';
 import { confirmStore } from '$lib/stores/confirm';
-import type { AIAssistantSettingsInput, AssistantHealthResponse, OverallConfigResponse, OverallConfigUpdateRequest, PresetHealthResponse, PromptOptimizerHealthResponse, PromptOptimizerSystemPromptResponse, R2BackupSettingsInput, R2HealthResponse, SettingsInput, SettingsResponse } from '$lib/api/types/settings';
+import type { AIAssistantSettingsInput, AssistantHealthResponse, OverallConfigResponse, OverallConfigUpdateRequest, PresetExportPackage, PresetHealthResponse, PresetImportInstruction, PresetImportPreviewResponse, PromptOptimizerHealthResponse, PromptOptimizerSystemPromptResponse, R2BackupSettingsInput, R2HealthResponse, SettingsInput, SettingsResponse } from '$lib/api/types/settings';
 import type { ToastVariant } from '$lib/stores/ui';
 
 type ShowToast = (message: string, variant?: ToastVariant) => void;
@@ -236,6 +236,72 @@ function createSettingsStore() {
     settingsActivityStore.clearHealth();
   }
 
+  function clearDerivedHealth() {
+    settingsActivityStore.clearHealth();
+    settingsActivityStore.setR2Health(null);
+    settingsActivityStore.clearPromptOptimizerHealth();
+    settingsActivityStore.clearAiAssistantHealth();
+  }
+
+  async function exportPreset(presetId: string) {
+    return apiFetch<PresetExportPackage>(
+      '/api/settings/presets/export',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preset_id: presetId })
+      },
+      'exporting preset'
+    );
+  }
+
+  async function previewPresetImport(packageValue: unknown) {
+    return apiFetch<PresetImportPreviewResponse>(
+      '/api/settings/presets/import/preview',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ package: packageValue })
+      },
+      'previewing preset import'
+    );
+  }
+
+  async function importPresets(
+    packageValue: unknown,
+    items: PresetImportInstruction[],
+    showToast: ShowToast
+  ) {
+    const settings = await apiFetch<SettingsResponse>(
+      '/api/settings/presets/import',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ package: packageValue, items })
+      },
+      'importing presets'
+    );
+    update((state) => ({ ...state, settings }));
+    clearDerivedHealth();
+    showToast(get(t).messages.presetsImported(items.filter((item) => item.action !== 'skip').length));
+    return settings;
+  }
+
+  async function reorderPresets(presetIds: string[], showToast: ShowToast) {
+    const settings = await apiFetch<SettingsResponse>(
+      '/api/settings/presets/order',
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preset_ids: presetIds })
+      },
+      'saving preset order'
+    );
+    update((state) => ({ ...state, settings }));
+    showToast(get(t).messages.presetOrderSaved);
+    return settings;
+  }
+
   async function checkR2Health(body: R2BackupSettingsInput) {
     settingsActivityStore.setR2HealthChecking(true);
     try {
@@ -351,6 +417,10 @@ function createSettingsStore() {
     deletePreset,
     checkPresetHealth,
     clearPresetHealth,
+    exportPreset,
+    previewPresetImport,
+    importPresets,
+    reorderPresets,
     checkR2Health,
     checkPromptOptimizerHealth,
     clearPromptOptimizerHealth,

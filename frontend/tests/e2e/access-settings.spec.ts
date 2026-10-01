@@ -498,3 +498,111 @@ test('settings drawer configures a custom async provider with a JSON mapping', a
   expect(body).toMatchObject({ api_url: 'https://queue.example.com', provider_kind: 'async_json' });
   expect(body.provider_config).toEqual(config);
 });
+
+test('export downloads a secret-free preset package', async ({ page }) => {
+  await loadApp(page);
+  await page.getByRole('button', { name: 'Settings' }).click();
+  const drawer = page.getByRole('dialog', { name: 'Settings' });
+
+  const downloadPromise = page.waitForEvent('download');
+  await drawer.getByRole('button', { name: 'Export', exact: true }).click();
+  const download = await downloadPromise;
+  const stream = await download.createReadStream();
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) chunks.push(chunk as Buffer);
+  const payload = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  expect(payload.format).toBe('gpt-image-panel-presets');
+  expect(payload.presets[0].api_url).toBe('https://api.example.com');
+  expect(JSON.stringify(payload)).not.toContain('api_key');
+  await expect(page.getByRole('status')).toContainText('Preset exported');
+});
+
+test('import previews duplicates and applies after explicit confirmation', async ({ page }) => {
+  await loadApp(page);
+  await page.getByRole('button', { name: 'Settings' }).click();
+  const drawer = page.getByRole('dialog', { name: 'Settings' });
+  await drawer.getByRole('button', { name: 'Import', exact: true }).click();
+
+  const dialog = page.getByRole('dialog', { name: 'Import presets' });
+  const pkg = {
+    format: 'gpt-image-panel-presets',
+    format_version: 1,
+    presets: [
+      {
+        name: 'Default',
+        api_url: 'https://api.example.com/v1',
+        api_path: '/v1/images/generations',
+        default_model: 'gpt-image-2',
+        default_response_format: 'url',
+        supports_mask: true,
+        prompt_guard: false,
+        provider_kind: 'openai'
+      }
+    ]
+  };
+  await dialog.getByLabel('Package JSON').fill(JSON.stringify(pkg));
+  await dialog.getByRole('button', { name: 'Preview', exact: true }).click();
+  await expect(dialog).toContainText('Same name as "Default"');
+  await expect(dialog).toContainText('The API key is not included');
+
+  const importRequest = page.waitForRequest(
+    (request) => new URL(request.url()).pathname === '/api/settings/presets/import' && request.method() === 'POST'
+  );
+  await dialog.getByRole('button', { name: 'Apply import' }).click();
+  const body = (await importRequest).postDataJSON();
+  expect(body.items).toEqual([{ index: 0, action: 'create' }]);
+  await expect(page.getByRole('status')).toContainText('1 preset(s) imported');
+});
+
+test('shared preset link offers a secret-free import preview', async ({ page }) => {
+  const pkg = {
+    format: 'gpt-image-panel-presets',
+    format_version: 1,
+    presets: [
+      { name: 'Shared gateway', api_url: 'https://shared.example.com', api_path: '/v1/images/generations', default_model: 'shared-model', default_response_format: 'url', supports_mask: true, prompt_guard: false, provider_kind: 'openai' }
+    ]
+  };
+  const encoded = Buffer.from(JSON.stringify(pkg), 'utf8').toString('base64url').replace(/=+$/, '');
+  await mockApi(page);
+  await page.goto(`/?preset=${encoded}&mode=studio`);
+
+  const drawer = page.getByRole('dialog', { name: 'Settings' });
+  const banner = drawer.getByTestId('settings-share-banner');
+  await expect(banner).toContainText('Shared preset received', { timeout: 15_000 });
+  await expect(page).not.toHaveURL(/preset=/);
+
+  await banner.getByRole('button', { name: 'Preview import' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Import presets' });
+  await expect(dialog).toContainText('Shared gateway');
+  await expect(dialog).toContainText('https://shared.example.com');
+
+  const importRequest = page.waitForRequest(
+    (request) => new URL(request.url()).pathname === '/api/settings/presets/import' && request.method() === 'POST'
+  );
+  await dialog.getByRole('button', { name: 'Apply import' }).click();
+  await importRequest;
+  await expect(drawer).toContainText('Shared gateway');
+});
+
+test('preset order buttons persist the new order', async ({ page }) => {
+  await loadApp(page, {
+    settings: {
+      ...settingsResponse,
+      presets: [
+        ...settingsResponse.presets,
+        { ...settingsResponse.presets[0], id: 'alt', name: 'Alt preset' }
+      ]
+    }
+  });
+  await page.getByRole('button', { name: 'Settings' }).click();
+  const drawer = page.getByRole('dialog', { name: 'Settings' });
+  await expect(drawer).toContainText('Alt preset');
+
+  const orderRequest = page.waitForRequest(
+    (request) => new URL(request.url()).pathname === '/api/settings/presets/order' && request.method() === 'PUT'
+  );
+  await drawer.getByRole('button', { name: 'Move preset down' }).first().click();
+  const body = (await orderRequest).postDataJSON();
+  expect(body.preset_ids).toEqual(['alt', 'default']);
+  await expect(page.getByRole('status')).toContainText('Preset order saved');
+});

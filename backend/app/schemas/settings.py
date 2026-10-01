@@ -213,6 +213,82 @@ class CredentialProbeRequest(StrictRequestModel):
     use_credentials: bool = False
 
 
+PRESET_EXPORT_FORMAT = "gpt-image-panel-presets"
+PRESET_EXPORT_VERSION = 1
+MAX_PRESET_IMPORT_BYTES = 256 * 1024
+MAX_IMPORTED_PRESETS = 50
+
+
+class PresetExportItem(StrictRequestModel):
+    name: str = Field(min_length=1, max_length=160)
+    api_url: str = Field(max_length=2048)
+    api_path: ApiPath = "/v1/images/generations"
+    default_model: str = Field(default="", max_length=200)
+    default_response_format: ResponseFormatDefault = "url"
+    supports_mask: bool = True
+    prompt_guard: bool = False
+    provider_kind: ProviderKind = "openai"
+    provider_config: Optional[ProviderConfigPayload] = None
+
+    @field_validator("api_url")
+    @classmethod
+    def validate_export_api_url(cls, value: str) -> str:
+        return normalize_upstream_base_url(value)
+
+
+class PresetExportPackage(StrictRequestModel):
+    format: Literal["gpt-image-panel-presets"] = "gpt-image-panel-presets"
+    format_version: Literal[1] = 1
+    exported_at: Optional[str] = None
+    presets: list[PresetExportItem] = Field(min_length=1, max_length=MAX_IMPORTED_PRESETS)
+
+
+class PresetExportRequest(StrictRequestModel):
+    preset_id: str = Field(min_length=1, max_length=128)
+
+
+class PresetImportIssue(BaseModel):
+    path: str
+    message: str
+
+
+class PresetImportPreviewItem(BaseModel):
+    index: int
+    name: str
+    api_url: str
+    provider_kind: str
+    duplicate_preset_id: Optional[str] = None
+    duplicate_preset_name: Optional[str] = None
+    will_reuse_api_key: bool = False
+    warnings: list[str] = Field(default_factory=list)
+
+
+class PresetImportPreviewResponse(BaseModel):
+    valid: bool
+    errors: list[PresetImportIssue] = Field(default_factory=list)
+    items: list[PresetImportPreviewItem] = Field(default_factory=list)
+    total_bytes: int = 0
+
+
+class PresetImportPreviewRequest(StrictRequestModel):
+    package: Any = None
+
+
+class PresetImportApplyItem(StrictRequestModel):
+    index: int = Field(ge=0, le=MAX_IMPORTED_PRESETS - 1)
+    action: Literal["create", "update", "skip"] = "create"
+    target_preset_id: Optional[str] = Field(default=None, max_length=128)
+
+
+class PresetImportApplyRequest(StrictRequestModel):
+    package: Any = None
+    items: list[PresetImportApplyItem] = Field(default_factory=list, max_length=MAX_IMPORTED_PRESETS)
+
+
+class PresetOrderRequest(StrictRequestModel):
+    preset_ids: list[str] = Field(min_length=1, max_length=MAX_IMPORTED_PRESETS)
+
+
 class R2HealthResponse(PresetHealthResponse):
     pass
 
