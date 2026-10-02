@@ -2,7 +2,11 @@
   import { onDestroy } from 'svelte';
   import { t } from '$lib/i18n';
   import type { ProviderKind } from '$lib/api/types/common';
-  import type { PresetImportIssue, ProviderMappingExtraction } from '$lib/api/types/settings';
+  import type {
+    PresetImportIssue,
+    ProviderCapabilities,
+    ProviderMappingExtraction
+  } from '$lib/api/types/settings';
   import { parseProviderConfigText } from '$lib/features/settings/draft';
   import { settingsStore } from '$lib/stores/settings';
   import { copyText } from '$lib/utils/format';
@@ -11,14 +15,28 @@
   export let providerConfigText = '';
   export let supportsMask = true;
 
-  // A neutral skeleton showing the shape; the docs describe every field.
+  // A neutral skeleton showing the v2 shape; the prompt button documents every field.
   const MAPPING_PLACEHOLDER = JSON.stringify(
     {
-      version: 1,
+      version: 2,
+      mode: 'async',
       auth: { header: 'Authorization', scheme: 'Bearer' },
-      submit: { path: '/{{model}}', body: { prompt: '{{prompt}}' } },
-      poll: { url_path: '$.status_url', status_path: '$.status', done: ['COMPLETED'], failed: ['FAILED'] },
-      result: { url_path: '$.result_url', images_path: '$.images[*].url', image_kind: 'url' }
+      submit: { path: '/v1/jobs', method: 'POST', body: { prompt: '{{prompt}}' } },
+      poll: {
+        task_id_path: '$.data.task_id',
+        url_template: '/v1/jobs/{{task_id}}',
+        status_path: '$.data.status',
+        done: ['succeeded'],
+        failed: ['failed']
+      },
+      result: { images_path: '$.data.images[*].url', image_kind: 'url' },
+      edit_submit: {
+        path: '/v1/edits',
+        body_format: 'multipart',
+        body: { prompt: '{{prompt}}' },
+        files: { images: 'image', mask: 'mask' }
+      },
+      capabilities: { transparent_background: false, formats: ['png', 'jpeg', 'webp'] }
     },
     null,
     2
@@ -31,6 +49,7 @@
   let validating = false;
   let validationErrors: PresetImportIssue[] = [];
   let validationTimer: ReturnType<typeof setTimeout> | null = null;
+  let capabilities: ProviderCapabilities | null = null;
   let samplesOpen = false;
   let sampleSubmit = '';
   let samplePoll = '';
@@ -70,8 +89,10 @@
     try {
       const response = await settingsStore.validateProviderMapping({ provider_config: config });
       validationErrors = response.valid ? [] : response.errors;
+      capabilities = response.valid ? response.capabilities || null : null;
     } catch {
       validationErrors = [];
+      capabilities = null;
     } finally {
       validating = false;
     }
@@ -81,6 +102,7 @@
     if (validationTimer) clearTimeout(validationTimer);
     validationErrors = [];
     extraction = null;
+    capabilities = null;
     if (providerKind !== 'async_json' || !parsed.ok || !parsed.value) return;
     const config = parsed.value;
     validationTimer = setTimeout(() => {
@@ -118,9 +140,11 @@
     });
     if (!response.valid) {
       validationErrors = response.errors;
+      capabilities = null;
       return;
     }
     extraction = response.extraction || null;
+    capabilities = response.capabilities || null;
   }
 
   function fieldLabel(result: { found: boolean; value?: string | null; detail?: string | null }): string {
@@ -173,6 +197,16 @@
             <li>{issue.path}: {issue.message}</li>
           {/each}
         </ul>
+      {/if}
+      {#if capabilities}
+        <div class="flex flex-wrap items-center gap-1.5" aria-label={$t.settings.mappingCapabilities}>
+          <span class="text-xs font-medium text-stone-500 dark:text-zinc-500">{$t.settings.mappingCapabilities}</span>
+          {#if capabilities.edit}<span class="rounded bg-emerald-100 px-1.5 py-0.5 text-[11px] text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">{$t.settings.mappingCapEdit}</span>{/if}
+          {#if capabilities.mask}<span class="rounded bg-emerald-100 px-1.5 py-0.5 text-[11px] text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">{$t.settings.mappingCapMask}</span>{/if}
+          {#if capabilities.stream}<span class="rounded bg-emerald-100 px-1.5 py-0.5 text-[11px] text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">{$t.settings.mappingCapStream}</span>{/if}
+          {#if capabilities.transparent_background}<span class="rounded bg-emerald-100 px-1.5 py-0.5 text-[11px] text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">{$t.settings.mappingCapTransparent}</span>{/if}
+          <span class="rounded bg-stone-100 px-1.5 py-0.5 font-mono text-[11px] text-stone-600 dark:bg-zinc-800 dark:text-zinc-300">{$t.settings.mappingCapFormats(capabilities.formats.join('/'))}</span>
+        </div>
       {/if}
 
       <details class="rounded-lg border border-stone-200 p-3 dark:border-zinc-800" bind:open={samplesOpen}>

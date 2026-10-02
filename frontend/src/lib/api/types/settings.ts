@@ -3,6 +3,17 @@ import type { ApiKeySource, ApiPath, AssistantApiPath, OverallConfigValueSource,
 // Declarative async-provider mapping. The backend validates the full shape.
 export type ProviderConfig = Record<string, unknown>;
 
+// Resolved capability view of a provider mapping (computed by the backend; the
+// same judgment gates task admission).
+export type ProviderCapabilities = {
+  generate: boolean;
+  edit: boolean;
+  mask: boolean;
+  stream: boolean;
+  transparent_background: boolean;
+  formats: string[];
+};
+
 export type ApiPreset = {
   id: string;
   name: string;
@@ -14,6 +25,7 @@ export type ApiPreset = {
   prompt_guard?: boolean;
   provider_kind?: ProviderKind;
   provider_config?: ProviderConfig | null;
+  provider_capabilities?: ProviderCapabilities;
   api_key_masked: string;
   has_api_key: boolean;
   api_key_source: ApiKeySource;
@@ -35,6 +47,7 @@ export type SettingsResponse = {
   supports_mask: boolean;
   prompt_guard?: boolean;
   provider_kind?: ProviderKind;
+  provider_capabilities?: ProviderCapabilities;
   has_upstream_socks5_proxy: boolean;
   upstream_socks5_proxy_masked: string;
   has_webhook_url: boolean;
@@ -305,6 +318,7 @@ export type ProviderMappingValidateResponse = {
   valid: boolean;
   errors: PresetImportIssue[];
   extraction?: ProviderMappingExtraction | null;
+  capabilities?: ProviderCapabilities;
 };
 
 export type ProviderMappingPromptResponse = {

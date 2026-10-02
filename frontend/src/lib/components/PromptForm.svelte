@@ -6,6 +6,7 @@
   import { t } from '$lib/i18n';
   import type { Snippet } from 'svelte';
   import type { PromptFormState } from '$lib/stores/preview';
+  import { settingsStore } from '$lib/stores/settings';
   import { RESPONSE_FORMAT_OPTIONS, sanitizeQuantityInput } from '$lib/utils/promptForm';
   import { imageQualities, isImage25, MAX_PROMPT_CHARS, promptLength } from '$lib/utils/imageModels';
 
@@ -56,15 +57,26 @@
         : '0-100'
   );
   const optimizeDisabled = $derived(loading || optimizing || !optimizerEnabled || !promptForm.prompt.trim());
+  // Mapped (async_json) presets publish their capability set from the backend;
+  // the form mirrors it so unsupported options are disabled before submit.
+  const providerCaps = $derived($settingsStore.settings?.provider_capabilities ?? null);
+  const providerMapped = $derived(($settingsStore.settings?.provider_kind ?? 'openai') === 'async_json');
 
   const streamUnavailableReason = $derived(
     Number(promptForm.quantity) > 1
       ? $t.promptForm.streamRequiresSingleImage
       : !hasEditSource && promptForm.apiPath !== '/v1/images/generations'
         ? $t.promptForm.streamUnsupportedPath
-        : ''
+        : providerMapped && !providerCaps?.stream
+          ? $t.promptForm.streamUnavailableMapped
+          : ''
   );
   const streamDisabled = $derived(loading || Boolean(streamUnavailableReason));
+  const transparentDisabledReason = $derived(
+    providerMapped && providerCaps && !providerCaps.transparent_background
+      ? $t.promptForm.transparentUnavailableMapped
+      : ''
+  );
 
   let qualityResetModel = $state('');
 
@@ -79,7 +91,10 @@
   $effect(() => {
     if (
       promptForm.stream &&
-      (loading || Number(promptForm.quantity) > 1 || (!hasEditSource && promptForm.apiPath !== '/v1/images/generations'))
+      (loading ||
+        Number(promptForm.quantity) > 1 ||
+        (!hasEditSource && promptForm.apiPath !== '/v1/images/generations') ||
+        (providerMapped && !providerCaps?.stream))
     ) {
       promptForm.stream = false;
     }
@@ -91,6 +106,11 @@
     if (promptForm.background === 'transparent' && promptForm.outputFormat === 'jpeg') {
       promptForm.outputFormat = 'png';
       promptForm.outputCompression = '';
+    }
+  });
+  $effect(() => {
+    if (promptForm.background === 'transparent' && transparentDisabledReason) {
+      promptForm.background = 'auto';
     }
   });
   $effect(() => {
@@ -243,7 +263,7 @@
             <select bind:value={promptForm.background} disabled={parameterControlsDisabled} class="control-focus form-select !bg-white focus:border-emerald-500 dark:!bg-zinc-900">
               <option value="auto">{$t.promptForm.backgroundAuto}</option>
               <option value="opaque">{$t.promptForm.backgroundOpaque}</option>
-              <option value="transparent">{$t.promptForm.backgroundTransparent}</option>
+              <option value="transparent" disabled={Boolean(transparentDisabledReason)}>{$t.promptForm.backgroundTransparent}</option>
               {#if !hasEditSource && !promptOnlyMode}
                 <option value="chroma_green">{$t.promptForm.backgroundChromaGreen}</option>
                 <option value="chroma_magenta">{$t.promptForm.backgroundChromaMagenta}</option>
@@ -251,6 +271,8 @@
             </select>
             {#if promptForm.background?.startsWith('chroma_')}
               <p class="mt-1 text-xs text-stone-500 dark:text-zinc-400">{$t.promptForm.chromaHint}</p>
+            {:else if transparentDisabledReason}
+              <p class="mt-1 text-xs text-stone-500 dark:text-zinc-400">{transparentDisabledReason}</p>
             {/if}
             {#if promptForm.background === 'transparent' && promptForm.outputFormat === 'jpeg'}
               <p class="mt-1 text-xs text-amber-600 dark:text-amber-400">{$t.promptForm.backgroundTransparentNote}</p>

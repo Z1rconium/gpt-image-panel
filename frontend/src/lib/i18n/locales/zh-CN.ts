@@ -170,6 +170,7 @@ const zh: Translation = {
     defaultResponseFormat: '默认响应格式',
     supportsMask: '支持蒙版编辑',
     supportsMaskHint: '对会忽略 mask 字段的网关请关闭；关闭后该预设不再显示蒙版入口。',
+    supportsMaskMappedHint: '由映射能力决定：在 provider_config 中配置 edit_submit.files.mask（multipart）或 {{mask}}（JSON）后即可启用蒙版编辑。',
     promptGuard: '防止提示词改写',
     promptGuardHint: '在提示词前加入"按原样使用"的指令，要求上游不要扩写或改写。适用于 /v1/responses 及会自动扩写提示词的网关。',
     apiKey: 'API 密钥',
@@ -291,6 +292,12 @@ const zh: Translation = {
     mappingImages: '图片',
     mappingImagesUnknown: '请粘贴结果或查询示例',
     mappingImagesFound: (count: number, kind: string) => `${count} 张图片（${kind || 'url'}）`,
+    mappingCapabilities: '能力',
+    mappingCapEdit: '编辑',
+    mappingCapMask: '蒙版',
+    mappingCapStream: '流式',
+    mappingCapTransparent: '透明背景',
+    mappingCapFormats: (formats: string) => `格式：${formats}`,
     savePreset: '保存预设',
     saving: '保存中...'
   },
@@ -427,6 +434,8 @@ const zh: Translation = {
     streamPartialImages: '预览帧数',
     streamRequiresSingleImage: '流式预览要求数量为 1',
     streamUnsupportedPath: '流式预览仅支持 Images API,不支持 Responses 或 Chat Completions',
+    streamUnavailableMapped: '当前供应商映射不支持流式预览',
+    transparentUnavailableMapped: '当前供应商映射未声明原生透明背景支持',
     streamCostNote: '预览帧会增加额外的输出 token;最终费用以实际用量为准'
   },
   maskEditor: {

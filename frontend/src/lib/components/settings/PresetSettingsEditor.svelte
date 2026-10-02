@@ -241,7 +241,7 @@
             <input type="checkbox" class="control-focus mt-0.5 accent-emerald-500" bind:checked={supportsMask} disabled={providerKind === 'async_json'} />
             <span class="min-w-0">
               <span class="block text-sm text-stone-800 dark:text-zinc-200">{$t.settings.supportsMask}</span>
-              <span class="mt-1 block text-xs text-stone-500 dark:text-zinc-500">{$t.settings.supportsMaskHint}</span>
+              <span class="mt-1 block text-xs text-stone-500 dark:text-zinc-500">{providerKind === 'async_json' ? $t.settings.supportsMaskMappedHint : $t.settings.supportsMaskHint}</span>
             </span>
           </label>
           <label class="flex items-start gap-2.5 rounded-lg border border-stone-300 bg-stone-50 px-3 py-2.5 dark:border-zinc-700 dark:bg-zinc-950">

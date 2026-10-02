@@ -168,6 +168,7 @@ const en = {
     defaultResponseFormat: 'Default response format',
     supportsMask: 'Supports mask inpainting',
     supportsMaskHint: 'Turn off for gateways that ignore the mask field; the mask editor is hidden for this preset.',
+    supportsMaskMappedHint: 'Follows the mapping: configure edit_submit.files.mask (multipart) or {{mask}} (JSON) in provider_config to enable mask editing.',
     promptGuard: 'Prevent prompt rewriting',
     promptGuardHint: 'Prepends an instruction asking upstream to use the prompt as-is. Useful for /v1/responses and gateways that expand prompts.',
     apiKey: 'API key',
@@ -289,6 +290,12 @@ const en = {
     mappingImages: 'Images',
     mappingImagesUnknown: 'paste a result or poll sample',
     mappingImagesFound: (count: number, kind: string) => `${count} image(s) (${kind || 'url'})`,
+    mappingCapabilities: 'Capabilities',
+    mappingCapEdit: 'edit',
+    mappingCapMask: 'mask',
+    mappingCapStream: 'stream',
+    mappingCapTransparent: 'transparent bg',
+    mappingCapFormats: (formats: string) => `formats: ${formats}`,
     savePreset: 'Save Preset',
     saving: 'Saving...'
   },
@@ -425,6 +432,8 @@ const en = {
     streamPartialImages: 'Preview frames',
     streamRequiresSingleImage: 'Streaming preview requires a quantity of 1',
     streamUnsupportedPath: 'Streaming preview requires the Images API, not Responses or Chat Completions',
+    streamUnavailableMapped: 'This provider mapping does not support streamed previews',
+    transparentUnavailableMapped: 'This provider mapping does not declare native transparent background support',
     streamCostNote: 'Preview frames add extra output tokens; the final cost reflects actual usage'
   },
   maskEditor: {
