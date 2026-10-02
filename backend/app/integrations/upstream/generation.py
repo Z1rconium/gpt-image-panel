@@ -10,6 +10,7 @@ from collections.abc import (
     Sequence,
 )
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from ...core import settings as config
@@ -19,6 +20,7 @@ from ...core.api_paths import (
     build_upstream_url,
     normalize_api_path,
 )
+from ...core.constants import PROVIDER_EDIT_INLINE_MAX_BYTES
 from ...core.observability import observe_job_stage, record_upstream_usage
 from ...core.diagnostics import UnitDiagnostics
 from ...core import validators as ssrf
@@ -30,21 +32,23 @@ from ...core.media import (
     validate_image_header_bytes,
 )
 from ...core.observability import metrics
+from ...runtime.blocking import run_file_operation, run_image_operation, upstream_memory_lease
+from ...schemas.gallery import GalleryEntry
+from ...schemas.generation import EditRequest, GenerateRequest
+from ...schemas.provider import ResolvedEditSubmit, resolve_provider_config
+from ..session_pool import (
+    TIMEOUT_UPSTREAM,
+    get_pool,
+)
 from .async_provider import (
     CheckpointCallback,
     ShouldCancelRemote,
     run_async_provider,
 )
-from .edit_paste_back import PasteBackOutcome, paste_back_image
+from .contracts import EditUpload, EditUploads, ImageEditSource
 from .chroma import remove_chroma_background
 from .diagnostics import image_diagnostics
-from ...runtime.blocking import run_image_operation, upstream_memory_lease
-from ...schemas.gallery import GalleryEntry
-from ...schemas.generation import EditRequest, GenerateRequest
-from ..session_pool import (
-    TIMEOUT_UPSTREAM,
-    get_pool,
-)
+from .edit_paste_back import PasteBackOutcome, paste_back_image
 
 ProgressCallback = Callable[[str, str], None]
 # Called with (partial_image_index, mime_type, image_bytes) as each streamed
@@ -67,7 +71,6 @@ from .errors import (
     UpstreamImageDownloadError,
     _warn_if_socks5_upstream_resolves_private,
 )
-from .contracts import ImageEditSource
 from .payloads import (
     DETECTED_FORMAT_EXTENSIONS,
     validate_upstream_image_data,
@@ -405,10 +408,9 @@ async def _call_async_provider_api(
 ) -> list[GalleryEntry]:
     api_path = normalize_api_path(api_path)
     payload.normalize_model_options(api_path)
-    if payload.background.startswith("chroma_"):
-        raise UpstreamApiError("Local chroma removal is not available for async providers")
 
     format_info = get_output_format_info(payload.output_format)
+    chroma_mode = payload.background if payload.background.startswith("chroma_") else None
     gallery_metadata = build_gallery_metadata(payload, api_path, api_preset_name)
     gallery_metadata["sent_prompt"] = sent_generation_prompt(payload, prompt_guard=prompt_guard)
 
@@ -445,6 +447,166 @@ async def _call_async_provider_api(
             save_message="Saving generated images",
             progress=progress,
             persist_gallery_entry=persist_gallery_entry,
+            chroma_mode=chroma_mode,
+            prompt_guard=prompt_guard,
+        )
+    finally:
+        await memory_lease.__aexit__(None, None, None)
+
+
+def _read_source_bytes(path: Path) -> bytes:
+    return path.read_bytes()
+
+
+async def _build_provider_edit_uploads(
+    edit_submit: ResolvedEditSubmit,
+    image_sources: Sequence[ImageEditSource],
+    mask_source: ImageEditSource | None,
+) -> EditUploads:
+    """Package validated edit sources for a custom-provider submit.
+
+    JSON edits inline bounded data URLs; multipart edits stream the validated
+    temp files directly, so no base64 copy is ever held in memory.
+    """
+    def part_of(source: ImageEditSource) -> EditUpload:
+        return EditUpload(
+            temp_path=source.temp_path,
+            filename=source.filename or "image.png",
+            content_type=source.content_type or "application/octet-stream",
+            byte_size=int(getattr(source, "byte_size", 0) or 0),
+        )
+
+    parts = tuple(part_of(source) for source in image_sources)
+    mask_part: EditUpload | None = None
+    inline: dict[str, Any] = {}
+    if edit_submit.body_format == "json":
+        total_bytes = sum(part.byte_size for part in parts)
+        if mask_source is not None:
+            total_bytes += int(getattr(mask_source, "byte_size", 0) or 0)
+        if total_bytes > PROVIDER_EDIT_INLINE_MAX_BYTES:
+            raise UpstreamApiError(
+                "Edit sources exceed the inline data-URL budget for this provider "
+                f"mapping ({total_bytes} bytes; max {PROVIDER_EDIT_INLINE_MAX_BYTES})"
+            )
+        encoded: list[str] = []
+        for part in parts:
+            data = await run_file_operation(
+                _read_source_bytes, part.temp_path, metric_name="read_provider_edit_source"
+            )
+            encoded.append(f"data:{part.content_type};base64,{base64.b64encode(data).decode('ascii')}")
+        inline["reference_images"] = encoded
+        if mask_source is not None:
+            data = await run_file_operation(
+                _read_source_bytes, mask_source.temp_path, metric_name="read_provider_edit_mask"
+            )
+            content_type = mask_source.content_type or "image/png"
+            inline["mask"] = f"data:{content_type};base64,{base64.b64encode(data).decode('ascii')}"
+    elif mask_source is not None:
+        mask_part = part_of(mask_source)
+    return EditUploads(parts=parts, mask_part=mask_part, inline_variables=inline)
+
+
+async def call_image_provider_edit_api(
+    api_url: str,
+    api_key: str,
+    payload: EditRequest,
+    image_sources: Sequence[ImageEditSource],
+    api_preset_name: str | None = None,
+    progress: ProgressCallback | None = None,
+    socks5_proxy: str | None = None,
+    *,
+    provider_config: dict,
+    persist_gallery_entry: PersistGalleryEntry,
+    prompt_guard: bool = False,
+    mask_source: ImageEditSource | None = None,
+    mask_coverage: float | None = None,
+    async_remote: dict[str, Any] | None = None,
+    async_checkpoint: CheckpointCallback | None = None,
+    async_cancel_remote: ShouldCancelRemote | None = None,
+    async_diagnostics: UnitDiagnostics | None = None,
+) -> list[GalleryEntry]:
+    """Run one edit task through a declaratively mapped custom provider."""
+    if not image_sources:
+        raise UpstreamApiError("At least one edit source image is required")
+    api_path = "/v1/images/edits"
+    payload.normalize_model_options(api_path)
+    resolved = resolve_provider_config(provider_config)
+    edit_submit = resolved.edit_submit
+    if edit_submit is None:
+        raise UpstreamApiError(
+            "Provider mapping does not declare image edit support; "
+            "add an edit_submit section to provider_config"
+        )
+    uploads = await _build_provider_edit_uploads(edit_submit, image_sources, mask_source)
+
+    format_info = get_output_format_info(payload.output_format)
+    gallery_metadata = build_gallery_metadata(
+        payload,
+        api_path,
+        api_preset_name,
+        mask_coverage=mask_coverage,
+    )
+    gallery_metadata["sent_prompt"] = sent_generation_prompt(payload, prompt_guard=prompt_guard)
+
+    transform_image = None
+    if mask_source is not None:
+        if payload.paste_back is False:
+            gallery_metadata["paste_back"] = "skipped:disabled"
+            metrics.increment("image_jobs.paste_back.skipped.disabled")
+        else:
+
+            async def transform_image(image_bytes: bytes) -> PasteBackOutcome:
+                return await run_image_operation(
+                    paste_back_image,
+                    image_bytes,
+                    image_sources[0].temp_path,
+                    mask_source.temp_path,
+                    output_format=payload.output_format,
+                    output_compression=payload.output_compression,
+                    background=payload.background,
+                    metric_name="paste_back_image",
+                )
+
+    download_session = get_pool().get(timeout_kind=TIMEOUT_UPSTREAM)
+    paste_back_weight = (
+        max(0, image_sources[0].width or 0) * max(0, image_sources[0].height or 0) * 12
+        if transform_image is not None
+        else 0
+    )
+    memory_lease = upstream_memory_lease(upstream_task_memory_weight(None) + paste_back_weight)
+    await memory_lease.__aenter__()
+    try:
+        upstream_started = time.monotonic()
+        with observe_job_stage("upstream_wait"):
+            data, response_preview = await run_async_provider(
+                api_url=api_url,
+                api_key=api_key,
+                provider_config=provider_config,
+                payload=payload,
+                progress=progress,
+                socks5_proxy=socks5_proxy,
+                prompt_guard=prompt_guard,
+                remote=async_remote,
+                checkpoint=async_checkpoint,
+                should_cancel_remote=async_cancel_remote,
+                diagnostics=async_diagnostics,
+                edit=uploads,
+            )
+        gallery_metadata["upstream_duration_ms"] = max(
+            0, round((time.monotonic() - upstream_started) * 1000)
+        )
+        data = validate_upstream_image_data(data, payload.n)
+        return await save_gallery_entries_from_upstream_data(
+            download_session=download_session,
+            data=data,
+            response_preview=response_preview,
+            payload=payload,
+            format_extension=format_info["extension"],
+            gallery_metadata=gallery_metadata,
+            save_message="Saving edited images",
+            progress=progress,
+            persist_gallery_entry=persist_gallery_entry,
+            transform_image=transform_image,
             chroma_mode=None,
             prompt_guard=prompt_guard,
         )

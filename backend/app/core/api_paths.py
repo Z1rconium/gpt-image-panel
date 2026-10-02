@@ -98,11 +98,7 @@ def normalize_api_preset(raw: dict[str, Any] | None, fallback_id: str = "default
         "default_response_format": normalize_default_response_format(
             preset.get("default_response_format")
         ),
-        "supports_mask": (
-            False
-            if provider_kind == PROVIDER_KIND_ASYNC_JSON
-            else normalize_supports_mask(preset.get("supports_mask"))
-        ),
+        "supports_mask": normalize_supports_mask(preset.get("supports_mask")),
         "prompt_guard": normalize_prompt_guard(preset.get("prompt_guard")),
         "provider_kind": provider_kind,
         "provider_config": normalize_provider_config(preset.get("provider_config")),

@@ -13,11 +13,12 @@ submitting the task again.
 """
 
 import asyncio
+import json
 import re
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 import aiohttp
 from pydantic import ValidationError
@@ -27,6 +28,7 @@ from ...core import settings as config
 from ...core import validators as ssrf
 from ...core.diagnostics import UnitDiagnostics
 from ...core.provider_mapping import (
+    TEMPLATE_VARIABLES,
     ProviderMappingError,
     render_template,
     select_all,
@@ -35,8 +37,13 @@ from ...core.provider_mapping import (
 from ...core.redaction import redact_sensitive_text
 from ...core.utils import utc_now
 from ...schemas.generation import GenerateRequest
-from ...schemas.provider import ResolvedProviderConfig, resolve_provider_config
+from ...schemas.provider import (
+    EDIT_TEMPLATE_VARIABLES,
+    ResolvedProviderConfig,
+    resolve_provider_config,
+)
 from ..session_pool import TIMEOUT_UPSTREAM, get_pool
+from .contracts import EditUploads
 from .errors import UpstreamApiError, _warn_if_socks5_upstream_resolves_private
 from .payloads import sent_generation_prompt
 from .transport import (
@@ -111,13 +118,16 @@ def _size_variables(payload: GenerateRequest) -> dict[str, Any]:
 
 
 def build_template_variables(payload: GenerateRequest, *, prompt_guard: bool) -> dict[str, Any]:
+    # Chroma backgrounds request an opaque canvas upstream (the local keying
+    # pass removes it afterwards), mirroring the OpenAI payload behavior.
+    background = "opaque" if payload.background.startswith("chroma_") else payload.background
     return {
         "prompt": sent_generation_prompt(payload, prompt_guard=prompt_guard),
         "model": payload.model,
         "n": payload.n,
         "quality": payload.quality,
         "output_format": payload.output_format,
-        "background": payload.background,
+        "background": background,
         **_size_variables(payload),
     }
 
@@ -141,18 +151,45 @@ def render_url_template(template: str, task_id: str) -> str:
     return _TASK_ID_PLACEHOLDER.sub(quote(task_id, safe=""), template)
 
 
+def append_query(
+    url: str,
+    query_pairs: tuple[tuple[str, str], ...],
+    variables: dict[str, Any],
+    *,
+    allowed: frozenset[str],
+) -> str:
+    """Render mapped query parameters onto a URL; omitted values drop the param.
+
+    ``urlencode`` percent-encodes each rendered value exactly once, so task ids
+    and model names are safe to embed without pre-quoting.
+    """
+    if not query_pairs:
+        return url
+    pairs: list[tuple[str, str]] = []
+    for key, template in query_pairs:
+        value = render_template(template, variables, allowed=allowed)
+        if value is None or (isinstance(value, dict) and not value):
+            continue
+        pairs.append((key, str(value)))
+    if not pairs:
+        return url
+    return url + ("&" if "?" in url else "?") + urlencode(pairs)
+
+
 def _auth_headers(
     cfg: ResolvedProviderConfig,
     api_key: str,
     *,
     idempotency_key: str = "",
+    json_body: bool = True,
 ) -> dict[str, str]:
     value = f"{cfg.auth.scheme} {api_key}".strip()
     headers = {
         cfg.auth.header: value,
         "User-Agent": "opencode",
-        "Content-Type": "application/json",
     }
+    if json_body:
+        headers["Content-Type"] = "application/json"
     if idempotency_key and cfg.submit.idempotency_header:
         headers[cfg.submit.idempotency_header] = idempotency_key
     return headers
@@ -213,19 +250,85 @@ async def _request_json(
     return result, status
 
 
+def _form_field_value(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    if value is None:
+        return ""
+    return json.dumps(value, ensure_ascii=False)
+
+
+async def _submit_provider_request(
+    session: aiohttp.ClientSession,
+    submit: Any,
+    url: str,
+    *,
+    headers: dict[str, str],
+    socks5_proxy: str | None,
+    body: Any,
+    uploads: EditUploads | None,
+) -> tuple[dict[str, Any], int]:
+    """Send one submit request as JSON or multipart and parse the JSON reply."""
+    if submit.body_format == "multipart":
+        mask_field = str(getattr(submit, "files_mask", "") or "")
+        form = aiohttp.FormData()
+        for key, value in body.items():
+            form.add_field(key, _form_field_value(value))
+        if uploads is not None:
+            for part in uploads.parts:
+                form.add_field(
+                    submit.files_images,
+                    part.temp_path.open("rb"),
+                    filename=part.filename,
+                    content_type=part.content_type or "application/octet-stream",
+                )
+            if mask_field and uploads.mask_part is not None:
+                form.add_field(
+                    mask_field,
+                    uploads.mask_part.temp_path.open("rb"),
+                    filename=uploads.mask_part.filename,
+                    content_type=uploads.mask_part.content_type or "image/png",
+                )
+        async with session.post(
+            url, data=form, headers=headers, allow_redirects=False
+        ) as resp:
+            status = int(resp.status)
+            if not socks5_proxy:
+                ssrf.validate_response_peer_ip(resp, "Upstream API")
+            result, _preview = await parse_upstream_json_response(resp, _PROVIDER_LABEL, None)
+        return result, status
+    return await _request_json(
+        session,
+        submit.method,
+        url,
+        headers=headers,
+        socks5_proxy=socks5_proxy,
+        json_body=body or None,
+    )
+
+
 async def _poll_json(
     session: aiohttp.ClientSession,
     url: str,
     *,
     headers: dict[str, str],
     socks5_proxy: str | None,
+    method: str = "GET",
 ) -> tuple[dict[str, Any], int]:
     """Fetch one poll response.
 
     Throttling and server errors are raised as retryable; other 4xx errors are
     terminal and keep their HTTP status for diagnostics.
     """
-    async with session.get(url, headers=headers, allow_redirects=False) as resp:
+    request = getattr(session, method.lower())
+    kwargs: dict[str, Any] = {"headers": headers, "allow_redirects": False}
+    if method == "POST":
+        kwargs["json"] = {}
+    async with request(url, **kwargs) as resp:
         status = int(resp.status)
         if not socks5_proxy:
             ssrf.validate_response_peer_ip(resp, "Upstream API")
@@ -277,22 +380,30 @@ async def _resolve_status_url(
     task_id: str | None,
     api_url: str,
 ) -> tuple[str, str | None]:
+    assert cfg.poll is not None
+    poll_query = cfg.poll.query
     if cfg.poll.url_path:
         value = _select_string(submit_result, cfg.poll.url_path)
         if not value:
             raise UpstreamApiError(
                 f"Provider response did not include a status URL at {cfg.poll.url_path}"
             )
-        return await _validated_followup_url(value, api_url, "status"), task_id
+        url = await _validated_followup_url(value, api_url, "status")
+        url = append_query(url, poll_query, _task_query_vars(task_id), allowed={"task_id"})
+        return url, task_id
     resolved_task_id = task_id or _select_task_id(submit_result, cfg.poll.task_id_path)
     if not resolved_task_id:
         raise UpstreamApiError(
             f"Provider response did not include a task id at {cfg.poll.task_id_path}"
         )
-    url = await _validated_upstream_url(
-        api_url.rstrip("/") + render_url_template(str(cfg.poll.url_template), resolved_task_id)
-    )
+    url = api_url.rstrip("/") + render_url_template(str(cfg.poll.url_template), resolved_task_id)
+    url = append_query(url, poll_query, {"task_id": resolved_task_id}, allowed={"task_id"})
+    url = await _validated_upstream_url(url)
     return url, resolved_task_id
+
+
+def _task_query_vars(task_id: str | None) -> dict[str, Any]:
+    return {"task_id": task_id} if task_id else {}
 
 
 async def _resolve_submit_result_url(
@@ -442,16 +553,27 @@ async def run_async_provider(
     checkpoint: CheckpointCallback | None = None,
     should_cancel_remote: ShouldCancelRemote | None = None,
     diagnostics: UnitDiagnostics | None = None,
+    edit: EditUploads | None = None,
 ) -> tuple[list[dict[str, Any]], str]:
     """Run one task. Returns the image entries and a short response preview.
 
     `remote` carries a persisted checkpoint: phase "submitted" resumes polling
     without resubmitting; phase "submitting" retries the submit under the same
     idempotency key when the mapping declares one. A fresh unit passes
-    `remote=None`.
+    `remote=None`. `edit` carries the validated reference images and mask for
+    an edit task; the mapping must then declare an `edit_submit` section.
     """
     cfg = load_provider_config(provider_config)
     diag = diagnostics
+    is_edit = edit is not None
+    if is_edit and cfg.edit_submit is None:
+        raise UpstreamApiError(
+            "Provider mapping does not declare image edit support; "
+            "add an edit_submit section to provider_config"
+        )
+    submit_cfg = cfg.edit_submit if is_edit else cfg.submit
+    assert submit_cfg is not None
+    sync_mode = cfg.mode == "sync"
     session = get_pool().get(timeout_kind=TIMEOUT_UPSTREAM, socks5_proxy=socks5_proxy)
     state_api_url = str(api_url).rstrip("/")
     remote_state = dict(remote or {})
@@ -484,6 +606,7 @@ async def run_async_provider(
                 cancel_url = None
         deadline = _parse_deadline(remote_state.get("deadline_at"))
         if deadline is None:
+            assert cfg.poll is not None
             deadline = _now() + timedelta(seconds=int(cfg.poll.timeout_seconds))
         if progress:
             progress("polling_provider", "Resuming provider task recovery")
@@ -499,6 +622,8 @@ async def run_async_provider(
             idempotency_key = uuid.uuid4().hex if cfg.submit.idempotency_header else ""
             remote_state = {
                 "phase": "submitting",
+                "mode": cfg.mode,
+                "operation": "edit" if is_edit else "generation",
                 "api_url": state_api_url,
                 "origin": secrets.canonical_origin(state_api_url),
                 "provider_config": cfg.snapshot,
@@ -509,31 +634,44 @@ async def run_async_provider(
         if checkpoint is not None:
             await checkpoint(dict(remote_state))
 
+        variables = build_template_variables(payload, prompt_guard=prompt_guard)
+        allowed = EDIT_TEMPLATE_VARIABLES if is_edit else TEMPLATE_VARIABLES
+        if is_edit:
+            assert edit is not None
+            variables.update(edit.inline_variables)
         try:
-            body = render_template(
-                cfg.submit.body, build_template_variables(payload, prompt_guard=prompt_guard)
-            )
+            body = render_template(submit_cfg.body, variables, allowed=allowed)
         except ProviderMappingError as exc:
             if diag:
                 diag.set_code("request_template_invalid")
                 diag.record_event("submit", "Cannot build provider request", error=str(exc))
             raise UpstreamApiError(f"Cannot build provider request: {exc}") from exc
 
-        submit_path = render_submit_path(cfg.submit.path, payload.model)
-        submit_url = await _validated_upstream_url(state_api_url + submit_path)
+        submit_path = render_submit_path(
+            submit_cfg.path or cfg.submit.path, payload.model
+        )
+        submit_url = state_api_url + submit_path
+        submit_url = append_query(submit_url, submit_cfg.query, variables, allowed=allowed)
+        submit_url = await _validated_upstream_url(submit_url)
         await _warn_if_socks5_upstream_resolves_private(submit_url, socks5_proxy)
 
         if progress:
             progress("submitting_provider_task", "Submitting task to provider")
-        request_headers = _auth_headers(cfg, api_key, idempotency_key=idempotency_key)
+        request_headers = _auth_headers(
+            cfg,
+            api_key,
+            idempotency_key=idempotency_key,
+            json_body=submit_cfg.body_format == "json",
+        )
         try:
-            submit_result, submit_status = await _request_json(
+            submit_result, submit_status = await _submit_provider_request(
                 session,
-                "POST",
+                submit_cfg,
                 submit_url,
                 headers=request_headers,
                 socks5_proxy=socks5_proxy,
-                json_body=body,
+                body=body,
+                uploads=edit,
             )
         except asyncio.CancelledError:
             raise
@@ -553,12 +691,33 @@ async def run_async_provider(
         if diag:
             diag.record_http(
                 "submit",
-                method="POST",
+                method="POST" if submit_cfg.body_format == "multipart" else submit_cfg.method,
                 url=submit_url,
                 status=submit_status,
                 snapshot=submit_result,
             )
 
+        if sync_mode:
+            # The submit response carries the final images; there is no remote
+            # task to resume, so the "submitting" checkpoint stays the only
+            # recovery state (same-key retry or interrupted, per Phase 1).
+            items = _image_items(submit_result, cfg)
+            if not items:
+                if diag:
+                    diag.set_code("result_extraction_failed")
+                    diag.record_http(
+                        "result",
+                        method=submit_cfg.method,
+                        url=submit_url,
+                        snapshot=submit_result,
+                        mapping_path=cfg.result.images_path,
+                    )
+                raise UpstreamApiError(
+                    f"Provider result did not include any images at {cfg.result.images_path}"
+                )
+            return items, f"{_PROVIDER_LABEL} result: {len(items)} image(s)"
+
+        assert cfg.poll is not None
         task_id = _select_task_id(submit_result, cfg.poll.task_id_path)
         if cfg.poll.task_id_path and not task_id:
             if diag:
@@ -621,6 +780,8 @@ async def run_async_provider(
         if checkpoint is not None:
             await checkpoint(dict(remote_state))
 
+    assert cfg.poll is not None
+    poll_method = str(getattr(cfg.poll, "method", "GET") or "GET")
     delay = float(cfg.poll.interval_seconds)
     poll_result: dict[str, Any] = {}
     poll_count = 0
@@ -629,13 +790,17 @@ async def run_async_provider(
         while True:
             try:
                 poll_result, poll_status = await _poll_json(
-                    session, status_url, headers=headers, socks5_proxy=socks5_proxy
+                    session,
+                    status_url,
+                    headers=headers,
+                    socks5_proxy=socks5_proxy,
+                    method=poll_method,
                 )
             except _RetryablePollError as exc:
                 if diag:
                     diag.record_http(
                         "poll",
-                        method="GET",
+                        method=poll_method,
                         url=status_url,
                         status=exc.status,
                         error=str(exc),
@@ -654,7 +819,7 @@ async def run_async_provider(
                 if diag:
                     diag.record_http(
                         "poll",
-                        method="GET",
+                        method=poll_method,
                         url=status_url,
                         status=exc.status,
                         error=str(exc),
@@ -679,7 +844,7 @@ async def run_async_provider(
             if diag and (poll_count == 1 or status != last_status):
                 diag.record_http(
                     "poll",
-                    method="GET",
+                    method=poll_method,
                     url=status_url,
                     status=poll_status,
                     snapshot=poll_result,

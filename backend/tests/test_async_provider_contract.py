@@ -258,11 +258,16 @@ def test_empty_result_is_an_error(client, monkeypatch, fast_provider):
         _run(_ScriptedSession(routes), monkeypatch)
 
 
-def test_streaming_and_chroma_are_rejected(client, monkeypatch, fast_provider):
+def test_streaming_is_rejected_and_chroma_now_runs(client, monkeypatch, fast_provider):
     with pytest.raises(upstream_client.UpstreamApiError, match="Streaming"):
         _run(_ScriptedSession({}), monkeypatch, stream=True)
-    with pytest.raises(upstream_client.UpstreamApiError, match="chroma"):
-        _run(_ScriptedSession({}), monkeypatch, request=_request(background="chroma_green"))
+    # Chroma keying is local post-processing, so mapped providers may use it;
+    # the upstream receives the opaque background and the keyed prompt suffix.
+    session = _ScriptedSession(_happy_routes())
+    entries = _run(session, monkeypatch, request=_request(background="chroma_green"))
+    assert len(entries) == 1
+    submit_body = session.calls[0][2]["json"]
+    assert "flat, uniform" in submit_body["prompt"]
 
 
 def _make_async_preset(client, monkeypatch):
@@ -290,16 +295,24 @@ def test_queue_rejects_unsupported_operations_for_async_presets(client, monkeypa
     streamed = client.post("/api/generate", json={"prompt": "fox", "stream": True})
     assert streamed.status_code == 422
     assert "Streaming preview is not available for async providers" in streamed.text
-    chroma = client.post("/api/generate", json={"prompt": "fox", "background": "chroma_green"})
-    assert chroma.status_code == 422
-    assert "chroma" in chroma.text
+    # Chroma keying is local, so it is admitted and the job succeeds end to end.
+    chroma = client.post(
+        "/api/generate", json={"prompt": "fox", "background": "chroma_green"}
+    )
+    assert chroma.status_code == 202
+    assert _wait_for_job(client, chroma.json()["job_id"])["status"] == "success"
+    transparent = client.post(
+        "/api/generate", json={"prompt": "fox", "background": "transparent"}
+    )
+    assert transparent.status_code == 422
+    assert "transparent background" in transparent.text
     edit = client.post(
         "/api/edits",
         data={"prompt": "fox", "model": MODEL, "size": "auto"},
         files={"image": ("input.png", PNG_BYTES, "image/png")},  # noqa: F405
     )
     assert edit.status_code == 422
-    assert "Async providers do not support image edits" in edit.text
+    assert "does not declare image edit support" in edit.text
 
 
 def test_executor_passes_provider_config_only_for_async_presets(client, monkeypatch):

@@ -25,7 +25,12 @@ from ..core.api_paths import (
     normalize_provider_kind,
     normalize_supports_mask,
 )
-from ..schemas.provider import ProviderConfigPayload, parse_provider_config
+from ..schemas.provider import (
+    ProviderCapabilities,
+    ProviderConfigPayload,
+    parse_provider_config,
+    provider_capabilities,
+)
 from ..core.validators import (
     get_env_var_ref_name,
     mask_socks5_proxy_url,
@@ -268,34 +273,55 @@ def load_api_settings():
     apply_api_preset(get_active_preset())
 
 
+def preset_provider_capabilities(raw: dict | None) -> dict:
+    """Resolved capability view for one stored preset (settings responses)."""
+    preset = raw if isinstance(raw, dict) else {}
+    if normalize_provider_kind(preset.get("provider_kind")) != PROVIDER_KIND_ASYNC_JSON:
+        caps = ProviderCapabilities()
+    else:
+        caps = provider_capabilities(preset.get("provider_config"))
+    return caps.as_dict()
+
+
+def _apply_capability_supports_mask(preset: dict) -> dict:
+    """An async preset's supports_mask follows what its mapping can carry."""
+    if normalize_provider_kind(preset.get("provider_kind")) == PROVIDER_KIND_ASYNC_JSON:
+        preset["supports_mask"] = provider_capabilities(preset.get("provider_config")).mask
+    return preset
+
+
 def get_api_presets() -> list[dict]:
     presets = getattr(state, "api_presets", None)
     if presets:
         normalized = [
-            normalize_api_preset(preset, str(preset.get("id") or f"preset-{index + 1}"))
+            _apply_capability_supports_mask(
+                normalize_api_preset(preset, str(preset.get("id") or f"preset-{index + 1}"))
+            )
             for index, preset in enumerate(presets)
         ]
         state.api_presets = normalized
         return normalized
 
-    preset = normalize_api_preset(
-        {
-            "id": "default",
-            "name": "Default",
-            "api_url": getattr(state, "api_url", config.DEFAULT_API_URL),
-            "api_key": getattr(
-                state,
-                "api_key",
-                _default_secret_reference("builtin-default-api-key", config.DEFAULT_API_KEY),
-            ),
-            "api_path": getattr(state, "api_path", config.DEFAULT_API_PATH),
-            "default_model": getattr(state, "default_model", ""),
-            "default_response_format": getattr(
-                state,
-                "default_response_format",
-                "url",
-            ),
-        }
+    preset = _apply_capability_supports_mask(
+        normalize_api_preset(
+            {
+                "id": "default",
+                "name": "Default",
+                "api_url": getattr(state, "api_url", config.DEFAULT_API_URL),
+                "api_key": getattr(
+                    state,
+                    "api_key",
+                    _default_secret_reference("builtin-default-api-key", config.DEFAULT_API_KEY),
+                ),
+                "api_path": getattr(state, "api_path", config.DEFAULT_API_PATH),
+                "default_model": getattr(state, "default_model", ""),
+                "default_response_format": getattr(
+                    state,
+                    "default_response_format",
+                    "url",
+                ),
+            }
+        )
     )
     state.api_presets = [preset]
     state.active_preset_id = preset["id"]
@@ -427,8 +453,11 @@ def apply_preset_provider(
             raise UnprocessableRequestError(
                 "provider_config is required when provider_kind is async_json"
             )
-        # Async providers have no edit endpoint, so masks can never be honoured.
-        preset["supports_mask"] = False
+        # supports_mask follows what the mapping can actually carry, so the
+        # mask editor only appears when the mask reaches the provider.
+        preset["supports_mask"] = provider_capabilities(
+            preset.get("provider_config")
+        ).mask
 
 
 def _stored_provider_config(preset: dict) -> ProviderConfigPayload | None:
@@ -584,7 +613,7 @@ def _new_preset_from_export(item: Any) -> dict:
         ),
     }
     if preset["provider_kind"] == PROVIDER_KIND_ASYNC_JSON:
-        preset["supports_mask"] = False
+        preset["supports_mask"] = provider_capabilities(preset["provider_config"]).mask
     return preset
 
 
@@ -606,7 +635,7 @@ def _merge_preset_from_export(target: dict, item: Any) -> None:
         else None
     )
     if target["provider_kind"] == PROVIDER_KIND_ASYNC_JSON:
-        target["supports_mask"] = False
+        target["supports_mask"] = provider_capabilities(target["provider_config"]).mask
     if not same_origin:
         # Never carry a stored key across origins.
         target["api_key"] = ""
@@ -729,6 +758,7 @@ def serialize_api_preset(preset: dict) -> ApiPresetResponse:
         prompt_guard=normalize_prompt_guard(preset.get("prompt_guard")),
         provider_kind=normalize_provider_kind(preset.get("provider_kind")),
         provider_config=_stored_provider_config(preset),
+        provider_capabilities=preset_provider_capabilities(preset),
         **key_fields,
     )
 
@@ -755,6 +785,7 @@ def build_settings_response() -> SettingsResponse:
         supports_mask=normalize_supports_mask(active_preset.get("supports_mask")),
         prompt_guard=normalize_prompt_guard(active_preset.get("prompt_guard")),
         provider_kind=normalize_provider_kind(active_preset.get("provider_kind")),
+        provider_capabilities=preset_provider_capabilities(active_preset),
         **upstream_socks5_proxy_response_fields(),
         **webhook_url_response_fields(),
         presets=[serialize_api_preset(preset) for preset in get_api_presets()],

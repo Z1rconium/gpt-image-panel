@@ -19,19 +19,29 @@ _VARIABLE_DESCRIPTIONS = {
     "background": "requested background value",
 }
 
+_EDIT_VARIABLE_DESCRIPTIONS = {
+    "reference_images": "the attached reference images as a bounded list of data URLs (JSON edits)",
+    "mask": "the edit mask as one data URL (JSON edits)",
+}
+
 
 def build_provider_mapping_prompt() -> str:
     variables = "\n".join(
-        f"- {{{{ {name} }}}} - {_VARIABLE_DESCRIPTIONS.get(name, 'supported variable')}"
+        f"- {{{{{name}}}}} - {_VARIABLE_DESCRIPTIONS.get(name, 'supported variable')}"
         for name in sorted(TEMPLATE_VARIABLES)
+    )
+    edit_variables = "\n".join(
+        f"- {{{{{name}}}}} - {_EDIT_VARIABLE_DESCRIPTIONS[name]}"
+        for name in sorted(_EDIT_VARIABLE_DESCRIPTIONS)
     )
     return f"""You are writing a `provider_config` JSON mapping for GPT Image Panel.
 
-The panel submits one image-generation task per queue unit and then polls the
-provider until the task finishes. Your mapping tells the panel which HTTP
-requests to send and how to read the responses. Respond with a single JSON
-object and nothing else. Never ask for or include an API key: the key is stored
-by the panel and injected separately.
+The panel submits one image-generation task per queue unit and either reads the
+images from the submit response (sync mode) or polls the provider until the task
+finishes (async mode). Your mapping tells the panel which HTTP requests to send
+and how to read the responses. Respond with a single JSON object and nothing
+else. Never ask for or include an API key: the key is stored by the panel and
+injected separately.
 
 ## Template variables usable in submit.body values
 
@@ -43,19 +53,24 @@ substituted as text. If a variable has no value for a request (for example
 width/height with size=auto) and it is used as a whole value, the field is
 omitted from the body. Placeholders are not allowed in JSON keys.
 
-## Version 2 mapping shape (preferred)
+## Version 2 mapping shape (preferred, async mode)
 
 {{
   "version": 2,
+  "mode": "async",
   "auth": {{"header": "Authorization", "scheme": "Bearer"}},
   "submit": {{
     "path": "/v1/jobs",
+    "method": "POST",
+    "query": {{"api_version": "2024-01"}},
     "body": {{"prompt": "{{{{prompt}}}}", "model": "{{{{model}}}}"}},
+    "body_format": "json",
     "idempotency_header": "Idempotency-Key"
   }},
   "poll": {{
     "task_id_path": "$.data.task_id",
     "url_template": "/v1/jobs/{{{{task_id}}}}",
+    "method": "GET",
     "status_path": "$.data.status",
     "done": ["succeeded"],
     "failed": ["failed", "cancelled"],
@@ -72,18 +87,38 @@ omitted from the body. Placeholders are not allowed in JSON keys.
     "task_id_path": "$.data.task_id",
     "url_template": "/v1/jobs/{{{{task_id}}}}/cancel",
     "method": "DELETE"
+  }},
+  "edit_submit": {{
+    "path": "/v1/edits",
+    "method": "POST",
+    "body_format": "multipart",
+    "body": {{"prompt": "{{{{prompt}}}}", "model": "{{{{model}}}}"}},
+    "files": {{"images": "image", "mask": "mask"}}
+  }},
+  "capabilities": {{
+    "transparent_background": false,
+    "formats": ["png", "jpeg", "webp"]
   }}
 }}
 
 Rules for the v2 fields:
+- `mode` is "async" (submit, then poll; the default) or "sync" (the submit
+  response itself carries the final images: omit `poll`, `cancel`, and any
+  `result.url_path`/`result.task_id_path`; only `result.images_path` is used).
+- `submit.method` and `poll.method` are "GET" or "POST". A GET submit must have
+  an empty body. POST polls send an empty JSON object.
+- `submit.query` and `poll.query` map query parameters. Values are templates;
+  submit.query may use the submit variables, poll.query may only use
+  {{{{task_id}}}}. Literal values may contain letters, digits and - _ . ~ only;
+  a whole-placeholder value whose variable is unset is omitted.
 - `poll` must have either `url_path` (a JSONPath into the submit response that
   holds a full status URL) or `task_id_path` plus `url_template`.
 - `poll.url_template`, `result.url_template` and `cancel.url_template` are plain
   paths starting with "/" that must contain {{{{task_id}}}}; the task id is
   percent-encoded as one path segment. Absolute URLs are rejected.
 - `result.images_path` selects image strings (URLs or base64) from the final
-  response. If `result` is omitted entirely the panel reads images from the last
-  poll response. `result.image_kind` is "url" or "b64_json".
+  response. In async mode the panel reads images from the last poll response
+  when `result` is omitted entirely. `result.image_kind` is "url" or "b64_json".
 - `result.task_id_path`/`url_template` are optional; use them only when the
   result lives at a separate endpoint. `result.url_path` is the alternative for
   providers that return the result URL directly.
@@ -91,11 +126,40 @@ Rules for the v2 fields:
 - `submit.idempotency_header` is optional; set it when the provider accepts a
   client idempotency key, so an interrupted submit can be retried safely.
 
+## Edit support (edit_submit)
+
+Provide `edit_submit` only when the provider documents an image-edit endpoint.
+Its presence is what declares edit capability:
+
+- `edit_submit.path` defaults to `submit.path`; `method` is "GET" or "POST".
+- `body_format` "multipart": `body` holds only plain fields; reference images
+  and the mask are uploaded as file parts named by `files.images` (one part per
+  image) and `files.mask`. `files.images` is required.
+- `body_format` "json": `body` must contain `{{{{reference_images}}}}` (it
+  becomes the array of data URLs for the attached images) and may contain
+  `{{{{mask}}}}` (the mask as one data URL) so no input is silently dropped.
+
+Edit-only template variables:
+
+{edit_variables}
+
+## Capabilities (capabilities)
+
+- `transparent_background`: true only when the provider natively renders a
+  transparent background (the mapping then passes `background`). When omitted,
+  the panel auto-detects: true only if the mapping uses {{{{background}}}}.
+- `formats`: the output formats the provider returns, from "png", "jpeg",
+  "webp". Omit for every format.
+- Edit capability follows `edit_submit`; the mask capability follows whether
+  the mapping can carry a mask. There is no separate switch.
+- `stream` is reserved for streamed previews and must stay false today.
+
 ## Version 1 mapping shape (also accepted)
 
 Same as version 2, but `poll.url_path`, `result.url_path` and `cancel.url_path`
 are required JSONPath selectors that read full URLs from the responses, and
-`submit` has no `idempotency_header`.
+`submit` has no `idempotency_header`, `method`, `query` or `body_format`; there
+is no `mode`, `edit_submit` or `capabilities`.
 
 ## JSONPath subset
 
@@ -106,8 +170,8 @@ tokens.
 
 ## URL and credential rules
 
-- `submit.path` is a plain path appended to the preset API URL and may contain
-  {{{{model}}}} only.
+- `submit.path` and `edit_submit.path` are plain paths appended to the preset
+  API URL and may contain {{{{model}}}} only.
 - Status/result/cancel URLs returned by the provider must be on the same origin
   as the preset API URL; cross-origin follow-ups are rejected.
 - The mapping is limited to 16 KiB of JSON.
@@ -115,9 +179,9 @@ tokens.
 ## What to do if the API documentation is incomplete
 
 Do not guess. If the documentation does not state the submit path/body, the
-task id location, the status values, the result shape, or the cancel endpoint,
-list exactly which of those are missing and ask for them. If it does specify
-them, output only the JSON mapping.
+task id location, the status values, the result shape, the cancel endpoint, or
+(for edits) the upload field names, list exactly which of those are missing and
+ask for them. If it does specify them, output only the JSON mapping.
 
 ## Reminder
 

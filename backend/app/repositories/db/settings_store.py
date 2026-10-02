@@ -8,8 +8,13 @@ from datetime import datetime, timezone
 from typing import Any
 
 from ...core import settings as config
-from ...core.api_paths import default_model_for_api_path, normalize_api_preset
+from ...core.api_paths import (
+    PROVIDER_KIND_ASYNC_JSON,
+    default_model_for_api_path,
+    normalize_api_preset,
+)
 from ...core.secrets import configured_secret_ids
+from ...schemas.provider import provider_capabilities
 from ...core.settings_defaults import (
     coerce_positive_int as _coerce_positive_int,
     default_ai_assistant_settings as _default_ai_assistant_settings,
@@ -605,6 +610,12 @@ def _normalize_settings(settings: dict | None) -> dict:
         normalized_preset["api_key"] = _normalize_stored_api_key(
             normalized_preset.get("api_key")
         )
+        # supports_mask for async presets follows what the mapping can carry,
+        # so a preset saved before the capability contract reads correctly.
+        if normalized_preset["provider_kind"] == PROVIDER_KIND_ASYNC_JSON:
+            normalized_preset["supports_mask"] = provider_capabilities(
+                normalized_preset.get("provider_config")
+            ).mask
         preset_id = normalized_preset["id"]
         if preset_id in seen_ids:
             continue

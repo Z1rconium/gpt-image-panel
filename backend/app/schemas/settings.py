@@ -34,6 +34,7 @@ class ApiPresetResponse(BaseModel):
     prompt_guard: bool = False
     provider_kind: ProviderKind = "openai"
     provider_config: Optional[ProviderConfigPayload] = None
+    provider_capabilities: dict[str, Any] = Field(default_factory=dict)
     api_key_masked: str
     has_api_key: bool
     api_key_source: ApiKeySource = "empty"
@@ -186,6 +187,7 @@ class SettingsResponse(BaseModel):
     supports_mask: bool = True
     prompt_guard: bool = False
     provider_kind: ProviderKind = "openai"
+    provider_capabilities: dict[str, Any] = Field(default_factory=dict)
     has_upstream_socks5_proxy: bool = False
     upstream_socks5_proxy_masked: str = ""
     has_webhook_url: bool = False
@@ -318,6 +320,7 @@ class ProviderMappingValidateResponse(BaseModel):
     valid: bool
     errors: list[PresetImportIssue] = Field(default_factory=list)
     extraction: Optional[ProviderMappingExtraction] = None
+    capabilities: dict[str, Any] = Field(default_factory=dict)
 
 
 class ProviderMappingPromptResponse(BaseModel):

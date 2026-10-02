@@ -50,6 +50,7 @@ from ..repositories.db import (
 from ..repositories.db import image_url_for_filename
 from ..schemas.gallery import GalleryEntry
 from ..schemas.generation import EditRequest, GenerateJobResponse, GenerateRequest
+from ..schemas.provider import provider_capabilities
 from ..runtime.blocking import run_db_operation
 from .job_events import (
     get_job_subscribers,
@@ -427,12 +428,36 @@ async def queue_image_job(
                 raise UnprocessableRequestError("GPT Image 2.5 edit inputs must be smaller than 50 MB")
 
     if normalize_provider_kind(active_preset.get("provider_kind")) == PROVIDER_KIND_ASYNC_JSON:
+        # Admission and the frontend both read this single capability view of
+        # the mapping, so a task never enters the queue on an unstated ability.
+        provider_caps = provider_capabilities(active_preset.get("provider_config"))
         if operation == "edit":
-            raise UnprocessableRequestError("Async providers do not support image edits")
+            if not provider_caps.edit:
+                raise UnprocessableRequestError(
+                    "This provider mapping does not declare image edit support; "
+                    "add an edit_submit section to provider_config"
+                )
+            if (
+                any(str(source.get("role") or "") == "mask" for source in edit_sources_payload or [])
+                and not provider_caps.mask
+            ):
+                raise UnprocessableRequestError(
+                    "This provider mapping cannot send an edit mask; configure "
+                    "edit_submit.files.mask (multipart) or {{mask}} in a JSON body"
+                )
         if getattr(req, "stream", False):
             raise UnprocessableRequestError("Streaming preview is not available for async providers")
-        if req.background.startswith("chroma_"):
-            raise UnprocessableRequestError("Local chroma removal is not available for async providers")
+        if req.background == "transparent" and not provider_caps.transparent_background:
+            raise UnprocessableRequestError(
+                "This provider mapping does not declare native transparent background "
+                "support; pick a chroma background or declare "
+                "capabilities.transparent_background in provider_config"
+            )
+        if req.output_format not in provider_caps.formats:
+            raise UnprocessableRequestError(
+                "This provider mapping supports output formats "
+                f"{'/'.join(provider_caps.formats)}; '{req.output_format}' was requested"
+            )
 
     if getattr(req, "stream", False) and resolved_api_path not in {
         "/v1/images/generations",

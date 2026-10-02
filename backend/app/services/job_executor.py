@@ -852,13 +852,26 @@ async def run_claimed_image_unit(unit: dict, worker_id: str):
                         (source for source in edit_sources if source.role == "mask"),
                         None,
                     )
-                    if provider_kwargs:
-                        raise proxy.UpstreamApiError(
-                            "Async providers do not support image edits"
-                        )
                     if not image_sources:
                         raise proxy.UpstreamApiError(
                             "At least one edit source image is required"
+                        )
+                    if provider_kwargs:
+                        # Declaratively mapped provider: the edit_submit section
+                        # carries reference images and the mask upstream.
+                        return await proxy.call_image_provider_edit_api(
+                            api_url,
+                            api_key,
+                            req,  # type: ignore[arg-type]
+                            image_sources,
+                            api_preset_name,
+                            progress,
+                            socks5_proxy=socks5_proxy,
+                            persist_gallery_entry=add_to_gallery_async,
+                            mask_source=mask_source,
+                            mask_coverage=mask_source.coverage if mask_source else None,
+                            prompt_guard=prompt_guard,
+                            **provider_kwargs,
                         )
                     return await proxy.call_image_edit_api(
                         api_url,

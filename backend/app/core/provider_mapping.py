@@ -127,36 +127,49 @@ class _Omit:
 _OMIT = _Omit()
 
 
-def render_template(node: Any, variables: dict[str, Any]) -> Any:
+def render_template(
+    node: Any, variables: dict[str, Any], *, allowed: frozenset[str] | None = None
+) -> Any:
     """Substitute placeholders.
 
     A value that is exactly one placeholder keeps its type. If that variable has
     no value for this request (for example ``width`` when ``size`` is ``auto``)
     the field is left out, and a container emptied that way is left out too. A
     placeholder embedded inside a longer string must have a value.
+    ``allowed`` restricts which variable names may appear (defaults to every
+    known variable).
     """
-    rendered = _render(node, variables)
+    names = TEMPLATE_VARIABLES if allowed is None else frozenset(allowed)
+    rendered = _render(node, variables, names)
     return {} if rendered is _OMIT else rendered
 
 
-def _render(node: Any, variables: dict[str, Any]) -> Any:
+def _render(node: Any, variables: dict[str, Any], allowed: frozenset[str]) -> Any:
     if isinstance(node, str):
         whole = _WHOLE_PLACEHOLDER.match(node)
         if whole:
-            return _variable(variables, whole.group(1), optional=True)
-        return _PLACEHOLDER.sub(lambda m: str(_variable(variables, m.group(1))), node)
+            return _variable(variables, whole.group(1), allowed=allowed, optional=True)
+        return _PLACEHOLDER.sub(
+            lambda m: str(_variable(variables, m.group(1), allowed)), node
+        )
     if isinstance(node, dict):
-        rendered = {key: _render(value, variables) for key, value in node.items()}
+        rendered = {key: _render(value, variables, allowed) for key, value in node.items()}
         kept = {key: value for key, value in rendered.items() if value is not _OMIT}
         return kept if kept or not node else _OMIT
     if isinstance(node, list):
-        kept_items = [item for item in (_render(value, variables) for value in node) if item is not _OMIT]
+        kept_items = [item for item in (_render(value, variables, allowed) for value in node) if item is not _OMIT]
         return kept_items if kept_items or not node else _OMIT
     return node
 
 
-def _variable(variables: dict[str, Any], name: str, *, optional: bool = False) -> Any:
-    if name not in TEMPLATE_VARIABLES:
+def _variable(
+    variables: dict[str, Any],
+    name: str,
+    allowed: frozenset[str] = TEMPLATE_VARIABLES,
+    *,
+    optional: bool = False,
+) -> Any:
+    if name not in allowed:
         raise ProviderMappingError(f"unknown template variable: {name}")
     value = variables.get(name)
     if value is None:

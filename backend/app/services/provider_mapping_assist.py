@@ -89,13 +89,19 @@ def _simulate_extraction(
     sample_result: Any,
 ) -> dict:
     notes: list[str] = []
+    sync_mode = cfg.mode == "sync"
     task_id = _field()
     status_url = _field()
     result_url = _field()
     status_value = _field()
 
-    extracted_task_id = _extract_task_id(sample_submit, cfg.poll.task_id_path)
-    if cfg.poll.task_id_path:
+    if sync_mode:
+        task_id = _field(False, None, None, "sync mode submits and receives the result in one request")
+        status_url = _field(False, None, None, "sync mode has no status endpoint")
+        status_value = _field(False, None, None, "sync mode has no status endpoint")
+
+    extracted_task_id = _extract_task_id(sample_submit, None if sync_mode else cfg.poll.task_id_path)
+    if not sync_mode and cfg.poll.task_id_path:
         if extracted_task_id:
             task_id = _field(
                 True, _preview(extracted_task_id), "submit", cfg.poll.task_id_path
@@ -108,7 +114,7 @@ def _simulate_extraction(
                 f"no task id at {cfg.poll.task_id_path} in the submit sample",
             )
 
-    if cfg.poll.url_path:
+    if not sync_mode and cfg.poll.url_path:
         raw = select_first(sample_submit, cfg.poll.url_path) if sample_submit is not None else None
         if isinstance(raw, str) and raw.strip():
             status_url = _field(
@@ -125,7 +131,7 @@ def _simulate_extraction(
                 None,
                 f"no status URL at {cfg.poll.url_path} in the submit sample",
             )
-    else:
+    elif not sync_mode:
         rendered = _render_template(cfg.poll.url_template, extracted_task_id)
         if rendered:
             status_url = _field(
@@ -172,10 +178,14 @@ def _simulate_extraction(
             )
     else:
         result_url = _field(
-            False, None, None, "not configured; images are read from the final response"
+            False,
+            None,
+            None,
+            "images are read from the submit response" if sync_mode
+            else "not configured; images are read from the final response",
         )
 
-    if sample_poll is not None:
+    if not sync_mode and sample_poll is not None:
         raw = select_first(sample_poll, cfg.poll.status_path)
         value = "" if raw is None else str(raw).strip()
         if value:
@@ -194,14 +204,17 @@ def _simulate_extraction(
             status_value = _field(
                 False, None, None, f"no value at {cfg.poll.status_path} in the poll sample"
             )
-    else:
+    elif not sync_mode:
         status_value = _field(
             False, None, None, "paste a poll response sample to verify the status path"
         )
 
     image_count: int | None = None
     image_samples: list[str] = []
-    source_label, source = ("result", sample_result) if sample_result is not None else ("poll", sample_poll)
+    if sync_mode:
+        source_label, source = ("submit", sample_submit)
+    else:
+        source_label, source = ("result", sample_result) if sample_result is not None else ("poll", sample_poll)
     if source is not None:
         values = [
             value
@@ -214,6 +227,8 @@ def _simulate_extraction(
             notes.append(
                 f"no image strings at {cfg.result.images_path} in the {source_label} sample"
             )
+    elif sync_mode:
+        notes.append("paste a submit response sample to verify image extraction")
     else:
         notes.append("paste a result or poll response sample to verify image extraction")
 
@@ -238,13 +253,23 @@ def validate_provider_mapping_request(
     try:
         cfg = resolve_provider_config(provider_config)
     except Exception as exc:  # noqa: BLE001 - surfaced as field errors
-        return {"valid": False, "errors": _validation_errors(exc), "extraction": None}
+        return {
+            "valid": False,
+            "errors": _validation_errors(exc),
+            "extraction": None,
+            "capabilities": {},
+        }
     extraction = None
     if any(
         sample is not None for sample in (sample_submit, sample_poll, sample_result)
     ):
         extraction = _simulate_extraction(cfg, sample_submit, sample_poll, sample_result)
-    return {"valid": True, "errors": [], "extraction": extraction}
+    return {
+        "valid": True,
+        "errors": [],
+        "extraction": extraction,
+        "capabilities": cfg.capabilities.as_dict(),
+    }
 
 
 __all__ = ["build_mapping_prompt", "validate_provider_mapping_request"]
