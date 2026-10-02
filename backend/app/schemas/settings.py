@@ -429,6 +429,8 @@ class AIAssistantSettingsResponse(BaseModel):
     agent_model: str = ""
     agent_max_tool_rounds: int = 4
     agent_system_prompt: str = ""
+    agent_web_search_enabled: bool = False
+    agent_web_search_supported: bool = False
     timeout_seconds: int = 60
     api_path: AssistantApiPath = "/v1/chat/completions"
     api_key_masked: str = "***"
@@ -455,6 +457,8 @@ class AIAssistantSettingsRequest(StrictRequestModel):
     agent_model: Optional[str] = Field(default=None, max_length=200)
     agent_max_tool_rounds: Optional[int] = Field(default=None, ge=1, le=64)
     agent_system_prompt: Optional[str] = Field(default=None, max_length=4000)
+    agent_web_search_enabled: Optional[bool] = None
+    agent_web_search_supported: Optional[bool] = None
     timeout_seconds: Optional[int] = Field(
         default=None,
         ge=1,

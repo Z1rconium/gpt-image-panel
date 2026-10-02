@@ -46,10 +46,12 @@ def test_linear_migration_preserves_running_turn_and_is_repeatable():
     for index, status in enumerate(["completed", "running"], 1):
         conn.execute("INSERT INTO agent_turns(id, conversation_id, round_no, client_turn_id, status, created_at) VALUES (?, 'c', ?, ?, ?, 'now')", (f"t{index}", index, f"client-{index}", status))
     schema._migration_agent_branches(conn)
-    assert [(row["parent_turn_id"], row["status"]) for row in conn.execute("SELECT * FROM agent_turns ORDER BY round_no")] == [(None, "completed"), ("t1", "running")]
+    schema._migration_agent_search(conn)
+    assert [(row["parent_turn_id"], row["status"], row["web_search_enabled"]) for row in conn.execute("SELECT * FROM agent_turns ORDER BY round_no")] == [(None, "completed", 0), ("t1", "running", 0)]
     assert conn.execute("SELECT selected_turn_id FROM agent_conversations").fetchone()[0] == "t2"
     conn.execute("UPDATE agent_turns SET parent_turn_id = NULL WHERE id = 't2'")
     schema._migration_agent_branches(conn)
+    schema._migration_agent_search(conn)
     assert conn.execute("SELECT parent_turn_id FROM agent_turns WHERE id = 't2'").fetchone()[0] is None
     assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
     conn.close()

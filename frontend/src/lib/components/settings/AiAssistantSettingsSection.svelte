@@ -7,6 +7,8 @@
   export let agentModel = '';
   export let agentMaxToolRounds: number | string = 4;
   export let agentSystemPrompt = '';
+  export let agentWebSearchEnabled = false;
+  export let agentWebSearchSupported = false;
   export let healthChecking = false;
   export let onCheck: () => void | Promise<void> = () => {};
 </script>
@@ -50,6 +52,15 @@
         <span class="mb-1.5 block text-xs font-medium text-stone-600 dark:text-zinc-400">{$t.settings.agentMaxToolRounds}</span>
         <input bind:value={agentMaxToolRounds} disabled={!enabled} type="number" min="1" max="64" inputmode="numeric" class="control-focus w-full rounded-md border border-stone-300 bg-stone-50 px-3 py-2.5 font-mono text-sm text-stone-900 focus:border-emerald-500 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100" />
       </label>
+      <label class="flex items-center gap-2 text-xs">
+        <input type="checkbox" class="control-focus accent-emerald-500" bind:checked={agentWebSearchSupported} disabled={!enabled} />
+        {$t.settings.agentSearchSupported}
+      </label>
+      <label class="flex items-center gap-2 text-xs">
+        <input type="checkbox" class="control-focus accent-emerald-500" bind:checked={agentWebSearchEnabled} disabled={!enabled || !agentWebSearchSupported} />
+        {$t.settings.agentSearchEnabled}
+      </label>
+      <p class="text-xs text-stone-500 dark:text-zinc-400">{$t.settings.agentSearchHint}</p>
       <label class="block">
         <span class="mb-1.5 block text-xs font-medium text-stone-600 dark:text-zinc-400">{$t.settings.agentSystemPrompt}</span>
         <textarea bind:value={agentSystemPrompt} disabled={!enabled} rows="3" maxlength="4000" class="control-focus w-full resize-y rounded-md border border-stone-300 bg-stone-50 px-3 py-2.5 text-sm text-stone-900 focus:border-emerald-500 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100" placeholder={$t.settings.agentSystemPromptPlaceholder}></textarea>

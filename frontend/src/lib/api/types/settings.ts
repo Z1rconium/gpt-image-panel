@@ -110,6 +110,8 @@ export type AIAssistantSettings = {
   agent_model: string;
   agent_max_tool_rounds: number;
   agent_system_prompt: string;
+  agent_web_search_enabled?: boolean;
+  agent_web_search_supported?: boolean;
   timeout_seconds: number;
   api_path: AssistantApiPath;
   api_key_masked: string;
@@ -126,6 +128,8 @@ export type AIAssistantSettingsInput = {
   agent_model?: string | null;
   agent_max_tool_rounds?: number | null;
   agent_system_prompt?: string | null;
+  agent_web_search_enabled?: boolean | null;
+  agent_web_search_supported?: boolean | null;
 };
 
 export type R2BackupSettings = {

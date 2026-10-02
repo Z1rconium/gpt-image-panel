@@ -37,6 +37,8 @@ export type SettingsDraft = {
   agentModel: string;
   agentMaxToolRounds: number;
   agentSystemPrompt: string;
+  agentWebSearchEnabled?: boolean;
+  agentWebSearchSupported?: boolean;
   r2BackupEnabled: boolean;
   r2EndpointUrl: string;
   r2BucketName: string;
@@ -165,6 +167,8 @@ export function hasSettingsChanges(
     draft.agentModel !== (settings?.ai_assistant?.agent_model || '') ||
     agentMaxToolRoundsValue(draft.agentMaxToolRounds) !== (settings?.ai_assistant?.agent_max_tool_rounds ?? 4) ||
     draft.agentSystemPrompt.trim() !== (settings?.ai_assistant?.agent_system_prompt || '') ||
+    Boolean(draft.agentWebSearchEnabled) !== Boolean(settings?.ai_assistant?.agent_web_search_enabled) ||
+    Boolean(draft.agentWebSearchSupported) !== Boolean(settings?.ai_assistant?.agent_web_search_supported) ||
     draft.r2BackupEnabled !== Boolean(settings?.r2_backup?.enabled) ||
     draft.r2EndpointUrl !== (settings?.r2_backup?.endpoint_url || '') ||
     draft.r2BucketName !== (settings?.r2_backup?.bucket_name || '') ||
@@ -201,7 +205,9 @@ export function aiAssistantPayload(draft: SettingsDraft): AIAssistantSettingsInp
     agent_enabled: draft.agentEnabled,
     agent_model: draft.agentModel.trim(),
     agent_max_tool_rounds: agentMaxToolRoundsValue(draft.agentMaxToolRounds),
-    agent_system_prompt: draft.agentSystemPrompt.trim()
+    agent_system_prompt: draft.agentSystemPrompt.trim(),
+    agent_web_search_enabled: Boolean(draft.agentWebSearchEnabled),
+    agent_web_search_supported: Boolean(draft.agentWebSearchSupported)
   };
 }
 

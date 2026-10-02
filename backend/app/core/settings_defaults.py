@@ -33,6 +33,8 @@ def default_ai_assistant_settings() -> dict:
         "agent_model": "",
         "agent_max_tool_rounds": 4,
         "agent_system_prompt": "",
+        "agent_web_search_enabled": False,
+        "agent_web_search_supported": False,
     }
 
 

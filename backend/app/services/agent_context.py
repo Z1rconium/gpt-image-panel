@@ -90,6 +90,9 @@ def build_history_items(
                 if image["role"] == "output" and image["message_id"] == assistant["id"]
             ]
             text = format_assistant_text(assistant["text"], outputs)
+            sources = [source for block in assistant.get("blocks", []) if block.get("type") == "sources" for source in block.get("sources", [])][:20]
+            if sources:
+                text += "\nSources used in that reply:\n" + "\n".join(f"{str(source.get('title') or '')[:300]}: {str(source.get('url') or '')[:2048]}" for source in sources)
             if text:
                 items.append(AssistantTextItem(text=text))
         per_round.append((round_no, items))

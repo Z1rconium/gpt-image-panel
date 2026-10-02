@@ -260,6 +260,8 @@ def _normalize_agent_settings(settings: dict, default: dict) -> dict:
             config.AGENT_MAX_TOOL_ROUNDS_CEILING,
         ),
         "agent_system_prompt": str(settings.get("agent_system_prompt") or "").strip()[:4000],
+        "agent_web_search_enabled": bool(settings.get("agent_web_search_enabled", False)),
+        "agent_web_search_supported": bool(settings.get("agent_web_search_supported", False)),
     }
 
 

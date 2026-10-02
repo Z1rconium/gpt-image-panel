@@ -371,6 +371,8 @@ class AgentRuntime:
     assistant: AssistantRuntime
     max_tool_rounds: int
     system_prompt: str
+    web_search_enabled: bool = False
+    web_search_supported: bool = False
 
 
 def resolve_agent_runtime(settings: dict | None = None) -> AgentRuntime:
@@ -382,6 +384,8 @@ def resolve_agent_runtime(settings: dict | None = None) -> AgentRuntime:
         assistant=runtime,
         max_tool_rounds=int(effective.get("agent_max_tool_rounds") or 1),
         system_prompt=str(effective.get("agent_system_prompt") or ""),
+        web_search_enabled=bool(effective.get("agent_web_search_enabled", False)),
+        web_search_supported=bool(effective.get("agent_web_search_supported", False)),
     )
 
 

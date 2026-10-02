@@ -149,6 +149,8 @@
     agentModel: '',
     agentMaxToolRounds: 4,
     agentSystemPrompt: '',
+    agentWebSearchEnabled: false,
+    agentWebSearchSupported: false,
     r2BackupEnabled: false,
     r2EndpointUrl: '',
     r2BucketName: '',
@@ -223,6 +225,8 @@
     draft.agentModel = settings.ai_assistant?.agent_model || '';
     draft.agentMaxToolRounds = settings.ai_assistant?.agent_max_tool_rounds ?? 4;
     draft.agentSystemPrompt = settings.ai_assistant?.agent_system_prompt || '';
+    draft.agentWebSearchEnabled = Boolean(settings.ai_assistant?.agent_web_search_enabled);
+    draft.agentWebSearchSupported = Boolean(settings.ai_assistant?.agent_web_search_supported);
     draft.r2BackupEnabled = Boolean(settings.r2_backup?.enabled);
     draft.r2EndpointUrl = settings.r2_backup?.endpoint_url || '';
     draft.r2BucketName = settings.r2_backup?.bucket_name || '';
@@ -591,6 +595,8 @@
         bind:agentModel={draft.agentModel}
         bind:agentMaxToolRounds={draft.agentMaxToolRounds}
         bind:agentSystemPrompt={draft.agentSystemPrompt}
+        bind:agentWebSearchEnabled={draft.agentWebSearchEnabled}
+        bind:agentWebSearchSupported={draft.agentWebSearchSupported}
         {aiAssistantHealthChecking}
         {onCreate}
         {onDelete}

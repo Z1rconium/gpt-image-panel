@@ -107,7 +107,39 @@ test('switching away from a running path does not cancel it or show its replay',
   expect(cancels).toBe(1);
 });
 
+test('search status, real citation positions, and safe Markdown survive reload and path changes', async ({ page }) => {
+  await loadAgent(page, { agentScenario: 'search', settings: { ...settings, ai_assistant: { ...settings.ai_assistant, api_path: '/v1/responses', agent_web_search_enabled: true, agent_web_search_supported: true } } });
+  await expect(page.getByTestId('agent-search-capability')).toContainText('enabled');
+  await send(page, 'what is the capital?');
+  const markdown = page.getByTestId('agent-markdown');
+  await expect(markdown.getByRole('heading', { name: 'Verified answer' })).toBeVisible();
+  await expect(markdown.locator('table')).toBeVisible();
+  await expect(markdown.locator('pre code')).toContainText('const city');
+  await expect(markdown).toContainText('<script>window.agentUnsafe = true</script>');
+  expect(await page.evaluate(() => (window as Window & { agentUnsafe?: boolean }).agentUnsafe)).toBeUndefined();
+  await expect(markdown.locator('a[href^="javascript:"]')).toHaveCount(0);
+  await expect(markdown.getByRole('link', { name: '1', exact: true })).toHaveAttribute('href', 'https://example.org/paris');
+  await expect(page.getByTestId('agent-search-status')).toContainText('Search complete');
+  const sources = page.getByTestId('agent-sources');
+  await sources.locator('summary').click();
+  await expect(sources.getByRole('link', { name: 'Official city guide' })).toBeVisible();
+  const selector = page.getByRole('combobox', { name: 'Conversation path' });
+  const head = await selector.inputValue();
+  await selector.selectOption('');
+  await expect(sources).toHaveCount(0);
+  await selector.selectOption(head);
+  await expect(sources).toContainText('Official city guide');
+  await page.reload();
+  await expect(sources).toContainText('Official city guide');
+  await expect(markdown.getByRole('link', { name: '1', exact: true })).toBeVisible();
+});
 
+test('unsupported search is explained before submission and never starts a turn', async ({ page }) => {
+  await loadAgent(page, { settings: { ...settings, ai_assistant: { ...settings.ai_assistant, agent_web_search_enabled: true, agent_web_search_supported: false } } });
+  await expect(page.getByTestId('agent-search-capability')).toContainText('supported model');
+  await page.getByRole('combobox', { name: 'Message to the Agent' }).fill('search');
+  await expect(page.getByTestId('agent-send')).toBeDisabled();
+});
 
 test('a stale second tab cannot overwrite the selected path and must resubmit after refresh', async ({ page, context }) => {
   const shared: NonNullable<MockOptions['agentConversations']> = [{ id: 'shared', title: 'Shared conversation', messages: [], turns: [] }];

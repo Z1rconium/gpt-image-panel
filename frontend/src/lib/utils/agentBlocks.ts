@@ -5,6 +5,8 @@ import type {
   AgentImageTaskBlock,
   AgentStreamEvent,
   AgentStreamEventName,
+  AgentSearchBlock,
+  AgentSourcesBlock,
   AgentTextBlock
 } from '$lib/api/types/agent';
 
@@ -59,7 +61,9 @@ export type AgentBlockGroup =
   | { kind: 'text'; key: string; block: AgentTextBlock }
   | { kind: 'batch'; key: string; block: AgentBatchParamsBlock }
   | { kind: 'images'; key: string; blocks: AgentImageTaskBlock[] }
-  | { kind: 'error'; key: string; block: AgentErrorBlock };
+  | { kind: 'error'; key: string; block: AgentErrorBlock }
+  | { kind: 'search'; key: string; block: AgentSearchBlock }
+  | { kind: 'sources'; key: string; block: AgentSourcesBlock };
 
 /** Consecutive image tasks render as one grid; everything else stays one block per row. */
 export function groupAgentBlocks(blocks: AgentBlock[]): AgentBlockGroup[] {
@@ -76,6 +80,10 @@ export function groupAgentBlocks(blocks: AgentBlock[]): AgentBlockGroup[] {
       if (block.text.trim()) groups.push({ kind: 'text', key: block.id, block });
     } else if (block.type === 'batch_params') {
       groups.push({ kind: 'batch', key: block.id, block });
+    } else if (block.type === 'search') {
+      groups.push({ kind: 'search', key: block.id, block });
+    } else if (block.type === 'sources') {
+      groups.push({ kind: 'sources', key: block.id, block });
     } else {
       groups.push({ kind: 'error', key: block.id, block });
     }

@@ -227,6 +227,9 @@ const zh: Translation = {
     agentMaxToolRounds: '每轮对话最多工具轮数',
     agentSystemPrompt: '附加指令',
     agentSystemPromptPlaceholder: '可选偏好，例如：始终用中文回复',
+    agentSearchSupported: '此 Agent 接口和模型支持 Responses 联网搜索',
+    agentSearchEnabled: '允许联网搜索',
+    agentSearchHint: '默认关闭。需要 /v1/responses 和兼容模型，请先查阅供应商文档确认支持。搜索失败时不会自动关闭搜索并重试。',
     agentSystemPromptHint: '追加在内置指令之后，无法更改工具协议。',
     aiAssistantHealth: 'AI Assistant 健康状态',
     editSystemPrompt: 'Edit System Prompt',
@@ -952,6 +955,11 @@ const zh: Translation = {
     upstream_error: '上游错误'
   },
   agent: {
+    searchEnabled: '已允许联网搜索，Agent 会在需要时检索。',
+    searchUnavailable: '联网搜索需要兼容模型及 /v1/responses。请调整 Agent 设置或关闭搜索后再发送。',
+    sources: '来源',
+    searchAction: (action: string) => ({ open_page: '读取网页', find_in_page: '查找网页内容' })[action] || '',
+    searchStatus: (status: string) => ({ in_progress: '准备联网搜索', searching: '正在搜索网络', completed: '搜索完成', failed: '搜索失败', cancelled: '搜索已停止', interrupted: '搜索已中断' })[status] || '联网搜索',
 
     editMessage: '编辑消息',
     sendBranch: '发送为新分支',

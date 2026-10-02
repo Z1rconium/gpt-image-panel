@@ -16,7 +16,8 @@ test('access gate unlocks before loading the app', async ({ page }) => {
   await mockApi(page, { authenticated: false });
   await page.goto('/');
 
-  await expect(page.getByRole('heading', { name: 'Access Key' })).toBeVisible();
+  // Match loadApp's bootstrap allowance when this is the first cold Vite page.
+  await expect(page.getByRole('heading', { name: 'Access Key' })).toBeVisible({ timeout: 15_000 });
   await page.getByLabel('Access Key').fill('open-sesame');
   await page.getByRole('button', { name: 'Unlock' }).click();
 

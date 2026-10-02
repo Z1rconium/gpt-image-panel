@@ -6,6 +6,8 @@
   import { thumbnailUrl } from '$lib/utils/format';
   import AgentImageTask from './AgentImageTask.svelte';
   import AgentMarkdown from './AgentMarkdown.svelte';
+  import AgentSources from './AgentSources.svelte';
+  import { withAgentCitations } from '$lib/utils/agentMarkdown';
 
   let {
     message,
@@ -26,6 +28,7 @@
   async function saveEdit() {
     if (editedText.trim() && await onFork(message, editedText)) editing = false;
   }
+  const sources = $derived(message.blocks.flatMap((block) => block.type === 'sources' ? block.sources : []));
   const groups = $derived(groupAgentBlocks(message.blocks));
   const parts = $derived(message.role === 'user' ? splitMentions(message.text) : []);
   const hasError = $derived(message.blocks.some((block) => block.type === 'error'));
@@ -97,7 +100,7 @@
       <p class="sr-only">{$t.agent.agent}</p>
       {#each groups as group (group.key)}
         {#if group.kind === 'text'}
-          <AgentMarkdown text={group.block.text} />
+          <AgentMarkdown text={withAgentCitations(group.block.text, group.block.id, sources)} />
         {:else if group.kind === 'batch'}
           {#if group.block.status === 'ready' && group.block.items.length}
             <details class="rounded-md border border-stone-200 px-3 py-2 text-xs text-stone-600 dark:border-zinc-800 dark:text-zinc-400">
@@ -119,6 +122,15 @@
               <AgentImageTask {block} onOpen={onOpenImage} />
             {/each}
           </div>
+        {:else if group.kind === 'search'}
+          <div class="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-xs text-stone-600 dark:text-zinc-400" data-testid="agent-search-status" role="status">
+            <span>{$t.agent.searchStatus(group.block.status)}</span>
+            {#if $t.agent.searchAction(group.block.action)}<span>{$t.agent.searchAction(group.block.action)}</span>{/if}
+            {#if group.block.queries.length}<span>{group.block.queries.join('; ')}</span>{/if}
+            {#if group.block.url}<span class="break-all">{group.block.url}</span>{/if}
+          </div>
+        {:else if group.kind === 'sources'}
+          <AgentSources sources={group.block.sources} />
         {:else}
           <p role="alert" class="status-error px-3 py-2 text-sm" data-testid="agent-error-block">{group.block.message}</p>
         {/if}

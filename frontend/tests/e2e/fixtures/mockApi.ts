@@ -122,7 +122,7 @@ type MockOptions = {
   nodeImageCancelStatusFailure?: boolean;
   nodeImageCancelReturnsCompleted?: boolean;
   /** How the mocked Agent answers a turn: a full reply, a failure, or a reply that never finishes. */
-  agentScenario?: 'reply' | 'fail' | 'hold';
+  agentScenario?: 'reply' | 'fail' | 'hold' | 'search';
   agentConversations?: AgentConversationFixture[];
   agentShareState?: boolean;
 };
@@ -630,7 +630,17 @@ async function mockApi(page: Page, options: MockOptions = {}) {
       { event: 'block.upsert', data: { block: task('pending', 'queued') } },
       { event: 'block.upsert', data: { block: task('succeeded', 'completed') } }
     ];
-    if (agentScenario === 'reply') events.push({ event: 'turn.completed', data: { rounds_used: 1 } });
+    if (agentScenario === 'search') {
+      const text = '# Verified answer\n\n😀 Paris is the capital.\n\n| City | Country |\n| --- | --- |\n| Paris | France |\n\n```js\nconst city = "Paris";\n```\n\n<script>window.agentUnsafe = true</script>\n[unsafe](javascript:alert(1))';
+      const end = Array.from(text.slice(0, text.indexOf('capital.') + 'capital.'.length)).length;
+      events.splice(1, 3,
+        { event: 'block.upsert', data: { block: { id: 's1', type: 'search', call_id: 'web-1', status: 'searching', action: 'search', queries: ['capital of France'], url: '' } } },
+        { event: 'block.upsert', data: { block: { id: 't1', type: 'text', text } } },
+        { event: 'block.upsert', data: { block: { id: 's1', type: 'search', call_id: 'web-1', status: 'completed', action: 'search', queries: ['capital of France'], url: '' } } },
+        { event: 'block.upsert', data: { block: { id: 'c1', type: 'sources', sources: [{ id: 'source-1', title: 'Official city guide', url: 'https://example.org/paris', text_block_id: 't1', start_index: end - 24, end_index: end, excerpt: 'Paris is the capital.' }] } } }
+      );
+    }
+    if (agentScenario === 'reply' || agentScenario === 'search') events.push({ event: 'turn.completed', data: { rounds_used: 1 } });
     return events;
   }
 

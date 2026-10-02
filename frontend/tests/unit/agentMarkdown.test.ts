@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { renderAgentMarkdown, safeAgentUrl } from '$lib/utils/agentMarkdown';
+import { renderAgentMarkdown, safeAgentUrl, withAgentCitations } from '$lib/utils/agentMarkdown';
 
 describe('Agent Markdown', () => {
   it('renders lists, tables, code and links, including an unfinished fence', () => {
@@ -23,6 +23,13 @@ describe('Agent Markdown', () => {
     expect(html).toContain('&lt;img');
     expect(html).toContain('&lt;script');
     expect(html).not.toContain('tracker.example.com');
+  });
+
+  it('places typed citations at Unicode positions and excludes another text block', () => {
+    const sources = [{ id: 'source-1', title: 'source', url: 'https://example.com', text_block_id: 't1', start_index: 1, end_index: 6, excerpt: 'facts' }];
+    expect(withAgentCitations('🌲facts.', 't1', sources)).toBe('🌲facts [1](https://example.com).');
+    expect(withAgentCitations('🌲facts.', 'other', sources)).toBe('🌲facts.');
+    expect(withAgentCitations('short', 't1', sources)).toBe('short');
   });
 
   it('renders a long streaming reply with an unfinished tail without truncation', () => {

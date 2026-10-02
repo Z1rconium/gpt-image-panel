@@ -121,6 +121,7 @@ def _turn_from_row(row: sqlite3.Row) -> dict[str, Any]:
         "started_at": row["started_at"],
         "finished_at": row["finished_at"],
         "parent_turn_id": row["parent_turn_id"],
+        "web_search_enabled": bool(row["web_search_enabled"]),
     }
 
 
@@ -344,6 +345,7 @@ def create_turn(
     action: str = "continue",
     source_turn_id: str | None = None,
     branch_revision: int | None = None,
+    web_search_enabled: bool = False,
 ) -> tuple[dict[str, Any], bool] | None:
     """Insert a turn with its user and empty assistant messages atomically.
 
@@ -431,9 +433,9 @@ def create_turn(
                 INSERT INTO agent_turns (
                     id, conversation_id, round_no, client_turn_id, status, model,
                     image_params_json, lease_expires_at, user_message_id,
-                    assistant_message_id, created_at, parent_turn_id
+                    assistant_message_id, created_at, parent_turn_id, web_search_enabled
                 )
-                VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     turn_id,
@@ -447,6 +449,7 @@ def create_turn(
                     assistant_message_id,
                     now,
                     parent_id,
+                    int(web_search_enabled),
                 ),
             )
             conn.execute(
@@ -627,6 +630,18 @@ def finish_turn(
                 (status, error_message, now, rounds_used, turn_id),
             )
             if current["assistant_message_id"]:
+                message_row = conn.execute("SELECT blocks_json FROM agent_messages WHERE id = ?", (current["assistant_message_id"],)).fetchone()
+                try:
+                    blocks = json.loads(message_row[0] or "[]") if message_row else []
+                except (TypeError, ValueError):
+                    blocks = []
+                changed = False
+                for block in blocks if isinstance(blocks, list) else []:
+                    if isinstance(block, dict) and block.get("type") == "search" and block.get("status") not in {"completed", "failed", "cancelled", "interrupted"}:
+                        block["status"] = status if status != "completed" else "interrupted"
+                        changed = True
+                if changed:
+                    conn.execute("UPDATE agent_messages SET blocks_json = ? WHERE id = ?", (json.dumps(blocks, ensure_ascii=False), current["assistant_message_id"]))
                 conn.execute(
                     "UPDATE agent_messages SET status = ?, updated_at = ? WHERE id = ?",
                     (_MESSAGE_STATUS_FOR_TURN[status], now, current["assistant_message_id"]),

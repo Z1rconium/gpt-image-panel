@@ -9,6 +9,7 @@ from aiohttp import web
 from aiohttp.test_utils import TestServer
 
 from backend.app.integrations import agent_client
+from backend.app.integrations.agent_search import SearchStatus, SourceCitation
 from backend.app.integrations.agent_client import (
     AgentClientError,
     AgentTimeoutError,
@@ -162,6 +163,36 @@ async def test_responses_stream_over_a_real_socket(tmp_path, monkeypatch):
     assert events[2] == ToolCallComplete("c9", "continue_generation", '{"reason":"next"}')
     body = upstream.requests[0]["body"]
     assert body["instructions"] == "sys" and body["input"][0]["role"] == "user" and body["stream"] is True
+
+
+@pytest.mark.anyio
+async def test_search_annotations_and_tools_over_chunked_responses_socket(tmp_path, monkeypatch):
+    _configure_runtime(tmp_path)  # noqa: F405
+    annotation = {"type": "url_citation", "title": "Official", "url": "https://example.com/facts", "start_index": 1, "end_index": 6}
+    search = {"type": "web_search_call", "id": "web", "status": "completed", "action": {"type": "search", "queries": ["facts"]}}
+    message = {"type": "message", "id": "m", "content": [{"type": "output_text", "text": "🌲facts", "annotations": [annotation]}]}
+    frames = [
+        sse_frame({"type": "response.web_search_call.in_progress", "item_id": "web"}),
+        sse_frame({"type": "response.web_search_call.searching", "item_id": "web"}),
+        sse_frame({"type": "response.output_text.delta", "item_id": "m", "delta": "🌲facts"}),
+        sse_frame({"type": "response.output_text.annotation.added", "item_id": "m", "annotation": annotation}),
+        sse_frame({"type": "response.output_item.done", "item": search}),
+        sse_frame({"type": "response.output_item.done", "item": message}),
+        sse_frame({"type": "response.completed", "response": {"status": "completed", "output": [search, message]}}),
+    ]
+
+    async def handler(request, body):
+        return await stream_response(request, frames, split_at=len(frames[0]) + 13)
+
+    async with LocalUpstream() as upstream:
+        upstream.handler = handler
+        wire(monkeypatch, upstream, "/v1/responses")
+        events = await collect("/v1/responses", web_search=True, max_tool_calls=2)
+    assert [event.text for event in events if isinstance(event, TextDelta)] == ["🌲facts"]
+    assert len([event for event in events if isinstance(event, SourceCitation)]) == 1
+    assert any(isinstance(event, SearchStatus) and event.queries == ("facts",) for event in events)
+    assert upstream.requests[0]["body"]["max_tool_calls"] == 2
+    assert {tool["type"] for tool in upstream.requests[0]["body"]["tools"]} == {"function", "web_search"}
 
 
 @pytest.mark.anyio

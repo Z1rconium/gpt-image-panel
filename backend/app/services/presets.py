@@ -220,6 +220,8 @@ def normalize_ai_assistant_settings(raw: dict | None) -> dict:
             config.AGENT_MAX_TOOL_ROUNDS_CEILING,
         ),
         "agent_system_prompt": str(raw.get("agent_system_prompt") or "").strip()[:4000],
+        "agent_web_search_enabled": bool(raw.get("agent_web_search_enabled", False)),
+        "agent_web_search_supported": bool(raw.get("agent_web_search_supported", False)),
     }
 
 
@@ -835,6 +837,8 @@ def build_ai_assistant_settings_response(raw: dict | None) -> AIAssistantSetting
         agent_model=str(raw.get("agent_model") or "").strip(),
         agent_max_tool_rounds=int(raw.get("agent_max_tool_rounds") or 4),
         agent_system_prompt=str(raw.get("agent_system_prompt") or ""),
+        agent_web_search_enabled=bool(raw.get("agent_web_search_enabled", False)),
+        agent_web_search_supported=bool(raw.get("agent_web_search_supported", False)),
         **key_fields,
     )
 
@@ -1069,6 +1073,9 @@ def apply_ai_assistant_settings(current: dict | None, req_assistant: object) -> 
         current["agent_max_tool_rounds"] = int(req_assistant.agent_max_tool_rounds)
     if getattr(req_assistant, "agent_system_prompt", None) is not None:
         current["agent_system_prompt"] = req_assistant.agent_system_prompt.strip()
+    for key in ("agent_web_search_enabled", "agent_web_search_supported"):
+        if getattr(req_assistant, key, None) is not None:
+            current[key] = bool(getattr(req_assistant, key))
     return normalize_ai_assistant_settings(current)
 
 

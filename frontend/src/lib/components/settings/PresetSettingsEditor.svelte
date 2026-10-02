@@ -59,6 +59,8 @@
   export let agentModel = '';
   export let agentMaxToolRounds: number | string = 4;
   export let agentSystemPrompt = '';
+  export let agentWebSearchEnabled = false;
+  export let agentWebSearchSupported = false;
   export let aiAssistantHealthChecking = false;
   export let onCreate: () => void = () => {};
   export let onDelete: (presetId: string) => void = () => {};
@@ -309,6 +311,8 @@
             bind:agentModel
             bind:agentMaxToolRounds
             bind:agentSystemPrompt
+            bind:agentWebSearchEnabled
+            bind:agentWebSearchSupported
             healthChecking={aiAssistantHealthChecking}
             onCheck={checkAiAssistantHealth}
           />

@@ -1,4 +1,5 @@
 import { Marked } from 'marked';
+import type { AgentSource } from '$lib/api/types/agent';
 
 export function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character] ?? character);
@@ -37,4 +38,17 @@ export function renderAgentMarkdown(text: string): string {
   } catch {
     return `<p>${escapeHtml(text)}</p>`;
   }
+}
+
+export function withAgentCitations(text: string, blockId: string, sources: AgentSource[]): string {
+  const points = Array.from(text);
+  const citations = sources.map((source, index) => ({ source, number: index + 1 }))
+    .filter(({ source }) => source.text_block_id === blockId && source.end_index !== null && source.end_index >= 0 && source.end_index <= points.length && safeAgentUrl(source.url))
+    .sort((a, b) => (b.source.end_index ?? 0) - (a.source.end_index ?? 0));
+  for (const { source, number } of citations) {
+    // Positions are upstream Unicode code points, not JavaScript UTF-16 units.
+    const url = source.url.replace(/\(/g, '%28').replace(/\)/g, '%29');
+    points.splice(source.end_index ?? 0, 0, ` [${number}](${url})`);
+  }
+  return points.join('');
 }

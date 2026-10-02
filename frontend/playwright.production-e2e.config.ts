@@ -1,10 +1,10 @@
 import { defineConfig, devices } from '@playwright/test';
 
-/** Run mask browser acceptance against the static bundle and emitted Worker. */
+/** Run mask and Agent acceptance against the static bundle and emitted Worker. */
 export default defineConfig({
   testDir: './tests/e2e',
   // Other e2e files exercise Vite-only source URLs; the normal suite owns them.
-  testMatch: ['**/edit-mask.spec.ts'],
+  testMatch: ['**/edit-mask.spec.ts', '**/agent-phases-six-seven.spec.ts'],
   timeout: 90_000,
   fullyParallel: false,
   workers: 1,

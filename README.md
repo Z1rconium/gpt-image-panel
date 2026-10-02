@@ -321,11 +321,16 @@ With `ENABLE_METRICS=true`, `/api/metrics` exposes diagnostics for sizing SQLite
 11. Use **Export** to download the selected preset as a versioned JSON package (never containing the key), **Share link** to copy a `?preset=` link, and **Import** to preview a file, clipboard JSON, or shared link before applying it. Order presets with the drag handle or the arrow buttons; the order is stored in SQLite.
 12. Optionally enable Agent mode in Settings → AI Assistant (pick a model that supports function calling), then switch to **Agent** in the header. Describe what you want, reference earlier images with `@` (for example `@round-1-image-1`), attach gallery images, and press Ctrl/Cmd+Enter. Use Stop to cancel a running reply; generated images appear in the gallery.
 
-### Agent paths, Markdown
+### Agent paths, Markdown and optional search
 
 Assistant replies support headings, lists, tables, code and links. Raw HTML is escaped, external Markdown images stay text, and links allow only HTTP(S) URLs without credentials.
 
 Use **Edit message → Send as new branch** or **Regenerate** to create a sibling of a historical turn. **Conversation path** restores any original or new path after reload. Switching paths does not create requests or stop running work; stop the active turn before editing or regenerating. Only ancestors on the executing path enter model history. Image IDs and `@round-N-image-M` references are stable; displayed rounds and `@第N轮图M` follow the current path. To reuse an image from another path, attach it explicitly from Gallery. Deleting Gallery images invalidates references on all paths; deleting a conversation keeps its Gallery images.
+
+Web search is **off by default**. Under **Settings → AI Assistant**, declare that the actual endpoint/model supports Responses web search, then enable **Allow web search**. This requires the inherited Prompt Optimizer route to use `/v1/responses` and a compatible model; chat/completions continues with the existing function tools when search is off. Check your provider documentation before declaring support. Search-enabled incompatible configurations block submission (422 at the API); failures are shown and never automatically retried with search disabled.
+
+Search progress and citations supplied by upstream annotations are saved with the turn. Inline numbers link to the same sources listed under **Sources**, including quoted spans; reloads, stream replay and path switches restore them. Ordinary Markdown links do not become sources. Search shares tool-round, timeout and cancellation limits, uses bounded branch history, and does not invent costs when usage is missing. Migrations 37/38 apply automatically at startup.
+
 
 ## GPT Image 2.5
 

@@ -225,6 +225,9 @@ const en = {
     agentMaxToolRounds: 'Max tool rounds per turn',
     agentSystemPrompt: 'Extra instructions',
     agentSystemPromptPlaceholder: 'Optional preferences, e.g. always reply in English',
+    agentSearchSupported: 'This Agent endpoint and model support Responses web search',
+    agentSearchEnabled: 'Allow web search',
+    agentSearchHint: 'Default off. Requires /v1/responses and a compatible model. Confirm support in your provider documentation; failed requests are not retried with search disabled.',
     agentSystemPromptHint: 'Appended to the built-in instructions; it cannot change the tool protocol.',
     aiAssistantHealth: 'AI Assistant health',
     editSystemPrompt: 'Edit System Prompt',
@@ -951,6 +954,11 @@ const en = {
     upstream_error: 'upstream error'
   },
   agent: {
+    searchEnabled: 'Web search is enabled. The Agent can search when useful.',
+    searchUnavailable: 'Web search needs a supported model and /v1/responses. Update the Agent settings or disable search before sending.',
+    sources: 'Sources',
+    searchAction: (action: string) => ({ open_page: 'Reading a page', find_in_page: 'Finding text on a page' })[action] || '',
+    searchStatus: (status: string) => ({ in_progress: 'Starting web search', searching: 'Searching the web', completed: 'Search complete', failed: 'Search failed', cancelled: 'Search stopped', interrupted: 'Search interrupted' })[status] || 'Web search',
 
     editMessage: 'Edit message',
     sendBranch: 'Send as new branch',

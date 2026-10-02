@@ -20,6 +20,7 @@ from ..core import validators as ssrf
 from ..core.api_paths import RESPONSES_API_PATH
 from ..core.redaction import redact_sensitive_text
 from .assistant_client import normalize_assistant_api_path, validate_assistant_endpoint_async
+from .agent_search import SearchStatus, SourceCitation, citation_event, search_event
 from .json_client import json_headers
 from .session_pool import TIMEOUT_PROMPT_OPTIMIZER, get_pool
 from .upstream.errors import UpstreamApiError
@@ -91,6 +92,8 @@ class ToolSpec:
 @dataclass(frozen=True)
 class TextDelta:
     text: str
+    item_id: str = ""
+    content_index: int = 0
 
 
 @dataclass(frozen=True)
@@ -113,7 +116,7 @@ class Finish:
     usage: dict[str, Any] = field(default_factory=dict)
 
 
-AgentStreamEvent = TextDelta | ToolCallStarted | ToolCallComplete | Finish
+AgentStreamEvent = TextDelta | ToolCallStarted | ToolCallComplete | Finish | SearchStatus | SourceCitation
 
 
 # ── Payload builders ────────────────────────────────────────────
@@ -199,6 +202,8 @@ def build_responses_payload(
     tools: Sequence[ToolSpec],
     tool_choice: str,
     max_output_tokens: int,
+    web_search: bool = False,
+    max_tool_calls: int = 4,
 ) -> dict[str, Any]:
     input_items: list[dict[str, Any]] = []
     for item in items:
@@ -243,6 +248,10 @@ def build_responses_payload(
             for tool in tools
         ]
         payload["tool_choice"] = tool_choice
+    if web_search:
+        payload.setdefault("tools", []).append({"type": "web_search"})
+        payload["tool_choice"] = tool_choice
+        payload["max_tool_calls"] = max(1, min(64, max_tool_calls))
     return payload
 
 
@@ -343,6 +352,39 @@ class ResponsesStreamParser:
     def __init__(self) -> None:
         self._calls: dict[str, dict[str, Any]] = {}
         self._finish: Finish | None = None
+        self._citations: set[SourceCitation] = set()
+        self._searches: dict[str, SearchStatus] = {}
+        self._text_seen: set[tuple[str, int]] = set()
+
+    def _citations_for(self, annotations: Any, item_id: str, content_index: int) -> list[AgentStreamEvent]:
+        out: list[AgentStreamEvent] = []
+        if not isinstance(annotations, list) or type(content_index) is not int or not 0 <= content_index < 100:
+            return out
+        for annotation in annotations[:100]:
+            citation = citation_event(annotation, item_id, content_index)
+            if citation is not None and citation not in self._citations and len(self._citations) < 100:
+                self._citations.add(citation)
+                out.append(citation)
+        return out
+
+    def _item_events(self, item: dict[str, Any]) -> list[AgentStreamEvent]:
+        out: list[AgentStreamEvent] = []
+        item_id = str(item.get("id") or "")
+        if item.get("type") == "web_search_call":
+            update = search_event(item)
+            if update != self._searches.get(update.call_id):
+                self._searches[update.call_id] = update
+                out.append(update)
+        elif item.get("type") == "message":
+            content = item.get("content")
+            for index, part in enumerate(content[:100] if isinstance(content, list) else []):
+                if not isinstance(part, dict) or part.get("type") != "output_text":
+                    continue
+                if (item_id, index) not in self._text_seen and isinstance(part.get("text"), str):
+                    self._text_seen.add((item_id, index))
+                    out.append(TextDelta(part["text"], item_id, index))
+                out.extend(self._citations_for(part.get("annotations"), item_id, index))
+        return out
 
     def _call_for(self, item: dict[str, Any]) -> dict[str, Any]:
         item_id = str(item.get("id") or item.get("call_id") or "")
@@ -382,9 +424,24 @@ class ResponsesStreamParser:
         if event_type == "response.output_text.delta":
             delta = event.get("delta")
             if isinstance(delta, str) and delta:
-                out.append(TextDelta(delta))
+                item_id = str(event.get("item_id") or "")
+                index = event.get("content_index", 0)
+                index = index if type(index) is int and 0 <= index < 100 else 0
+                self._text_seen.add((item_id, index))
+                out.append(TextDelta(delta, item_id, index))
+        elif event_type == "response.output_text.annotation.added":
+            out.extend(self._citations_for([event.get("annotation")], str(event.get("item_id") or ""), event.get("content_index", 0)))
+        elif event_type.startswith("response.web_search_call."):
+            status = event_type.rsplit(".", 1)[-1]
+            if status in {"in_progress", "searching", "completed", "failed"}:
+                update = SearchStatus(str(event.get("item_id") or "search")[:200], status)
+                if update != self._searches.get(update.call_id):
+                    self._searches[update.call_id] = update
+                    out.append(update)
         elif event_type == "response.output_item.added":
             item = event.get("item")
+            if isinstance(item, dict) and item.get("type") == "web_search_call":
+                out.extend(self._item_events(item))
             if isinstance(item, dict) and item.get("type") == "function_call":
                 out.extend(self._start(self._call_for(item)))
         elif event_type == "response.function_call_arguments.delta":
@@ -399,6 +456,8 @@ class ResponsesStreamParser:
                 call["arguments"] = event["arguments"]
         elif event_type == "response.output_item.done":
             item = event.get("item")
+            if isinstance(item, dict):
+                out.extend(self._item_events(item))
             if isinstance(item, dict) and item.get("type") == "function_call":
                 call = self._call_for(item)
                 if isinstance(item.get("arguments"), str):
@@ -406,6 +465,12 @@ class ResponsesStreamParser:
                 out.extend(self._complete(call))
         elif event_type in {"response.completed", "response.incomplete"}:
             response = event.get("response") if isinstance(event.get("response"), dict) else {}
+            output = response.get("output")
+            for item in output[:100] if isinstance(output, list) else []:
+                if isinstance(item, dict):
+                    out.extend(self._item_events(item))
+                    if item.get("type") == "function_call":
+                        out.extend(self._complete(self._call_for(item)))
             incomplete = event_type == "response.incomplete" or response.get("status") == "incomplete"
             usage = response.get("usage") if isinstance(response.get("usage"), dict) else {}
             self._finish = Finish(
@@ -462,15 +527,24 @@ def parse_complete_responses_response(data: dict[str, Any]) -> list[AgentStreamE
     if message:
         raise AgentClientError(redact_sensitive_text(message))
     out: list[AgentStreamEvent] = []
-    for item in data.get("output") or []:
+    output = data.get("output")
+    for item in output[:100] if isinstance(output, list) else []:
         if not isinstance(item, dict):
             continue
         if item.get("type") == "message":
-            for part in item.get("content") or []:
+            content = item.get("content")
+            for index, part in enumerate(content[:100] if isinstance(content, list) else []):
                 if isinstance(part, dict) and part.get("type") in {"output_text", "text"}:
                     text = part.get("text")
                     if isinstance(text, str) and text:
-                        out.append(TextDelta(text))
+                        out.append(TextDelta(text, str(item.get("id") or ""), index))
+                    annotations = part.get("annotations")
+                    for annotation in annotations[:100] if isinstance(annotations, list) else []:
+                        citation = citation_event(annotation, str(item.get("id") or ""), index)
+                        if citation is not None:
+                            out.append(citation)
+        elif item.get("type") == "web_search_call":
+            out.append(search_event(item))
         elif item.get("type") == "function_call" and item.get("name"):
             call_id = str(item.get("call_id") or item.get("id") or f"call_{len(out)}")
             arguments = item.get("arguments")
@@ -515,12 +589,16 @@ async def stream_agent_response(
     tool_choice: str = "auto",
     timeout_seconds: float | None = None,
     max_output_tokens: int = 4096,
+    web_search: bool = False,
+    max_tool_calls: int = 4,
 ) -> AsyncIterator[AgentStreamEvent]:
     normalized_path = normalize_assistant_api_path(api_path)
     endpoint = await validate_assistant_endpoint_async(api_url, normalized_path)
     timeout_seconds = float(timeout_seconds or config.PROMPT_OPTIMIZER_TIMEOUT_SECONDS)
     model = str(model or config.PROMPT_OPTIMIZER_MODEL).strip() or config.PROMPT_OPTIMIZER_MODEL
     use_responses = normalized_path == RESPONSES_API_PATH
+    if web_search and not use_responses:
+        raise AgentToolsUnsupportedError("Web search requires a Responses endpoint")
     builder = build_responses_payload if use_responses else build_chat_payload
     payload = builder(
         model=model,
@@ -529,6 +607,7 @@ async def stream_agent_response(
         tools=tools,
         tool_choice=tool_choice,
         max_output_tokens=max_output_tokens,
+        **({"web_search": True, "max_tool_calls": max_tool_calls} if web_search else {}),
     )
     max_response_bytes = config.AI_ASSISTANT_MAX_RESPONSE_MB * 1024 * 1024
     timeout = aiohttp.ClientTimeout(

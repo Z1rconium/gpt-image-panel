@@ -138,6 +138,8 @@ async def _create_reserved_turn(conversation_id: str, req: AgentTurnRequest) -> 
     if replay is not None:
         return _accepted(replay, created=False)
     agent = await assistant_runtime.resolve_agent_runtime_async()
+    if agent.web_search_enabled and (not agent.web_search_supported or agent.assistant.api_path != "/v1/responses"):
+        raise UnprocessableRequestError("Web search requires a Responses endpoint and declared model support. Disable web search or update Agent settings.")
     text = req.text.strip()
     if len(text) > config.AGENT_MAX_USER_TEXT_CHARS:
         raise UnprocessableRequestError(
@@ -162,6 +164,7 @@ async def _create_reserved_turn(conversation_id: str, req: AgentTurnRequest) -> 
             action=req.action,
             source_turn_id=req.source_turn_id,
             branch_revision=req.branch_revision,
+            web_search_enabled=agent.web_search_enabled,
             metric_name="agent_create_turn",
             critical=True,
         )

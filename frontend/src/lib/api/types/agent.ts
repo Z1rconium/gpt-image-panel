@@ -43,7 +43,15 @@ export type AgentErrorBlock = {
   message: string;
 };
 
-export type AgentBlock = AgentTextBlock | AgentBatchParamsBlock | AgentImageTaskBlock | AgentErrorBlock;
+export type AgentSearchBlock = {
+  id: string; type: 'search'; call_id: string; status: string; action: string; queries: string[]; url: string;
+};
+export type AgentSource = {
+  id: string; title: string; url: string; text_block_id: string | null;
+  start_index: number | null; end_index: number | null; excerpt: string;
+};
+export type AgentSourcesBlock = { id: string; type: 'sources'; sources: AgentSource[] };
+export type AgentBlock = AgentTextBlock | AgentBatchParamsBlock | AgentImageTaskBlock | AgentErrorBlock | AgentSearchBlock | AgentSourcesBlock;
 
 export type AgentConversationSummary = {
   id: string;

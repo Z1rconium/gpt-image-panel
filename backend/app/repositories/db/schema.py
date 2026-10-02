@@ -1390,6 +1390,12 @@ def _migration_agent_branches(conn: sqlite3.Connection):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_agent_turns_parent ON agent_turns(conversation_id, parent_turn_id)")
 
 
+def _migration_agent_search(conn: sqlite3.Connection):
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(agent_turns)")}
+    if "web_search_enabled" not in columns:
+        conn.execute("ALTER TABLE agent_turns ADD COLUMN web_search_enabled INTEGER NOT NULL DEFAULT 0")
+
+
 SCHEMA_MIGRATIONS = (
     (1, "baseline_legacy_schema", _migration_baseline_legacy_schema),
     (2, "gallery_filter_options", _migration_gallery_filter_options),
@@ -1428,4 +1434,5 @@ SCHEMA_MIGRATIONS = (
     (35, "image_job_unit_diagnostics", _migration_image_job_unit_diagnostics),
     (36, "image_job_preview_context", _migration_image_job_preview_context),
     (37, "agent_branches", _migration_agent_branches),
+    (38, "agent_search", _migration_agent_search),
 )
