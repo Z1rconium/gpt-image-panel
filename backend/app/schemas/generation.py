@@ -87,12 +87,6 @@ class GenerateRequest(StrictRequestModel):
             self.output_compression = None
         return self
 
-    @model_validator(mode="after")
-    def validate_streaming_options(self) -> "GenerateRequest":
-        if self.stream and self.n > 1:
-            raise ValueError("stream=true requires n=1; the image queue runs each n as a separate request")
-        return self
-
 
 class EditRequest(GenerateRequest):
     paste_back: Optional[bool] = None

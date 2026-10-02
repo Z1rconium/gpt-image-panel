@@ -348,7 +348,10 @@ async def consume_streaming_image_response(
             continue
         event_type = str(event.get("type") or "")
         if event_type.endswith(".partial_image"):
-            b64_json = event.get("b64_json")
+            # Images API frames carry `b64_json`; Responses API frames carry
+            # `partial_image_b64`. Text deltas and other unrelated events are
+            # skipped because neither field is present.
+            b64_json = event.get("b64_json") or event.get("partial_image_b64")
             if not b64_json:
                 continue
             try:
@@ -368,6 +371,24 @@ async def consume_streaming_image_response(
                         f"Received partial preview {partial_index + 1}",
                     )
                 preview(partial_index, mime_type, image_bytes)
+        elif event_type in {"response.completed", "response.incomplete"}:
+            response_payload = event.get("response")
+            if not isinstance(response_payload, dict):
+                continue
+            responses_data = extract_response_image_results(response_payload)
+            if responses_data:
+                final_data = [dict(item) for item in responses_data]
+            usage = response_payload.get("usage")
+            if isinstance(usage, dict) and usage:
+                raw_usage = usage
+            if event_type == "response.incomplete" and not responses_data:
+                details = response_payload.get("incomplete_details")
+                reason = (
+                    details.get("reason")
+                    if isinstance(details, dict) and details.get("reason")
+                    else "the upstream ended the response before completion"
+                )
+                raise UpstreamApiError(f"Streaming response ended incomplete: {reason}")
         elif event_type.endswith(".completed"):
             b64_json = event.get("b64_json")
             if b64_json:
@@ -376,10 +397,14 @@ async def consume_streaming_image_response(
             if isinstance(usage, dict):
                 raw_usage = usage
         elif event_type.endswith(".failed") or event_type == "error":
-            message = event.get("error") or event.get("message") or "Upstream reported a streaming failure"
+            message = event.get("error") or event.get("message")
             if isinstance(message, dict):
-                message = message.get("message") or "Upstream reported a streaming failure"
-            raise UpstreamApiError(str(message))
+                message = message.get("message")
+            if not message and isinstance(event.get("response"), dict):
+                response_error = event["response"].get("error")
+                if isinstance(response_error, dict):
+                    message = response_error.get("message") or response_error.get("code")
+            raise UpstreamApiError(str(message or "Upstream reported a streaming failure"))
 
     if final_data is None:
         raise UpstreamApiError(
@@ -657,7 +682,7 @@ async def call_image_generation_api(
     payload.normalize_model_options(api_path)
     if payload.background.startswith("chroma_") and api_path != "/v1/images/generations":
         raise UpstreamApiError("Local chroma removal requires /v1/images/generations")
-    use_streaming = bool(stream) and api_path == "/v1/images/generations"
+    use_streaming = bool(stream) and api_path in {"/v1/images/generations", RESPONSES_API_PATH}
     prepared_request = await _prepare_upstream_request(
         api_url=api_url,
         api_key=api_key,
@@ -668,7 +693,12 @@ async def call_image_generation_api(
     if api_path == RESPONSES_API_PATH:
         if progress:
             progress("building_responses_payload", "Building Responses API payload")
-        request_data = build_responses_request_data(payload, prompt_guard=prompt_guard)
+        request_data = build_responses_request_data(
+            payload,
+            prompt_guard=prompt_guard,
+            stream=use_streaming,
+            partial_images=partial_images,
+        )
     elif api_path == CHAT_COMPLETIONS_API_PATH:
         if progress:
             progress(

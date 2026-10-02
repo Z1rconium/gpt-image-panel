@@ -462,8 +462,11 @@ async def queue_image_job(
     if getattr(req, "stream", False) and resolved_api_path not in {
         "/v1/images/generations",
         "/v1/images/edits",
+        "/v1/responses",
     }:
-        raise UnprocessableRequestError("Streaming preview requires /v1/images/generations or /v1/images/edits")
+        raise UnprocessableRequestError(
+            "Streaming preview requires /v1/images/generations, /v1/images/edits or /v1/responses"
+        )
 
     if not api_url:
         raise InvalidRequestError("API URL not configured. Please set it in Settings.")

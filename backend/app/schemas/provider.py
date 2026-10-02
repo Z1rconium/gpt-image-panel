@@ -465,12 +465,13 @@ class ProviderCapabilitiesV2(StrictRequestModel):
     """Declared provider capabilities; undeclared values stay conservative.
 
     ``edit``/``mask`` are derived from the mapping shape and cannot be declared
-    here. ``stream`` stays reserved for the Phase 4 preview work.
+    here. ``stream`` must stay false: mapped providers speak the declarative
+    HTTP mapping, not the SSE protocols the panel streams previews over.
     """
 
     stream: Literal[False] = Field(
         default=False,
-        description="Reserved for streamed previews; must stay false today.",
+        description="Streamed previews need an SSE-capable OpenAI-compatible API; mapped providers must keep this false.",
     )
     transparent_background: Optional[bool] = Field(
         default=None,

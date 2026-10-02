@@ -324,12 +324,25 @@ def build_responses_request_data(
     payload: GenerateRequest,
     *,
     prompt_guard: bool = False,
+    stream: bool = False,
+    partial_images: int = 2,
 ) -> dict[str, Any]:
     model = (payload.model or config.DEFAULT_RESPONSES_MODEL or "").strip()
-    return {
+    request_data: dict[str, Any] = {
         "prompt": sent_generation_prompt(payload, prompt_guard=prompt_guard),
         "model": model or payload.model,
     }
+    if stream:
+        # Streamed image previews only arrive through the image_generation
+        # tool; non-streaming requests keep the historical prompt-only shape.
+        request_data["stream"] = True
+        request_data["tools"] = [
+            {
+                "type": "image_generation",
+                "partial_images": max(1, min(3, int(partial_images or 2))),
+            }
+        ]
+    return request_data
 
 
 OUTPUT_FORMATS = {

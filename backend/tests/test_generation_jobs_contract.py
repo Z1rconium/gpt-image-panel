@@ -1841,12 +1841,83 @@ def test_background_transparent_with_jpeg_forces_png(tmp_path):
     assert payload.background == "transparent"
 
 
-def test_stream_with_n_greater_than_one_rejected_with_422(client):
+def test_streaming_multi_image_job_attributes_previews_per_unit(client, monkeypatch):
+    import backend.app.services.job_executor as job_executor_module
+
+    calls = []
+    calls_lock = threading.Lock()
+    recorded_previews = []
+    original_publish = job_events.publish_generate_job_preview
+
+    def recording_publish(job_id, payload):
+        recorded_previews.append(dict(payload))
+        return original_publish(job_id, payload)
+
+    async def fake_generation_api(
+        api_url,
+        api_key,
+        api_path,
+        payload,
+        api_preset_name=None,
+        progress=None,
+        socks5_proxy=None,
+        *,
+        stream: bool = False,
+        partial_images: int = 2,
+        preview=None,
+        persist_gallery_entry=None,
+    ):
+        with calls_lock:
+            calls.append({"stream": stream, "partial_images": partial_images, "n": payload.n})
+        assert stream is True
+        assert preview is not None
+        preview(0, "image/png", PNG_BYTES)
+        preview(1, "image/png", PNG_BYTES)
+        return [
+            await _add_generated_gallery_entry(
+                payload,
+                api_path,
+                api_preset_name,
+            )
+        ]
+
+    monkeypatch.setattr(backend_main.proxy, "call_image_generation_api", fake_generation_api)
+    monkeypatch.setattr(job_executor_module, "publish_generate_job_preview", recording_publish)
+
     resp = client.post(
         "/api/generate",
-        json={"prompt": "two streamed", "model": "gpt-image-2", "n": 2, "stream": True},
+        json={
+            "prompt": "two streamed cubes",
+            "size": "1024x1024",
+            "model": "gpt-image-2",
+            "n": 2,
+            "stream": True,
+            "partial_images": 2,
+        },
     )
-    assert resp.status_code == 422
+    assert resp.status_code == 202
+    job_id = resp.json()["job_id"]
+
+    job = _wait_for_job(client, job_id)
+    assert job["status"] == "success"
+    assert job["streaming"] is True
+    assert len(job["images"]) == 2
+    assert len(calls) == 2
+    assert all(call["stream"] is True for call in calls)
+    assert all(call["n"] == 1 for call in calls)
+    assert all(call["partial_images"] == 2 for call in calls)
+
+    assert len(recorded_previews) == 4
+    by_unit: dict[int, list[dict]] = {}
+    for payload in recorded_previews:
+        assert payload["job_id"] == job_id
+        by_unit.setdefault(payload["unit_index"], []).append(payload)
+    assert sorted(by_unit) == [0, 1]
+    for unit_payloads in by_unit.values():
+        assert [item["sequence"] for item in unit_payloads] == [1, 2]
+        assert [item["partial_image_index"] for item in unit_payloads] == [0, 1]
+
+    assert job_events.get_cached_generate_job_previews(job_id) == []
 
 
 def test_stream_partial_images_out_of_range_rejected_with_422(client):
@@ -1861,10 +1932,10 @@ def test_stream_unsupported_api_path_rejected_with_422(client):
     resp = client.post(
         "/api/generate",
         json={
-            "prompt": "responses streaming",
+            "prompt": "chat streaming",
             "model": "gpt-image-2",
             "stream": True,
-            "api_path": "/v1/responses",
+            "api_path": "/v1/chat/completions",
         },
     )
     assert resp.status_code == 422
