@@ -40,7 +40,15 @@ _COLLECTION_SELECT_SQL = """
             WHERE items.collection_id = c.id
             ORDER BY e.sort_seq DESC, e.id DESC
             LIMIT 1
-        ) AS cover_image_id
+        ) AS cover_image_id,
+        (
+            SELECT e.filename
+            FROM gallery_collection_items AS items
+            JOIN gallery_entries AS e ON e.id = items.image_id
+            WHERE items.collection_id = c.id
+            ORDER BY e.sort_seq DESC, e.id DESC
+            LIMIT 1
+        ) AS cover_filename
     FROM gallery_collections AS c
 """
 
@@ -53,6 +61,7 @@ def _collection_from_row(row: sqlite3.Row) -> dict[str, Any]:
         "is_default": bool(row["is_default"]),
         "image_count": int(row["image_count"] or 0),
         "cover_image_id": row["cover_image_id"],
+        "cover_filename": row["cover_filename"],
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }

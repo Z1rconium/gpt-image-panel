@@ -49,6 +49,7 @@ export type GalleryCollection = {
   is_default: boolean;
   image_count: number;
   cover_image_id?: string | null;
+  cover_filename?: string | null;
   created_at: string;
   updated_at: string;
 };

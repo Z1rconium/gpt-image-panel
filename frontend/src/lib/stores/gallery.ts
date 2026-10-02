@@ -576,7 +576,16 @@ function createGalleryStore() {
       : new Set(state.selectedIds);
     if (selectedIds.has(image.id)) selectedIds.delete(image.id);
     else selectedIds.add(image.id);
-    update((current) => ({ ...current, selectedIds, selectionToken: null }));
+    update((current) => ({ ...current, selectionMode: true, selectedIds, selectionToken: null }));
+  }
+
+  /** Replace (or, additively, extend) the explicit selection with a drag band result. */
+  function applyBandSelection(ids: string[], additive = false) {
+    update((current) => {
+      const selectedIds = additive ? new Set(current.selectedIds) : new Set<string>();
+      ids.forEach((id) => selectedIds.add(id));
+      return { ...current, selectionMode: true, selectedIds, selectionToken: null };
+    });
   }
 
   function selectPage() {
@@ -750,6 +759,7 @@ function createGalleryStore() {
     resetFilters,
     setSelectionMode,
     toggleSelection,
+    applyBandSelection,
     selectPage,
     selectFiltered,
     clearSelection,

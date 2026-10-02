@@ -143,6 +143,7 @@ class GalleryCollection(BaseModel):
     is_default: bool = False
     image_count: int = 0
     cover_image_id: Optional[str] = None
+    cover_filename: Optional[str] = None
     created_at: str
     updated_at: str
 

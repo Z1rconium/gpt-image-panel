@@ -727,7 +727,13 @@ async function mockApi(page: Page, options: MockOptions = {}) {
 
   function publicCollection(collection: CollectionFixture) {
     const members = [...(collectionItems.get(collection.id) || [])].filter((id) => galleryImages.some((image) => image.id === id));
-    return { ...collection, image_count: members.length, cover_image_id: members.at(-1) ?? null };
+    const cover = members.at(-1) ? galleryImages.find((image) => image.id === members.at(-1)) : undefined;
+    return {
+      ...collection,
+      image_count: members.length,
+      cover_image_id: members.at(-1) ?? null,
+      cover_filename: cover?.filename ?? null
+    };
   }
 
   function sortedCollections() {

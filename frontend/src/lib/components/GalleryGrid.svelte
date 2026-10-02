@@ -2,12 +2,23 @@
   import { onDestroy, onMount } from 'svelte';
   import type { GalleryEntry, GalleryResponse } from '$lib/api/types/gallery';
   import CollectionsDialog from '$lib/components/gallery/CollectionsDialog.svelte';
+  import CollectionsOverview from '$lib/components/gallery/CollectionsOverview.svelte';
   import GalleryFilterToolbar from '$lib/components/gallery/GalleryFilterToolbar.svelte';
   import GalleryPagination from '$lib/components/gallery/GalleryPagination.svelte';
   import { t } from '$lib/i18n';
   import { galleryActivityStore, galleryStore, type GalleryFilters } from '$lib/stores/gallery';
   import { defaultCollection, galleryCollectionsStore } from '$lib/stores/galleryCollections';
   import { uiStore } from '$lib/stores/ui';
+  import {
+    bandPastThreshold,
+    bandRect,
+    idsForBand,
+    swipeSelectBegin,
+    swipeSelectMove,
+    type BandRect,
+    type Point,
+    type SwipeSelectState
+  } from '$lib/features/gallery/selectionGestures';
   import BookmarkPlus from 'lucide-svelte/icons/bookmark-plus';
   import CloudUpload from 'lucide-svelte/icons/cloud-upload';
   import Download from 'lucide-svelte/icons/download';
@@ -110,9 +121,14 @@
     }, 280);
   }
 
-  onDestroy(() => clearTimeout(favoritePopTimer));
+  onDestroy(() => {
+    clearTimeout(favoritePopTimer);
+    handleBandCancel();
+    swipeState = null;
+  });
 
   let collectionsDialogOpen = $state(false);
+  let collectionsOverviewOpen = $state(false);
   const collections = $derived($galleryCollectionsStore.collections);
   const defaultTarget = $derived(defaultCollection(collections));
   const activeCollection = $derived(collections.find((collection) => collection.id === filters.collectionId) || null);
@@ -198,12 +214,133 @@
     if (importInput) importInput.value = '';
   }
 
-  function handleImageClick(image: GalleryEntry) {
+  function handleImageClick(event: MouseEvent, image: GalleryEntry) {
+    // Ctrl/⌘ (or shift) click multi-selects without switching modes first.
+    if (gesturesEnabled && (event.ctrlKey || event.metaKey || event.shiftKey)) {
+      galleryStore.toggleSelection(image);
+      return;
+    }
     if (selectionMode) {
       galleryStore.toggleSelection(image);
       return;
     }
     onOpen(image);
+  }
+
+  // ── Selection gestures: desktop drag band, ctrl/⌘ multi-select, touch swipe ──
+  const finePointer =
+    typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+      ? window.matchMedia('(hover: hover) and (pointer: fine)').matches
+      : false;
+
+  // Explicit set operations are off-limits while a filtered-selection token is
+  // active: toggling one card would silently materialise the whole filtered
+  // set into page ids, so the band, swipe and ctrl-click paths all opt out.
+  const gesturesEnabled = $derived(!selectedAllFiltered);
+
+  let gridElement: HTMLElement | null = $state(null);
+  let bandStart: Point | null = null;
+  let bandAdditive = false;
+  let bandRectState = $state<BandRect | null>(null);
+  let suppressNextClick = false;
+  let swipeState: SwipeSelectState | null = null;
+
+  function handleBandMove(event: PointerEvent) {
+    if (!bandStart || !gridElement) return;
+    const current = { x: event.clientX, y: event.clientY };
+    if (!bandPastThreshold(bandStart, current)) return;
+    const containerRect = gridElement.getBoundingClientRect();
+    const rect = bandRect(
+      { x: bandStart.x - containerRect.left, y: bandStart.y - containerRect.top },
+      { x: current.x - containerRect.left, y: current.y - containerRect.top }
+    );
+    bandRectState = rect;
+  }
+
+  function handleBandPointerUp(event: PointerEvent) {
+    window.removeEventListener('pointermove', handleBandMove);
+    window.removeEventListener('pointercancel', handleBandCancel);
+    const start = bandStart;
+    bandStart = null;
+    if (!start || !gridElement) return;
+    const current = { x: event.clientX, y: event.clientY };
+    const rect = bandRectState;
+    bandRectState = null;
+    if (!rect || !bandPastThreshold(start, current)) return;
+    // The pointerup lands as a click on whichever card is under it; swallow
+    // that click so ending a band never opens the preview underneath.
+    suppressNextClick = true;
+    const containerRect = gridElement.getBoundingClientRect();
+    const band = {
+      left: rect.left,
+      top: rect.top,
+      width: rect.width,
+      height: rect.height
+    };
+    const cards = Array.from(gridElement.querySelectorAll<HTMLElement>('.gallery-card'))
+      .map((card) => {
+        const cardRect = card.getBoundingClientRect();
+        return {
+          id: card.dataset.imageId || '',
+          rect: {
+            left: cardRect.left - containerRect.left,
+            top: cardRect.top - containerRect.top,
+            width: cardRect.width,
+            height: cardRect.height
+          }
+        };
+      })
+      .filter((card) => card.id);
+    galleryStore.applyBandSelection(idsForBand(band, cards), bandAdditive);
+  }
+
+  function handleBandCancel() {
+    window.removeEventListener('pointermove', handleBandMove);
+    window.removeEventListener('pointercancel', handleBandCancel);
+    bandStart = null;
+    bandRectState = null;
+  }
+
+  function handleGridPointerDown(event: PointerEvent) {
+    if (!gesturesEnabled) return;
+    if (event.pointerType !== 'mouse' || event.button !== 0 || !finePointer) return;
+    const target = event.target as HTMLElement | null;
+    if (!target || !gridElement) return;
+    if (target.closest('a, select, input, textarea, label')) return;
+    if (target.closest('button') && !target.closest('.gallery-media-well')) return;
+    bandStart = { x: event.clientX, y: event.clientY };
+    bandAdditive = event.ctrlKey || event.metaKey || event.shiftKey;
+    window.addEventListener('pointermove', handleBandMove);
+    window.addEventListener('pointercancel', handleBandCancel);
+    window.addEventListener('pointerup', handleBandPointerUp, { once: true });
+  }
+
+  function handleGridClickCapture(event: MouseEvent) {
+    if (!suppressNextClick) return;
+    suppressNextClick = false;
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  function handleCardSwipeDown(event: PointerEvent, image: GalleryEntry) {
+    if (!gesturesEnabled) return;
+    if (event.pointerType !== 'touch') return;
+    swipeState = swipeSelectBegin(event.pointerId, event.clientX, event.clientY);
+    void image;
+  }
+
+  function handleCardSwipeMove(event: PointerEvent, image: GalleryEntry) {
+    if (!swipeState || event.pointerId !== swipeState.pointerId) return;
+    if (swipeSelectMove(swipeState, event.clientX, event.clientY) === 'committed') {
+      // Committing the swipe also lands as a click on the card; suppress it so
+      // selecting never opens the lightbox.
+      suppressNextClick = true;
+      galleryStore.toggleSelection(image);
+    }
+  }
+
+  function handleCardSwipeEnd(event: PointerEvent) {
+    if (swipeState && event.pointerId === swipeState.pointerId) swipeState = null;
   }
 
   function handleGalleryAction(event: MouseEvent, action: () => void) {
@@ -263,6 +400,16 @@
       </p>
     </div>
     <div class="flex flex-wrap gap-2">
+      {#if collections.length}
+        <button
+          type="button"
+          class={`control-focus rounded-lg border px-3 py-2 text-xs ${collectionsOverviewOpen ? 'border-emerald-500/60 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200' : 'border-stone-300 text-stone-700 hover:bg-stone-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800'}`}
+          aria-pressed={collectionsOverviewOpen}
+          onclick={() => (collectionsOverviewOpen = !collectionsOverviewOpen)}
+        >
+          {collectionsOverviewOpen ? $t.collections.hideOverview : $t.collections.showOverview}
+        </button>
+      {/if}
       <button type="button" class="control-focus rounded-lg border border-stone-300 px-3 py-2 text-xs text-stone-700 hover:bg-stone-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800" onclick={() => galleryStore.setSelectionMode(!selectionMode)}>
         {selectionMode ? $t.gallery.cancelSelection : $t.gallery.select}
       </button>
@@ -290,6 +437,14 @@
 
   <GalleryFilterToolbar {gallery} {filters} {onFilter} onReset={onResetFilters} {collections} onManageCollections={() => (collectionsDialogOpen = true)} />
   <CollectionsDialog open={collectionsDialogOpen} onClose={() => (collectionsDialogOpen = false)} />
+  {#if collectionsOverviewOpen}
+    <CollectionsOverview
+      {collections}
+      activeCollectionId={filters.collectionId || null}
+      onOpenCollection={(collectionId) => onFilter('collectionId', collectionId)}
+      onManageCollections={() => (collectionsDialogOpen = true)}
+    />
+  {/if}
 
   {#if selectionMode}
     <div class="mb-4 flex flex-col gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3 sm:flex-row sm:items-center sm:justify-between">
@@ -297,7 +452,7 @@
       <div class="flex flex-wrap gap-2">
         <button type="button" class="control-focus rounded-lg border border-stone-300 px-2.5 py-2 text-xs text-stone-700 hover:bg-stone-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800" onclick={galleryStore.selectPage}>{$t.gallery.selectAllPage}</button>
         <button type="button" class="control-focus rounded-lg border border-stone-300 px-2.5 py-2 text-xs text-stone-700 hover:bg-stone-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800" disabled={!gallery?.total || busy} onclick={galleryStore.selectFiltered}>{$t.gallery.selectFiltered}</button>
-        <button type="button" class="control-focus rounded-lg border border-stone-300 px-2.5 py-2 text-xs text-stone-700 hover:bg-stone-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800" disabled={!hasSelection} onclick={galleryStore.clearSelection}>{$t.gallery.clearSelection}</button>
+        <button type="button" class="control-focus rounded-lg border border-stone-300 px-2.5 py-2 text-xs text-stone-700 hover:bg-stone-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800" disabled={!hasSelection} onclick={galleryStore.clearSelection}>{selectedAllFiltered ? $t.gallery.exitFilteredSelection : $t.gallery.clearSelection}</button>
         <button type="button" class="control-focus rounded-lg border border-stone-300 px-2.5 py-2 text-xs text-stone-700 hover:bg-stone-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800" disabled={!hasSelection || busy} onclick={() => galleryStore.batchDownload(uiStore.showToast)}>{operationStatus?.kind === 'download' ? $t.gallery.downloading : $t.gallery.downloadSelected}</button>
         {#if canNodeImageUpload}
           <button type="button" class="control-focus rounded-lg border border-stone-300 px-2.5 py-2 text-xs text-stone-700 hover:bg-stone-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800" disabled={!hasSelection || busy} onclick={onBatchNodeImageUpload}>
@@ -399,15 +554,27 @@
         </div>
       {/if}
 
-      <div class={`gallery-grid grid gap-4 sm:grid-cols-2 md:gap-5 lg:grid-cols-3 lg:gap-4 ${loading ? 'opacity-70' : ''}`}>
+      <div
+        bind:this={gridElement}
+        role="group"
+        aria-label={$t.gallery.title}
+        class={`gallery-grid grid gap-4 sm:grid-cols-2 md:gap-5 lg:grid-cols-3 lg:gap-4 ${loading ? 'opacity-70' : ''}`}
+        onpointerdown={handleGridPointerDown}
+        onclickcapture={handleGridClickCapture}
+      >
         {#each images as image, index (image.id)}
-          <article class={`gallery-card overflow-hidden rounded-xl border ${isImageSelected(image) ? 'border-emerald-400 bg-emerald-500/10' : 'border-stone-200 bg-white/85 dark:border-zinc-800 dark:bg-zinc-950/45'}`}>
+          <article data-image-id={image.id} class={`gallery-card overflow-hidden rounded-xl border ${isImageSelected(image) ? 'border-emerald-400 bg-emerald-500/10' : 'border-stone-200 bg-white/85 dark:border-zinc-800 dark:bg-zinc-950/45'}`}>
             <button
               type="button"
               class="gallery-media-well control-focus relative block aspect-square w-full bg-stone-100 dark:bg-zinc-950"
+              style="touch-action: pan-y"
               aria-label={image.prompt}
               aria-pressed={selectionMode ? isImageSelected(image) : undefined}
-              onclick={() => handleImageClick(image)}
+              onclick={(event) => handleImageClick(event, image)}
+              onpointerdown={(event) => handleCardSwipeDown(event, image)}
+              onpointermove={(event) => handleCardSwipeMove(event, image)}
+              onpointerup={handleCardSwipeEnd}
+              onpointercancel={handleCardSwipeEnd}
             >
               {#if selectionMode}
                 <span class="absolute left-2 top-2 z-10 rounded-md bg-white/90 px-2 py-1 text-xs font-medium text-stone-800 dark:bg-zinc-950/80 dark:text-zinc-100">
@@ -524,6 +691,13 @@
           </article>
         {/each}
       </div>
+      {#if bandRectState}
+        <div
+          class="pointer-events-none absolute z-20 rounded border border-emerald-500/70 bg-emerald-500/10"
+          style={`left:${bandRectState.left}px;top:${bandRectState.top}px;width:${bandRectState.width}px;height:${bandRectState.height}px;`}
+          aria-hidden="true"
+        ></div>
+      {/if}
     </div>
 
     <GalleryPagination {currentPage} {totalPages} hasPrevious={Boolean(gallery?.has_prev)} hasNext={Boolean(gallery?.has_next)} {loading} {onPage} />
