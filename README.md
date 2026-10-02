@@ -386,10 +386,18 @@ Some gateways accept a task, return status/result URLs and finish later. A prese
 
 ## Streaming Preview & Cost Estimation
 
-- Streaming preview is opt-in per request (the "Streaming preview" toggle), applies only to `/v1/images/generations` and `/v1/images/edits` with a quantity of 1 — streaming and batching don't compose, since each requested image queues as a separate unit. Choose 1–3 preview frames; more frames means more output tokens and a somewhat higher cost.
+- Streaming preview is opt-in for the Images generation/edit endpoints and `/v1/responses`, with quantities of 1–10. Each image remains a separate queue unit under the existing concurrency limit. Choose 1–3 intermediate frames; the upstream determines their availability and usage. Responses partial images are associated with their output call, and text deltas never become image previews. Declarative custom provider mappings continue to require `capabilities.stream: false`.
 - If a compatible upstream rejects the `stream`/`partial_images` parameters, the job fails with a clear error instead of silently retrying non-streaming, since that could double-bill the generation.
-- Partial images live only in server memory (one latest frame per running unit, bounded by `PREVIEW_CACHE_MAX_ENTRY_MB`/`PREVIEW_CACHE_MAX_ENTRIES`) and are never persisted; a reconnecting client gets whatever frame is still cached, and a restarted or different worker has nothing to replay.
+- Partial images live only in server memory (one latest frame per running unit/output call, bounded by `PREVIEW_CACHE_MAX_ENTRY_MB`/`PREVIEW_CACHE_MAX_ENTRIES`, defaults 8 MiB / 500 entries). Slow SSE subscribers receive coalesced frames. Final results replace only their own slots; failed, cancelled and completed slots release previews. Reconnect restores the job snapshot before cached frames; a restarted or different worker has no preview frames to replay. A valid JSON final response is accepted from the original request without resubmission.
 - **Estimated cost is not a bill.** It's computed only from the `usage` object the upstream actually returns; when usage or a model price is missing, the UI shows why instead of `$0.00`. The builtin rate table covers `gpt-image-1` and GPT Image 2 / 2.5, taken from OpenAI's published pricing — third-party upstreams rarely match it. Override or add rates with `IMAGE_COST_RATES_JSON`.
+
+## Gallery, touch controls and completion notifications
+
+- Drag a selection rectangle on desktop, or use Ctrl/⌘/Shift when selecting cards. On touch screens, a deliberate horizontal swipe toggles a card once; vertical movement keeps scrolling. Filter-wide selection retains its server selection token until **Exit select-all** is chosen.
+- **Collection overview** shows covers, counts and default markers from the collection list without per-cover detail requests. Opening a collection preserves other filters; management and ZIP export remain available for empty collections or missing covers.
+- The Lightbox supports pinch zoom, pan while enlarged, double tap to zoom, and long press for download, favorite and edit actions. Escape closes the action menu before closing the viewer.
+- **Workspace preferences → Notify when tasks finish** is off by default and asks permission only when enabled. Supported secure-context browsers notify while the page is in the background: once per image parent task or Agent turn, including partial-failure counts. A click opens the result or conversation. Web Locks and a bounded localStorage history coordinate tabs and replays; older browsers use best-effort coordination. The page must remain running; use Webhooks for integrations that need delivery after it closes.
+- Queued image tasks freeze non-secret provider settings. Credentials remain in the current preset; changing its API origin stops the queued task with an explicit error instead of sending the updated credentials to the saved origin.
 
 ## API Overview
 

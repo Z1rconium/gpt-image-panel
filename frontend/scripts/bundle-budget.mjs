@@ -19,7 +19,10 @@ const BUDGETS = {
   // at the agent-UI baseline (the conversation view grew the workspace chunk
   // without a JS budget update), and the preset share/import plus job
   // diagnostics work adds about 2.3 KiB gzip measured before/after.
-  homepageGzipBytes: 116 * 1024,
+  // 116 -> 120 KiB: Phase 4 per-unit previews and Phase 5 notifications add
+  // 2,728 B gzip to the measured v1.7.5 dependency graph (118,245 -> 120,973 B).
+  // Gallery and Lightbox gesture UI remain lazy chunks.
+  homepageGzipBytes: 120 * 1024,
   // 12.3 -> 12.9 KiB: the mask editor dialog and the primary-source card
   // actions add 22 utility rules (+262 B gzip, measured with the Tailwind CLI
   // against the pre-change tree) and are loaded lazily, but Tailwind's utility
@@ -32,7 +35,9 @@ const BUDGETS = {
   // parameter-diff badges add about 15 utility rules (+13 B gzip, measured
   // against the pre-change build); the views load lazily, the utility CSS is
   // global.
-  mainCssGzipBytes: 13.4 * 1024,
+  // 13.4 -> 13.6 KiB: preview slots, collection covers and touch actions add
+  // 129 B gzip over the measured v1.7.5 stylesheet (13,662 -> 13,791 B).
+  mainCssGzipBytes: 13.6 * 1024,
   oglGzipBytes: 39.4 * 1024,
   oglReduction: 0.2
 };
