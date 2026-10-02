@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte';
   import { dialogIn, dialogOut, overlayIn, overlayOut } from '$lib/motion';
   import type { AssistantGalleryMetadataResponse } from '$lib/api/types/assistant';
   import type { GalleryEntry } from '$lib/api/types/gallery';
@@ -63,6 +64,14 @@
   const SWIPE_MAX_DRAG = 96;
   const SWIPE_IGNORE_SELECTOR = 'a, button, input, select, textarea, [role="button"], [data-swipe-ignore]';
 
+  // Touch zoom + long-press menu constants.
+  const PINCH_MAX_SCALE = 5;
+  const DOUBLE_TAP_ZOOM_SCALE = 2.5;
+  const DOUBLE_TAP_WINDOW_MS = 300;
+  const DOUBLE_TAP_SLOP_PX = 30;
+  const LONG_PRESS_MS = 600;
+  const LONG_PRESS_SLOP_PX = 10;
+
   const image = $derived($lightboxStore.image);
   const open = $derived(Boolean(image));
 
@@ -83,6 +92,27 @@
   let panStartY = 0;
   let panStartScrollLeft = 0;
   let panStartScrollTop = 0;
+  let panStartPinchX = 0;
+  let panStartPinchY = 0;
+
+  // Continuous pinch/double-tap zoom layered on fit mode. While zoomed in,
+  // one finger pans instead of swiping between images.
+  let pinchScale = $state(1);
+  let pinchOffsetX = $state(0);
+  let pinchOffsetY = $state(0);
+  let actionMenuOpen = $state(false);
+  let mediaElement: HTMLDivElement | null = $state(null);
+  let activePointers = new Map<number, { x: number; y: number }>();
+  let pinchActive = false;
+  let pinchBaseDistance = 0;
+  let pinchBaseScale = 1;
+  let pinchBaseOffsetX = 0;
+  let pinchBaseOffsetY = 0;
+  let pinchMidStart: { x: number; y: number } | null = null;
+  let longPressTimer: ReturnType<typeof setTimeout> | undefined;
+  let longPressStart: { x: number; y: number } | null = null;
+  let lastTap: { x: number; y: number; time: number } | null = null;
+  let tapSuppressed = false;
 
   const aiLoading = $derived(Boolean(image && aiLoadingImageId === image.id));
   const fullImageSrc = $derived(image ? imageUrl(image.filename, image.image_url) : '');
@@ -91,19 +121,47 @@
   );
   const fullImageLoaded = $derived(Boolean(fullImageSrc && loadedImageSrc === fullImageSrc));
   const fullImageFailed = $derived(Boolean(fullImageSrc && failedImageSrc === fullImageSrc));
-  const stageTransform = $derived(!zoomActual && dragOffsetX ? `translateX(${dragOffsetX}px)` : '');
+  const stageTransform = $derived(
+    pinchScale > 1
+      ? `translate(${pinchOffsetX}px, ${pinchOffsetY}px) scale(${pinchScale})`
+      : dragOffsetX
+        ? `translateX(${dragOffsetX}px)`
+        : ''
+  );
 
   // A new original always opens fit-to-window.
   $effect(() => {
     if (fullImageSrc) {
       zoomActual = false;
+      pinchScale = 1;
+      pinchOffsetX = 0;
+      pinchOffsetY = 0;
+      actionMenuOpen = false;
     }
   });
 
   function setZoomActual(next: boolean) {
     zoomActual = next;
+    pinchScale = 1;
+    pinchOffsetX = 0;
+    pinchOffsetY = 0;
     // Deferred a frame so the viewport is scrollable again before it is rewound.
     if (next) requestAnimationFrame(() => zoomViewport?.scrollTo({ top: 0, left: 0 }));
+  }
+
+  function resetPinchZoom() {
+    pinchScale = 1;
+    pinchOffsetX = 0;
+    pinchOffsetY = 0;
+  }
+
+  function handleDialogClose() {
+    // Escape (and the overlay) close the long-press menu first.
+    if (actionMenuOpen) {
+      actionMenuOpen = false;
+      return;
+    }
+    onClose();
   }
 
   function handleFullImageLoad() {
@@ -154,9 +212,90 @@
     );
   }
 
+  function mediaRect(): DOMRect | null {
+    return mediaElement?.getBoundingClientRect() ?? null;
+  }
+
+  function clampPanOffset(value: number, size: number, scale: number) {
+    const max = (size * (scale - 1)) / 2;
+    return Math.max(-max, Math.min(max, value));
+  }
+
+  function pinchMidpoint(): { x: number; y: number } | null {
+    if (activePointers.size < 2) return null;
+    const [a, b] = [...activePointers.values()];
+    return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  }
+
+  function startLongPress(x: number, y: number) {
+    cancelLongPress();
+    longPressStart = { x, y };
+    longPressTimer = setTimeout(() => {
+      longPressTimer = undefined;
+      actionMenuOpen = true;
+      // This finger's lift must not count as a tap on the media area.
+      tapSuppressed = true;
+    }, LONG_PRESS_MS);
+  }
+
+  function cancelLongPress() {
+    if (longPressTimer) clearTimeout(longPressTimer);
+    longPressTimer = undefined;
+    longPressStart = null;
+  }
+
+  function toggleDoubleTapZoom(clientX: number, clientY: number) {
+    if (zoomActual) setZoomActual(false);
+    if (pinchScale > 1) {
+      resetPinchZoom();
+      return;
+    }
+    const rect = mediaRect();
+    pinchScale = DOUBLE_TAP_ZOOM_SCALE;
+    if (rect) {
+      // Bring the tapped point to the middle of the viewport.
+      pinchOffsetX = clampPanOffset((rect.width / 2 - (clientX - rect.left)) * pinchScale, rect.width, pinchScale);
+      pinchOffsetY = clampPanOffset((rect.height / 2 - (clientY - rect.top)) * pinchScale, rect.height, pinchScale);
+    }
+  }
+
   function handleSwipePointerDown(event: PointerEvent) {
+    activePointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (activePointers.size === 2) {
+      // Second finger: pinch takes over, canceling swipe and long-press.
+      cancelLongPress();
+      swipePointerId = null;
+      dragOffsetX = 0;
+      if (zoomActual) setZoomActual(false);
+      const mid = pinchMidpoint();
+      if (mid) {
+        pinchBaseDistance = distanceBetweenFirstTwo();
+        pinchBaseScale = pinchScale;
+        pinchBaseOffsetX = pinchOffsetX;
+        pinchBaseOffsetY = pinchOffsetY;
+        pinchMidStart = mid;
+        pinchActive = true;
+        dragging = true;
+      }
+      return;
+    }
+    if (activePointers.size > 2) return;
+    if (pinchScale > 1) {
+      // Zoomed in: any pointer pans the transform instead of swiping.
+      panPointerId = event.pointerId;
+      panStartX = event.clientX;
+      panStartY = event.clientY;
+      panStartPinchX = pinchOffsetX;
+      panStartPinchY = pinchOffsetY;
+      dragging = true;
+      (event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId);
+      return;
+    }
     if (zoomActual) {
-      if (!canStartPan(event) || !zoomViewport) return;
+      if (!canStartPan(event) || !zoomViewport) {
+        activePointers.delete(event.pointerId);
+        return;
+      }
       panPointerId = event.pointerId;
       panStartX = event.clientX;
       panStartY = event.clientY;
@@ -166,7 +305,10 @@
       (event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId);
       return;
     }
-    if (!canStartSwipe(event)) return;
+    if (!canStartSwipe(event)) {
+      activePointers.delete(event.pointerId);
+      return;
+    }
     swipePointerId = event.pointerId;
     swipeStartX = event.clientX;
     swipeStartY = event.clientY;
@@ -174,9 +316,45 @@
     dragging = true;
     dragOffsetX = 0;
     (event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId);
+    if (event.pointerType === 'touch') startLongPress(event.clientX, event.clientY);
+  }
+
+  function distanceBetweenFirstTwo() {
+    const [a, b] = [...activePointers.values()];
+    return Math.hypot(a.x - b.x, a.y - b.y);
   }
 
   function handleSwipePointerMove(event: PointerEvent) {
+    const tracked = activePointers.get(event.pointerId);
+    if (tracked) {
+      tracked.x = event.clientX;
+      tracked.y = event.clientY;
+    }
+    if (activePointers.size >= 2 && pinchBaseDistance > 0) {
+      const mid = pinchMidpoint();
+      const distance = distanceBetweenFirstTwo();
+      if (!mid) return;
+      pinchScale = Math.min(PINCH_MAX_SCALE, Math.max(1, pinchBaseScale * (distance / pinchBaseDistance)));
+      const rect = mediaRect();
+      if (rect) {
+        pinchOffsetX = clampPanOffset(pinchBaseOffsetX + (mid.x - (pinchMidStart?.x ?? mid.x)), rect.width, pinchScale);
+        pinchOffsetY = clampPanOffset(pinchBaseOffsetY + (mid.y - (pinchMidStart?.y ?? mid.y)), rect.height, pinchScale);
+      }
+      if (pinchScale <= 1) {
+        pinchOffsetX = 0;
+        pinchOffsetY = 0;
+      }
+      return;
+    }
+    if (longPressStart && Math.hypot(event.clientX - longPressStart.x, event.clientY - longPressStart.y) > LONG_PRESS_SLOP_PX) {
+      cancelLongPress();
+    }
+    if (panPointerId === event.pointerId && pinchScale > 1) {
+      const rect = mediaRect();
+      pinchOffsetX = clampPanOffset(panStartPinchX + (event.clientX - panStartX), rect?.width ?? 0, pinchScale);
+      pinchOffsetY = clampPanOffset(panStartPinchY + (event.clientY - panStartY), rect?.height ?? 0, pinchScale);
+      return;
+    }
     if (panPointerId === event.pointerId) {
       if (!zoomViewport) return;
       zoomViewport.scrollLeft = panStartScrollLeft - (event.clientX - panStartX);
@@ -206,6 +384,27 @@
   }
 
   function handleSwipePointerUp(event: PointerEvent) {
+    activePointers.delete(event.pointerId);
+    if (pinchActive) {
+      if (activePointers.size >= 2) return;
+      pinchActive = false;
+      pinchBaseDistance = 0;
+      pinchMidStart = null;
+      if (activePointers.size === 1 && pinchScale > 1) {
+        // One finger lifted out of a pinch: rebase onto the remaining pointer.
+        const [pointerId, position] = [...activePointers.entries()][0];
+        panPointerId = pointerId;
+        panStartX = position.x;
+        panStartY = position.y;
+        panStartPinchX = pinchOffsetX;
+        panStartPinchY = pinchOffsetY;
+        dragging = true;
+      } else {
+        dragging = false;
+      }
+      return;
+    }
+    cancelLongPress();
     if (panPointerId === event.pointerId) {
       panPointerId = null;
       dragging = false;
@@ -223,6 +422,20 @@
 
     if (horizontalSwipe && dx < 0 && canNavigateNext) onNavigateNext();
     else if (horizontalSwipe && dx > 0 && canNavigatePrevious) onNavigatePrevious();
+    else if (event.pointerType === 'touch' && !horizontalSwipe && !tapSuppressed) {
+      const now = Date.now();
+      if (
+        lastTap &&
+        now - lastTap.time <= DOUBLE_TAP_WINDOW_MS &&
+        Math.hypot(event.clientX - lastTap.x, event.clientY - lastTap.y) <= DOUBLE_TAP_SLOP_PX
+      ) {
+        toggleDoubleTapZoom(event.clientX, event.clientY);
+        lastTap = null;
+      } else {
+        lastTap = { x: event.clientX, y: event.clientY, time: now };
+      }
+    }
+    tapSuppressed = false;
 
     releasePointer(event);
     resetSwipeTracking();
@@ -230,6 +443,15 @@
   }
 
   function handleSwipePointerCancel(event: PointerEvent) {
+    activePointers.delete(event.pointerId);
+    if (pinchActive && activePointers.size < 2) {
+      pinchActive = false;
+      pinchBaseDistance = 0;
+      pinchMidStart = null;
+      dragging = false;
+    }
+    cancelLongPress();
+    tapSuppressed = false;
     if (panPointerId === event.pointerId) {
       panPointerId = null;
       dragging = false;
@@ -241,6 +463,18 @@
     resetSwipeTracking();
     snapBack();
   }
+
+  function handleNavigate(action: () => void) {
+    actionMenuOpen = false;
+    resetPinchZoom();
+    action();
+  }
+
+  function closeActionMenu() {
+    actionMenuOpen = false;
+  }
+
+  onDestroy(() => cancelLongPress());
 </script>
 
 {#if open && image}
@@ -249,16 +483,19 @@
     <div
       class="lightbox-shell relative" in:dialogIn out:dialogOut
       aria-labelledby="lightbox-title"
-      use:dialog={{ open, onClose }}
+      use:dialog={{ open, onClose: handleDialogClose }}
     >
       <div
+        bind:this={mediaElement}
         class="lightbox-media"
         role="group"
         aria-label={$t.lightbox.title}
+        style:touch-action={pinchScale > 1 ? 'none' : null}
         onpointerdown={handleSwipePointerDown}
         onpointermove={handleSwipePointerMove}
         onpointerup={handleSwipePointerUp}
         onpointercancel={handleSwipePointerCancel}
+        ondblclick={(event) => toggleDoubleTapZoom(event.clientX, event.clientY)}
       >
         {#if fullImageLoaded}
           <div class="lightbox-zoom-controls">
@@ -338,7 +575,7 @@
                 class="mobile-touch-target control-focus inline-flex h-10 w-10 items-center justify-center rounded-lg border border-stone-300 text-lg leading-none text-stone-700 transition-colors hover:bg-stone-100 hover:text-stone-950 disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
                 aria-label={$t.lightbox.previousImage}
                 disabled={navigating}
-                onclick={onNavigatePrevious}
+                onclick={() => handleNavigate(onNavigatePrevious)}
               >
                 <span aria-hidden="true">&larr;</span>
               </button>
@@ -352,7 +589,7 @@
                 class="mobile-touch-target control-focus inline-flex h-10 w-10 items-center justify-center rounded-lg border border-stone-300 text-lg leading-none text-stone-700 transition-colors hover:bg-stone-100 hover:text-stone-950 disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
                 aria-label={$t.lightbox.nextImage}
                 disabled={navigating}
-                onclick={onNavigateNext}
+                onclick={() => handleNavigate(onNavigateNext)}
               >
                 <span aria-hidden="true">&rarr;</span>
               </button>
@@ -362,6 +599,45 @@
           </div>
         </div>
       </div>
+      {#if actionMenuOpen}
+        <div class="absolute inset-0 z-20" aria-hidden="true" onclick={closeActionMenu}></div>
+        <div
+          class="absolute bottom-16 left-1/2 z-30 flex -translate-x-1/2 items-center gap-1 rounded-xl border border-stone-200 bg-white/95 p-1.5 shadow-2xl dark:border-zinc-700 dark:bg-zinc-950/95"
+          role="menu"
+          aria-label={$t.lightbox.imageActions}
+        >
+          <a
+            href={downloadUrl(image.filename)}
+            role="menuitem"
+            class="control-focus rounded-lg px-3 py-2 text-xs font-medium text-stone-800 hover:bg-stone-100 dark:text-zinc-100 dark:hover:bg-zinc-800"
+            onclick={closeActionMenu}
+          >
+            {$t.common.download}
+          </a>
+          <button
+            type="button"
+            role="menuitem"
+            class="control-focus rounded-lg px-3 py-2 text-xs font-medium text-stone-800 hover:bg-stone-100 dark:text-zinc-100 dark:hover:bg-zinc-800"
+            onclick={() => {
+              onFavorite(image);
+              closeActionMenu();
+            }}
+          >
+            {image.favorite ? $t.common.unfavorite : $t.common.favorite}
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            class="control-focus rounded-lg px-3 py-2 text-xs font-medium text-stone-800 hover:bg-stone-100 dark:text-zinc-100 dark:hover:bg-zinc-800"
+            onclick={() => {
+              onEdit(image);
+              closeActionMenu();
+            }}
+          >
+            {$t.common.edit}
+          </button>
+        </div>
+      {/if}
       <aside class="lightbox-details flex min-h-0 flex-col">
         <div class="flex items-start justify-between gap-3 border-b border-stone-200 p-5 dark:border-zinc-800">
           <div class="min-w-0">
