@@ -23,6 +23,7 @@ import type {
 } from '$lib/api/types/agent';
 import { t } from '$lib/i18n';
 import { applyAgentEvent } from '$lib/utils/agentBlocks';
+import { observeAgentTurn } from '$lib/utils/completionNotifications';
 import { isAbortError } from './assistant';
 
 export type AgentState = {
@@ -165,6 +166,9 @@ function createAgentStore() {
   }
 
   function applyDetail(detail: AgentConversationDetail) {
+    for (const message of detail.messages) {
+      if (message.role === 'assistant') observeCompletion(message, detail.conversation.id);
+    }
     update((current) => ({
       ...current,
       messages: detail.messages,
@@ -228,6 +232,11 @@ function createAgentStore() {
   }
 
   function finishTurn(eventName: TerminalEventName) {
+    const turnId = state.activeTurnId;
+    const message = state.messages.find((item) => item.turn_id === turnId && item.role === 'assistant');
+    if (message && state.activeId) observeCompletion({
+      ...message, status: eventName === 'turn.completed' ? 'complete' : eventName === 'turn.failed' ? 'failed' : 'cancelled'
+    }, state.activeId);
     clearCancelPoll();
     closeSource();
     recoverAttempts = 0;
@@ -244,6 +253,16 @@ function createAgentStore() {
     const conversationId = state.activeId;
     if (conversationId) void refreshDetail(conversationId);
     void loadList();
+  }
+
+  function observeCompletion(message: AgentMessage, conversationId: string) {
+    const images = message.blocks.filter((block) => block.type === 'image_task');
+    void observeAgentTurn({
+      turnId: message.turn_id, conversationId,
+      status: message.status === 'streaming' ? 'running' : message.status === 'complete' ? 'completed' : message.status,
+      successCount: images.filter((block) => block.status === 'succeeded').length,
+      failureCount: images.filter((block) => block.status === 'failed' || block.status === 'cancelled').length
+    });
   }
 
   /**
@@ -329,6 +348,7 @@ function createAgentStore() {
       updateAssistantMessage(turnId, (message) => ({ ...message, blocks: [], status: 'streaming' }));
     }
     streamTurnId = turnId;
+    if (state.activeId) void observeAgentTurn({ turnId, conversationId: state.activeId, status: 'running', successCount: 0, failureCount: 0 });
     update((current) => ({ ...current, activeTurnId: turnId }));
     source = openAgentTurnEvents(turnId, lastEventSeq, {
       onEvent: (event, lastEventId) => enqueueEvent(turnId, event, lastEventId),
@@ -463,6 +483,7 @@ function createAgentStore() {
         attachments: input.attachmentIds.slice(0, AGENT_MAX_ATTACHMENTS).map((imageId) => ({ kind: 'gallery', image_id: imageId })),
         image_params: input.imageParams
       });
+      if (!accepted.replayed) void observeAgentTurn({ turnId: accepted.turn_id, conversationId, status: 'queued', successCount: 0, failureCount: 0 });
       const detail = await refreshDetail(conversationId);
       if (detail) attachStream(accepted.turn_id);
       void loadList();

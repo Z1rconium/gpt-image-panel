@@ -69,7 +69,11 @@
         type="checkbox"
         class="control-focus mt-0.5 accent-emerald-500"
         checked={$preferencesStore.taskCompletionNotifications}
-        onchange={(event) => void toggleCompletionNotifications(event.currentTarget.checked)}
+        onchange={(event) => {
+          const checked = event.currentTarget.checked;
+          event.currentTarget.checked = $preferencesStore.taskCompletionNotifications;
+          void toggleCompletionNotifications(checked);
+        }}
       />
       <span class="min-w-0">
         <span class="block text-sm text-stone-800 dark:text-zinc-200">{$t.preferences.taskCompletionNotifications}</span>

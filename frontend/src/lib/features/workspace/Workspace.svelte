@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
+  import { OPEN_COMPLETION_EVENT, type CompletionTarget } from '$lib/utils/completionNotifications';
   import AccessGate from '$lib/components/AccessGate.svelte';
   import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
   import EditSourcePicker from '$lib/components/EditSourcePicker.svelte';
@@ -1316,6 +1317,30 @@
     void aiAssistantPanel.prefetch();
     void galleryGridPanel.prefetch();
 
+    const openCompletion = async (event: Event) => {
+      const target = (event as CustomEvent<CompletionTarget>).detail;
+      if (target?.kind === 'agent') {
+        workspaceModeStore.apply({ mode: 'agent', conversationId: target.conversationId });
+        urlSync.schedule('push');
+        await agentViewPanel.prefetch();
+        await tick();
+        document.querySelector('[data-testid="agent-view"]')?.scrollIntoView({ block: 'start' });
+      } else if (target?.kind === 'job') {
+        try {
+          const job = await apiFetch<GenerateJobStatus>(`/api/generate/${encodeURIComponent(target.jobId)}`, {}, 'opening completed task');
+          jobsStore.closeActiveJobSource();
+          changeWorkspaceMode('studio');
+          previewStore.setPreview(jobsStore.previewFromJob(job, jobsStore.makeQueuedPreview(job.prompt || '', job.operation || 'generation')));
+          if (job.status === 'queued' || job.status === 'running') trackJob(job.job_id);
+          await tick();
+          document.getElementById('preview-panel')?.scrollIntoView({ block: 'start' });
+        } catch (error) {
+          showToast(error instanceof Error ? error.message : $t.messages.jobLoadFailed, 'error');
+        }
+      }
+    };
+    window.addEventListener(OPEN_COMPLETION_EVENT, openCompletion);
+
     const popstate = () => {
       void applyUrlStateToApp();
     };
@@ -1376,6 +1401,7 @@
         prefetchPanel('snippets');
       },
       cleanup: () => {
+        window.removeEventListener(OPEN_COMPLETION_EVENT, openCompletion);
         if (gallerySuccessRefreshTimer) clearTimeout(gallerySuccessRefreshTimer);
         gallerySuccessRefreshTimer = null;
         urlSync.destroy();

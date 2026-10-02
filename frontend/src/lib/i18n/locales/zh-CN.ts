@@ -816,7 +816,7 @@ const zh: Translation = {
     retryUsesJobPresetHint: '重试历史任务时发送到它原先使用的预设，不会切换当前激活的预设。',
     retryPresetMissing: '原 API 预设已不存在，将使用当前激活的预设重试。',
     taskCompletionNotifications: '任务完成时通知',
-    taskCompletionNotificationsHint: '本页面处于后台时，生成或编辑任务结束会弹出浏览器通知。需要浏览器支持且页面保持打开；页面关闭后的通知请继续使用 Webhooks。',
+    taskCompletionNotificationsHint: '本页面处于后台时，每个图片任务或 Agent 轮次结束后汇总通知一次。需要浏览器支持且页面保持打开；页面关闭后的通知请使用 Webhooks。',
     taskCompletionNotificationsBlocked: '通知权限已被拒绝。请在浏览器站点设置中重新允许通知，然后再打开此开关。',
     taskCompletionNotificationsUnsupported: '当前浏览器或上下文不支持通知；页面内的任务列表不受影响。',
     sizePresetsHint: '命名尺寸预设可在尺寸选择器中管理。'
@@ -825,6 +825,8 @@ const zh: Translation = {
     jobSucceeded: '图片已生成',
     jobPartialFailure: '任务完成，部分失败',
     jobFailed: '任务失败',
+    agentCompleted: 'Agent 回复完成',
+    agentFailed: 'Agent 本轮已结束',
     partialFailureCounts: (succeeded, failed) => `成功 ${succeeded} 张，失败 ${failed} 张`
   },
   galleryEditDialog: {

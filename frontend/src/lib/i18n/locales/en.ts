@@ -775,7 +775,7 @@ const en = {
   collections: {
     title: 'Collections',
     manage: 'Collections',
-    showOverview: 'Collections',
+    showOverview: 'Collection overview',
     hideOverview: 'Hide collections',
     manageTitle: 'Manage collections',
     manageSubtitle: 'Group images into named albums. Drag to reorder; the default collection is the one-click target.',
@@ -815,7 +815,7 @@ const en = {
     retryUsesJobPresetHint: 'Retrying a history job sends it to the preset it originally ran on, without switching the active preset.',
     retryPresetMissing: 'The original API preset no longer exists; retrying with the active preset.',
     taskCompletionNotifications: 'Notify when tasks finish',
-    taskCompletionNotificationsHint: 'Shows a browser notification when a generation or edit task settles while this panel is in the background. Needs browser support and an open page; webhooks keep working after the page is closed.',
+    taskCompletionNotificationsHint: 'Shows one notification per image task or Agent turn while this panel is in the background. Needs browser support and an open page; use webhooks when the page is closed.',
     taskCompletionNotificationsBlocked: 'Notification permission was denied. Re-enable notifications for this site in the browser settings, then toggle this on again.',
     taskCompletionNotificationsUnsupported: 'This browser or context does not support notifications; the in-page job list stays available.',
     sizePresetsHint: 'Named size presets are managed in the size picker.'
@@ -824,6 +824,8 @@ const en = {
     jobSucceeded: 'Image ready',
     jobPartialFailure: 'Task finished with failures',
     jobFailed: 'Task failed',
+    agentCompleted: 'Agent reply complete',
+    agentFailed: 'Agent turn ended',
     partialFailureCounts: (succeeded: number, failed: number) => `${succeeded} succeeded, ${failed} failed`
   },
   galleryEditDialog: {

@@ -2,135 +2,125 @@ import { get } from 'svelte/store';
 import { t } from '$lib/i18n';
 import { preferencesStore } from '$lib/stores/preferences';
 import type { GenerateJobStatus } from '$lib/api/types/jobs';
+import type { AgentTurnStatus } from '$lib/api/types/agent';
 import { isActiveJobStatus } from '$lib/utils/jobs';
 
 export type NotificationPermissionState = 'unsupported' | 'default' | 'granted' | 'denied';
+export type CompletionTarget = { kind: 'job'; jobId: string } | { kind: 'agent'; conversationId: string; turnId: string };
+export type AgentCompletion = { turnId: string; conversationId: string; status: AgentTurnStatus; successCount: number; failureCount: number };
+export const OPEN_COMPLETION_EVENT = 'gpt-image-panel-open-completion';
+const STORAGE_KEY = 'gpt-image-panel-notified-jobs';
+const LIMIT = 200;
 
-const NOTIFIED_JOBS_STORAGE_KEY = 'gpt-image-panel-notified-jobs';
-const NOTIFIED_JOBS_LIMIT = 200;
-const NOTIFIED_BODY_MAX_CHARS = 160;
-
-/**
- * Browser completion notifications for image tasks. The panel only runs while
- * the page is open (webhooks cover closed-page integrations), so this notifies
- * when a task settles while the page is hidden or unfocused, once per job.
- */
 export function notificationsSupported(): boolean {
   return typeof window !== 'undefined' && 'Notification' in window && window.isSecureContext;
 }
 
 export function notificationPermission(): NotificationPermissionState {
-  if (!notificationsSupported()) return 'unsupported';
-  return Notification.permission as NotificationPermissionState;
+  return notificationsSupported() ? Notification.permission : 'unsupported';
 }
 
 export async function requestNotificationPermission(): Promise<NotificationPermissionState> {
   if (!notificationsSupported()) return 'unsupported';
-  try {
-    const result = await Notification.requestPermission();
-    return result as NotificationPermissionState;
-  } catch {
-    return 'denied';
-  }
+  try { return await Notification.requestPermission(); } catch { return 'denied'; }
 }
 
-function loadNotifiedJobIds(): Set<string> {
+function readCompleted(): string[] {
   try {
-    if (typeof localStorage === 'undefined') return new Set();
-    const raw = localStorage.getItem(NOTIFIED_JOBS_STORAGE_KEY);
-    if (!raw) return new Set();
-    const parsed = JSON.parse(raw);
-    return new Set(Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string') : []);
-  } catch {
-    return new Set();
-  }
+    const ids = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+    return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === 'string').slice(-LIMIT) : [];
+  } catch { return []; }
 }
 
-function persistNotifiedJobIds(ids: Set<string>) {
-  try {
-    if (typeof localStorage === 'undefined') return;
-    const bounded = [...ids].slice(-NOTIFIED_JOBS_LIMIT);
-    localStorage.setItem(NOTIFIED_JOBS_STORAGE_KEY, JSON.stringify(bounded));
-  } catch {
-    // Storage may be unavailable; in-memory dedupe still applies.
-  }
+function remember(set: Set<string>, id: string) {
+  set.add(id);
+  if (set.size > LIMIT) set.delete(set.values().next().value!);
 }
 
-function jobNotificationBody(job: GenerateJobStatus): string {
-  const prompt = (job.prompt || '').trim();
-  if (job.status === 'partial_failure') {
-    const succeeded = job.success_count ?? 0;
-    const failed = job.failure_count ?? 0;
-    return `${get(t).notifications.partialFailureCounts(succeeded, failed)}${prompt ? ` — ${prompt}` : ''}`;
-  }
-  return prompt.slice(0, NOTIFIED_BODY_MAX_CHARS) || (job.error || '');
+function canNotify() {
+  return get(preferencesStore).taskCompletionNotifications && notificationPermission() === 'granted' &&
+    (typeof document === 'undefined' || document.hidden || !document.hasFocus());
 }
 
-function showJobNotification(job: GenerateJobStatus) {
-  const messages = get(t).notifications;
-  const title = job.status === 'success' ? messages.jobSucceeded : job.status === 'partial_failure' ? messages.jobPartialFailure : messages.jobFailed;
+function show(title: string, body: string, id: string, target: CompletionTarget) {
   try {
-    const notification = new Notification(title, {
-      body: jobNotificationBody(job),
-      tag: `gpt-image-panel-job-${job.job_id}`,
-      data: { job_id: job.job_id }
-    });
+    const notification = new Notification(title, { body: body.slice(0, 160), tag: `gpt-image-panel-${id}`, data: target });
     notification.onclick = () => {
       window.focus();
       notification.close();
+      window.dispatchEvent(new CustomEvent<CompletionTarget>(OPEN_COMPLETION_EVENT, { detail: target }));
     };
-  } catch {
-    // Some browsers throw when constructing without a service worker; the
-    // in-page running jobs list remains the fallback.
+  } catch { /* The page's task status remains available when the browser refuses notifications. */ }
+}
+
+export function createCompletionNotificationTracker() {
+  const active = new Set<string>();
+  const terminal = new Set<string>();
+
+  async function notifyOnce(id: string, showNotification: () => void) {
+    const claim = () => {
+      const completed = readCompleted();
+      if (completed.includes(id)) return;
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify([...completed, id].slice(-LIMIT))); } catch { /* Session dedupe still applies. */ }
+      if (canNotify()) showNotification();
+    };
+    try {
+      if (typeof navigator !== 'undefined' && navigator.locks) {
+        // Lock plus a fresh storage read serializes simultaneous terminal SSE
+        // events in different tabs. Constructor-time snapshots cannot do this.
+        await navigator.locks.request(STORAGE_KEY, claim);
+      } else {
+        // Older browsers elect the last claimant before displaying. Web Locks
+        // provide the stronger guarantee on current secure-context browsers.
+        const key = `${STORAGE_KEY}-claim-${id}`;
+        const owner = `${id}:${Math.random()}`;
+        let stored = false;
+        try { localStorage.setItem(key, owner); stored = true; } catch { /* Storage disabled. */ }
+        if (stored) {
+          await new Promise((resolve) => setTimeout(resolve, 60));
+          if (localStorage.getItem(key) !== owner) return;
+          localStorage.removeItem(key);
+        }
+        claim();
+      }
+    } catch { /* A denied lock/storage API must not disrupt task handling. */ }
   }
-}
 
-function pageInBackground(): boolean {
-  if (typeof document === 'undefined') return true;
-  return document.hidden || !document.hasFocus();
-}
-
-export type CompletionNotificationTracker = {
-  /**
-   * Feed every job status sighting through here. Only the first terminal state
-   * of a job that was previously seen active notifies, so SSE replays, polling,
-   * history loads and reloads never fire duplicate notifications. Cross-tab
-   * duplicates are suppressed through localStorage.
-   */
-  observeJobStatusChange: (job: GenerateJobStatus) => void;
-};
-
-export function createCompletionNotificationTracker(): CompletionNotificationTracker {
-  const notifiedJobIds = loadNotifiedJobIds();
-  const activeJobIds = new Set<string>();
-
-  function observeJobStatusChange(job: GenerateJobStatus) {
-    if (!job?.job_id) return;
-    if (isActiveJobStatus(job.status)) {
-      activeJobIds.add(job.job_id);
-      return;
+  function transition(id: string, running: boolean, showNotification: () => void): Promise<void> {
+    if (terminal.has(id)) return Promise.resolve();
+    if (running) {
+      remember(active, id);
+      return Promise.resolve();
     }
-    if (notifiedJobIds.has(job.job_id)) return;
-    notifiedJobIds.add(job.job_id);
-    persistNotifiedJobIds(notifiedJobIds);
-    const wasActive = activeJobIds.delete(job.job_id);
-    if (!wasActive) return;
-    const preferences = get(preferencesStore);
-    if (!preferences.taskCompletionNotifications) return;
-    if (notificationPermission() !== 'granted') return;
-    // While the user is actively looking at the panel the in-page job list is
-    // the notification; the browser one covers background/switched-away use.
-    if (!pageInBackground()) return;
-    showJobNotification(job);
+    remember(terminal, id);
+    if (!active.delete(id)) return Promise.resolve(); // History and first terminal snapshots never notify.
+    return notifyOnce(id, showNotification);
   }
 
-  return { observeJobStatusChange };
+  function observeJobStatusChange(job: GenerateJobStatus): Promise<void> {
+    if (!job?.job_id || job.agent_turn_id) return Promise.resolve();
+    return transition(`job-${job.job_id}`, isActiveJobStatus(job.status), () => {
+      const messages = get(t).notifications;
+      const title = job.status === 'success' ? messages.jobSucceeded : job.status === 'partial_failure' ? messages.jobPartialFailure : messages.jobFailed;
+      const counts = messages.partialFailureCounts(job.success_count ?? job.images?.length ?? 0, job.failure_count ?? 0);
+      const body = job.status === 'partial_failure' ? `${counts} — ${job.prompt || ''}` : job.prompt || job.error || '';
+      show(title, body, `job-${job.job_id}`, { kind: 'job', jobId: job.job_id });
+    });
+  }
+
+  function observeAgentTurn(turn: AgentCompletion): Promise<void> {
+    if (!turn.turnId) return Promise.resolve();
+    return transition(`agent-${turn.turnId}`, turn.status === 'running' || turn.status === 'queued', () => {
+      const messages = get(t).notifications;
+      const title = turn.status === 'completed' ? messages.agentCompleted : messages.agentFailed;
+      show(title, messages.partialFailureCounts(turn.successCount, turn.failureCount), `agent-${turn.turnId}`,
+        { kind: 'agent', conversationId: turn.conversationId, turnId: turn.turnId });
+    });
+  }
+
+  return { observeJobStatusChange, observeAgentTurn };
 }
 
 const sharedTracker = createCompletionNotificationTracker();
-
 export const observeJobStatusChange = sharedTracker.observeJobStatusChange;
-
-export function notificationPreferenceBlocked(): boolean {
-  return notificationPermission() === 'denied';
-}
+export const observeAgentTurn = sharedTracker.observeAgentTurn;
