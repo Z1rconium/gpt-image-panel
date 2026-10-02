@@ -451,7 +451,7 @@ function createJobsStore() {
     try {
       const job = await apiFetch<GenerateJobStatus>(`/api/generate/${encodeURIComponent(jobId)}`, {}, 'loading job');
       if (trackedJobId !== jobId || trackedJobGeneration !== generation || !trackedJobUpdate) return;
-      await trackedJobUpdate(job);
+      await applyTrackedJob(job);
       if (trackedJobId !== jobId || trackedJobGeneration !== generation) return;
       if (isActiveJobStatus(job.status)) {
         if (!activeJobFeedHealthy) scheduleTrackedJobPoll(jobId, generation);
@@ -507,7 +507,13 @@ function createJobsStore() {
       // drop the streaming previews so PreviewPanel switches to the real
       // images. A failed job never gets one, so release its (potentially
       // large) data URLs too.
-      streamingPreviews: image || !active ? {} : preview.streamingPreviews,
+      streamingPreviews: !active ? {} : Object.fromEntries(
+        Object.entries(preview.streamingPreviews).filter(([key, slot]) =>
+          !job.images?.some((result) => result.unit_index === (slot.unitIndex ?? Number(key.split(':')[0]))) &&
+          (!job.unit_statuses?.[slot.unitIndex ?? key.split(':')[0]] ||
+            isActiveJobStatus(job.unit_statuses[slot.unitIndex ?? key.split(':')[0]] as GenerateJobStatus['status']))
+        )
+      ),
       compareSource: preview.compareSource
     };
   }

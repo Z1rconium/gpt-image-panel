@@ -32,6 +32,8 @@ export type GenerateJobImage = {
   image_id: string;
   image_url: string;
   filename: string;
+  unit_index?: number | null;
+  result_index?: number | null;
   image_width?: number | null;
   image_height?: number | null;
   sent_prompt?: string | null;
@@ -48,6 +50,7 @@ export type GenerateJobImage = {
 export type GeneratePreviewEvent = {
   job_id: string;
   unit_index: number;
+  call_index?: number;
   partial_image_index: number;
   sequence: number;
   mime_type: string;
@@ -59,6 +62,9 @@ export type GenerateJobStatus = GenerateJobResponse & {
   image_id?: string | null;
   image_url?: string | null;
   images?: GenerateJobImage[];
+  unit_statuses?: Record<string, string>;
+  agent_turn_id?: string | null;
+  agent_conversation_id?: string | null;
   prompt?: string | null;
   size?: string | null;
   created_at?: string | null;

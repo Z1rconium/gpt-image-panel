@@ -6,9 +6,10 @@ import type { ApiPath, ResponseFormatDefault } from '$lib/api/types/common';
 import type { GenerateRequestBody } from '$lib/api/types/generation';
 import type { GeneratePreviewEvent, GenerateJobResponse, GenerateJobStatus } from '$lib/api/types/jobs';
 import { MAX_PROMPT_CHARS, imageQualities, isImage25, promptLength, validImageSize } from '$lib/utils/imageModels';
+import { isActiveJobStatus } from '$lib/utils/jobs';
 
 /** Latest streamed partial image for one task unit (keyed by unit_index). */
-export type StreamingPreviewSlot = { dataUrl: string; sequence: number };
+export type StreamingPreviewSlot = { dataUrl: string; sequence: number; unitIndex?: number; callIndex?: number };
 
 export type PreviewState = {
   loading: boolean;
@@ -17,7 +18,7 @@ export type PreviewState = {
   imageUrl: string;
   filename: string;
   prompt: string;
-  streamingPreviews: Record<number, StreamingPreviewSlot>;
+  streamingPreviews: Record<string, StreamingPreviewSlot>;
   compareSource: PreviewCompareSource | null;
 };
 
@@ -151,12 +152,12 @@ function createPreviewStore() {
   }
 
   function setError(message: string) {
-    update((current) => ({ ...current, loading: false, error: message }));
+    update((current) => ({ ...current, loading: false, error: message, streamingPreviews: {} }));
   }
 
   function setSubmissionError(error: unknown) {
     const message = error instanceof Error ? error.message : get(t).messages.requestFailed;
-    update((current) => ({ ...current, loading: false, error: message, job: null, compareSource: null }));
+    update((current) => ({ ...current, loading: false, error: message, job: null, compareSource: null, streamingPreviews: {} }));
   }
 
   function clearPreview(closeActiveJobSource?: () => void) {
@@ -170,14 +171,21 @@ function createPreviewStore() {
       // The final image always wins, and out-of-order/duplicate frames
       // (possible across an SSE reconnect) are dropped via the per-unit
       // sequence so one image slot never shows another unit's frame.
-      if (current.imageUrl) return current;
-      const unit = current.streamingPreviews[event.unit_index];
+      if (!current.loading || !isActiveJobStatus(current.job.status)) return current;
+      if (!Number.isInteger(event.unit_index) || event.unit_index < 0 || event.unit_index >= Math.min(current.job.n || 1, 10)) return current;
+      const callIndex = event.call_index || 0;
+      if (!Number.isInteger(callIndex) || callIndex < 0 || callIndex >= 10 || event.data_url.length > 8 * 1024 * 1024) return current;
+      if (current.job.images?.some((image) => image.unit_index === event.unit_index)) return current;
+      const unitStatus = current.job.unit_statuses?.[event.unit_index];
+      if (unitStatus && !isActiveJobStatus(unitStatus as GenerateJobStatus['status'])) return current;
+      const key = callIndex ? `${event.unit_index}:${callIndex}` : `${event.unit_index}`;
+      const unit = current.streamingPreviews[key];
       if (unit && event.sequence <= unit.sequence) return current;
       return {
         ...current,
         streamingPreviews: {
           ...current.streamingPreviews,
-          [event.unit_index]: { dataUrl: event.data_url, sequence: event.sequence }
+          [key]: { dataUrl: event.data_url, sequence: event.sequence, unitIndex: event.unit_index, callIndex }
         }
       };
     });
