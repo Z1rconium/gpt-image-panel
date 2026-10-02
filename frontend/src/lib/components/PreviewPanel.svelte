@@ -20,7 +20,8 @@
   const imageUrl = $derived($previewStore.imageUrl);
   const filename = $derived($previewStore.filename);
   const prompt = $derived($previewStore.prompt);
-  const streamingPreviewDataUrl = $derived($previewStore.streamingPreviewDataUrl);
+  const streamingPreviews = $derived($previewStore.streamingPreviews);
+  const streamingSlotCount = $derived(Math.max(1, Math.min(Number(job?.n || 1), 10)));
   const compareSource = $derived($previewStore.compareSource);
 
   let activeJobId = $state('');
@@ -329,7 +330,41 @@
           </div>
         {/if}
       </div>
-    {:else if loading && streamingPreviewDataUrl}
+    {:else if loading && streamingSlotCount > 1}
+      <div class="flex h-full w-full flex-col">
+        <div class="flex min-w-0 items-center gap-3 border-b border-stone-200 bg-white/80 px-4 py-3 dark:border-zinc-800 dark:bg-zinc-900/80" role="status" aria-live="polite" aria-atomic="true">
+          <span class="spinner shrink-0"></span>
+          <div class="min-w-0 flex-1">
+            <p class="truncate text-sm font-semibold text-stone-900 dark:text-zinc-100">{$t.preview.streamingPreviewLabel}</p>
+            <p class="mt-0.5 text-xs text-stone-500 dark:text-zinc-400">{stageLabel(job, $t.stages) || $t.preview.working}</p>
+          </div>
+        </div>
+        <div class="grid flex-1 grid-cols-2 content-start gap-3 overflow-y-auto p-3 lg:grid-cols-3">
+          {#each Array.from({ length: streamingSlotCount }, (_, slotIndex) => slotIndex) as slotIndex (slotIndex)}
+            <div class="relative aspect-square">
+              {#if streamingPreviews[slotIndex]}
+                <div class="preview-image-frame relative h-full w-full">
+                  <img
+                    src={streamingPreviews[slotIndex].dataUrl}
+                    alt={$t.preview.streamingSlotAlt(slotIndex + 1)}
+                    class="h-full w-full rounded-lg object-contain opacity-90"
+                    loading="eager"
+                    decoding="async"
+                  />
+                  <span class="absolute left-2 top-2 rounded bg-black/60 px-2 py-1 text-xs font-medium text-white">{$t.preview.streamingPreviewBadge} {slotIndex + 1}</span>
+                </div>
+              {:else}
+                <div class="flex h-full w-full flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-stone-300 dark:border-zinc-700">
+                  <span class="spinner"></span>
+                  <span class="text-xs text-stone-500 dark:text-zinc-400">{$t.preview.streamingSlotWaiting}</span>
+                  <span class="absolute left-2 top-2 rounded bg-black/60 px-2 py-1 text-xs font-medium text-white">{slotIndex + 1}</span>
+                </div>
+              {/if}
+            </div>
+          {/each}
+        </div>
+      </div>
+    {:else if loading && streamingPreviews[0]}
       <div class="flex h-full w-full flex-col">
         <div class="flex min-w-0 items-center gap-3 border-b border-stone-200 bg-white/80 px-4 py-3 dark:border-zinc-800 dark:bg-zinc-900/80" role="status" aria-live="polite" aria-atomic="true">
           <span class="spinner shrink-0"></span>
@@ -341,7 +376,7 @@
         <div class="flex min-h-[320px] flex-1 items-center justify-center p-3">
           <div class="preview-image-frame relative">
             <img
-              src={streamingPreviewDataUrl}
+              src={streamingPreviews[0].dataUrl}
               alt={$t.preview.streamingPreviewAlt}
               class="preview-image max-h-[640px] max-w-full rounded-lg object-contain opacity-90"
               loading="eager"

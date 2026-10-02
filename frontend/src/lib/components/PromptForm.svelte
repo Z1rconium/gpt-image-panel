@@ -63,13 +63,11 @@
   const providerMapped = $derived(($settingsStore.settings?.provider_kind ?? 'openai') === 'async_json');
 
   const streamUnavailableReason = $derived(
-    Number(promptForm.quantity) > 1
-      ? $t.promptForm.streamRequiresSingleImage
-      : !hasEditSource && promptForm.apiPath !== '/v1/images/generations'
-        ? $t.promptForm.streamUnsupportedPath
-        : providerMapped && !providerCaps?.stream
-          ? $t.promptForm.streamUnavailableMapped
-          : ''
+    !hasEditSource && !['/v1/images/generations', '/v1/responses'].includes(promptForm.apiPath)
+      ? $t.promptForm.streamUnsupportedPath
+      : providerMapped && !providerCaps?.stream
+        ? $t.promptForm.streamUnavailableMapped
+        : ''
   );
   const streamDisabled = $derived(loading || Boolean(streamUnavailableReason));
   const transparentDisabledReason = $derived(
@@ -92,8 +90,7 @@
     if (
       promptForm.stream &&
       (loading ||
-        Number(promptForm.quantity) > 1 ||
-        (!hasEditSource && promptForm.apiPath !== '/v1/images/generations') ||
+        (!hasEditSource && !['/v1/images/generations', '/v1/responses'].includes(promptForm.apiPath)) ||
         (providerMapped && !providerCaps?.stream))
     ) {
       promptForm.stream = false;

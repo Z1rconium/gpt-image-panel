@@ -472,8 +472,7 @@ function createJobsStore() {
       imageUrl: '',
       filename: '',
       prompt: currentPrompt,
-      streamingPreviewDataUrl: '',
-      streamingPreviewSequence: 0,
+      streamingPreviews: {},
       compareSource: null,
       job: {
         job_id: '',
@@ -497,10 +496,10 @@ function createJobsStore() {
       filename: primaryImage?.filename || (image ? filenameFromImageUrl(image) : preview.filename),
       prompt: job.prompt || preview.prompt,
       // The final image always wins over a streamed partial; once it lands,
-      // drop the streaming preview so PreviewPanel switches to the real image.
-      // A failed job never gets one, so release its (potentially large) data URL.
-      streamingPreviewDataUrl: image || !active ? '' : preview.streamingPreviewDataUrl,
-      streamingPreviewSequence: image || !active ? 0 : preview.streamingPreviewSequence,
+      // drop the streaming previews so PreviewPanel switches to the real
+      // images. A failed job never gets one, so release its (potentially
+      // large) data URLs too.
+      streamingPreviews: image || !active ? {} : preview.streamingPreviews,
       compareSource: preview.compareSource
     };
   }

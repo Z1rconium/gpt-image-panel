@@ -430,8 +430,7 @@ const en = {
     closeEditPreview: 'Close edit image preview',
     streamToggle: 'Streaming preview',
     streamPartialImages: 'Preview frames',
-    streamRequiresSingleImage: 'Streaming preview requires a quantity of 1',
-    streamUnsupportedPath: 'Streaming preview requires the Images API, not Responses or Chat Completions',
+    streamUnsupportedPath: 'Streaming preview requires the Images or Responses API, not Chat Completions',
     streamUnavailableMapped: 'This provider mapping does not support streamed previews',
     transparentUnavailableMapped: 'This provider mapping does not declare native transparent background support',
     streamCostNote: 'Preview frames add extra output tokens; the final cost reflects actual usage'
@@ -601,7 +600,9 @@ const en = {
     noPreviewHint: 'Generate or edit an image to show the result.',
     streamingPreviewLabel: 'Streaming preview',
     streamingPreviewAlt: 'Streaming partial preview',
-    streamingPreviewBadge: 'Preview'
+    streamingPreviewBadge: 'Preview',
+    streamingSlotAlt: (index: number) => `Image ${index} streaming preview`,
+    streamingSlotWaiting: 'Waiting for preview'
   },
   gallery: {
     title: 'Gallery',

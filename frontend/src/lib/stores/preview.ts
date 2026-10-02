@@ -7,6 +7,9 @@ import type { GenerateRequestBody } from '$lib/api/types/generation';
 import type { GeneratePreviewEvent, GenerateJobResponse, GenerateJobStatus } from '$lib/api/types/jobs';
 import { MAX_PROMPT_CHARS, imageQualities, isImage25, promptLength, validImageSize } from '$lib/utils/imageModels';
 
+/** Latest streamed partial image for one task unit (keyed by unit_index). */
+export type StreamingPreviewSlot = { dataUrl: string; sequence: number };
+
 export type PreviewState = {
   loading: boolean;
   error: string;
@@ -14,8 +17,7 @@ export type PreviewState = {
   imageUrl: string;
   filename: string;
   prompt: string;
-  streamingPreviewDataUrl: string;
-  streamingPreviewSequence: number;
+  streamingPreviews: Record<number, StreamingPreviewSlot>;
   compareSource: PreviewCompareSource | null;
 };
 
@@ -54,8 +56,7 @@ const initialPreviewState: PreviewState = {
   imageUrl: '',
   filename: '',
   prompt: '',
-  streamingPreviewDataUrl: '',
-  streamingPreviewSequence: 0,
+  streamingPreviews: {},
   compareSource: null
 };
 
@@ -104,7 +105,7 @@ function buildRequestBody(form: PromptFormState): GenerateRequestBody {
     body.output_compression = null;
   }
 
-  if (form.stream && quantity === 1) {
+  if (form.stream) {
     body.stream = true;
     body.partial_images = Math.min(Math.max(Math.round(form.partialImages) || 2, 1), 3);
   }
@@ -119,8 +120,9 @@ function submissionError(body: GenerateRequestBody, edit = false): string {
   if (isImage25(body.model) && !edit && body.api_path !== '/v1/images/generations') return messages.promptForm.image25Endpoint;
   if (!imageQualities(body.model).includes(body.quality)) return messages.promptForm.qualityReset;
   if ((edit || body.api_path === '/v1/images/generations') && !validImageSize(body.size)) return messages.sizeDialog.invalidSize;
-  if (body.stream && body.n > 1) return messages.promptForm.streamRequiresSingleImage;
-  if (body.stream && !edit && body.api_path !== '/v1/images/generations') return messages.promptForm.streamUnsupportedPath;
+  if (body.stream && !edit && !['/v1/images/generations', '/v1/responses'].includes(body.api_path || '')) {
+    return messages.promptForm.streamUnsupportedPath;
+  }
   if (!edit && body.background?.startsWith('chroma_') && body.api_path !== '/v1/images/generations') return messages.promptForm.chromaUnsupportedPath;
   return '';
 }
@@ -162,14 +164,22 @@ function createPreviewStore() {
     set(initialPreviewState);
   }
 
-  function applyPreviewEvent(event: { job_id: string; sequence: number; data_url: string }) {
+  function applyPreviewEvent(event: GeneratePreviewEvent) {
     update((current) => {
       if (!current.job || current.job.job_id !== event.job_id) return current;
       // The final image always wins, and out-of-order/duplicate frames
-      // (possible across an SSE reconnect) are dropped via the sequence.
+      // (possible across an SSE reconnect) are dropped via the per-unit
+      // sequence so one image slot never shows another unit's frame.
       if (current.imageUrl) return current;
-      if (event.sequence <= current.streamingPreviewSequence) return current;
-      return { ...current, streamingPreviewDataUrl: event.data_url, streamingPreviewSequence: event.sequence };
+      const unit = current.streamingPreviews[event.unit_index];
+      if (unit && event.sequence <= unit.sequence) return current;
+      return {
+        ...current,
+        streamingPreviews: {
+          ...current.streamingPreviews,
+          [event.unit_index]: { dataUrl: event.data_url, sequence: event.sequence }
+        }
+      };
     });
   }
 

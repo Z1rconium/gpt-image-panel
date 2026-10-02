@@ -432,8 +432,7 @@ const zh: Translation = {
     closeEditPreview: '关闭编辑图片预览',
     streamToggle: '流式预览',
     streamPartialImages: '预览帧数',
-    streamRequiresSingleImage: '流式预览要求数量为 1',
-    streamUnsupportedPath: '流式预览仅支持 Images API,不支持 Responses 或 Chat Completions',
+    streamUnsupportedPath: '流式预览仅支持 Images 或 Responses API,不支持 Chat Completions',
     streamUnavailableMapped: '当前供应商映射不支持流式预览',
     transparentUnavailableMapped: '当前供应商映射未声明原生透明背景支持',
     streamCostNote: '预览帧会增加额外的输出 token;最终费用以实际用量为准'
@@ -602,7 +601,9 @@ const zh: Translation = {
     noPreviewHint: '生成或编辑一张图片后会在这里显示结果。',
     streamingPreviewLabel: '流式预览',
     streamingPreviewAlt: '流式阶段性预览',
-    streamingPreviewBadge: '预览'
+    streamingPreviewBadge: '预览',
+    streamingSlotAlt: (index) => `第 ${index} 张流式预览`,
+    streamingSlotWaiting: '等待预览'
   },
   gallery: {
     title: '图库',
