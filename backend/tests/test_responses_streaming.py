@@ -118,10 +118,10 @@ def test_consume_responses_stream_forwards_partial_images_and_final_from_complet
     previews = []
     data, usage = _consume(
         _FakeResponse([_sse_bytes(events)]),
-        lambda idx, mime, image_bytes: previews.append((idx, mime, image_bytes)),
+        lambda idx, mime, image_bytes, call_index=0: previews.append((idx, mime, image_bytes, call_index)),
     )
 
-    assert previews == [(0, "image/png", b"partial-frame")]
+    assert previews == [(0, "image/png", b"partial-frame", 1)]
     assert data == [
         {
             "b64_json": final,
@@ -175,10 +175,10 @@ def test_consume_responses_stream_collects_every_image_generation_call():
     previews = []
     data, usage = _consume(
         _FakeResponse([_sse_bytes(events)]),
-        lambda idx, mime, image_bytes: previews.append((idx, mime, image_bytes)),
+        lambda idx, mime, image_bytes, call_index=0: previews.append((idx, mime, image_bytes, call_index)),
     )
 
-    assert previews == [(0, "image/png", b"partial-a"), (0, "image/png", b"partial-b")]
+    assert previews == [(0, "image/png", b"partial-a", 1), (0, "image/png", b"partial-b", 2)]
     assert [item["b64_json"] for item in data] == [final_a, final_b]
     assert data[0]["reported_size"] == "1024x1024"
     assert usage is None
@@ -255,7 +255,7 @@ def test_consume_responses_stream_survives_delayed_partial_after_completed():
 
     assert [item["b64_json"] for item in data] == [final]
     assert usage == {"total_tokens": 99}
-    assert previews == [(2, "image/png", b"late-partial")]
+    assert previews == []
 
 
 def test_consume_responses_stream_without_completed_event_raises():
@@ -268,3 +268,45 @@ def test_consume_responses_stream_without_completed_event_raises():
     ]
     with pytest.raises(UpstreamApiError, match="ended without a completed image event"):
         _consume(_FakeResponse([_sse_bytes(events)]))
+
+
+def test_stream_accepts_json_final_without_resubmission():
+    final = base64.b64encode(b"final-json").decode()
+    body = {"output": [{"type": "image_generation_call", "result": final}], "usage": {"total_tokens": 12}}
+    previews = []
+    data, usage = _consume(_FakeResponse([json.dumps(body).encode()], headers={"Content-Type": "application/json"}), lambda *args: previews.append(args))
+    assert data == [{"b64_json": final}]
+    assert usage == {"total_tokens": 12}
+    assert previews == []
+
+
+def test_stream_retains_output_item_final_and_discards_late_call_preview():
+    final = base64.b64encode(b"item-final").decode()
+    events = [
+        {"type": "response.output_item.done", "output_index": 1, "item": {"type": "image_generation_call", "result": final}},
+        {"type": "response.image_generation_call.partial_image", "output_index": 1, "partial_image_b64": base64.b64encode(b"late").decode()},
+    ]
+    previews = []
+    data, usage = _consume(_FakeResponse([_sse_bytes(events)]), lambda *args: previews.append(args))
+    assert data == [{"b64_json": final}]
+    assert usage is None
+    assert previews == []
+
+
+def test_preview_cache_coalesces_frames_and_preserves_status_events(monkeypatch):
+    from backend.app.runtime.state import state
+    from backend.app.services import job_events
+
+    queue = asyncio.Queue(maxsize=4)
+    monkeypatch.setattr(state, "generate_job_preview_cache", {}, raising=False)
+    monkeypatch.setattr(state, "generate_job_subscribers", {"job-1": {queue}}, raising=False)
+    queue.put_nowait({"event": "job", "data": {"status": "running"}})
+    for sequence in range(20):
+        job_events.publish_generate_job_preview("job-1", {"unit_index": 0, "call_index": 1, "sequence": sequence, "data_url": "data:frame"})
+    job_events.publish_generate_job_preview("job-1", {"unit_index": 1, "call_index": 0, "sequence": 1, "data_url": "data:other"})
+    assert queue.qsize() == 3
+    assert queue.get_nowait()["event"] == "job"
+    assert queue.get_nowait()["data"]["sequence"] == 19
+    assert len(job_events.get_cached_generate_job_previews("job-1")) == 2
+    job_events.clear_generate_job_unit_previews("job-1", 0)
+    assert [item["unit_index"] for item in job_events.get_cached_generate_job_previews("job-1")] == [1]

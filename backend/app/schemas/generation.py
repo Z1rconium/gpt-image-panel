@@ -130,6 +130,8 @@ class GenerateJobImage(BaseModel):
     image_id: str
     image_url: str
     filename: str
+    unit_index: Optional[int] = None
+    result_index: Optional[int] = None
     image_width: Optional[int] = None
     image_height: Optional[int] = None
     sent_prompt: Optional[str] = None
@@ -146,6 +148,7 @@ class GenerateJobImage(BaseModel):
 class GeneratePreviewEvent(BaseModel):
     job_id: str
     unit_index: int = 0
+    call_index: int = 0
     partial_image_index: int = 0
     sequence: int = 0
     mime_type: str = "image/png"
@@ -187,6 +190,9 @@ class GenerateJobStatus(GenerateJobResponse):
     image_id: Optional[str] = None
     image_url: Optional[str] = None
     images: list[GenerateJobImage] = Field(default_factory=list)
+    unit_statuses: dict[str, str] = Field(default_factory=dict)
+    agent_turn_id: Optional[str] = None
+    agent_conversation_id: Optional[str] = None
     prompt: Optional[str] = None
     size: Optional[str] = None
     created_at: Optional[str] = None

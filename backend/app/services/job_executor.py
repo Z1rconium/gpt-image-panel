@@ -20,6 +20,7 @@ from ..core.api_paths import (
     normalize_provider_kind,
 )
 from ..core.diagnostics import UnitDiagnostics
+from ..core.constants import ACTIVE_GENERATE_JOB_STATUSES
 from ..core.media import generate_stable_image_id, use_image_id_factory
 from ..core.observability import (
     JobStageTimer,
@@ -45,6 +46,7 @@ from ..repositories.image_jobs import (
 from ..schemas.provider import resolve_provider_config
 from ..core import image_cost
 from .job_events import (
+    clear_generate_job_unit_previews,
     publish_generate_job,
     publish_generate_job_preview,
     publish_generate_job_row_async,
@@ -138,6 +140,7 @@ def derive_parent_update(
         "completed_count": completed,
         "success_count": success_count,
         "failure_count": failure_count,
+        "unit_statuses": {str(unit.get("unit_index", index)): unit["status"] for index, unit in enumerate(aggregate.get("units", []))},
     }
     usage_cost_update = {
         "usage": aggregate.get("usage"),
@@ -274,6 +277,9 @@ async def aggregate_parent_image_job(
     )
     if not parent:
         return None
+    for unit in aggregate.get("units", []):
+        if unit["status"] not in ACTIVE_GENERATE_JOB_STATUSES:
+            clear_generate_job_unit_previews(parent_job_id, int(unit["unit_index"]))
     operation = str(parent.get("operation") or "generation")
 
     if aggregate.get("all_terminal"):
@@ -392,6 +398,13 @@ async def run_claimed_image_unit(unit: dict, worker_id: str):
     )
     if not preset:
         raise RuntimeError("API preset not found for image unit")
+    snapshot = (unit.get("request") or {}).get("_provider_snapshot")
+    snapshot_origin_changed = False
+    if isinstance(snapshot, dict):
+        snapshot_origin_changed = str(snapshot.get("api_url") or "").rstrip("/") != str(preset.get("api_url") or "").rstrip("/")
+        # Credentials remain live and are never persisted in the snapshot.
+        # Do not send credentials edited for another origin to the old one.
+        preset = {**preset, **snapshot}
     api_url = ssrf.normalize_upstream_base_url(
         str(preset.get("api_url") or "").rstrip("/")
     )
@@ -732,6 +745,8 @@ async def run_claimed_image_unit(unit: dict, worker_id: str):
         )
 
     try:
+        if snapshot_origin_changed:
+            raise proxy.UpstreamApiError("API preset address changed after this job was queued; start a new task with the intended preset")
         if await parent_was_cancelled():
             raise asyncio.CancelledError()
         if remote is not None and remote_phase == "results_ready":
@@ -809,7 +824,7 @@ async def run_claimed_image_unit(unit: dict, worker_id: str):
             preview_sequence = 0
             unit_index = int(unit.get("unit_index") or 0)
 
-            def on_preview(partial_image_index: int, mime_type: str, image_bytes: bytes) -> None:
+            def on_preview(partial_image_index: int, mime_type: str, image_bytes: bytes, call_index: int = 0) -> None:
                 nonlocal preview_sequence
                 preview_sequence += 1
                 data_url = f"data:{mime_type};base64,{base64.b64encode(image_bytes).decode('ascii')}"
@@ -818,6 +833,7 @@ async def run_claimed_image_unit(unit: dict, worker_id: str):
                     {
                         "job_id": parent_job_id,
                         "unit_index": unit_index,
+                        "call_index": call_index,
                         "partial_image_index": partial_image_index,
                         "sequence": preview_sequence,
                         "mime_type": mime_type,

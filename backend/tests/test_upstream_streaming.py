@@ -206,7 +206,7 @@ def test_consume_streaming_image_response_raises_on_failed_event():
 
 def test_consume_streaming_image_response_rejects_non_event_stream_content_type():
     resp = _FakeResponse([b"{}"], headers={"Content-Type": "application/json"})
-    with pytest.raises(UpstreamApiError, match="did not return a streaming response"):
+    with pytest.raises(UpstreamApiError, match="No image data"):
         asyncio.run(
             upstream_generation.consume_streaming_image_response(
                 resp, "/v1/images/generations", None, None

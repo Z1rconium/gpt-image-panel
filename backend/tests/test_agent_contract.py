@@ -181,6 +181,10 @@ def test_agent_happy_path_generates_batch_and_summarizes(client, monkeypatch):
     assert [t["ref_label"] for t in tasks] == ["round-1-image-1", "round-1-image-2"]
     assert all(t["status"] == "succeeded" and t["image_id"] and not t["deleted"] for t in tasks)
     assert all(t["filename"] and t["filename"].endswith(".png") for t in tasks)
+    for task in tasks:
+        image_job = client.get(f"/api/generate/{task['job_id']}").json()
+        assert image_job["agent_turn_id"] == accepted["turn_id"]
+        assert image_job["agent_conversation_id"] == conversation_id
     assert {ref["filename"] for ref in payload["image_refs"]} == {t["filename"] for t in tasks}
     assert blocks[4]["text"] == "Made  and both are ready."
     assistant = payload["messages"][1]

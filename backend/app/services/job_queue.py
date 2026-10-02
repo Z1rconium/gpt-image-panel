@@ -296,6 +296,7 @@ def build_request_payload(req: GenerateRequest | EditRequest) -> dict:
 
 def rebuild_request(operation: str, payload: dict) -> GenerateRequest | EditRequest:
     request_data = {**payload, "n": 1}
+    request_data.pop("_provider_snapshot", None)
     if operation == "edit":
         return EditRequest(**request_data)
     return GenerateRequest(**request_data)
@@ -385,6 +386,8 @@ async def queue_image_job(
     edit_sources_payload: list[dict] | None = None,
     mask_applied: bool = False,
     job_id: str | None = None,
+    agent_turn_id: str | None = None,
+    agent_conversation_id: str | None = None,
 ) -> GenerateJobResponse:
     await run_db_operation(load_api_settings, metric_name="load_api_settings")
     active_preset = get_active_preset()
@@ -495,12 +498,19 @@ async def queue_image_job(
         api_preset_id=active_preset_id,
     )
     pending_job["webhook_url"] = webhook_url
+    pending_job["agent_turn_id"] = agent_turn_id
+    pending_job["agent_conversation_id"] = agent_conversation_id
+    request_payload = build_request_payload(req)
+    request_payload["_provider_snapshot"] = {
+        key: active_preset.get(key)
+        for key in ("api_url", "provider_kind", "provider_config", "prompt_guard", "supports_mask")
+    }
     try:
         stored_job, _units = await run_db_operation(
             enqueue_image_job,
             parent_job=pending_job,
             operation=operation,
-            request=build_request_payload(req),
+            request=request_payload,
             image_units=image_units,
             api_preset_id=active_preset_id,
             api_preset_name=api_preset_name,
@@ -542,6 +552,9 @@ async def queue_edit_job(
     mask_source: EditImageSource | None = None,
     mask_coverage: float | None = None,
     mask_optimized_png: bytes | None = None,
+    *,
+    agent_turn_id: str | None = None,
+    agent_conversation_id: str | None = None,
 ) -> GenerateJobResponse:
     job_id = str(uuid.uuid4())
     if mask_source is not None:
@@ -574,6 +587,8 @@ async def queue_edit_job(
             edit_sources_payload=[edit_source_to_payload(source) for source in edit_sources],
             mask_applied=mask_source is not None,
             job_id=job_id,
+            agent_turn_id=agent_turn_id,
+            agent_conversation_id=agent_conversation_id,
         )
     except BaseException:
         if mask_source is not None:

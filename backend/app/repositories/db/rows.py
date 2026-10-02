@@ -449,7 +449,7 @@ def _normalize_generate_job(job: dict[str, Any]) -> dict[str, Any]:
                 except TypeError:
                     continue
             continue
-        if column in {"usage_json", "cost_json"}:
+        if column in {"usage_json", "cost_json", "unit_statuses_json"}:
             value = job.get(column)
             if value is None:
                 value = job.get(column[: -len("_json")])
@@ -576,6 +576,7 @@ def _generate_job_from_row(row: sqlite3.Row) -> dict[str, Any]:
             job["cost"] = json.loads(cost_json)
         except json.JSONDecodeError:
             pass
+    job["unit_statuses"] = _json_loads_dict(job.pop("unit_statuses_json", None))
     if "streaming" in job:
         job["streaming"] = bool(job["streaming"])
     if "mask_applied" in job:

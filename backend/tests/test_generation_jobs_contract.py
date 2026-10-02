@@ -148,6 +148,8 @@ def test_multi_image_job_returns_all_results(client, monkeypatch):
     assert job["success_count"] == 3
     assert job["failure_count"] == 0
     assert len(job["images"]) == 3
+    assert [image["unit_index"] for image in job["images"]] == [0, 1, 2]
+    assert job["unit_statuses"] == {"0": "success", "1": "success", "2": "success"}
     assert job["image_id"] == job["images"][0]["image_id"]
     assert job["image_url"] == job["images"][0]["image_url"]
     assert {image["filename"] for image in job["images"]} == {

@@ -102,6 +102,7 @@ from .transport import (
 from .errors import raise_upstream_error
 from .contracts import (
     PersistGalleryEntry,
+    PreviewCallback,
 )
 
 
@@ -324,6 +325,18 @@ async def consume_streaming_image_response(
         raise_upstream_error(status, error_text, is_json_response, api_path)
 
     if "text/event-stream" not in content_type:
+        if is_json_content_type(content_type):
+            # Accept the same successful response without making another paid
+            # request when a gateway ignores stream=true.
+            result, _ = await parse_upstream_json_response(resp, api_path, progress)
+            data = (
+                extract_response_image_results(result)
+                if api_path == RESPONSES_API_PATH
+                else result.get("data", [])
+            )
+            if not data:
+                raise UpstreamApiError("No image data in upstream JSON response")
+            return data, result.get("usage")
         raise UpstreamApiError(
             "Upstream did not return a streaming response for stream=true. "
             "Disable streaming preview for this request and try again."
@@ -335,6 +348,9 @@ async def consume_streaming_image_response(
     final_data: list[dict[str, Any]] | None = None
     raw_usage: dict[str, Any] | None = None
     next_partial_index = 0
+    completed = False
+    completed_calls: set[int] = set()
+    completed_outputs: dict[int, dict[str, Any]] = {}
     max_total_bytes = config.STREAMING_MAX_TOTAL_MB * 1024 * 1024
     max_frame_bytes = config.STREAMING_MAX_FRAME_MB * 1024 * 1024
 
@@ -348,6 +364,14 @@ async def consume_streaming_image_response(
             continue
         event_type = str(event.get("type") or "")
         if event_type.endswith(".partial_image"):
+            if completed:
+                continue
+            try:
+                call_index = max(0, int(event.get("output_index") or 0))
+            except (TypeError, ValueError):
+                call_index = 0
+            if call_index in completed_calls or call_index >= 10:
+                continue
             # Images API frames carry `b64_json`; Responses API frames carry
             # `partial_image_b64`. Text deltas and other unrelated events are
             # skipped because neither field is present.
@@ -361,7 +385,7 @@ async def consume_streaming_image_response(
             next_partial_index = partial_index + 1
             if preview is not None:
                 try:
-                    image_bytes = base64.b64decode(str(b64_json))
+                    image_bytes = base64.b64decode(str(b64_json), validate=True)
                 except ValueError:
                     continue
                 mime_type = f"image/{str(event.get('output_format') or 'png').lower()}"
@@ -370,8 +394,23 @@ async def consume_streaming_image_response(
                         "streaming_preview",
                         f"Received partial preview {partial_index + 1}",
                     )
-                preview(partial_index, mime_type, image_bytes)
+                if call_index:
+                    preview(partial_index, mime_type, image_bytes, call_index)
+                else:
+                    preview(partial_index, mime_type, image_bytes)
+        elif event_type == "response.output_item.done":
+            item = event.get("item")
+            if isinstance(item, dict) and item.get("type") == "image_generation_call":
+                try:
+                    output_index = int(event.get("output_index") or 0)
+                    completed_calls.add(output_index)
+                    images = extract_response_image_results({"output": [item]})
+                    if images and 0 <= output_index < 10:
+                        completed_outputs[output_index] = dict(images[0])
+                except (TypeError, ValueError):
+                    pass
         elif event_type in {"response.completed", "response.incomplete"}:
+            completed = True
             response_payload = event.get("response")
             if not isinstance(response_payload, dict):
                 continue
@@ -392,6 +431,7 @@ async def consume_streaming_image_response(
         elif event_type.endswith(".completed"):
             b64_json = event.get("b64_json")
             if b64_json:
+                completed = True
                 final_data = [{"b64_json": b64_json, **reported_image_fields(event)}]
             usage = event.get("usage")
             if isinstance(usage, dict):
@@ -406,6 +446,8 @@ async def consume_streaming_image_response(
                     message = response_error.get("message") or response_error.get("code")
             raise UpstreamApiError(str(message or "Upstream reported a streaming failure"))
 
+    if final_data is None and completed_outputs:
+        final_data = [completed_outputs[index] for index in sorted(completed_outputs)]
     if final_data is None:
         raise UpstreamApiError(
             "Streaming upstream response ended without a completed image event"

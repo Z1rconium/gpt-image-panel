@@ -960,7 +960,11 @@ def _aggregate_image_job_units_on_conn(
         result = unit.get("result") or {}
         unit_images = result.get("images") if isinstance(result, dict) else None
         if isinstance(unit_images, list):
-            images.extend(image for image in unit_images if isinstance(image, dict))
+            images.extend(
+                {**image, "unit_index": unit["unit_index"], "result_index": index}
+                for index, image in enumerate(unit_images)
+                if isinstance(image, dict)
+            )
         for key, value in (unit.get("stage_timings") or {}).items():
             try:
                 stage_timings[key] = stage_timings.get(key, 0.0) + float(value)

@@ -611,7 +611,10 @@ class _TurnRun:
                 for ref in ref_rows:
                     sources.append(await edit_sources.read_gallery_edit_source(ref["image_id"]))
                 await self.check_cancel()
-                job = await self._queue_owned(job_queue.queue_edit_job(req=request, image_sources=sources))
+                job = await self._queue_owned(job_queue.queue_edit_job(
+                    req=request, image_sources=sources,
+                    agent_turn_id=self.turn_id, agent_conversation_id=self.conversation_id,
+                ))
                 sources = []
             else:
                 await self.check_cancel()
@@ -622,6 +625,8 @@ class _TurnRun:
                         str(preset.get("api_path") or "/v1/images/generations")
                     ),
                     queued_message="Queued image generation",
+                    agent_turn_id=self.turn_id,
+                    agent_conversation_id=self.conversation_id,
                 ))
         except (asyncio.CancelledError, TurnCancelled):
             edit_sources.cleanup_edit_sources(sources)

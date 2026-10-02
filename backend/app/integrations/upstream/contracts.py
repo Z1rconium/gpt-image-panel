@@ -48,5 +48,5 @@ class EditUploads:
     inline_variables: dict[str, object]
 
 
-PreviewCallback = Callable[[int, str, bytes], None]
+PreviewCallback = Callable[..., None]
 PersistGalleryEntry = Callable[..., Awaitable[GalleryEntry]]

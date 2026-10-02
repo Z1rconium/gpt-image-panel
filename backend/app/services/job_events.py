@@ -46,8 +46,8 @@ def get_jobs_subscribers() -> set[asyncio.Queue]:
     return subscribers
 
 
-def get_generate_job_preview_cache() -> dict[tuple[str, int], dict]:
-    """In-memory, per-process only: one slot per (job_id, unit_index) holding
+def get_generate_job_preview_cache() -> dict[tuple[str, int, int], dict]:
+    """In-memory, per-process only: one slot per (job_id, unit_index, call_index) holding
     the most recent partial-image preview. Never persisted to SQLite - a
     reconnecting client either gets this cached frame or waits for the next
     one; a restarted/other worker process has nothing to replay, which is an
@@ -73,7 +73,8 @@ def publish_generate_job_preview(job_id: str, payload: dict) -> None:
         return
 
     cache = get_generate_job_preview_cache()
-    key = (job_id, unit_index)
+    call_index = max(0, min(9, int(payload.get("call_index") or 0)))
+    key = (job_id, unit_index, call_index)
     cache[key] = payload
     while len(cache) > config.PREVIEW_CACHE_MAX_ENTRIES:
         oldest_key = next(iter(cache))
@@ -84,17 +85,36 @@ def publish_generate_job_preview(job_id: str, payload: dict) -> None:
 
     event = {"event": "preview", "data": payload}
     for queue in list(get_job_subscribers().get(job_id, set())):
+        # Replace queued frames for this slot so slow clients retain one latest
+        # frame rather than every base64 payload; preserve job/status events.
+        pending = []
+        while True:
+            try:
+                queued = queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            data = queued.get("data") or {}
+            if queued.get("event") != "preview" or (data.get("unit_index", 0), data.get("call_index", 0)) != (unit_index, call_index):
+                pending.append(queued)
+        for queued in pending:
+            publish_queue(queue, queued)
         publish_queue(queue, event)
 
 
 def get_cached_generate_job_previews(job_id: str) -> list[dict]:
     cache = get_generate_job_preview_cache()
-    return [payload for (cached_job_id, _unit_index), payload in cache.items() if cached_job_id == job_id]
+    return [payload for key, payload in cache.items() if key[0] == job_id]
 
 
 def clear_generate_job_preview_cache(job_id: str) -> None:
     cache = get_generate_job_preview_cache()
     for key in [key for key in cache if key[0] == job_id]:
+        cache.pop(key, None)
+
+
+def clear_generate_job_unit_previews(job_id: str, unit_index: int) -> None:
+    cache = get_generate_job_preview_cache()
+    for key in [key for key in cache if key[0] == job_id and key[1] == unit_index]:
         cache.pop(key, None)
 
 

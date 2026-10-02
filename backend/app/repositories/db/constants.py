@@ -96,6 +96,9 @@ GENERATE_JOB_COLUMNS = (
     "paste_back",
     "error",
     "webhook_url",
+    "unit_statuses_json",
+    "agent_turn_id",
+    "agent_conversation_id",
 )
 IMAGE_JOB_UNIT_COLUMNS = (
     "unit_id",

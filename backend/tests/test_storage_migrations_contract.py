@@ -1,5 +1,22 @@
 from backend.tests.support.contract import *  # noqa: F403
 
+
+def test_preview_context_migration_preserves_legacy_jobs():
+    from backend.app.repositories.db import schema
+
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.execute("CREATE TABLE generate_jobs (job_id TEXT PRIMARY KEY, status TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)")
+    conn.execute("INSERT INTO generate_jobs (job_id, status, created_at, updated_at) VALUES ('old-job', 'queued', 'before', 'before')")
+    schema._migration_image_job_preview_context(conn)
+    schema._migration_image_job_preview_context(conn)
+    row = conn.execute("SELECT * FROM generate_jobs WHERE job_id = 'old-job'").fetchone()
+    assert row["status"] == "queued"
+    assert row["agent_turn_id"] is None and row["agent_conversation_id"] is None
+    assert row["unit_statuses_json"] is None
+    conn.close()
+
+
 def test_storage_connect_reuses_nested_sqlite_handle_and_closes_on_exit(tmp_path, monkeypatch):
     _configure_runtime(tmp_path)
     closed_paths: list[str] = []

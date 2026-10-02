@@ -1366,6 +1366,13 @@ def _migration_agent_performance_indexes(conn: sqlite3.Connection):
     )
 
 
+def _migration_image_job_preview_context(conn: sqlite3.Connection):
+    columns = _table_columns(conn, "generate_jobs")
+    for column in ("unit_statuses_json", "agent_turn_id", "agent_conversation_id"):
+        if column not in columns:
+            conn.execute(f"ALTER TABLE generate_jobs ADD COLUMN {column} TEXT")
+
+
 SCHEMA_MIGRATIONS = (
     (1, "baseline_legacy_schema", _migration_baseline_legacy_schema),
     (2, "gallery_filter_options", _migration_gallery_filter_options),
@@ -1402,4 +1409,5 @@ SCHEMA_MIGRATIONS = (
     (33, "api_preset_provider", _migration_api_preset_provider),
     (34, "image_job_unit_recovery", _migration_image_job_unit_recovery),
     (35, "image_job_unit_diagnostics", _migration_image_job_unit_diagnostics),
+    (36, "image_job_preview_context", _migration_image_job_preview_context),
 )

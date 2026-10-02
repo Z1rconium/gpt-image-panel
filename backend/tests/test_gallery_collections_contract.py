@@ -66,6 +66,7 @@ def test_gallery_collection_items_filter_and_cascade(client):
     assert added.json()["changed_count"] == 2
     assert added.json()["collection"]["image_count"] == 2
     assert added.json()["collection"]["cover_image_id"] == "col-3"
+    assert added.json()["collection"]["cover_filename"] == "col-3.png"
 
     again = client.post(f"/api/gallery/collections/{album['id']}/items", json={"ids": ["col-1"]})
     assert again.json()["changed_count"] == 0

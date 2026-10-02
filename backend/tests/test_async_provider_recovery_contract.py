@@ -405,11 +405,11 @@ def test_diagnostics_snapshots_are_redacted_and_bounded():
 # ── persistence: migration, fencing, recovery bounds ─────────────────────────
 
 
-def _enqueue(parent_id: str, *, preset_id: str = "default", preset_name: str = "Default"):
+def _enqueue(parent_id: str, *, preset_id: str = "default", preset_name: str = "Default", request: dict | None = None):
     return image_jobs_repo.enqueue_image_job(
         parent_job={"job_id": parent_id, "status": "queued"},
         operation="generation",
-        request={"prompt": "checkpoint", "n": 1},
+        request=request or {"prompt": "checkpoint", "n": 1},
         image_units=1,
         api_preset_id=preset_id,
         api_preset_name=preset_name,
@@ -648,6 +648,37 @@ def test_results_ready_checkpoint_completes_without_upstream(tmp_path, monkeypat
     assert row["status"] == "success"
     assert row["result"]["images"][0]["image_id"] == "img-1"
     assert called == []
+
+
+@pytest.mark.parametrize("origin_changed", [False, True])
+def test_queued_provider_snapshot_survives_preset_changes(tmp_path, monkeypatch, origin_changed):
+    _configure_runtime(tmp_path)
+    preset = _install_async_preset(monkeypatch, provider_config=V1_CONFIG)
+    snapshot = {key: preset.get(key) for key in ("api_url", "provider_kind", "provider_config", "prompt_guard", "supports_mask")}
+    parent_id = f"queued-{uuid.uuid4().hex}"
+    _enqueue(parent_id, preset_id=preset["id"], preset_name=preset["name"], request={"prompt": "checkpoint", "n": 1, "_provider_snapshot": snapshot})
+    claimed = image_jobs_repo.claim_next_image_job_unit(worker_id="worker-a", claim_token="token-a", lease_expires_at="2099-01-01T00:00:00+00:00", now="2026-01-01T00:00:01+00:00", running_limit=4, max_attempts=2)
+    assert "recovery-secret" not in json.dumps(claimed["request"])
+    preset["provider_config"] = V2_CONFIG
+    if origin_changed:
+        preset["api_url"] = "https://another.example.com"
+    runtime_state.state.api_presets = [preset]
+    presets_service.persist_api_settings()
+    calls = []
+
+    async def captured(*args, **kwargs):
+        calls.append(kwargs["provider_config"])
+        raise job_executor.proxy.UpstreamApiError("intentional fixture stop")
+
+    monkeypatch.setattr(job_executor.proxy, "call_image_generation_api", captured)
+    asyncio.run(job_executor.run_claimed_image_unit(claimed, "worker-a"))
+    row = image_jobs_repo.get_image_job_unit(claimed["unit_id"])
+    assert row["status"] == "upstream_error"
+    if origin_changed:
+        assert calls == []
+        assert "address changed" in row["error"]
+    else:
+        assert calls == [V1_CONFIG]
 
 
 def test_reclaimed_async_unit_without_checkpoint_is_interrupted(tmp_path, monkeypatch):
