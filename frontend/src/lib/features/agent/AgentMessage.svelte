@@ -5,17 +5,27 @@
   import { splitMentions } from '$lib/utils/agentRefs';
   import { thumbnailUrl } from '$lib/utils/format';
   import AgentImageTask from './AgentImageTask.svelte';
+  import AgentMarkdown from './AgentMarkdown.svelte';
 
   let {
     message,
     attachments = [],
-    onOpenImage
+    onOpenImage,
+    busy = false,
+    onFork = async () => false
   }: {
     message: AgentMessage;
     attachments?: AgentImageRef[];
     onOpenImage: (imageId: string) => void;
+    busy?: boolean;
+    onFork?: (message: AgentMessage, text?: string) => Promise<boolean>;
   } = $props();
 
+  let editing = $state(false);
+  let editedText = $state('');
+  async function saveEdit() {
+    if (editedText.trim() && await onFork(message, editedText)) editing = false;
+  }
   const groups = $derived(groupAgentBlocks(message.blocks));
   const parts = $derived(message.role === 'user' ? splitMentions(message.text) : []);
   const hasError = $derived(message.blocks.some((block) => block.type === 'error'));
@@ -49,6 +59,14 @@
           {:else}{part.value}{/if}
         {/each}
       </p>
+      <button type="button" class="ui-button-secondary text-xs" disabled={busy} onclick={() => { editedText = message.text; editing = !editing; }}>{$t.agent.editMessage}</button>
+      {#if editing}
+        <form class="space-y-2" onsubmit={(event) => { event.preventDefault(); void saveEdit(); }}>
+          <textarea class="ui-field w-full p-2" rows="4" maxlength="8000" aria-label={$t.agent.editMessage} bind:value={editedText}></textarea>
+          <button type="submit" class="ui-button-primary" disabled={busy || !editedText.trim()}>{$t.agent.sendBranch}</button>
+          <button type="button" class="ui-button-secondary" onclick={() => editing = false}>{$t.agent.cancel}</button>
+        </form>
+      {/if}
       {#if attachments.length}
         <ul class="flex flex-wrap gap-2" aria-label={$t.agent.attachments}>
           {#each attachments as attachment (attachment.ref_label)}
@@ -57,7 +75,7 @@
                 <button
                   type="button"
                   class="control-focus block w-full overflow-hidden rounded-md border border-stone-300 dark:border-zinc-700"
-                  aria-label={$t.agent.openImage($t.agent.attachmentLabel(attachment.round_no, attachment.image_index))}
+                  aria-label={$t.agent.openImage($t.agent.attachmentLabel(attachment.path_round_no ?? attachment.round_no, attachment.image_index))}
                   onclick={() => attachment.image_id && onOpenImage(attachment.image_id)}
                 >
                   <img src={thumbnailUrl(attachment.filename)} alt="" loading="lazy" class="aspect-square w-full object-cover" />
@@ -79,7 +97,7 @@
       <p class="sr-only">{$t.agent.agent}</p>
       {#each groups as group (group.key)}
         {#if group.kind === 'text'}
-          <p class="whitespace-pre-wrap break-words text-sm leading-6 text-stone-900 dark:text-zinc-100">{group.block.text}</p>
+          <AgentMarkdown text={group.block.text} />
         {:else if group.kind === 'batch'}
           {#if group.block.status === 'ready' && group.block.items.length}
             <details class="rounded-md border border-stone-200 px-3 py-2 text-xs text-stone-600 dark:border-zinc-800 dark:text-zinc-400">
@@ -105,6 +123,7 @@
           <p role="alert" class="status-error px-3 py-2 text-sm" data-testid="agent-error-block">{group.block.message}</p>
         {/if}
       {/each}
+      <button type="button" class="ui-button-secondary text-xs" disabled={busy || message.status === 'streaming'} onclick={() => void onFork(message)}>{$t.agent.regenerate}</button>
       {#if statusNote}
         <p class="text-xs text-stone-500 dark:text-zinc-500">{statusNote}</p>
       {/if}

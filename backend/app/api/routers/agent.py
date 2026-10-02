@@ -6,6 +6,7 @@ from ..responses import streaming_response
 from ...core import security as auth
 from ...schemas.agent import (
     AgentConversationCreateRequest,
+    AgentBranchSelectRequest,
     AgentConversationDetail,
     AgentConversationListResponse,
     AgentConversationRenameRequest,
@@ -48,6 +49,11 @@ async def get_agent_conversation(
 @router.patch("/api/agent/conversations/{conversation_id}", response_model=AgentConversationSummary)
 async def rename_agent_conversation(conversation_id: str, req: AgentConversationRenameRequest):
     return await agent_conversations.rename_conversation(conversation_id, req)
+
+
+@router.patch("/api/agent/conversations/{conversation_id}/branch", response_model=AgentConversationDetail)
+async def select_agent_branch(conversation_id: str, req: AgentBranchSelectRequest):
+    return await agent_conversations.select_branch(conversation_id, req)
 
 
 @router.delete("/api/agent/conversations/{conversation_id}", response_model=MessageResponse)

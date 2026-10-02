@@ -37,7 +37,9 @@ const BUDGETS = {
   // global.
   // 13.4 -> 13.6 KiB: preview slots, collection covers and touch actions add
   // 129 B gzip over the measured v1.7.5 stylesheet (13,662 -> 13,791 B).
-  mainCssGzipBytes: 13.6 * 1024,
+  // 13.6 -> 14.0 KiB: the lazy Agent Markdown component adds scoped styles
+  // included in this combined CSS budget. Marked stays in the Agent chunk.
+  mainCssGzipBytes: 14.0 * 1024,
   oglGzipBytes: 39.4 * 1024,
   oglReduction: 0.2
 };

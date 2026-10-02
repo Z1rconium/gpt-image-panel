@@ -111,6 +111,7 @@ class _TurnRun:
         self.conversation_id: str = turn["conversation_id"]
         self.round_no: int = int(turn["round_no"])
         self.message_id: str = turn["assistant_message_id"]
+        self.path_round_no: int = 0
         self.agent: assistant_runtime.AgentRuntime | None = None
         self.blocks: list[dict[str, Any]] = []
         self.rounds_used = 0
@@ -353,17 +354,21 @@ class _TurnRun:
             await self.persist()
 
     async def _initial_items(self) -> list[Any]:
+        path_ids = await self._db(agent_repo.path_turn_ids, self.conversation_id, self.turn_id, metric_name="agent_context_path")
+        self.path_round_no = len(path_ids)
         messages, image_refs, user_message = await asyncio.gather(
             self._db(
                 agent_repo.list_messages,
                 self.conversation_id,
                 limit=HISTORY_MESSAGE_LIMIT,
+                turn_ids=path_ids,
                 metric_name="agent_history_messages",
             ),
             self._db(
                 agent_repo.list_conversation_images,
                 self.conversation_id,
                 metric_name="agent_history_images",
+                turn_ids=path_ids,
             ),
             self._db(
                 agent_repo.get_message,
@@ -371,6 +376,8 @@ class _TurnRun:
                 metric_name="agent_user_message",
             ),
         )
+        messages = [message for message in messages if message["turn_id"] in path_ids]
+        image_refs = [image for image in image_refs if image["turn_id"] in path_ids]
         history = agent_context.build_history_items(
             messages=messages,
             image_refs=image_refs,
@@ -513,6 +520,9 @@ class _TurnRun:
                     label,
                     metric_name="agent_get_image_ref",
                 )
+                path_ids = await self._db(agent_repo.path_turn_ids, self.conversation_id, self.turn_id, metric_name="agent_tool_path")
+                if row is not None and row["turn_id"] not in path_ids:
+                    row = None
                 if row is None or row["status"] != "succeeded" or not row.get("image_id"):
                     problem = (
                         f"Reference {label} is not available: it is unknown, deleted, or not created yet. "
@@ -540,6 +550,7 @@ class _TurnRun:
             block = {
                 "id": self._next_block_id("i"),
                 "type": "image_task",
+                "path_round_no": self.path_round_no,
                 "call_id": call_id,
                 "item_id": image.id,
                 "ref_label": row["ref_label"],

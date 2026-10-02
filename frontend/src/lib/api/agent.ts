@@ -103,3 +103,11 @@ export function openAgentTurnEvents(turnId: string, after: number, handlers: Age
     AGENT_EVENT_NAMES
   );
 }
+
+export function selectAgentBranch(conversationId: string, selectedTurnId: string | null, expectedRevision: number) {
+  return apiFetch<AgentConversationDetail>(
+    `/api/agent/conversations/${encodeURIComponent(conversationId)}/branch`,
+    { method: 'PATCH', headers: JSON_HEADERS, body: JSON.stringify({ selected_turn_id: selectedTurnId, expected_revision: expectedRevision }) },
+    'switching the branch'
+  );
+}

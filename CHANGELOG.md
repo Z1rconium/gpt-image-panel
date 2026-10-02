@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Phase 6: Agent replies render GFM headings, lists, tables, code and links, including unfinished streaming syntax. Raw HTML is escaped, Markdown images remain text, and links allow only credential-free HTTP(S) URLs. Marked is pinned and loads with the lazy Agent view.
+- Phase 6: edit a historical message or regenerate its answer to create a sibling turn while keeping the original path and gallery results. A separate selected-path pointer survives reloads; switching paths creates no model request and does not cancel active work. Context, pagination and image references follow ancestors of the selected/executing turn. Stable reference labels stay unchanged while displayed round numbers follow path depth; another branch's images require an explicit Gallery attachment.
+- Migration 37 preserves old linear conversations as parent-linked paths and adds the selected turn and revision. Branch selection uses `PATCH /api/agent/conversations/{id}/branch` with `expected_revision`; turn admission accepts `action`, `source_turn_id` and `branch_revision`. Stale tabs receive 409, uncertain client retries reuse the same `client_turn_id`, and replay remains available after configuration changes.
 ## v1.7.6
 
 - Streaming previews now support the Responses image-generation tool and batches of 1–10 queued units. Per-unit/output-call slots retain independent previews and final images; terminal unit statuses prevent delayed frames from returning. Responses output completion, response completion/failure, malformed SSE, cancellation and JSON final responses are handled without automatic paid resubmission; usage is recorded once per response.

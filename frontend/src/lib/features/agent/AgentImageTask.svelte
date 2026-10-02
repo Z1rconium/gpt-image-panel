@@ -7,7 +7,7 @@
 
   let thumbFailed = $state(false);
 
-  const label = $derived($t.agent.imageLabel(block.round_no, block.image_index));
+  const label = $derived($t.agent.imageLabel(block.path_round_no ?? block.round_no, block.image_index));
   const deleted = $derived(block.status === 'succeeded' && (Boolean(block.deleted) || !block.image_id));
   const ready = $derived(block.status === 'succeeded' && !deleted && Boolean(block.image_id && block.filename));
   const stageLabel = $derived(($t.stages as Record<string, string>)[block.stage] ?? '');

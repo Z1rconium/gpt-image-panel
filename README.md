@@ -321,6 +321,12 @@ With `ENABLE_METRICS=true`, `/api/metrics` exposes diagnostics for sizing SQLite
 11. Use **Export** to download the selected preset as a versioned JSON package (never containing the key), **Share link** to copy a `?preset=` link, and **Import** to preview a file, clipboard JSON, or shared link before applying it. Order presets with the drag handle or the arrow buttons; the order is stored in SQLite.
 12. Optionally enable Agent mode in Settings → AI Assistant (pick a model that supports function calling), then switch to **Agent** in the header. Describe what you want, reference earlier images with `@` (for example `@round-1-image-1`), attach gallery images, and press Ctrl/Cmd+Enter. Use Stop to cancel a running reply; generated images appear in the gallery.
 
+### Agent paths, Markdown
+
+Assistant replies support headings, lists, tables, code and links. Raw HTML is escaped, external Markdown images stay text, and links allow only HTTP(S) URLs without credentials.
+
+Use **Edit message → Send as new branch** or **Regenerate** to create a sibling of a historical turn. **Conversation path** restores any original or new path after reload. Switching paths does not create requests or stop running work; stop the active turn before editing or regenerating. Only ancestors on the executing path enter model history. Image IDs and `@round-N-image-M` references are stable; displayed rounds and `@第N轮图M` follow the current path. To reuse an image from another path, attach it explicitly from Gallery. Deleting Gallery images invalidates references on all paths; deleting a conversation keeps its Gallery images.
+
 ## GPT Image 2.5
 
 The generation form and preset settings offer `gpt-image-2.5-flare` (fast everyday generation) and `gpt-image-2.5-sunburst` (precise editing). `gpt-image-2` remains the default; saved presets and custom model names are preserved. Choose **Custom model / snapshot** to pin either model to its `-2026-09-08` snapshot.
@@ -431,6 +437,7 @@ Key backend routes:
 | `GET/POST` | `/api/agent/conversations` | List or create Agent conversations. |
 | `GET/PATCH/DELETE` | `/api/agent/conversations/{conversation_id}` | Read (messages, image references, active turn), rename, or delete a conversation; deleting keeps its gallery images. |
 | `POST` | `/api/agent/conversations/{conversation_id}/turns` | Send a message (`client_turn_id` makes retries idempotent); runs as a background turn and returns `202`. |
+| `PATCH` | `/api/agent/conversations/{conversation_id}/branch` | Select a persisted path using `selected_turn_id` (null starts an empty path) and `expected_revision`; stale tabs receive 409. Turns also accept `action: continue/edit/regenerate`, `source_turn_id` and `branch_revision`. |
 | `GET` | `/api/agent/turns/{turn_id}`, `/api/agent/turns/{turn_id}/events` | Read a turn or stream its replayable SSE events (`?after=` or `Last-Event-ID` resumes). |
 | `POST` | `/api/agent/turns/{turn_id}/cancel` | Stop a running turn and cancel its queued image jobs. |
 | `POST` | `/api/generate` | Start generation job. |

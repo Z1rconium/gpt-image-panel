@@ -2,7 +2,7 @@
 
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from ..core import settings as config
 from ..core.image_models import ImageQuality
@@ -56,6 +56,15 @@ class AgentTurnRequest(StrictRequestModel):
         default_factory=list, max_length=AGENT_ATTACHMENT_CEILING
     )
     image_params: AgentImageParams = Field(default_factory=AgentImageParams)
+    action: Literal["continue", "edit", "regenerate"] = "continue"
+    source_turn_id: Optional[ShortId] = None
+    branch_revision: Optional[int] = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def validate_branch_action(self) -> "AgentTurnRequest":
+        if self.action != "continue" and (self.source_turn_id is None or self.branch_revision is None):
+            raise ValueError("edit/regenerate require source_turn_id and branch_revision")
+        return self
 
     @field_validator("text")
     @classmethod
@@ -84,6 +93,22 @@ class AgentConversationSummary(BaseModel):
     created_at: str
     updated_at: str
     active_turn_id: Optional[str] = None
+    selected_turn_id: Optional[str] = None
+    branch_revision: int = 0
+
+
+class AgentBranchSelectRequest(StrictRequestModel):
+    selected_turn_id: Optional[ShortId] = None
+    expected_revision: int = Field(..., ge=0)
+
+
+class AgentBranch(BaseModel):
+    id: str
+    parent_turn_id: Optional[str] = None
+    round_no: int
+    path_round_no: int
+    preview: str
+    status: AgentTurnStatusValue
 
 
 class AgentConversationListResponse(BaseModel):
@@ -105,6 +130,9 @@ class AgentImageRef(BaseModel):
     error: Optional[str] = None
     deleted: bool = False
     message_id: str
+    image_ref_id: Optional[str] = None
+    turn_id: Optional[str] = None
+    path_round_no: Optional[int] = None
 
 
 class AgentMessage(BaseModel):
@@ -118,6 +146,7 @@ class AgentMessage(BaseModel):
     status: AgentMessageStatusValue
     created_at: str
     updated_at: str
+    path_round_no: Optional[int] = None
 
 
 class AgentActiveTurn(BaseModel):
@@ -132,6 +161,7 @@ class AgentConversationDetail(BaseModel):
     image_refs: list[AgentImageRef]
     active_turn: Optional[AgentActiveTurn] = None
     has_more: bool = False
+    branches: list[AgentBranch] = Field(default_factory=list)
 
 
 class AgentTurnAccepted(BaseModel):

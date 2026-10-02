@@ -24,7 +24,7 @@ export function isMentionable(ref: AgentImageRef): boolean {
 
 function searchKeys(ref: AgentImageRef): string[] {
   const keys = [ref.ref_label];
-  if (ref.role === 'output') keys.push(`第${ref.round_no}轮图${ref.image_index}`);
+  if (ref.role === 'output') keys.push(`第${ref.path_round_no ?? ref.round_no}轮图${ref.image_index}`);
   return keys;
 }
 

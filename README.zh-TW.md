@@ -296,6 +296,12 @@ Overall Config 會將 Override 持久化至 SQLite。部分設定可熱更新；
 11. 用「匯出」把所選預設下載成帶版本、不含金鑰的 JSON 套件；用「分享連結」複製 `?preset=` 連結；用「匯入」先預覽檔案、剪貼簿 JSON 或分享連結，再確認套用。預設可透過拖曳手柄或上下箭頭排序，順序儲存在 SQLite。
 12. 視需要在「設定 → AI Assistant」中開啟 Agent 模式（選擇支援 function calling 的模型），然後在頁首切換到 **Agent**。描述需求，用 `@`（例如 `@round-1-image-1` 或 `@第1輪圖1`）引用先前的圖片，也可從 Gallery 加入圖片，按 Ctrl/Cmd+Enter 送出。執行中可按「停止」取消；產生的圖片會出現在 Gallery。
 
+### Agent 分支、Markdown
+
+助手回覆支援標題、清單、表格、程式碼與連結。原始 HTML 顯示為文字，外部 Markdown 圖片不自動載入，連結僅允許不含憑據的 HTTP(S) 位址。
+
+使用「編輯訊息 → 作為新分支傳送」或「重新產生」建立歷史回合的同級分支。「對話路徑」可切換並在重新整理後還原原路徑或新路徑；切換不會發起模型請求，也不會停止執行中的工作。編輯或重新產生前需先停止活動回合。模型歷史僅包含執行路徑的祖先；圖片 ID 與 `@round-N-image-M` 參照保持穩定，顯示輪次及 `@第N轮图M` 依目前路徑解讀。跨分支重用圖片時，請從 Gallery 明確加入附件。圖庫刪除會使所有路徑上的參照失效；刪除對話仍保留圖庫圖片。
+
 ## GPT Image 2.5
 
 生成表單和預設設定提供 `gpt-image-2.5-flare`（快速日常生成）與 `gpt-image-2.5-sunburst`（精細編輯）。預設模型仍為 `gpt-image-2`，保留已儲存預設和自訂模型；透過自訂模型欄位可輸入兩個模型的 `-2026-09-08` 日期快照名稱。
@@ -403,6 +409,7 @@ Overall Config 會將 Override 持久化至 SQLite。部分設定可熱更新；
 | `GET/POST` | `/api/agent/conversations` | 列出或建立 Agent 對話。 |
 | `GET/PATCH/DELETE` | `/api/agent/conversations/{conversation_id}` | 讀取（訊息、圖片引用、進行中的回合）、重新命名或刪除對話；刪除對話不會刪除其產生的 Gallery 圖片。 |
 | `POST` | `/api/agent/conversations/{conversation_id}/turns` | 送出訊息（`client_turn_id` 讓重試具冪等性）；以背景回合執行，回傳 `202`。 |
+| `PATCH` | `/api/agent/conversations/{conversation_id}/branch` | 透過 `selected_turn_id`（null 為新空路徑）及 `expected_revision` 選擇持久化路徑，過期分頁回傳 409；turn 請求支援 `action: continue/edit/regenerate`、`source_turn_id`、`branch_revision`。 |
 | `GET` | `/api/agent/turns/{turn_id}`, `/api/agent/turns/{turn_id}/events` | 讀取回合狀態，或訂閱可重播的 SSE 事件（`?after=` 或 `Last-Event-ID` 續傳）。 |
 | `POST` | `/api/agent/turns/{turn_id}/cancel` | 停止執行中的回合，並取消其排隊中的圖片工作。 |
 | `POST` | `/api/generate` | 建立生成工作。 |

@@ -126,13 +126,25 @@
     </div>
 
     <div class="app-surface flex min-w-0 flex-col overflow-hidden">
+      {#if $agentStore.branches.length}
+        <label class="flex items-center gap-3 border-b border-stone-200 px-3 py-2 text-xs dark:border-zinc-800">
+          <span>{$t.agent.branch}</span>
+          <select class="ui-field min-w-0 flex-1 px-2 py-1" aria-label={$t.agent.branch} value={$agentStore.selectedTurnId ?? ''} disabled={$agentStore.sending} onchange={(event) => void agentStore.selectBranch(event.currentTarget.value || null)}>
+            <option value="">{$t.agent.newBranch}</option>
+            {#each $agentStore.branches as branch (branch.id)}
+              <option value={branch.id}>{$t.agent.branchOption(branch.path_round_no, branch.preview, branch.round_no)}</option>
+            {/each}
+          </select>
+        </label>
+      {/if}
       <AgentThread
         messages={$agentStore.messages}
         imageRefs={$agentStore.imageRefs}
         loading={$agentStore.detailLoading}
-        busy={Boolean($agentStore.activeTurnId)}
+        busy={$agentStore.sending || Boolean($agentStore.activeTurnId)}
         hasMore={$agentStore.hasMore}
         error={$agentStore.detailError}
+        onFork={agentStore.fork}
         onLoadEarlier={() => void agentStore.loadEarlier()}
         onOpenImage={openImage}
         onRetry={() => void agentStore.open($agentStore.activeId)}

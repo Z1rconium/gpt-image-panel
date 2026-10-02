@@ -23,6 +23,7 @@ export type AgentImageTaskBlock = {
   item_id: string;
   ref_label: string;
   round_no: number;
+  path_round_no?: number;
   image_index: number;
   job_id: string | null;
   prompt: string;
@@ -52,6 +53,8 @@ export type AgentConversationSummary = {
   created_at: string;
   updated_at: string;
   active_turn_id: string | null;
+  selected_turn_id?: string | null;
+  branch_revision?: number;
 };
 
 export type AgentConversationListResponse = {
@@ -59,8 +62,11 @@ export type AgentConversationListResponse = {
 };
 
 export type AgentImageRef = {
+  image_ref_id?: string;
+  turn_id?: string;
   ref_label: string;
   round_no: number;
+  path_round_no?: number;
   image_index: number;
   role: 'input' | 'output';
   image_id: string | null;
@@ -80,6 +86,7 @@ export type AgentMessage = {
   turn_id: string;
   seq: number;
   round_no: number;
+  path_round_no?: number;
   role: 'user' | 'assistant';
   text: string;
   blocks: AgentBlock[];
@@ -92,6 +99,7 @@ export type AgentActiveTurn = {
   id: string;
   status: AgentTurnStatus;
   round_no: number;
+  path_round_no?: number;
 };
 
 export type AgentConversationDetail = {
@@ -100,6 +108,7 @@ export type AgentConversationDetail = {
   image_refs: AgentImageRef[];
   active_turn: AgentActiveTurn | null;
   has_more: boolean;
+  branches?: AgentBranch[];
 };
 
 export type AgentImageParams = {
@@ -110,6 +119,9 @@ export type AgentImageParams = {
 
 export type AgentTurnRequest = {
   client_turn_id: string;
+  action?: 'continue' | 'edit' | 'regenerate';
+  source_turn_id?: string;
+  branch_revision?: number;
   text: string;
   attachments: { kind: 'gallery'; image_id: string }[];
   image_params: AgentImageParams;
@@ -119,6 +131,7 @@ export type AgentTurnAccepted = {
   turn_id: string;
   conversation_id: string;
   round_no: number;
+  path_round_no?: number;
   status: AgentTurnStatus;
   user_message_id: string;
   assistant_message_id: string;
@@ -129,6 +142,7 @@ export type AgentTurnStatusResponse = {
   turn_id: string;
   conversation_id: string;
   round_no: number;
+  path_round_no?: number;
   status: AgentTurnStatus;
   rounds_used: number;
   error_message: string | null;
@@ -143,3 +157,5 @@ export type AgentStreamEvent =
   | { event: 'turn.cancelled'; data: Record<string, never> };
 
 export type AgentStreamEventName = AgentStreamEvent['event'];
+
+export type AgentBranch = { id: string; parent_turn_id: string | null; round_no: number; path_round_no: number; preview: string; status: AgentTurnStatus };

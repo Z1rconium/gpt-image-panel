@@ -952,6 +952,14 @@ const zh: Translation = {
     upstream_error: '上游错误'
   },
   agent: {
+
+    editMessage: '编辑消息',
+    sendBranch: '发送为新分支',
+    regenerate: '重新生成',
+    branch: '对话路径',
+    newBranch: '开始新路径',
+    branchOption: (round: number, text: string, sequence: number) => `到第 ${round} 轮 · #${sequence}：${text}`,
+
     modeLabel: '工作区模式',
     modeStudio: '创作台',
     modeAgent: 'Agent',

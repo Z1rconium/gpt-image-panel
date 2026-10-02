@@ -951,6 +951,14 @@ const en = {
     upstream_error: 'upstream error'
   },
   agent: {
+
+    editMessage: 'Edit message',
+    sendBranch: 'Send as new branch',
+    regenerate: 'Regenerate',
+    branch: 'Conversation path',
+    newBranch: 'Start a new path',
+    branchOption: (round: number, text: string, sequence: number) => `Through round ${round} · #${sequence}: ${text}`,
+
     modeLabel: 'Workspace mode',
     modeStudio: 'Studio',
     modeAgent: 'Agent',

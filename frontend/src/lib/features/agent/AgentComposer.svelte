@@ -87,8 +87,8 @@
 
   function optionLabel(ref: AgentImageRef) {
     return ref.role === 'output'
-      ? $t.agent.imageLabel(ref.round_no, ref.image_index)
-      : $t.agent.attachmentLabel(ref.round_no, ref.image_index);
+      ? $t.agent.imageLabel(ref.path_round_no ?? ref.round_no, ref.image_index)
+      : $t.agent.attachmentLabel(ref.path_round_no ?? ref.round_no, ref.image_index);
   }
 
   async function chooseOption(ref: AgentImageRef) {

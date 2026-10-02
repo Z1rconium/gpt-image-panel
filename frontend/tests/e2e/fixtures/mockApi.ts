@@ -124,6 +124,7 @@ type MockOptions = {
   /** How the mocked Agent answers a turn: a full reply, a failure, or a reply that never finishes. */
   agentScenario?: 'reply' | 'fail' | 'hold';
   agentConversations?: AgentConversationFixture[];
+  agentShareState?: boolean;
 };
 
 type AgentBlockFixture = Record<string, unknown> & { id: string; type: string };
@@ -147,12 +148,16 @@ type AgentTurnFixture = {
   status: 'running' | 'completed' | 'failed' | 'cancelled';
   events: AgentEventFixture[];
   attachments: string[];
+  parentTurnId?: string | null;
+  clientTurnId?: string;
 };
 type AgentConversationFixture = {
   id: string;
   title: string;
   messages: AgentMessageFixture[];
   turns: AgentTurnFixture[];
+  selectedTurnId?: string | null;
+  branchRevision?: number;
 };
 
 const baseGalleryImages: GalleryImageFixture[] = [
@@ -558,7 +563,14 @@ async function mockApi(page: Page, options: MockOptions = {}) {
       presets: mockedSettings.presets.map((preset) => ({ ...preset, supports_mask: false }))
     };
   }
-  const agentConversations: AgentConversationFixture[] = structuredClone(options.agentConversations ?? []);
+  const agentConversations: AgentConversationFixture[] = options.agentShareState ? options.agentConversations ?? [] : structuredClone(options.agentConversations ?? []);
+  for (const conversation of agentConversations) {
+    conversation.turns.forEach((turn, index) => {
+      if (turn.parentTurnId === undefined) turn.parentTurnId = conversation.turns[index - 1]?.id ?? null;
+    });
+    if (conversation.selectedTurnId === undefined) conversation.selectedTurnId = conversation.turns.at(-1)?.id ?? null;
+    conversation.branchRevision ??= 0;
+  }
   let agentIdSeq = 0;
   const agentScenario = options.agentScenario ?? 'reply';
 
@@ -632,21 +644,31 @@ async function mockApi(page: Page, options: MockOptions = {}) {
 
   function agentDetail(conversation: AgentConversationFixture) {
     const active = conversation.turns.find((turn) => turn.status === 'running');
-    const messages = conversation.messages.map((message) => {
+    const depths = new Map<string, number>();
+    for (const turn of conversation.turns) depths.set(turn.id, (depths.get(turn.parentTurnId ?? '') ?? 0) + 1);
+    const path: string[] = [];
+    let head = conversation.selectedTurnId;
+    while (head) {
+      path.unshift(head);
+      head = conversation.turns.find((turn) => turn.id === head)?.parentTurnId;
+    }
+    const messages = conversation.messages.filter((message) => path.includes(message.turn_id)).map((original) => {
+      const message = { ...original, path_round_no: path.indexOf(original.turn_id) + 1 };
       if (message.role !== 'assistant') return message;
       const turn = conversation.turns.find((candidate) => candidate.id === message.turn_id);
       if (!turn || turn.status === 'running') return { ...message, blocks: [], status: 'streaming' };
       return {
         ...message,
-        blocks: reduceAgentBlocks(turn.events),
+        blocks: reduceAgentBlocks(turn.events).map((block) => block.type === 'image_task' ? { ...block, path_round_no: message.path_round_no } : block),
         status: turn.status === 'completed' ? 'complete' : turn.status
       };
     });
-    const imageRefs = conversation.turns.flatMap((turn) => {
+    const imageRefs = conversation.turns.filter((turn) => path.includes(turn.id)).flatMap((turn) => {
       const blocks = turn.status === 'running' ? [] : reduceAgentBlocks(turn.events);
       const inputs = turn.attachments.map((imageId, index) => ({
         ref_label: `round-${turn.roundNo}-input-${index + 1}`,
         round_no: turn.roundNo,
+        path_round_no: path.indexOf(turn.id) + 1,
         image_index: index + 1,
         role: 'input',
         image_id: imageId,
@@ -665,6 +687,7 @@ async function mockApi(page: Page, options: MockOptions = {}) {
         .map((block) => ({
           ref_label: block.ref_label,
           round_no: block.round_no,
+          path_round_no: path.indexOf(turn.id) + 1,
           image_index: block.image_index,
           role: 'output',
           image_id: block.image_id,
@@ -684,6 +707,7 @@ async function mockApi(page: Page, options: MockOptions = {}) {
       conversation: agentSummary(conversation),
       messages,
       image_refs: imageRefs,
+      branches: conversation.turns.map((turn) => ({ id: turn.id, parent_turn_id: turn.parentTurnId ?? null, round_no: turn.roundNo, path_round_no: depths.get(turn.id), preview: conversation.messages.find((message) => message.turn_id === turn.id && message.role === 'user')?.text ?? '', status: turn.status })),
       active_turn: active ? { id: active.id, status: 'running', round_no: active.roundNo } : null,
       has_more: false
     };
@@ -698,7 +722,9 @@ async function mockApi(page: Page, options: MockOptions = {}) {
       turn_count: conversation.turns.length,
       created_at: agentNow(),
       updated_at: agentNow(),
-      active_turn_id: active?.id ?? null
+      active_turn_id: active?.id ?? null,
+      selected_turn_id: conversation.selectedTurnId ?? null,
+      branch_revision: conversation.branchRevision ?? 0
     };
   }
 
@@ -1963,9 +1989,22 @@ async function mockApi(page: Page, options: MockOptions = {}) {
     if (url.pathname === '/api/agent/conversations' && request.method() === 'POST') {
       const body = JSON.parse(request.postData() || '{}');
       agentIdSeq += 1;
-      const conversation: AgentConversationFixture = { id: `conv-${agentIdSeq}`, title: body.title || '', messages: [], turns: [] };
+      const conversation: AgentConversationFixture = { id: `conv-${agentIdSeq}`, title: body.title || '', messages: [], turns: [], selectedTurnId: null, branchRevision: 0 };
       agentConversations.unshift(conversation);
       await route.fulfill(json(agentSummary(conversation), 201));
+      return;
+    }
+    const agentBranchMatch = url.pathname.match(/^\/api\/agent\/conversations\/([^/]+)\/branch$/);
+    if (agentBranchMatch && request.method() === 'PATCH') {
+      const conversation = agentConversations.find((item) => item.id === agentBranchMatch[1]);
+      const body = JSON.parse(request.postData() || '{}');
+      if (!conversation || body.expected_revision !== conversation.branchRevision) {
+        await route.fulfill(json({ detail: 'The selected branch changed. Refresh before retrying.' }, 409));
+        return;
+      }
+      conversation.selectedTurnId = body.selected_turn_id;
+      conversation.branchRevision = (conversation.branchRevision ?? 0) + 1;
+      await route.fulfill(json(agentDetail(conversation)));
       return;
     }
     const agentConversationMatch = url.pathname.match(/^\/api\/agent\/conversations\/([^/]+)$/);
@@ -1996,17 +2035,32 @@ async function mockApi(page: Page, options: MockOptions = {}) {
         return;
       }
       const body = JSON.parse(request.postData() || '{}');
+      const replay = conversation.turns.find((turn) => turn.clientTurnId === body.client_turn_id);
+      if (replay) {
+        await route.fulfill(json({ turn_id: replay.id, conversation_id: conversation.id, round_no: replay.roundNo, status: replay.status, user_message_id: conversation.messages.find((message) => message.turn_id === replay.id && message.role === 'user')?.id, assistant_message_id: conversation.messages.find((message) => message.turn_id === replay.id && message.role === 'assistant')?.id, replayed: true }, 202));
+        return;
+      }
+      if (body.branch_revision !== conversation.branchRevision || conversation.turns.some((turn) => turn.status === 'running')) {
+        await route.fulfill(json({ detail: 'The selected branch changed or a turn is still running.' }, 409));
+        return;
+      }
+      const source = conversation.turns.find((turn) => turn.id === body.source_turn_id);
+      if (body.action === 'regenerate' && source) body.text = conversation.messages.find((message) => message.turn_id === source.id && message.role === 'user')?.text;
       const roundNo = conversation.turns.length + 1;
-      agentIdSeq += 1;
+      agentIdSeq = Math.max(agentIdSeq, ...agentConversations.flatMap((item) => item.turns.map((turn) => Number(turn.id.replace('turn-', '')) || 0))) + 1;
       const turn: AgentTurnFixture = {
         id: `turn-${agentIdSeq}`,
         conversationId: conversation.id,
         roundNo,
         status: 'running',
         events: agentScript(roundNo),
-        attachments: (body.attachments || []).map((item: { image_id: string }) => item.image_id)
+        attachments: (body.attachments || []).map((item: { image_id: string }) => item.image_id),
+        parentTurnId: body.action === 'edit' || body.action === 'regenerate' ? source?.parentTurnId ?? null : conversation.selectedTurnId ?? null,
+        clientTurnId: body.client_turn_id
       };
       conversation.turns.push(turn);
+      conversation.selectedTurnId = turn.id;
+      conversation.branchRevision = (conversation.branchRevision ?? 0) + 1;
       if (!conversation.title) conversation.title = String(body.text).slice(0, 40);
       const seq = conversation.messages.length;
       const userId = `msg-${agentIdSeq}-u`;
@@ -2046,6 +2100,12 @@ async function mockApi(page: Page, options: MockOptions = {}) {
       await route.fulfill({ status: 200, contentType: 'text/event-stream', body: agentSse(turn, lastEventId) });
       return;
     }
+    const agentTurnStatusMatch = url.pathname.match(/^\/api\/agent\/turns\/([^/]+)$/);
+    if (agentTurnStatusMatch && request.method() === 'GET') {
+      const turn = agentConversations.flatMap((item) => item.turns).find((item) => item.id === agentTurnStatusMatch[1]);
+      await route.fulfill(turn ? json({ turn_id: turn.id, conversation_id: turn.conversationId, round_no: turn.roundNo, status: turn.status, rounds_used: 1, error_message: null }) : json({ detail: 'Agent turn not found' }, 404));
+      return;
+    }
     const agentTurnCancelMatch = url.pathname.match(/^\/api\/agent\/turns\/([^/]+)\/cancel$/);
     if (agentTurnCancelMatch && request.method() === 'POST') {
       const turn = agentConversations.flatMap((item) => item.turns).find((item) => item.id === agentTurnCancelMatch[1]);
@@ -2054,6 +2114,7 @@ async function mockApi(page: Page, options: MockOptions = {}) {
         return;
       }
       turn.events.push({ event: 'turn.cancelled', data: {} });
+      turn.status = 'cancelled';
       await route.fulfill(
         json(
           { turn_id: turn.id, conversation_id: turn.conversationId, round_no: turn.roundNo, status: 'cancelled', rounds_used: 0, error_message: null },

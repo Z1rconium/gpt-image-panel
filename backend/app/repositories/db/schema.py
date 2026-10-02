@@ -1373,6 +1373,23 @@ def _migration_image_job_preview_context(conn: sqlite3.Connection):
             conn.execute(f"ALTER TABLE generate_jobs ADD COLUMN {column} TEXT")
 
 
+def _migration_agent_branches(conn: sqlite3.Connection):
+    turn_columns = {row[1] for row in conn.execute("PRAGMA table_info(agent_turns)")}
+    if "parent_turn_id" not in turn_columns:
+        conn.execute("ALTER TABLE agent_turns ADD COLUMN parent_turn_id TEXT REFERENCES agent_turns(id)")
+        parents: dict[str, str] = {}
+        for row in conn.execute("SELECT id, conversation_id FROM agent_turns ORDER BY conversation_id, round_no").fetchall():
+            conn.execute("UPDATE agent_turns SET parent_turn_id = ? WHERE id = ?", (parents.get(row[1]), row[0]))
+            parents[row[1]] = row[0]
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(agent_conversations)")}
+    if "selected_turn_id" not in columns:
+        conn.execute("ALTER TABLE agent_conversations ADD COLUMN selected_turn_id TEXT REFERENCES agent_turns(id) ON DELETE SET NULL")
+        conn.execute("UPDATE agent_conversations SET selected_turn_id = (SELECT id FROM agent_turns WHERE conversation_id = agent_conversations.id ORDER BY round_no DESC LIMIT 1)")
+    if "branch_revision" not in columns:
+        conn.execute("ALTER TABLE agent_conversations ADD COLUMN branch_revision INTEGER NOT NULL DEFAULT 0")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_agent_turns_parent ON agent_turns(conversation_id, parent_turn_id)")
+
+
 SCHEMA_MIGRATIONS = (
     (1, "baseline_legacy_schema", _migration_baseline_legacy_schema),
     (2, "gallery_filter_options", _migration_gallery_filter_options),
@@ -1410,4 +1427,5 @@ SCHEMA_MIGRATIONS = (
     (34, "image_job_unit_recovery", _migration_image_job_unit_recovery),
     (35, "image_job_unit_diagnostics", _migration_image_job_unit_diagnostics),
     (36, "image_job_preview_context", _migration_image_job_preview_context),
+    (37, "agent_branches", _migration_agent_branches),
 )

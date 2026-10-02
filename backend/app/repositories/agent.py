@@ -1,6 +1,7 @@
 """Agent conversations, turns, messages, image references and turn events."""
 
 import json
+import re
 import sqlite3
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -80,12 +81,15 @@ def _conversation_from_row(row: sqlite3.Row) -> dict[str, Any]:
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
         "active_turn_id": row["active_turn_id"] if "active_turn_id" in keys else None,
+        "selected_turn_id": row["selected_turn_id"],
+        "branch_revision": int(row["branch_revision"]),
     }
 
 
 _CONVERSATION_SELECT_SQL = """
     SELECT
         c.id, c.title, c.message_count, c.turn_count, c.created_at, c.updated_at,
+        c.selected_turn_id, c.branch_revision,
         t.id AS active_turn_id
     FROM agent_conversations AS c
     LEFT JOIN agent_turns AS t
@@ -116,6 +120,7 @@ def _turn_from_row(row: sqlite3.Row) -> dict[str, Any]:
         "created_at": row["created_at"],
         "started_at": row["started_at"],
         "finished_at": row["finished_at"],
+        "parent_turn_id": row["parent_turn_id"],
     }
 
 
@@ -242,6 +247,91 @@ def delete_conversation(conversation_id: str) -> bool:
 # ── Turns ──────────────────────────────────────────────────────
 
 
+def _path_ids(conn: sqlite3.Connection, conversation_id: str, head: str | None) -> list[str]:
+    rows = conn.execute("SELECT id, parent_turn_id FROM agent_turns WHERE conversation_id = ?", (conversation_id,)).fetchall()
+    parents = {row[0]: row[1] for row in rows}
+    path: list[str] = []
+    while head is not None:
+        if head not in parents or head in path:
+            raise AgentTurnConflictError("Invalid Agent branch")
+        path.append(head)
+        head = parents[head]
+    return list(reversed(path))
+
+
+def _branch_text(conn: sqlite3.Connection, conversation_id: str, path: list[str], text: str) -> str:
+    rows = conn.execute("SELECT turn_id, ref_label, image_index, role FROM agent_message_images WHERE conversation_id = ?", (conversation_id,)).fetchall()
+    allowed = {row["ref_label"] for row in rows if row["turn_id"] in path}
+    aliases = {(path.index(row["turn_id"]) + 1, row["image_index"]): row["ref_label"] for row in rows if row["turn_id"] in path and row["role"] == "output"}
+
+    def replace(match: re.Match[str]) -> str:
+        label = aliases.get((int(match[1]), int(match[2])))
+        if label is None:
+            raise AgentAttachmentError("The mentioned image is not on this branch; attach it explicitly from Gallery")
+        return f"@{label}"
+
+    normalized = re.sub(r"@第?(\d+)轮图(\d+)", replace, text)
+    for label in re.findall(r"@(round-\d+-(?:image|input)-\d+)", normalized):
+        if label not in allowed:
+            raise AgentAttachmentError("The mentioned image is not on this branch; attach it explicitly from Gallery")
+    return normalized
+
+
+def select_branch(conversation_id: str, selected_turn_id: str | None, expected_revision: int) -> bool:
+    _ensure_database()
+    with _connect() as conn:
+        with _transaction(conn):
+            row = conn.execute("SELECT branch_revision FROM agent_conversations WHERE id = ?", (conversation_id,)).fetchone()
+            if row is None:
+                return False
+            if int(row[0]) != expected_revision:
+                raise AgentTurnConflictError("The selected branch changed in another tab. Reload before switching.")
+            _path_ids(conn, conversation_id, selected_turn_id)
+            conn.execute("UPDATE agent_conversations SET selected_turn_id = ?, branch_revision = branch_revision + 1, updated_at = ? WHERE id = ?", (selected_turn_id, utc_now(), conversation_id))
+    return True
+
+
+def path_turn_ids(conversation_id: str, turn_id: str | None) -> list[str]:
+    _ensure_database()
+    with _connect() as conn:
+        return _path_ids(conn, conversation_id, turn_id)
+
+
+def branch_snapshot(conversation_id: str, *, before_seq: int | None = None, limit: int = 200) -> dict[str, Any] | None:
+    _ensure_database()
+    with _connect() as conn:
+        with conn:
+            # A deferred read transaction keeps the path/page consistent
+            # without taking the write reservation used for branch mutations.
+            conn.execute("BEGIN")
+            conversation = conn.execute(f"{_CONVERSATION_SELECT_SQL} WHERE c.id = ?", (conversation_id,)).fetchone()
+            if conversation is None:
+                return None
+            path = _path_ids(conn, conversation_id, conversation["selected_turn_id"])
+            turns = conn.execute("SELECT t.*, m.text FROM agent_turns t JOIN agent_messages m ON m.id = t.user_message_id WHERE t.conversation_id = ? ORDER BY t.round_no", (conversation_id,)).fetchall()
+            depths: dict[str, int] = {}
+            branches = []
+            for turn in turns:
+                depths[turn["id"]] = depths.get(turn["parent_turn_id"], 0) + 1
+                branches.append({"id": turn["id"], "parent_turn_id": turn["parent_turn_id"], "round_no": turn["round_no"], "path_round_no": depths[turn["id"]], "preview": turn["text"][:120], "status": turn["status"]})
+            messages = []
+            images = []
+            if path:
+                placeholders = ",".join("?" for _ in path)
+                where = f"conversation_id = ? AND turn_id IN ({placeholders})"
+                params: list[Any] = [conversation_id, *path]
+                if before_seq is not None:
+                    where += " AND seq < ?"
+                    params.append(before_seq)
+                raw = conn.execute(f"SELECT * FROM agent_messages WHERE {where} ORDER BY seq DESC LIMIT ?", [*params, max(1, limit)]).fetchall()
+                messages = [{**_message_from_row(row), "path_round_no": depths[row["turn_id"]]} for row in reversed(raw)]
+                message_ids = [row["id"] for row in raw]
+                if message_ids:
+                    marks = ",".join("?" for _ in message_ids)
+                    images = [{**_image_from_row(row), "path_round_no": depths[row["turn_id"]]} for row in conn.execute(f"{_IMAGE_SELECT_SQL} WHERE i.message_id IN ({marks}) ORDER BY i.round_no, i.image_index", message_ids)]
+            return {"conversation": _conversation_from_row(conversation), "messages": messages, "images": images, "branches": branches}
+
+
 def create_turn(
     conversation_id: str,
     *,
@@ -251,6 +341,9 @@ def create_turn(
     model: str,
     image_params: dict[str, Any],
     lease_expires_at: str,
+    action: str = "continue",
+    source_turn_id: str | None = None,
+    branch_revision: int | None = None,
 ) -> tuple[dict[str, Any], bool] | None:
     """Insert a turn with its user and empty assistant messages atomically.
 
@@ -263,7 +356,7 @@ def create_turn(
     with _connect() as conn:
         with _transaction(conn):
             conversation = conn.execute(
-                "SELECT id, title, title_is_auto, turn_count FROM agent_conversations WHERE id = ?",
+                "SELECT * FROM agent_conversations WHERE id = ?",
                 (conversation_id,),
             ).fetchone()
             if conversation is None:
@@ -274,6 +367,25 @@ def create_turn(
             ).fetchone()
             if existing is not None:
                 return _turn_from_row(existing), False
+            if branch_revision is not None and branch_revision != conversation["branch_revision"]:
+                raise AgentTurnConflictError("The selected branch changed in another tab. Reload before continuing.")
+            parent_id = conversation["selected_turn_id"]
+            if action != "continue":
+                source = conn.execute("SELECT * FROM agent_turns WHERE id = ? AND conversation_id = ?", (source_turn_id, conversation_id)).fetchone()
+                selected_path = _path_ids(conn, conversation_id, parent_id)
+                if source is None or source["id"] not in selected_path:
+                    raise AgentTurnConflictError("The source turn is not on the selected branch")
+                parent_id = source["parent_turn_id"]
+                if action == "regenerate":
+                    text = conn.execute("SELECT text FROM agent_messages WHERE id = ?", (source["user_message_id"],)).fetchone()[0]
+                    attachment_image_ids = [row[0] for row in conn.execute("SELECT image_id FROM agent_message_images WHERE turn_id = ? AND role = 'input'", (source["id"],))]
+                    if any(value is None for value in attachment_image_ids):
+                        raise AgentAttachmentError("An original attachment was deleted; edit the message to choose new attachments")
+                    image_params = json.loads(source["image_params_json"] or "{}")
+            elif source_turn_id is not None:
+                raise AgentTurnConflictError("source_turn_id requires edit or regenerate")
+            path_ids = _path_ids(conn, conversation_id, parent_id)
+            text = _branch_text(conn, conversation_id, path_ids, text)
             active = conn.execute(
                 "SELECT 1 FROM agent_turns WHERE conversation_id = ? AND status IN ('queued', 'running') LIMIT 1",
                 (conversation_id,),
@@ -319,9 +431,9 @@ def create_turn(
                 INSERT INTO agent_turns (
                     id, conversation_id, round_no, client_turn_id, status, model,
                     image_params_json, lease_expires_at, user_message_id,
-                    assistant_message_id, created_at
+                    assistant_message_id, created_at, parent_turn_id
                 )
-                VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     turn_id,
@@ -334,6 +446,7 @@ def create_turn(
                     user_message_id,
                     assistant_message_id,
                     now,
+                    parent_id,
                 ),
             )
             conn.execute(
@@ -384,10 +497,10 @@ def create_turn(
                 """
                 UPDATE agent_conversations
                 SET title = ?, message_count = message_count + 2, turn_count = turn_count + 1,
-                    updated_at = ?
+                    updated_at = ?, selected_turn_id = ?, branch_revision = branch_revision + 1
                 WHERE id = ?
                 """,
-                (title, now, conversation_id),
+                (title, now, turn_id, conversation_id),
             )
             row = conn.execute("SELECT * FROM agent_turns WHERE id = ?", (turn_id,)).fetchone()
     return _turn_from_row(row), True
@@ -578,11 +691,17 @@ def list_messages(
     *,
     before_seq: int | None = None,
     limit: int = 200,
+    turn_ids: Sequence[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Return up to ``limit`` messages older than ``before_seq``, in ascending order."""
     _ensure_database()
     params: list[Any] = [conversation_id]
     where = "conversation_id = ?"
+    if turn_ids is not None:
+        if not turn_ids:
+            return []
+        where += f" AND turn_id IN ({','.join('?' for _ in turn_ids)})"
+        params.extend(turn_ids)
     if before_seq is not None:
         where += " AND seq < ?"
         params.append(int(before_seq))
@@ -620,10 +739,16 @@ def list_conversation_images(
     conversation_id: str,
     *,
     message_ids: Sequence[str] | None = None,
+    turn_ids: Sequence[str] | None = None,
 ) -> list[dict[str, Any]]:
     _ensure_database()
     params: list[Any] = [conversation_id]
     where = "i.conversation_id = ?"
+    if turn_ids is not None:
+        if not turn_ids:
+            return []
+        where += f" AND i.turn_id IN ({','.join('?' for _ in turn_ids)})"
+        params.extend(turn_ids)
     if message_ids is not None:
         if not message_ids:
             return []

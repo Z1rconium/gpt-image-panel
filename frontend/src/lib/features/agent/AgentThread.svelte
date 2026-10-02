@@ -13,7 +13,8 @@
     error = null,
     onLoadEarlier,
     onOpenImage,
-    onRetry
+    onRetry,
+    onFork
   }: {
     messages: AgentMessageModel[];
     imageRefs: AgentImageRef[];
@@ -24,6 +25,7 @@
     onLoadEarlier: () => void;
     onOpenImage: (imageId: string) => void;
     onRetry: () => void;
+    onFork: (message: AgentMessageModel, text?: string) => Promise<boolean>;
   } = $props();
 
   const NEAR_BOTTOM_PX = 96;
@@ -119,7 +121,7 @@
   {:else}
     <ol class="space-y-4">
       {#each messages as message (message.id)}
-        <AgentMessage {message} attachments={inputsByMessage.get(message.id) ?? []} {onOpenImage} />
+        <AgentMessage {message} {busy} {onFork} attachments={inputsByMessage.get(message.id) ?? []} {onOpenImage} />
       {/each}
     </ol>
   {/if}

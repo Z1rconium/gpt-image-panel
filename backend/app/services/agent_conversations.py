@@ -12,6 +12,7 @@ from ..runtime.blocking import run_db_operation
 from ..runtime.state import state, utc_lease_expires_at
 from ..schemas.agent import (
     AgentActiveTurn,
+    AgentBranchSelectRequest,
     AgentConversationCreateRequest,
     AgentConversationDetail,
     AgentConversationListResponse,
@@ -130,6 +131,12 @@ async def _start_reserved_turn(conversation_id: str, req: AgentTurnRequest) -> A
 
 
 async def _create_reserved_turn(conversation_id: str, req: AgentTurnRequest) -> AgentTurnAccepted:
+    replay = await run_db_operation(
+        agent_repo.get_turn_by_client_id, conversation_id, req.client_turn_id,
+        metric_name="agent_replay_turn",
+    )
+    if replay is not None:
+        return _accepted(replay, created=False)
     agent = await assistant_runtime.resolve_agent_runtime_async()
     text = req.text.strip()
     if len(text) > config.AGENT_MAX_USER_TEXT_CHARS:
@@ -152,6 +159,9 @@ async def _create_reserved_turn(conversation_id: str, req: AgentTurnRequest) -> 
             model=agent.assistant.model,
             image_params=req.image_params.model_dump(),
             lease_expires_at=utc_lease_expires_at(config.AGENT_TURN_LEASE_SECONDS),
+            action=req.action,
+            source_turn_id=req.source_turn_id,
+            branch_revision=req.branch_revision,
             metric_name="agent_create_turn",
             critical=True,
         )
@@ -282,6 +292,9 @@ def _image_ref(row: dict[str, Any]) -> AgentImageRef:
         error=row["error"],
         deleted=row["status"] == "succeeded" and not row["image_id"],
         message_id=row["message_id"],
+        image_ref_id=row["id"],
+        turn_id=row["turn_id"],
+        path_round_no=row.get("path_round_no"),
     )
 
 
@@ -299,6 +312,7 @@ def _overlay_blocks(blocks: list[dict[str, Any]], images: dict[str, dict[str, An
                 "error": row["error"],
                 "job_id": row["job_id"] or block.get("job_id"),
                 "deleted": row["status"] == "succeeded" and not row["image_id"],
+                "path_round_no": row.get("path_round_no"),
             }
         overlaid.append(block)
     return overlaid
@@ -321,24 +335,24 @@ async def get_conversation_detail(
     conversation = await run_db_operation(
         agent_repo.get_conversation, conversation_id, metric_name="agent_get_conversation"
     ) or conversation
-    messages = await run_db_operation(
-        agent_repo.list_messages,
+    snapshot = await run_db_operation(
+        agent_repo.branch_snapshot,
         conversation_id,
         before_seq=before_seq,
         limit=limit + 1,
-        metric_name="agent_list_messages",
+        metric_name="agent_branch_snapshot",
     )
+    if snapshot is None:
+        raise NotFoundError("Agent conversation not found")
+    conversation = snapshot["conversation"]
+    messages = snapshot["messages"]
     has_more = len(messages) > limit
     if has_more:
         messages = messages[1:]
     # Image refs are only needed for the messages in this page, so the response
     # stays bounded by the message limit instead of the whole conversation.
-    image_rows = await run_db_operation(
-        agent_repo.list_conversation_images,
-        conversation_id,
-        message_ids=[message["id"] for message in messages],
-        metric_name="agent_list_images",
-    )
+    message_ids = {message["id"] for message in messages}
+    image_rows = [row for row in snapshot["images"] if row["message_id"] in message_ids]
     by_label = {row["ref_label"]: row for row in image_rows}
     active_turn = None
     if conversation.get("active_turn_id"):
@@ -361,10 +375,22 @@ async def get_conversation_detail(
                 status=message["status"],
                 created_at=message["created_at"],
                 updated_at=message["updated_at"],
+                path_round_no=message.get("path_round_no"),
             )
             for message in messages
         ],
         image_refs=[_image_ref(row) for row in image_rows],
         active_turn=active_turn,
         has_more=has_more,
+        branches=snapshot["branches"],
     )
+
+
+async def select_branch(conversation_id: str, req: AgentBranchSelectRequest) -> AgentConversationDetail:
+    try:
+        found = await run_db_operation(agent_repo.select_branch, conversation_id, req.selected_turn_id, req.expected_revision, metric_name="agent_select_branch", critical=True)
+    except agent_repo.AgentTurnConflictError as error:
+        raise DomainError(str(error), status_code=409) from error
+    if not found:
+        raise NotFoundError("Agent conversation not found")
+    return await get_conversation_detail(conversation_id)
