@@ -5,6 +5,7 @@ import { t } from '$lib/i18n';
 import { filenameFromImageUrl, jobFailureMessage } from '$lib/utils/format';
 import { isPageVisible } from '$lib/utils/network';
 import { isActiveJobStatus } from '$lib/utils/jobs';
+import { observeJobStatusChange } from '$lib/utils/completionNotifications';
 import type { GeneratePreviewEvent, GenerateJobResponse, GenerateJobStatus } from '$lib/api/types/jobs';
 import type { PreviewState } from '$lib/stores/preview';
 
@@ -147,6 +148,9 @@ function createJobsStore() {
   });
 
   function applyActiveJobs(jobs: GenerateJobStatus[]) {
+    // Observe every status sighting for completion notifications; the first
+    // snapshot only primes the tracking (see observeJobStatusChange).
+    jobs.forEach((job) => observeJobStatusChange(job));
     const trackedJob = trackedJobId ? jobs.find((job) => job.job_id === trackedJobId) : null;
     if (trackedJob) applyTrackedJob(trackedJob);
     const activeIds = new Set(jobs.map((job) => job.job_id));
@@ -309,6 +313,9 @@ function createJobsStore() {
         if (event === 'jobs' && Array.isArray(data)) {
           applyActiveJobs(data);
         } else if (event === 'job' && !Array.isArray(data)) {
+          // Global feed events cover jobs this tab never tracked; observe
+          // them before the tracked-job guard drops the rest.
+          observeJobStatusChange(data);
           void applyTrackedJob(data);
         }
       },
@@ -401,6 +408,7 @@ function createJobsStore() {
 
   async function applyTrackedJob(job: GenerateJobStatus) {
     if (trackedJobId !== job.job_id || !trackedJobUpdate) return;
+    observeJobStatusChange(job);
     const generation = trackedJobGeneration;
     const updatePreviewFromJob = trackedJobUpdate;
     await updatePreviewFromJob(job);

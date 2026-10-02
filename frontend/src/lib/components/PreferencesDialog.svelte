@@ -2,6 +2,7 @@
   import Overlay from '$lib/components/Overlay.svelte';
   import { t } from '$lib/i18n';
   import { preferencesStore } from '$lib/stores/preferences';
+  import { notificationPermission, requestNotificationPermission } from '$lib/utils/completionNotifications';
 
   interface Props {
     open?: boolean;
@@ -9,6 +10,24 @@
   }
 
   let { open = false, onClose = () => {} }: Props = $props();
+
+  let notificationBlocked = $state(false);
+
+  async function toggleCompletionNotifications(checked: boolean) {
+    notificationBlocked = false;
+    if (!checked) {
+      preferencesStore.patch({ taskCompletionNotifications: false });
+      return;
+    }
+    // Only ask for permission when the user explicitly turns the feature on.
+    const permission = await requestNotificationPermission();
+    if (permission === 'granted') {
+      preferencesStore.patch({ taskCompletionNotifications: true });
+    } else {
+      preferencesStore.patch({ taskCompletionNotifications: false });
+      notificationBlocked = true;
+    }
+  }
 </script>
 
 <Overlay {open} {onClose} closeLabel={$t.common.close} labelledBy="preferences-dialog-title" z={80} maxWidthClass="max-w-md" panelClass="p-5" backdropBlur>
@@ -43,6 +62,24 @@
       <span class="min-w-0">
         <span class="block text-sm text-stone-800 dark:text-zinc-200">{$t.preferences.retryUsesJobPreset}</span>
         <span class="mt-1 block text-xs text-stone-500 dark:text-zinc-500">{$t.preferences.retryUsesJobPresetHint}</span>
+      </span>
+    </label>
+    <label class="flex items-start gap-2.5 rounded-lg border border-stone-300 bg-stone-50 px-3 py-2.5 dark:border-zinc-700 dark:bg-zinc-950">
+      <input
+        type="checkbox"
+        class="control-focus mt-0.5 accent-emerald-500"
+        checked={$preferencesStore.taskCompletionNotifications}
+        onchange={(event) => void toggleCompletionNotifications(event.currentTarget.checked)}
+      />
+      <span class="min-w-0">
+        <span class="block text-sm text-stone-800 dark:text-zinc-200">{$t.preferences.taskCompletionNotifications}</span>
+        <span class="mt-1 block text-xs text-stone-500 dark:text-zinc-500">
+          {notificationBlocked
+            ? $t.preferences.taskCompletionNotificationsBlocked
+            : notificationPermission() === 'unsupported'
+              ? $t.preferences.taskCompletionNotificationsUnsupported
+              : $t.preferences.taskCompletionNotificationsHint}
+        </span>
       </span>
     </label>
   </div>

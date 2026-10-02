@@ -9,6 +9,7 @@ import { sanitizeNamedSizePresets, type NamedSizePreset } from '$lib/utils/sizeP
 export type WorkspacePreferences = {
   clearPromptAfterSubmit: boolean;
   retryUsesJobPreset: boolean;
+  taskCompletionNotifications: boolean;
   sizePresets: NamedSizePreset[];
 };
 
@@ -18,6 +19,7 @@ const PREFERENCES_VERSION = 1;
 export const defaultPreferences: WorkspacePreferences = {
   clearPromptAfterSubmit: false,
   retryUsesJobPreset: false,
+  taskCompletionNotifications: false,
   sizePresets: []
 };
 
@@ -31,6 +33,7 @@ function readPreferences(): WorkspacePreferences {
     return {
       clearPromptAfterSubmit: parsed.clearPromptAfterSubmit === true,
       retryUsesJobPreset: parsed.retryUsesJobPreset === true,
+      taskCompletionNotifications: parsed.taskCompletionNotifications === true,
       sizePresets: sanitizeNamedSizePresets(parsed.sizePresets)
     };
   } catch {
