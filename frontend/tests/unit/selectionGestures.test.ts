@@ -45,7 +45,7 @@ describe('swipe select gesture', () => {
     expect(swipeSelectMove(state, 10, 2)).toBe('horizontal');
     expect(swipeSelectMove(state, 30, 5)).toBe('horizontal');
     expect(swipeSelectMove(state, 50, 5)).toBe('committed');
-    expect(swipeSelectMove(state, 80, 5)).toBe('committed');
+    expect(swipeSelectMove(state, 80, 5)).toBe('idle');
   });
 
   it('never commits when the drag turns mostly vertical', () => {
@@ -53,7 +53,7 @@ describe('swipe select gesture', () => {
     expect(swipeSelectMove(state, 60, 40)).toBe('horizontal');
     expect(state.committed).toBe(false);
     expect(swipeSelectMove(state, 60, 120)).toBe('vertical');
-    expect(swipeSelectMove(state, 120, 40)).toBe('committed');
+    expect(swipeSelectMove(state, 120, 40)).toBe('vertical');
   });
 
   it('requires horizontal dominance beyond the axis ratio to commit', () => {

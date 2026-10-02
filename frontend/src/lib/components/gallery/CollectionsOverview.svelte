@@ -21,12 +21,12 @@
   const busy = $derived(Boolean($galleryActivityStore.operationStatus));
 
   function coverSrc(collection: GalleryCollection) {
-    if (!collection.cover_filename || failedCoverIds.includes(collection.id)) return '';
+    if (!collection.cover_filename || failedCoverIds.includes(collection.cover_filename)) return '';
     return thumbnailUrl(collection.cover_filename);
   }
 
   function handleCoverError(collection: GalleryCollection) {
-    if (!failedCoverIds.includes(collection.id)) failedCoverIds = [...failedCoverIds, collection.id];
+    if (collection.cover_filename && !failedCoverIds.includes(collection.cover_filename)) failedCoverIds = [...failedCoverIds, collection.cover_filename].slice(-100);
   }
 
   async function downloadZip(collection: GalleryCollection) {

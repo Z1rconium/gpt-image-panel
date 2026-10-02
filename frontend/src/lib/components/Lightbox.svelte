@@ -131,7 +131,17 @@
 
   // A new original always opens fit-to-window.
   $effect(() => {
-    if (fullImageSrc) {
+    if (fullImageSrc || !open) {
+      cancelLongPress();
+      activePointers.clear();
+      resetSwipeTracking();
+      pinchActive = false;
+      pinchBaseDistance = 0;
+      panPointerId = null;
+      lastTap = null;
+      tapSuppressed = false;
+      dragging = false;
+      dragOffsetX = 0;
       zoomActual = false;
       pinchScale = 1;
       pinchOffsetX = 0;
@@ -141,6 +151,8 @@
   });
 
   function setZoomActual(next: boolean) {
+    lastTap = null;
+    tapSuppressed = false;
     zoomActual = next;
     pinchScale = 1;
     pinchOffsetX = 0;
@@ -260,11 +272,17 @@
   }
 
   function handleSwipePointerDown(event: PointerEvent) {
+    const target = event.target;
+    if (actionMenuOpen || navigating || (target instanceof Element && target.closest(SWIPE_IGNORE_SELECTOR))) return;
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
     activePointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
     if (activePointers.size === 2) {
       // Second finger: pinch takes over, canceling swipe and long-press.
       cancelLongPress();
+      tapSuppressed = true;
+      lastTap = null;
       swipePointerId = null;
+      panPointerId = null;
       dragOffsetX = 0;
       if (zoomActual) setZoomActual(false);
       const mid = pinchMidpoint();
@@ -280,6 +298,7 @@
       return;
     }
     if (activePointers.size > 2) return;
+    if (event.pointerType === 'touch') startLongPress(event.clientX, event.clientY);
     if (pinchScale > 1) {
       // Zoomed in: any pointer pans the transform instead of swiping.
       panPointerId = event.pointerId;
@@ -305,7 +324,8 @@
       (event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId);
       return;
     }
-    if (!canStartSwipe(event)) {
+    if (!canStartSwipe(event) && event.pointerType !== 'touch') {
+      cancelLongPress();
       activePointers.delete(event.pointerId);
       return;
     }
@@ -316,7 +336,6 @@
     dragging = true;
     dragOffsetX = 0;
     (event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId);
-    if (event.pointerType === 'touch') startLongPress(event.clientX, event.clientY);
   }
 
   function distanceBetweenFirstTwo() {
@@ -384,6 +403,7 @@
   }
 
   function handleSwipePointerUp(event: PointerEvent) {
+    releasePointer(event);
     activePointers.delete(event.pointerId);
     if (pinchActive) {
       if (activePointers.size >= 2) return;
@@ -406,8 +426,12 @@
     }
     cancelLongPress();
     if (panPointerId === event.pointerId) {
+      if (event.pointerType === 'touch' && !tapSuppressed && Math.hypot(event.clientX - panStartX, event.clientY - panStartY) <= LONG_PRESS_SLOP_PX) {
+        handleTouchTap(event);
+      }
       panPointerId = null;
       dragging = false;
+      tapSuppressed = false;
       releasePointer(event);
       return;
     }
@@ -422,24 +446,24 @@
 
     if (horizontalSwipe && dx < 0 && canNavigateNext) onNavigateNext();
     else if (horizontalSwipe && dx > 0 && canNavigatePrevious) onNavigatePrevious();
-    else if (event.pointerType === 'touch' && !horizontalSwipe && !tapSuppressed) {
-      const now = Date.now();
-      if (
-        lastTap &&
-        now - lastTap.time <= DOUBLE_TAP_WINDOW_MS &&
-        Math.hypot(event.clientX - lastTap.x, event.clientY - lastTap.y) <= DOUBLE_TAP_SLOP_PX
-      ) {
-        toggleDoubleTapZoom(event.clientX, event.clientY);
-        lastTap = null;
-      } else {
-        lastTap = { x: event.clientX, y: event.clientY, time: now };
-      }
+    else if (event.pointerType === 'touch' && absX <= LONG_PRESS_SLOP_PX && absY <= LONG_PRESS_SLOP_PX && !tapSuppressed) {
+      handleTouchTap(event);
     }
     tapSuppressed = false;
 
     releasePointer(event);
     resetSwipeTracking();
     snapBack();
+  }
+
+  function handleTouchTap(event: PointerEvent) {
+    const now = Date.now();
+    if (lastTap && now - lastTap.time <= DOUBLE_TAP_WINDOW_MS && Math.hypot(event.clientX - lastTap.x, event.clientY - lastTap.y) <= DOUBLE_TAP_SLOP_PX) {
+      toggleDoubleTapZoom(event.clientX, event.clientY);
+      lastTap = null;
+    } else {
+      lastTap = { x: event.clientX, y: event.clientY, time: now };
+    }
   }
 
   function handleSwipePointerCancel(event: PointerEvent) {
@@ -479,7 +503,7 @@
 
 {#if open && image}
   <div class="mobile-lightbox-root fixed inset-0 z-[70] flex items-center justify-center bg-black/75 p-4" in:overlayIn out:overlayOut>
-    <button class="absolute inset-0" type="button" tabindex="-1" aria-label={$t.lightbox.closeLabel} onclick={onClose}></button>
+    <button class="absolute inset-0" type="button" tabindex="-1" aria-label={$t.lightbox.closeLabel} onclick={handleDialogClose}></button>
     <div
       class="lightbox-shell relative" in:dialogIn out:dialogOut
       aria-labelledby="lightbox-title"
@@ -490,12 +514,15 @@
         class="lightbox-media"
         role="group"
         aria-label={$t.lightbox.title}
-        style:touch-action={pinchScale > 1 ? 'none' : null}
+        style:touch-action={zoomActual ? 'pan-x pan-y' : 'none'}
         onpointerdown={handleSwipePointerDown}
         onpointermove={handleSwipePointerMove}
         onpointerup={handleSwipePointerUp}
         onpointercancel={handleSwipePointerCancel}
-        ondblclick={(event) => toggleDoubleTapZoom(event.clientX, event.clientY)}
+        ondblclick={(event) => {
+          if (!(event.target instanceof Element && event.target.closest(SWIPE_IGNORE_SELECTOR))) toggleDoubleTapZoom(event.clientX, event.clientY);
+        }}
+        oncontextmenu={(event) => { if (actionMenuOpen) event.preventDefault(); }}
       >
         {#if fullImageLoaded}
           <div class="lightbox-zoom-controls">
@@ -644,7 +671,7 @@
             <h2 id="lightbox-title" class="text-sm font-semibold text-stone-950 dark:text-zinc-100">{$t.lightbox.title}</h2>
             <p class="mt-1 truncate text-xs text-stone-500 dark:text-zinc-500">{image.filename}</p>
           </div>
-          <button type="button" class="mobile-touch-target control-focus rounded-lg p-1.5 text-stone-500 hover:bg-stone-100 hover:text-stone-950 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100" aria-label={$t.lightbox.closeLabel} onclick={onClose}>x</button>
+          <button type="button" class="mobile-touch-target control-focus rounded-lg p-1.5 text-stone-500 hover:bg-stone-100 hover:text-stone-950 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100" aria-label={$t.lightbox.closeLabel} onclick={handleDialogClose}>x</button>
         </div>
         <div class="min-h-0 flex-1 space-y-4 overflow-y-auto p-5">
           <div>

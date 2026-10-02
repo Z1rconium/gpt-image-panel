@@ -112,6 +112,7 @@
   function popFavorite(image: GalleryEntry) {
     if (image.favorite) return;
     clearTimeout(favoritePopTimer);
+    clearTimeout(suppressClickTimer);
     poppedFavoriteId = '';
     requestAnimationFrame(() => {
       poppedFavoriteId = image.id;
@@ -243,12 +244,14 @@
   let bandAdditive = false;
   let bandRectState = $state<BandRect | null>(null);
   let suppressNextClick = false;
+  let suppressClickTimer: ReturnType<typeof setTimeout> | undefined;
   let swipeState: SwipeSelectState | null = null;
 
   function handleBandMove(event: PointerEvent) {
     if (!bandStart || !gridElement) return;
     const current = { x: event.clientX, y: event.clientY };
     if (!bandPastThreshold(bandStart, current)) return;
+    event.preventDefault();
     const containerRect = gridElement.getBoundingClientRect();
     const rect = bandRect(
       { x: bandStart.x - containerRect.left, y: bandStart.y - containerRect.top },
@@ -269,7 +272,8 @@
     if (!rect || !bandPastThreshold(start, current)) return;
     // The pointerup lands as a click on whichever card is under it; swallow
     // that click so ending a band never opens the preview underneath.
-    suppressNextClick = true;
+    suppressGestureClick();
+    if (!gesturesEnabled) return;
     const containerRect = gridElement.getBoundingClientRect();
     const band = {
       left: rect.left,
@@ -290,15 +294,22 @@
           }
         };
       })
-      .filter((card) => card.id);
+      .filter((card) => card.id && card.rect.top + containerRect.top < window.innerHeight && card.rect.top + containerRect.top + card.rect.height > 0);
     galleryStore.applyBandSelection(idsForBand(band, cards), bandAdditive);
   }
 
   function handleBandCancel() {
     window.removeEventListener('pointermove', handleBandMove);
     window.removeEventListener('pointercancel', handleBandCancel);
+    window.removeEventListener('pointerup', handleBandPointerUp);
     bandStart = null;
     bandRectState = null;
+  }
+
+  function suppressGestureClick() {
+    suppressNextClick = true;
+    clearTimeout(suppressClickTimer);
+    suppressClickTimer = setTimeout(() => { suppressNextClick = false; }, 500);
   }
 
   function handleGridPointerDown(event: PointerEvent) {
@@ -324,17 +335,18 @@
 
   function handleCardSwipeDown(event: PointerEvent, image: GalleryEntry) {
     if (!gesturesEnabled) return;
-    if (event.pointerType !== 'touch') return;
+    if (event.pointerType !== 'touch' || !event.isPrimary || event.clientX < 24 || event.clientX > window.innerWidth - 24) return;
     swipeState = swipeSelectBegin(event.pointerId, event.clientX, event.clientY);
     void image;
   }
 
   function handleCardSwipeMove(event: PointerEvent, image: GalleryEntry) {
     if (!swipeState || event.pointerId !== swipeState.pointerId) return;
+    if (!gesturesEnabled) { swipeState = null; return; }
     if (swipeSelectMove(swipeState, event.clientX, event.clientY) === 'committed') {
       // Committing the swipe also lands as a click on the card; suppress it so
       // selecting never opens the lightbox.
-      suppressNextClick = true;
+      suppressGestureClick();
       galleryStore.toggleSelection(image);
     }
   }
@@ -400,7 +412,6 @@
       </p>
     </div>
     <div class="flex flex-wrap gap-2">
-      {#if collections.length}
         <button
           type="button"
           class={`control-focus rounded-lg border px-3 py-2 text-xs ${collectionsOverviewOpen ? 'border-emerald-500/60 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200' : 'border-stone-300 text-stone-700 hover:bg-stone-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800'}`}
@@ -409,7 +420,6 @@
         >
           {collectionsOverviewOpen ? $t.collections.hideOverview : $t.collections.showOverview}
         </button>
-      {/if}
       <button type="button" class="control-focus rounded-lg border border-stone-300 px-3 py-2 text-xs text-stone-700 hover:bg-stone-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800" onclick={() => galleryStore.setSelectionMode(!selectionMode)}>
         {selectionMode ? $t.gallery.cancelSelection : $t.gallery.select}
       </button>
@@ -450,7 +460,7 @@
     <div class="mb-4 flex flex-col gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3 sm:flex-row sm:items-center sm:justify-between">
       <div class="text-xs font-medium text-emerald-800 dark:text-emerald-200">{selectionSummary}</div>
       <div class="flex flex-wrap gap-2">
-        <button type="button" class="control-focus rounded-lg border border-stone-300 px-2.5 py-2 text-xs text-stone-700 hover:bg-stone-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800" onclick={galleryStore.selectPage}>{$t.gallery.selectAllPage}</button>
+        <button type="button" class="control-focus rounded-lg border border-stone-300 px-2.5 py-2 text-xs text-stone-700 hover:bg-stone-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800" disabled={selectedAllFiltered} onclick={galleryStore.selectPage}>{$t.gallery.selectAllPage}</button>
         <button type="button" class="control-focus rounded-lg border border-stone-300 px-2.5 py-2 text-xs text-stone-700 hover:bg-stone-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800" disabled={!gallery?.total || busy} onclick={galleryStore.selectFiltered}>{$t.gallery.selectFiltered}</button>
         <button type="button" class="control-focus rounded-lg border border-stone-300 px-2.5 py-2 text-xs text-stone-700 hover:bg-stone-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800" disabled={!hasSelection} onclick={galleryStore.clearSelection}>{selectedAllFiltered ? $t.gallery.exitFilteredSelection : $t.gallery.clearSelection}</button>
         <button type="button" class="control-focus rounded-lg border border-stone-300 px-2.5 py-2 text-xs text-stone-700 hover:bg-stone-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800" disabled={!hasSelection || busy} onclick={() => galleryStore.batchDownload(uiStore.showToast)}>{operationStatus?.kind === 'download' ? $t.gallery.downloading : $t.gallery.downloadSelected}</button>
@@ -584,6 +594,7 @@
               {/if}
               <picture class="block h-full w-full">
                 <img
+                  draggable="false"
                   src={galleryImageSrc(image)}
                   alt={image.prompt}
                   class="gallery-image preview-empty h-full w-full object-cover"

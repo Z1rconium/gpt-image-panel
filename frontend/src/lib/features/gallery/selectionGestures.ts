@@ -47,21 +47,26 @@ export type SwipeSelectState = {
   startX: number;
   startY: number;
   committed: boolean;
+  cancelled: boolean;
 };
 
 export type SwipeSelectMove = 'idle' | 'horizontal' | 'vertical' | 'committed';
 
 export function swipeSelectBegin(pointerId: number, x: number, y: number): SwipeSelectState {
-  return { pointerId, startX: x, startY: y, committed: false };
+  return { pointerId, startX: x, startY: y, committed: false, cancelled: false };
 }
 
 export function swipeSelectMove(state: SwipeSelectState, x: number, y: number): SwipeSelectMove {
-  if (state.committed) return 'committed';
+  if (state.committed) return 'idle';
+  if (state.cancelled) return 'vertical';
   const dx = x - state.startX;
   const dy = y - state.startY;
   // Vertical scroll and system navigation gestures always win: a mostly
   // vertical drag is never treated as a horizontal selection swipe.
-  if (Math.abs(dy) > Math.abs(dx)) return 'vertical';
+  if (Math.abs(dy) >= BAND_START_THRESHOLD_PX && Math.abs(dy) > Math.abs(dx)) {
+    state.cancelled = true;
+    return 'vertical';
+  }
   if (Math.abs(dx) >= SWIPE_SELECT_THRESHOLD_PX && Math.abs(dx) >= Math.abs(dy) * SWIPE_SELECT_AXIS_RATIO) {
     state.committed = true;
     return 'committed';

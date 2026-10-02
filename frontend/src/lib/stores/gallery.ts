@@ -571,9 +571,8 @@ function createGalleryStore() {
   }
 
   function toggleSelection(image: GalleryEntry) {
-    const selectedIds = state.selectionToken
-      ? new Set(state.gallery?.images.map((entry) => entry.id) || [])
-      : new Set(state.selectedIds);
+    if (state.selectionToken) return;
+    const selectedIds = new Set(state.selectedIds);
     if (selectedIds.has(image.id)) selectedIds.delete(image.id);
     else selectedIds.add(image.id);
     update((current) => ({ ...current, selectionMode: true, selectedIds, selectionToken: null }));
@@ -582,6 +581,7 @@ function createGalleryStore() {
   /** Replace (or, additively, extend) the explicit selection with a drag band result. */
   function applyBandSelection(ids: string[], additive = false) {
     update((current) => {
+      if (current.selectionToken) return current;
       const selectedIds = additive ? new Set(current.selectedIds) : new Set<string>();
       ids.forEach((id) => selectedIds.add(id));
       return { ...current, selectionMode: true, selectedIds, selectionToken: null };
@@ -590,6 +590,7 @@ function createGalleryStore() {
 
   function selectPage() {
     update((current) => {
+      if (current.selectionToken) return current;
       const selectedIds = new Set(current.selectedIds);
       current.gallery?.images.forEach((image) => selectedIds.add(image.id));
       return { ...current, selectedIds, selectionToken: null, selectionMode: true };
