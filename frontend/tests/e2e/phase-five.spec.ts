@@ -33,7 +33,7 @@ async function emit(page: Page, url: string, event: string, data: unknown) {
 test('modifier and band selection preserve ordinary preview and filtered scope', async ({ page }) => {
   await loadApp(page);
   const cards = page.locator('.gallery-card');
-  await cards.first().locator('.gallery-media-well').click({ modifiers: ['Control'] });
+  await cards.first().locator('.gallery-media-well').click({ modifiers: ['ControlOrMeta'] });
   await expect(page.getByText('1 selected on this page', { exact: true })).toBeVisible();
   await expect(page.getByRole('dialog', { name: 'Image Details' })).toBeHidden();
   await page.getByRole('button', { name: 'Cancel selection' }).click();
@@ -47,7 +47,7 @@ test('modifier and band selection preserve ordinary preview and filtered scope',
   await expect(page.getByRole('dialog', { name: 'Image Details' })).toBeHidden();
   await page.getByRole('button', { name: 'Select filtered' }).click();
   await expect(page.getByRole('button', { name: 'Select page' })).toBeDisabled();
-  await cards.first().locator('.gallery-media-well').click({ modifiers: ['Control'] });
+  await cards.first().locator('.gallery-media-well').click({ modifiers: ['ControlOrMeta'] });
   await expect(page.getByText('2 selected from current filters', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Exit select-all' }).click();
   await expect(page.getByRole('button', { name: 'Select page' })).toBeEnabled();
