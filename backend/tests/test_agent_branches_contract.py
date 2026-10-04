@@ -98,6 +98,16 @@ def test_regenerate_replays_original_input_and_keeps_original_answer(client, mon
     assert replay["turn_id"] == regenerated["turn_id"] and len(model.calls) == 2
 
 
+@pytest.mark.parametrize("mention", ["@第" + "9" * 5000 + "轮图1", "@第1轮图" + "9" * 5000])
+def test_oversized_reference_numbers_return_validation_error(client, monkeypatch, mention):
+    enable_agent(client)
+    model = install_model(monkeypatch, [])
+    conversation = new_conversation(client)
+    start_turn(client, conversation, mention, expect=422)
+    assert model.calls == []
+    assert detail(client, conversation)["conversation"]["turn_count"] == 0
+
+
 def test_reference_isolation_aliases_and_selection_conflicts(tmp_path):
     _configure_runtime(tmp_path)
     db_repo.verify_storage_writable()

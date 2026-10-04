@@ -4,6 +4,7 @@ import asyncio
 import base64
 import logging
 import time
+import traceback
 from datetime import datetime
 
 from ..runtime.state import state
@@ -20,6 +21,7 @@ from ..core.api_paths import (
     normalize_provider_kind,
 )
 from ..core.diagnostics import UnitDiagnostics
+from ..core.redaction import redact_sensitive_text
 from ..core.constants import ACTIVE_GENERATE_JOB_STATUSES
 from ..core.media import generate_stable_image_id, use_image_id_factory
 from ..core.observability import (
@@ -770,6 +772,7 @@ async def run_claimed_image_unit(unit: dict, worker_id: str):
                 if not has_idempotency_key:
                     await interrupt_unknown_submit(remote)
                     return
+                provider_kwargs["async_remote"] = remote
             elif remote_phase == "submitted":
                 provider_kwargs["async_remote"] = remote
             elif remote_phase == "" and int(unit.get("attempts") or 0) > 1:
@@ -1078,7 +1081,9 @@ async def run_claimed_image_unit(unit: dict, worker_id: str):
             worker_id,
         )
     except Exception as error:
-        error_message = get_exception_message(error)
+        error_message = redact_sensitive_text(
+            get_exception_message(error), secret_values=(api_key, socks5_proxy)
+        )
         status = (
             "upstream_error" if isinstance(error, proxy.UpstreamApiError) else "error"
         )
@@ -1091,12 +1096,17 @@ async def run_claimed_image_unit(unit: dict, worker_id: str):
             metrics.increment(f"image_jobs.{operation}.failed")
             metrics.observe_ms("image_job.duration", duration_seconds * 1000)
             metrics.observe_job_stage_timings(stage_timings)
-            logger.exception(
-                "Image unit failed: unit_id=%s parent_job_id=%s worker_id=%s error_type=%s",
+            redacted_traceback = redact_sensitive_text(
+                "".join(traceback.format_exception(error)),
+                secret_values=(api_key, socks5_proxy),
+            )
+            logger.error(
+                "Image unit failed: unit_id=%s parent_job_id=%s worker_id=%s error_type=%s\n%s",
                 unit_id,
                 parent_job_id,
                 worker_id,
                 error.__class__.__name__,
+                redacted_traceback,
             )
         await flush_progress_before_terminal(suppress_cancelled=False)
         if lease_lost.is_set():

@@ -266,6 +266,10 @@ def _branch_text(conn: sqlite3.Connection, conversation_id: str, path: list[str]
     aliases = {(path.index(row["turn_id"]) + 1, row["image_index"]): row["ref_label"] for row in rows if row["turn_id"] in path and row["role"] == "output"}
 
     def replace(match: re.Match[str]) -> str:
+        # A mention is untrusted text. Bound its numeric fields before int()
+        # so thousands of digits cannot trip Python's integer conversion cap.
+        if len(match[1]) > 10 or len(match[2]) > 10:
+            raise AgentAttachmentError("The mentioned image is not on this branch; attach it explicitly from Gallery")
         label = aliases.get((int(match[1]), int(match[2])))
         if label is None:
             raise AgentAttachmentError("The mentioned image is not on this branch; attach it explicitly from Gallery")

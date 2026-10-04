@@ -11,7 +11,8 @@ def test_image_generation_preview_ssrf_validation_runs_off_event_loop(monkeypatc
     event_loop_thread = threading.get_ident()
     seen: dict[str, int | str] = {}
 
-    def fake_validate_upstream_url(url: str, allowlist: str) -> None:
+    def fake_validate_upstream_url(url: str, allowlist: str, *, allow_query: bool = False) -> None:
+        assert not allow_query
         seen["thread"] = threading.get_ident()
         seen["url"] = url
         raise ValueError("stop before upstream request")

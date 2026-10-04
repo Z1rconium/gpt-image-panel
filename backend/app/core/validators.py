@@ -223,7 +223,9 @@ def _validate_url_base(
     _validate_public_dns_resolution(hostname, private_ip_error=private_ip_error)
 
 
-def validate_upstream_url(url: str, allowlist: str) -> None:
+def validate_upstream_url(url: str, allowlist: str, *, allow_query: bool = False) -> None:
+    if allow_query and urlsplit(url).fragment:
+        raise ValueError("Upstream request URL must not include fragments")
     _validate_url_base(
         url,
         allowed_schemes={"https"},
@@ -233,7 +235,7 @@ def validate_upstream_url(url: str, allowlist: str) -> None:
         private_ip_error="Hostname '{hostname}' resolves to private/internal IP(s): {resolved_info}",
         allowlist=allowlist,
         reject_userinfo=True,
-        reject_query_fragment=True,
+        reject_query_fragment=not allow_query,
     )
 
 
@@ -407,8 +409,8 @@ def validate_webhook_url(url: str, allowlist: str = "") -> None:
     )
 
 
-async def validate_upstream_url_async(url: str, allowlist: str) -> None:
-    await asyncio.to_thread(validate_upstream_url, url, allowlist)
+async def validate_upstream_url_async(url: str, allowlist: str, *, allow_query: bool = False) -> None:
+    await asyncio.to_thread(validate_upstream_url, url, allowlist, allow_query=allow_query)
 
 
 async def validate_r2_endpoint_url_async(

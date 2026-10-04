@@ -9,7 +9,7 @@ the total payload stays under `MAX_UNIT_DIAGNOSTIC_BYTES`.
 
 import json
 import re
-from typing import Any
+from typing import Any, Callable
 
 from .redaction import redact_sensitive_text
 from .utils import utc_now
@@ -34,6 +34,7 @@ def _bounded_value(
     depth: int = 0,
     omitted: list[str],
     key: str = "",
+    redact: Callable[[Any], str] = redact_sensitive_text,
 ) -> Any:
     if depth > _MAX_DEPTH:
         omitted.append("nested value depth limit")
@@ -45,16 +46,17 @@ def _bounded_value(
                 omitted.append(f"{index + 1 - _MAX_ARRAY_ITEMS} dict entries")
                 result["_omitted"] = f"{len(value) - _MAX_ARRAY_ITEMS} more entries"
                 break
+            bounded_key = redact(str(child_key))[:_MAX_STRING_CHARS]
             if _SENSITIVE_KEY.search(str(child_key)):
-                result[str(child_key)] = "[REDACTED]"
+                result[bounded_key] = "[REDACTED]"
                 continue
-            result[str(child_key)] = _bounded_value(
-                child_value, depth=depth + 1, omitted=omitted, key=str(child_key)
+            result[bounded_key] = _bounded_value(
+                child_value, depth=depth + 1, omitted=omitted, key=str(child_key), redact=redact
             )
         return result
     if isinstance(value, (list, tuple)):
         items = [
-            _bounded_value(item, depth=depth + 1, omitted=omitted, key=key)
+            _bounded_value(item, depth=depth + 1, omitted=omitted, key=key, redact=redact)
             for item in value[:_MAX_ARRAY_ITEMS]
         ]
         if len(value) > _MAX_ARRAY_ITEMS:
@@ -62,7 +64,7 @@ def _bounded_value(
             items.append(f"[{len(value) - _MAX_ARRAY_ITEMS} more items omitted]")
         return items
     if isinstance(value, str):
-        redacted = redact_sensitive_text(value)
+        redacted = redact(value)
         if redacted.startswith("data:image/") or (
             len(redacted) > _MAX_STRING_CHARS and _BASE64_LIKE.match(redacted)
         ):
@@ -74,7 +76,7 @@ def _bounded_value(
         return redacted
     if isinstance(value, (int, float, bool)) or value is None:
         return value
-    return redact_sensitive_text(str(value))[:_MAX_STRING_CHARS]
+    return redact(str(value))[:_MAX_STRING_CHARS]
 
 
 def _encode(payload: dict[str, Any]) -> str:
@@ -94,6 +96,14 @@ class UnitDiagnostics:
         self._code = ""
         self._records: list[dict[str, Any]] = []
         self._recovery: dict[str, Any] = {}
+        self._secret_values: tuple[str, ...] = ()
+
+    def add_secrets(self, *values: str | None) -> None:
+        """Include this request's resolved credentials, including preset env refs."""
+        self._secret_values = tuple(sorted({*self._secret_values, *(value for value in values if value)}, key=len, reverse=True))
+
+    def _redact(self, value: Any) -> str:
+        return redact_sensitive_text(value, secret_values=self._secret_values)
 
     @property
     def code(self) -> str:
@@ -105,11 +115,11 @@ class UnitDiagnostics:
 
     def set_code(self, code: str) -> None:
         if code and not self._code:
-            self._code = str(code)
+            self._code = self._redact(code)[:128]
 
     def set_recovery(self, **fields: Any) -> None:
         omitted: list[str] = []
-        bounded = _bounded_value(fields, omitted=omitted, depth=_MAX_DEPTH - 1)
+        bounded = _bounded_value(fields, omitted=omitted, depth=_MAX_DEPTH - 1, redact=self._redact)
         if isinstance(bounded, dict):
             self._recovery.update(bounded)
 
@@ -126,9 +136,12 @@ class UnitDiagnostics:
         extra: dict[str, Any] | None = None,
     ) -> None:
         record: dict[str, Any] = {
-            "phase": str(phase),
+            "phase": self._redact(phase)[:_MAX_STRING_CHARS],
             "at": utc_now(),
-            "http": {"method": str(method).upper(), "url": redact_sensitive_text(url)},
+            "http": {
+                "method": self._redact(str(method).upper())[:_MAX_STRING_CHARS],
+                "url": self._redact(url)[:_MAX_STRING_CHARS],
+            },
         }
         if status is not None:
             record["http"]["status"] = int(status)
@@ -145,9 +158,9 @@ class UnitDiagnostics:
         extra: dict[str, Any] | None = None,
     ) -> None:
         record: dict[str, Any] = {
-            "phase": str(phase),
+            "phase": self._redact(phase)[:_MAX_STRING_CHARS],
             "at": utc_now(),
-            "message": redact_sensitive_text(message)[:_MAX_STRING_CHARS],
+            "message": self._redact(message)[:_MAX_STRING_CHARS],
         }
         self._finish_record(record, snapshot=snapshot, mapping_path=mapping_path, error=error, extra=extra)
 
@@ -161,7 +174,7 @@ class UnitDiagnostics:
     ) -> None:
         record: dict[str, Any] = {"phase": "download", "at": utc_now()}
         if url is not None:
-            record["url"] = redact_sensitive_text(url)
+            record["url"] = self._redact(url)[:_MAX_STRING_CHARS]
         if status is not None:
             record["status"] = int(status)
         self._finish_record(record, snapshot=None, mapping_path=None, error=error, extra=extra)
@@ -177,24 +190,26 @@ class UnitDiagnostics:
     ) -> None:
         omitted: list[str] = []
         if mapping_path:
-            record["mapping_path"] = redact_sensitive_text(mapping_path)[:_MAX_STRING_CHARS]
+            record["mapping_path"] = self._redact(mapping_path)[:_MAX_STRING_CHARS]
         if error:
-            record["error"] = redact_sensitive_text(error)[:_MAX_STRING_CHARS]
+            record["error"] = self._redact(error)[:_MAX_STRING_CHARS]
         if extra:
-            record["extra"] = _bounded_value(extra, omitted=omitted)
+            record["extra"] = _bounded_value(extra, omitted=omitted, redact=self._redact)
         if snapshot is not None:
-            record["snapshot"] = _bounded_value(snapshot, omitted=omitted)
+            record["snapshot"] = _bounded_value(snapshot, omitted=omitted, redact=self._redact)
         if omitted:
             record["omitted"] = omitted[:_MAX_ARRAY_ITEMS]
-        if len(_encode(record)) > _MAX_RECORD_BYTES:
+        if len(_encode(record).encode("utf-8")) > _MAX_RECORD_BYTES:
             record.pop("snapshot", None)
             record["truncated"] = True
-        if len(_encode(record)) > _MAX_RECORD_BYTES:
+        if len(_encode(record).encode("utf-8")) > _MAX_RECORD_BYTES:
             record.pop("extra", None)
             if "message" in record:
                 record["message"] = str(record["message"])[:500]
             if "error" in record:
                 record["error"] = str(record["error"])[:500]
+        if len(_encode(record).encode("utf-8")) > _MAX_RECORD_BYTES:
+            record = {"phase": str(record["phase"])[:100], "at": record["at"], "truncated": True}
         self._records.append(record)
         if len(self._records) > _MAX_RECORDS:
             del self._records[: len(self._records) - _MAX_RECORDS]
@@ -216,7 +231,8 @@ class UnitDiagnostics:
         while len(payload["stages"]) > 1 and len(_encode(payload).encode("utf-8")) > self.max_bytes:
             payload["stages"].pop(0)
         if len(_encode(payload).encode("utf-8")) > self.max_bytes:
-            payload["stages"] = payload["stages"][:1]
+            payload["stages"] = []
+            payload.pop("recovery", None)
             payload["truncated"] = True
         return payload
 

@@ -57,8 +57,10 @@ def _redact_url(match: re.Match[str]) -> str:
     return urlunsplit((parsed.scheme, host, parsed.path, query, fragment)) + trailing
 
 
-def redact_sensitive_text(value: Any) -> str:
+def redact_sensitive_text(value: Any, *, secret_values: tuple[str | None, ...] = ()) -> str:
     text = str(value or "")
+    for secret in sorted((value for value in secret_values if value), key=len, reverse=True):
+        text = text.replace(secret, "[REDACTED]")
     try:
         from .secrets import active_secret_values
 

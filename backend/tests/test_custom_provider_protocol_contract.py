@@ -316,6 +316,37 @@ def test_multipart_edit_streams_temp_files(monkeypatch, fast_provider, edit_file
     assert submit["data"] is not None
 
 
+@pytest.mark.parametrize("failure", [OSError("connection failed"), asyncio.CancelledError()])
+def test_multipart_handles_close_before_transport_consumes_files(monkeypatch, edit_files, failure):
+    image, mask = edit_files
+    resolved = resolve_provider_config({
+        **ASYNC_V2_CONFIG,
+        "edit_submit": {"path": "/edit", "body_format": "multipart", "body": {},
+                        "files": {"images": "image", "mask": "mask"}},
+    })
+    uploads = asyncio.run(_build_provider_edit_uploads(resolved.edit_submit, [image], mask))
+    opened = []
+    original_open = type(image.temp_path).open
+
+    def tracked_open(path, *args, **kwargs):
+        file = original_open(path, *args, **kwargs)
+        opened.append(file)
+        return file
+
+    monkeypatch.setattr(type(image.temp_path), "open", tracked_open)
+    class BrokenSession:
+        def post(self, *args, **kwargs):
+            raise failure
+
+    session = BrokenSession()
+    with pytest.raises(type(failure)):
+        asyncio.run(async_provider._submit_provider_request(
+            session, resolved.edit_submit, f"{API_URL}/edit", headers={},
+            socks5_proxy=None, body={}, uploads=uploads,
+        ))
+    assert len(opened) == 2 and all(file.closed for file in opened)
+
+
 def test_edit_without_edit_submit_section_is_rejected(monkeypatch, fast_provider, edit_files):
     _image, _mask = edit_files
     uploads = EditUploads(parts=(), mask_part=None, inline_variables={})

@@ -106,7 +106,7 @@ class BodyLimitMiddleware:
             # Validate the complete bounded JSON body before routing or parsing.
             # BaseHTTPMiddleware can wrap receive exceptions in ExceptionGroup,
             # which FastAPI otherwise translates into an incorrect generic 400.
-            messages = []
+            body = bytearray()
             total = 0
             while True:
                 message = await receive()
@@ -115,9 +115,15 @@ class BodyLimitMiddleware:
                     response = JSONResponse(status_code=413, content={"status": "error", "detail": "Request body too large"})
                     await response(scope, receive, send)
                     return
-                messages.append(message)
+                body.extend(message.get("body", b""))
                 if message["type"] != "http.request" or not message.get("more_body", False):
                     break
+            # Keep one contiguous body instead of retaining every ASGI frame:
+            # tiny chunks must not amplify a bounded JSON body into an
+            # unbounded list of message dictionaries.
+            messages = [{"type": "http.request", "body": bytes(body), "more_body": message["type"] != "http.request"}]
+            if message["type"] != "http.request":
+                messages.append(message)
             buffered = iter(messages)
 
             async def replay_receive() -> Message:

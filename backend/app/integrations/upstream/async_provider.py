@@ -16,6 +16,7 @@ import asyncio
 import json
 import re
 import uuid
+from contextlib import ExitStack
 from datetime import datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable
 from urllib.parse import quote, urlencode
@@ -197,7 +198,7 @@ def _auth_headers(
 
 async def _validated_upstream_url(url: str) -> str:
     try:
-        await ssrf.validate_upstream_url_async(url, config.UPSTREAM_HOST_ALLOWLIST)
+        await ssrf.validate_upstream_url_async(url, config.UPSTREAM_HOST_ALLOWLIST, allow_query=True)
     except ValueError as exc:
         raise UpstreamApiError(redact_sensitive_text(f"Provider URL rejected: {exc}")) from exc
     return url
@@ -275,31 +276,34 @@ async def _submit_provider_request(
     """Send one submit request as JSON or multipart and parse the JSON reply."""
     if submit.body_format == "multipart":
         mask_field = str(getattr(submit, "files_mask", "") or "")
-        form = aiohttp.FormData()
-        for key, value in body.items():
-            form.add_field(key, _form_field_value(value))
-        if uploads is not None:
-            for part in uploads.parts:
-                form.add_field(
-                    submit.files_images,
-                    part.temp_path.open("rb"),
-                    filename=part.filename,
-                    content_type=part.content_type or "application/octet-stream",
-                )
-            if mask_field and uploads.mask_part is not None:
-                form.add_field(
-                    mask_field,
-                    uploads.mask_part.temp_path.open("rb"),
-                    filename=uploads.mask_part.filename,
-                    content_type=uploads.mask_part.content_type or "image/png",
-                )
-        async with session.post(
-            url, data=form, headers=headers, allow_redirects=False
-        ) as resp:
-            status = int(resp.status)
-            if not socks5_proxy:
-                ssrf.validate_response_peer_ip(resp, "Upstream API")
-            result, _preview = await parse_upstream_json_response(resp, _PROVIDER_LABEL, None)
+        # Own file handles even when connection setup, form construction or
+        # cancellation happens before aiohttp consumes the upload payload.
+        with ExitStack() as files:
+            form = aiohttp.FormData()
+            for key, value in body.items():
+                form.add_field(key, _form_field_value(value))
+            if uploads is not None:
+                for part in uploads.parts:
+                    form.add_field(
+                        submit.files_images,
+                        files.enter_context(part.temp_path.open("rb")),
+                        filename=part.filename,
+                        content_type=part.content_type or "application/octet-stream",
+                    )
+                if mask_field and uploads.mask_part is not None:
+                    form.add_field(
+                        mask_field,
+                        files.enter_context(uploads.mask_part.temp_path.open("rb")),
+                        filename=uploads.mask_part.filename,
+                        content_type=uploads.mask_part.content_type or "image/png",
+                    )
+            async with session.post(
+                url, data=form, headers=headers, allow_redirects=False
+            ) as resp:
+                status = int(resp.status)
+                if not socks5_proxy:
+                    ssrf.validate_response_peer_ip(resp, "Upstream API")
+                result, _preview = await parse_upstream_json_response(resp, _PROVIDER_LABEL, None)
         return result, status
     return await _request_json(
         session,
@@ -565,6 +569,8 @@ async def run_async_provider(
     """
     cfg = load_provider_config(provider_config)
     diag = diagnostics
+    if diag is not None:
+        diag.add_secrets(api_key, socks5_proxy)
     is_edit = edit is not None
     if is_edit and cfg.edit_submit is None:
         raise UpstreamApiError(
@@ -578,6 +584,10 @@ async def run_async_provider(
     state_api_url = str(api_url).rstrip("/")
     remote_state = dict(remote or {})
     phase = str(remote_state.get("phase") or "")
+    if remote_state.get("api_url") and not secrets.same_origin(api_url, remote_state["api_url"]):
+        raise UpstreamApiError(
+            "Provider checkpoint origin differs from the current preset; start a new task"
+        )
     if phase == "submitted":
         state_api_url = str(remote_state.get("api_url") or state_api_url).rstrip("/")
     headers = _auth_headers(cfg, api_key)
@@ -788,13 +798,19 @@ async def run_async_provider(
     last_status: str | None = None
     try:
         while True:
+            remaining = (deadline - _now()).total_seconds()
+            if remaining <= 0:
+                raise _PollTimeout()
             try:
-                poll_result, poll_status = await _poll_json(
-                    session,
-                    status_url,
-                    headers=headers,
-                    socks5_proxy=socks5_proxy,
-                    method=poll_method,
+                poll_result, poll_status = await asyncio.wait_for(
+                    _poll_json(
+                        session,
+                        status_url,
+                        headers=headers,
+                        socks5_proxy=socks5_proxy,
+                        method=poll_method,
+                    ),
+                    timeout=remaining,
                 )
             except _RetryablePollError as exc:
                 if diag:
@@ -810,7 +826,7 @@ async def run_async_provider(
                     raise _PollTimeout() from None
                 if progress:
                     progress("polling_provider", "Provider poll request failed; retrying")
-                await _sleep(delay)
+                await _sleep(min(delay, max(0.0, (deadline - _now()).total_seconds())))
                 delay = min(
                     delay * 1.25, max(float(cfg.poll.interval_seconds), _MAX_POLL_DELAY_SECONDS)
                 )
@@ -832,7 +848,7 @@ async def run_async_provider(
                     raise _PollTimeout() from None
                 if progress:
                     progress("polling_provider", "Provider poll request failed; retrying")
-                await _sleep(delay)
+                await _sleep(min(delay, max(0.0, (deadline - _now()).total_seconds())))
                 delay = min(
                     delay * 1.25, max(float(cfg.poll.interval_seconds), _MAX_POLL_DELAY_SECONDS)
                 )
@@ -863,7 +879,7 @@ async def run_async_provider(
                 raise _PollTimeout()
             if progress:
                 progress("polling_provider", f"Provider task status: {status or 'unknown'}")
-            await _sleep(delay)
+            await _sleep(min(delay, max(0.0, (deadline - _now()).total_seconds())))
             delay = min(
                 delay * 1.25, max(float(cfg.poll.interval_seconds), _MAX_POLL_DELAY_SECONDS)
             )

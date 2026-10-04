@@ -253,7 +253,26 @@ def test_resume_after_deadline_times_out_and_cancels_remote(provider_session):
     }
     with pytest.raises(async_provider.UpstreamApiError, match="did not finish within"):
         _run_provider(session, V2_CONFIG, remote=remote)
+    assert ("GET", V2_STATUS_URL) not in session.methods()
     assert ("DELETE", V2_CANCEL_URL) in session.methods()
+
+
+def test_poll_request_cannot_outlive_the_absolute_deadline(provider_session, monkeypatch):
+    session = provider_session(_ScriptedSession({}))
+    cancelled = []
+
+    async def stalled_poll(*args, **kwargs):
+        try:
+            await asyncio.sleep(10)
+        finally:
+            cancelled.append(True)
+
+    monkeypatch.setattr(async_provider, "_poll_json", stalled_poll)
+    remote = {"phase": "submitted", "api_url": API_URL,
+              "status_url": V2_STATUS_URL, "deadline_at": _future_deadline(0.03)}
+    with pytest.raises(async_provider.UpstreamApiError, match="did not finish within"):
+        _run_provider(session, V2_CONFIG, remote=remote)
+    assert cancelled == [True]
 
 
 def test_unknown_submit_without_idempotency_key_is_never_resubmitted(provider_session):
@@ -286,6 +305,16 @@ def test_submitting_phase_resubmits_with_the_same_idempotency_key(provider_sessi
     items, _preview = _run_provider(session, V2_CONFIG, remote=remote)
     assert items
     assert session.calls[0][2]["headers"]["Idempotency-Key"] == "stable-key-1"
+
+
+@pytest.mark.parametrize("phase", ["submitted", "submitting"])
+def test_checkpoint_cannot_send_current_credentials_to_a_previous_origin(provider_session, phase):
+    session = provider_session(_ScriptedSession({}))
+    remote = {"phase": phase, "api_url": "https://previous.example.com", "idempotency_key": "saved-key",
+              "status_url": "https://previous.example.com/jobs/1", "deadline_at": _future_deadline()}
+    with pytest.raises(async_provider.UpstreamApiError, match="checkpoint origin"):
+        _run_provider(session, V2_CONFIG, remote=remote)
+    assert session.calls == []
 
 
 def test_retryable_poll_errors_back_off_until_success(provider_session):
@@ -373,6 +402,38 @@ def test_diagnostics_capture_missing_task_id(provider_session):
     payload = diagnostics.payload()
     assert payload["code"] == "task_id_missing"
     assert payload["stages"][0]["snapshot"] == {"nope": 1}
+
+
+def test_diagnostics_redact_resolved_request_key_in_arbitrary_fields(provider_session):
+    session = provider_session(_ScriptedSession({
+        ("POST", f"{API_URL}/submit"): [_json({"message": "rejected test-key", "test-key": "echo"})],
+    }))
+    diagnostics = UnitDiagnostics()
+    with pytest.raises(async_provider.UpstreamApiError, match="task id"):
+        _run_provider(session, V2_CONFIG, diagnostics=diagnostics)
+    assert "test-key" not in json.dumps(diagnostics.payload())
+
+
+def test_diagnostics_redact_snapshot_keys_without_changing_record_schema():
+    diagnostics = UnitDiagnostics()
+    diagnostics.add_secrets("phase")
+    diagnostics.record_event("submit", "rejected phase", snapshot={"phase": "echo"})
+    stage = diagnostics.payload()["stages"][0]
+    assert stage["phase"] == "submit"
+    assert stage["snapshot"] == {"[REDACTED]": "echo"}
+    assert stage["message"] == "rejected [REDACTED]"
+
+
+@pytest.mark.parametrize("max_bytes", [1024, 64 * 1024])
+def test_diagnostics_cap_covers_metadata_and_utf8_bytes(max_bytes):
+    diagnostics = UnitDiagnostics(max_bytes=max_bytes)
+    large = "界" * 20_000
+    diagnostics.set_code(large)
+    diagnostics.set_recovery(**{f"field-{index}": large for index in range(20)})
+    for _ in range(12):
+        diagnostics.record_http(large, method=large, url="https://example.com/" + large,
+                                snapshot={large: large}, extra={"field": large})
+    assert len(json.dumps(diagnostics.payload(), ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode("utf-8")) <= max_bytes
 
 
 # ── diagnostics bounding / redaction ─────────────────────────────────────────
@@ -718,6 +779,53 @@ def test_reclaimed_async_unit_without_checkpoint_is_interrupted(tmp_path, monkey
     assert row["status"] == "interrupted"
     assert row["diagnostics"]["code"] == "submit_unknown"
     assert called == []
+
+
+def test_executor_replays_unknown_submit_with_persisted_idempotency_key(tmp_path, monkeypatch, provider_session):
+    _configure_runtime(tmp_path)
+    _install_async_preset(monkeypatch, provider_config=V2_B64_CONFIG)
+    _enqueue(f"same-key-{uuid.uuid4().hex}", preset_id="recovery-preset", preset_name="recovery")
+    claimed = image_jobs_repo.claim_next_image_job_unit(
+        worker_id="worker-a", claim_token="token-a", lease_expires_at="2099-01-01T00:00:00+00:00",
+        now="2026-01-01T00:00:01+00:00", running_limit=4, max_attempts=2,
+    )
+    image_jobs_repo.write_image_job_unit_remote(
+        claimed["unit_id"], claim_token="token-a", checkpointed=True,
+        remote={"phase": "submitting", "api_url": API_URL, "provider_config": V2_B64_CONFIG,
+                "idempotency_key": "original-paid-request-key"},
+    )
+    resumed = image_jobs_repo.get_image_job_unit(claimed["unit_id"])
+    monkeypatch.setattr(job_executor.proxy, "call_image_generation_api", ORIGINAL_CALL_IMAGE_GENERATION_API)
+    session = _use_session(monkeypatch, _ScriptedSession({
+        ("POST", f"{API_URL}/submit"): [_json({"id": "job-1"})],
+        ("GET", V2_STATUS_URL): [_json({"state": "done"})],
+        ("GET", V2_RESULT_URL): [_json({"images": [{"b64": base64.b64encode(PNG_BYTES).decode("ascii")}]})],
+    }))
+    asyncio.run(job_executor.run_claimed_image_unit(resumed, "worker-a"))
+    assert image_jobs_repo.get_image_job_unit(claimed["unit_id"])["status"] == "success"
+    assert session.calls[0][2]["headers"]["Idempotency-Key"] == "original-paid-request-key"
+
+
+def test_executor_redacts_resolved_preset_key_from_errors_and_logs(tmp_path, monkeypatch, caplog):
+    _configure_runtime(tmp_path)
+    _install_async_preset(monkeypatch, provider_config=V1_CONFIG)
+    _enqueue(f"error-secret-{uuid.uuid4().hex}", preset_id="recovery-preset", preset_name="recovery")
+    claimed = image_jobs_repo.claim_next_image_job_unit(
+        worker_id="worker-a", claim_token="token-a", lease_expires_at="2099-01-01T00:00:00+00:00",
+        now="2026-01-01T00:00:01+00:00", running_limit=4, max_attempts=2,
+    )
+
+    async def rejected(*args, **kwargs):
+        raise job_executor.proxy.UpstreamApiError("The submitted recovery-secret was rejected")
+
+    monkeypatch.setattr(job_executor.proxy, "call_image_generation_api", rejected)
+    asyncio.run(job_executor.run_claimed_image_unit(claimed, "worker-a"))
+    unit = image_jobs_repo.get_image_job_unit(claimed["unit_id"])
+    assert unit["status"] == "upstream_error"
+    assert "recovery-secret" not in unit["error"]
+    assert "[REDACTED]" in unit["error"]
+    assert "recovery-secret" not in caplog.text
+    assert "UpstreamApiError" in caplog.text
 
 
 def test_worker_killed_after_submit_resumes_without_second_submit(tmp_path, monkeypatch):
