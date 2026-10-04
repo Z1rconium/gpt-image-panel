@@ -26,10 +26,10 @@ function makeMask(sourceId: string, previewUrl: string): EditMask {
   };
 }
 
-let revokeSpy: ReturnType<typeof vi.fn>;
+let revokeSpy = vi.fn<(url: string) => void>();
 
 beforeEach(() => {
-  revokeSpy = vi.fn();
+  revokeSpy = vi.fn<(url: string) => void>();
   let counter = 0;
   // The node test environment has no object URLs; the store creates and
   // revokes them on every mutation, so both need stubbing.
