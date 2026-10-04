@@ -1,6 +1,15 @@
 # Changelog
 
-## Unreleased
+## v1.7.8
+
+- Security review of v1.7.0–v1.7.7: resumed async submits reuse the checkpoint's original idempotency key, and legacy checkpoints cannot send current preset credentials to a different origin. Mapped request queries now pass the existing HTTPS, allowlist, DNS and peer-IP checks while preset base URLs remain query-free.
+- Resolved preset and proxy credentials are redacted from upstream diagnostics, persisted errors and failure tracebacks. Diagnostic metadata and snapshot keys are bounded, record limits count UTF-8 bytes, and even the smallest configured diagnostic payload stays within its byte budget.
+- JSON body buffering coalesces tiny ASGI frames to prevent memory amplification. Oversized branch image-alias numbers return 422 before integer conversion. Multipart provider uploads close file handles on setup failure or cancellation, and hanging polls cannot exceed the persisted deadline.
+- Dependency hardening raises the aiohttp, AnyIO and urllib3 minimum versions, updates the production lock and upgrades Vitest with compatible frontend transitive fixes. Tailwind 3's development-only braces dependency still has an upstream advisory without a compatible patch; Tailwind 4 would require a browser-compatibility migration.
+- Gallery modifier-selection browser tests use the platform's Control/Command modifier, including macOS.
+- Validation: 885 backend tests, 182 frontend unit tests and 209 browser tests pass; 22 backend and 3 browser tests are skipped. Frontend diagnostics, production build and bundle budgets pass. Production Python and frontend dependency audits report no known vulnerabilities.
+
+## v1.7.7
 
 - Phase 6: Agent replies render GFM headings, lists, tables, code and links, including unfinished streaming syntax. Raw HTML is escaped, Markdown images remain text, and links allow only credential-free HTTP(S) URLs. Marked is pinned and loads with the lazy Agent view.
 - Phase 6: edit a historical message or regenerate its answer to create a sibling turn while keeping the original path and gallery results. A separate selected-path pointer survives reloads; switching paths creates no model request and does not cancel active work. Context, pagination and image references follow ancestors of the selected/executing turn. Stable reference labels stay unchanged while displayed round numbers follow path depth; another branch's images require an explicit Gallery attachment.
