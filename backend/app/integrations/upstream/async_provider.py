@@ -187,7 +187,7 @@ def _auth_headers(
     value = f"{cfg.auth.scheme} {api_key}".strip()
     headers = {
         cfg.auth.header: value,
-        "User-Agent": "opencode",
+        "User-Agent": config.UPSTREAM_USER_AGENT,
     }
     if json_body:
         headers["Content-Type"] = "application/json"

@@ -43,11 +43,16 @@ def _max_body_for_path(path: str, content_type: str = "") -> int:
         ),
     ]
     for prefix, limit in path_limits:
-        if path.startswith(prefix):
+        if path == prefix or path.startswith(prefix + "/"):
             return limit
     if _is_json_content_type(content_type):
         return config.MAX_JSON_BODY_MB * 1024 * 1024
     return config.MAX_FILE_SIZE_MB * 1024 * 1024
+
+
+# Methods that cannot carry a request body our limits care about; routing them
+# through the body-field lookup would only cost a scan over every route.
+_BODYLESS_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 
 def _body_routes(routes):
@@ -79,7 +84,8 @@ class BodyLimitMiddleware:
         content_type = headers.get(b"content-type", b"").decode("latin1")
         max_bytes = _max_body_for_path(path, content_type)
         json_body = False
-        for route in _body_routes(scope["app"].routes):
+        routes = () if scope.get("method", "GET") in _BODYLESS_METHODS else _body_routes(scope["app"].routes)
+        for route in routes:
             if route.matches(scope)[0] == Match.FULL:
                 field = getattr(route, "body_field", None)
                 if field is not None:

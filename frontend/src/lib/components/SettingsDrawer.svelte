@@ -529,7 +529,10 @@
         <div class="mx-5 mt-4 rounded-lg border border-emerald-300 bg-emerald-50 p-3 text-xs text-stone-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-zinc-300" role="status" data-testid="settings-prefill-banner">
           <p class="font-medium text-stone-900 dark:text-zinc-100">{$t.settings.prefillTitle}</p>
           <dl class="mt-1 break-all">
-            {#if prefill.apiUrl}<div>{$t.settings.apiUrl}: <span class="font-mono">{prefill.apiUrl}</span></div>{/if}
+            {#if prefill.apiUrl}
+              <div class="text-sm font-semibold text-stone-900 dark:text-zinc-100" data-testid="settings-prefill-host">{$t.settings.prefillHost}: <span class="font-mono">{new URL(prefill.apiUrl).host}</span></div>
+              <div>{$t.settings.apiUrl}: <span class="font-mono">{prefill.apiUrl}</span></div>
+            {/if}
             {#if prefill.apiModel}<div>{$t.settings.defaultModel}: <span class="font-mono">{prefill.apiModel}</span></div>{/if}
           </dl>
           <p class="mt-1 text-stone-500 dark:text-zinc-500">{$t.settings.prefillHint}</p>

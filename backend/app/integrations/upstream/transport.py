@@ -272,7 +272,7 @@ async def download_image_url(
         await ssrf.validate_image_url_async(current_url)
         async with session.get(
             current_url,
-            headers={"User-Agent": "opencode"},
+            headers={"User-Agent": config.UPSTREAM_USER_AGENT},
             allow_redirects=False,
         ) as img_resp:
             if 300 <= img_resp.status < 400:
@@ -349,7 +349,7 @@ async def probe_upstream_endpoint(
     upstream_url = build_upstream_url(api_url, api_path)
     await ssrf.validate_upstream_url_async(upstream_url, config.UPSTREAM_HOST_ALLOWLIST)
 
-    headers = {"User-Agent": "opencode"}
+    headers = {"User-Agent": config.UPSTREAM_USER_AGENT}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
 
