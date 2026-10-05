@@ -785,7 +785,6 @@ async def run_async_provider(
             "status_url": status_url,
             "result_url": result_url,
             "cancel_url": cancel_url,
-            "poll_count": 0,
         }
         if checkpoint is not None:
             await checkpoint(dict(remote_state))

@@ -63,6 +63,9 @@ def test_job_diagnostics_endpoint_returns_redacted_unit_payload(client):
     assert unit["remote"]["phase"] == "submitted"
     assert unit["remote"]["has_status_url"] is True
     assert unit["remote"]["has_cancel_url"] is False
+    # The poll count is only recorded per diagnostics event; a checkpoint-level
+    # counter was never updated, so the summary must not advertise one.
+    assert "poll_count" not in unit["remote"]
     assert "token=secret" not in json.dumps(body)
 
     assert client.get("/api/generate/nope/diagnostics").status_code == 404

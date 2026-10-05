@@ -1302,8 +1302,7 @@ async function mockApi(page: Page, options: MockOptions = {}) {
                 has_status_url: false,
                 has_result_url: false,
                 has_cancel_url: false,
-                has_idempotency_key: false,
-                poll_count: null
+                has_idempotency_key: false
               },
               diagnostics: {
                 code: 'task_id_missing',

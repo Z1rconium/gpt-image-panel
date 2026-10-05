@@ -106,7 +106,6 @@ export type JobUnitRemoteSummary = {
   has_result_url: boolean;
   has_cancel_url: boolean;
   has_idempotency_key: boolean;
-  poll_count?: number | null;
 };
 
 export type JobUnitDiagnostics = {
