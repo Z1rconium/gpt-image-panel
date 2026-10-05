@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.7.9
+
+- Agent image aliases such as `@第N轮图M` accept at most 10 digits per number in the shared mention pattern; longer digit runs stay plain text instead of raising from Python's integer-conversion limit while building turn context. The branch-selection path keeps its explicit "not on this branch" error.
+- Async provider checkpoints and the job diagnostics summary no longer carry `poll_count`, which was always 0; per-event poll counts remain in the diagnostics records.
+- Redaction logs one warning (exception class only) when the registered-secret lookup fails, instead of silently skipping it. Explicit and pattern-based redaction still apply.
+- Removed dead code: the unused `image_id_factory` edit parameter, `UnitDiagnostics.record_download`, the `_select_task_id` alias and unused imports. A new Lint workflow keeps the cleaned modules free of unused imports and variables.
+- Review notes and the remaining hardening and refactoring phases are tracked in `plan/v1.7.9-review-cleanup-plan.md`.
+- Validation: 887 backend tests pass (22 skipped); `svelte-check` and the 182 frontend unit tests pass. Browser tests were not run for this release.
+
 ## v1.7.8
 
 - Security review of v1.7.0–v1.7.7: resumed async submits reuse the checkpoint's original idempotency key, and legacy checkpoints cannot send current preset credentials to a different origin. Mapped request queries now pass the existing HTTPS, allowlist, DNS and peer-IP checks while preset base URLs remain query-free.
