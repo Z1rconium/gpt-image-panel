@@ -17,6 +17,7 @@ import json
 import re
 import uuid
 from contextlib import ExitStack
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable
 from urllib.parse import quote, urlencode
@@ -406,6 +407,48 @@ def _task_query_vars(task_id: str | None) -> dict[str, Any]:
     return {"task_id": task_id} if task_id else {}
 
 
+async def _resolve_mapped_url(
+    source: Any,
+    *,
+    label: str,
+    holders: tuple[dict[str, Any] | None, ...],
+    task_id: str | None,
+    api_url: str,
+    required: bool,
+) -> str | None:
+    """Resolve a result/cancel URL from `url_path` or `url_template`.
+
+    `holders` are the responses searched in order. A missing value returns None
+    unless `required`, in which case it raises the "did not include" error.
+    """
+    if source.url_path:
+        for holder in holders:
+            value = _select_string(holder, source.url_path)
+            if value:
+                return await _validated_followup_url(value, api_url, label)
+        if required:
+            raise UpstreamApiError(
+                f"Provider response did not include a {label} URL at {source.url_path}"
+            )
+        return None
+    if source.url_template:
+        resolved = task_id
+        for holder in holders:
+            if resolved:
+                break
+            resolved = _select_string(holder, source.task_id_path)
+        if not resolved:
+            if required:
+                raise UpstreamApiError(
+                    f"Provider response did not include a task id at {source.task_id_path}"
+                )
+            return None
+        return await _validated_upstream_url(
+            api_url.rstrip("/") + render_url_template(source.url_template, resolved)
+        )
+    return None
+
+
 async def _resolve_submit_result_url(
     cfg: ResolvedProviderConfig,
     *,
@@ -416,18 +459,14 @@ async def _resolve_submit_result_url(
 ) -> str | None:
     source = cfg.result
     try:
-        if source.url_path:
-            value = _select_string(submit_result, source.url_path)
-            if not value:
-                return None
-            return await _validated_followup_url(value, api_url, "result")
-        if source.task_id_path and source.url_template:
-            resolved = task_id or _select_string(submit_result, source.task_id_path)
-            if not resolved:
-                return None
-            return await _validated_upstream_url(
-                api_url.rstrip("/") + render_url_template(source.url_template, resolved)
-            )
+        return await _resolve_mapped_url(
+            source,
+            label="result",
+            holders=(submit_result,),
+            task_id=task_id,
+            api_url=api_url,
+            required=False,
+        )
     except UpstreamApiError as exc:
         if diag:
             diag.record_event(
@@ -437,7 +476,6 @@ async def _resolve_submit_result_url(
                 error=str(exc),
             )
         raise
-    return None
 
 
 async def _resolve_cancel_url(
@@ -452,16 +490,13 @@ async def _resolve_cancel_url(
     if cancel is None:
         return None
     try:
-        if cancel.url_path:
-            value = _select_string(submit_result, cancel.url_path)
-            if not value:
-                return None
-            return await _validated_followup_url(value, api_url, "cancel")
-        resolved = task_id or _select_string(submit_result, cancel.task_id_path)
-        if not resolved:
-            return None
-        return await _validated_upstream_url(
-            api_url.rstrip("/") + render_url_template(str(cancel.url_template), resolved)
+        return await _resolve_mapped_url(
+            cancel,
+            label="cancel",
+            holders=(submit_result,),
+            task_id=task_id,
+            api_url=api_url,
+            required=False,
         )
     except UpstreamApiError as exc:
         if diag:
@@ -485,27 +520,14 @@ async def _resolve_result_url(
 ) -> str | None:
     source = cfg.result
     try:
-        if source.url_path:
-            for holder in (submit_result, poll_result):
-                value = _select_string(holder, source.url_path)
-                if value:
-                    return await _validated_followup_url(value, api_url, "result")
-            raise UpstreamApiError(
-                f"Provider response did not include a result URL at {source.url_path}"
-            )
-        if source.task_id_path and source.url_template:
-            resolved = (
-                task_id
-                or _select_string(submit_result, source.task_id_path)
-                or _select_string(poll_result, source.task_id_path)
-            )
-            if not resolved:
-                raise UpstreamApiError(
-                    f"Provider response did not include a task id at {source.task_id_path}"
-                )
-            return await _validated_upstream_url(
-                api_url.rstrip("/") + render_url_template(source.url_template, resolved)
-            )
+        return await _resolve_mapped_url(
+            source,
+            label="result",
+            holders=(submit_result, poll_result),
+            task_id=task_id,
+            api_url=api_url,
+            required=True,
+        )
     except UpstreamApiError as exc:
         if diag:
             diag.set_code("result_url_missing")
@@ -516,7 +538,6 @@ async def _resolve_result_url(
                 error=str(exc),
             )
         raise
-    return None
 
 
 def _image_items(source: Any, cfg: ResolvedProviderConfig) -> list[dict[str, Any]]:
@@ -538,6 +559,388 @@ def _parse_deadline(value: Any) -> datetime | None:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed
+
+
+@dataclass
+class _RemoteTask:
+    """Everything needed to poll (and cancel) one submitted provider task."""
+
+    task_id: str | None
+    status_url: str
+    result_url: str | None
+    cancel_url: str | None
+    deadline: datetime
+    submit_result: dict[str, Any] | None = None
+
+
+async def _backoff_sleep(delay: float, deadline: datetime, base_interval: float) -> float:
+    """Sleep for `delay` (never past `deadline`) and return the next, longer delay."""
+    await _sleep(min(delay, max(0.0, (deadline - _now()).total_seconds())))
+    return min(delay * 1.25, max(float(base_interval), _MAX_POLL_DELAY_SECONDS))
+
+
+async def _resume_remote_task(
+    cfg: ResolvedProviderConfig,
+    remote_state: dict[str, Any],
+    *,
+    api_url: str,
+    progress: ProgressCallback | None,
+) -> _RemoteTask:
+    """Rebuild a `_RemoteTask` from a persisted "submitted" checkpoint."""
+    assert cfg.poll is not None
+    task_id = str(remote_state.get("task_id") or "") or None
+    status_url = await _validated_followup_url(
+        str(remote_state.get("status_url") or ""), api_url, "status"
+    )
+    result_url: str | None = None
+    if remote_state.get("result_url"):
+        result_url = await _validated_followup_url(
+            str(remote_state["result_url"]), api_url, "result"
+        )
+    cancel_url: str | None = None
+    if remote_state.get("cancel_url") and cfg.cancel is not None:
+        try:
+            cancel_url = await _validated_followup_url(
+                str(remote_state["cancel_url"]), api_url, "cancel"
+            )
+        except UpstreamApiError:
+            cancel_url = None
+    deadline = _parse_deadline(remote_state.get("deadline_at"))
+    if deadline is None:
+        deadline = _now() + timedelta(seconds=int(cfg.poll.timeout_seconds))
+    if progress:
+        progress("polling_provider", "Resuming provider task recovery")
+    return _RemoteTask(task_id, status_url, result_url, cancel_url, deadline)
+
+
+def _sync_result(
+    cfg: ResolvedProviderConfig,
+    submit_cfg: Any,
+    submit_result: dict[str, Any],
+    submit_url: str,
+    diag: UnitDiagnostics | None,
+) -> tuple[list[dict[str, Any]], str]:
+    items = _image_items(submit_result, cfg)
+    if not items:
+        if diag:
+            diag.set_code("result_extraction_failed")
+            diag.record_http(
+                "result",
+                method=submit_cfg.method,
+                url=submit_url,
+                snapshot=submit_result,
+                mapping_path=cfg.result.images_path,
+            )
+        raise UpstreamApiError(
+            f"Provider result did not include any images at {cfg.result.images_path}"
+        )
+    return items, f"{_PROVIDER_LABEL} result: {len(items)} image(s)"
+
+
+async def _submit_task(
+    cfg: ResolvedProviderConfig,
+    submit_cfg: Any,
+    *,
+    session: aiohttp.ClientSession,
+    api_url: str,
+    api_key: str,
+    payload: GenerateRequest,
+    prompt_guard: bool,
+    remote_state: dict[str, Any],
+    phase: str,
+    is_edit: bool,
+    edit: EditUploads | None,
+    progress: ProgressCallback | None,
+    socks5_proxy: str | None,
+    checkpoint: CheckpointCallback | None,
+    diag: UnitDiagnostics | None,
+) -> tuple[_RemoteTask | None, tuple[list[dict[str, Any]], str] | None]:
+    """Submit the task. Returns (remote task, None), or (None, sync result)."""
+    idempotency_key = str(remote_state.get("idempotency_key") or "")
+    if phase == "submitting":
+        if not (cfg.submit.idempotency_header and idempotency_key):
+            raise UpstreamApiError(
+                "Provider submit result is unknown and the mapping has no idempotency "
+                "key for this task; automatic resubmission is not attempted"
+            )
+    else:
+        idempotency_key = uuid.uuid4().hex if cfg.submit.idempotency_header else ""
+        remote_state = {
+            "phase": "submitting",
+            "mode": cfg.mode,
+            "operation": "edit" if is_edit else "generation",
+            "api_url": api_url,
+            "origin": secrets.canonical_origin(api_url),
+            "provider_config": cfg.snapshot,
+            "submitted_at": utc_now(),
+        }
+        if idempotency_key:
+            remote_state["idempotency_key"] = idempotency_key
+    if checkpoint is not None:
+        await checkpoint(dict(remote_state))
+
+    variables = build_template_variables(payload, prompt_guard=prompt_guard)
+    allowed = EDIT_TEMPLATE_VARIABLES if is_edit else TEMPLATE_VARIABLES
+    if is_edit:
+        assert edit is not None
+        variables.update(edit.inline_variables)
+    try:
+        body = render_template(submit_cfg.body, variables, allowed=allowed)
+    except ProviderMappingError as exc:
+        if diag:
+            diag.set_code("request_template_invalid")
+            diag.record_event("submit", "Cannot build provider request", error=str(exc))
+        raise UpstreamApiError(f"Cannot build provider request: {exc}") from exc
+
+    submit_path = render_submit_path(submit_cfg.path or cfg.submit.path, payload.model)
+    submit_url = api_url + submit_path
+    submit_url = append_query(submit_url, submit_cfg.query, variables, allowed=allowed)
+    submit_url = await _validated_upstream_url(submit_url)
+    await _warn_if_socks5_upstream_resolves_private(submit_url, socks5_proxy)
+
+    if progress:
+        progress("submitting_provider_task", "Submitting task to provider")
+    request_headers = _auth_headers(
+        cfg,
+        api_key,
+        idempotency_key=idempotency_key,
+        json_body=submit_cfg.body_format == "json",
+    )
+    try:
+        submit_result, submit_status = await _submit_provider_request(
+            session,
+            submit_cfg,
+            submit_url,
+            headers=request_headers,
+            socks5_proxy=socks5_proxy,
+            body=body,
+            uploads=edit,
+        )
+    except asyncio.CancelledError:
+        raise
+    except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as exc:
+        if diag:
+            diag.set_code("submit_unknown")
+            diag.record_event(
+                "submit",
+                "Provider submit request failed without a response; "
+                "the task is not resubmitted automatically",
+                error=str(exc),
+            )
+        raise UpstreamApiError(
+            "Provider submit request failed without a response; no automatic "
+            "resubmission was attempted"
+        ) from exc
+    if diag:
+        diag.record_http(
+            "submit",
+            method="POST" if submit_cfg.body_format == "multipart" else submit_cfg.method,
+            url=submit_url,
+            status=submit_status,
+            snapshot=submit_result,
+        )
+
+    if cfg.mode == "sync":
+        # The submit response carries the final images; there is no remote
+        # task to resume, so the "submitting" checkpoint stays the only
+        # recovery state (same-key retry or interrupted, per Phase 1).
+        return None, _sync_result(cfg, submit_cfg, submit_result, submit_url, diag)
+
+    assert cfg.poll is not None
+    task_id = _select_string(submit_result, cfg.poll.task_id_path)
+    if cfg.poll.task_id_path and not task_id:
+        if diag:
+            diag.set_code("task_id_missing")
+            diag.record_event(
+                "submit",
+                f"Provider response did not include a task id at {cfg.poll.task_id_path}",
+                mapping_path=cfg.poll.task_id_path,
+                error="task id missing",
+            )
+        raise UpstreamApiError(
+            f"Provider response did not include a task id at {cfg.poll.task_id_path}"
+        )
+    try:
+        status_url, task_id = await _resolve_status_url(
+            cfg, submit_result, task_id=task_id, api_url=api_url
+        )
+    except UpstreamApiError as exc:
+        if diag:
+            diag.set_code("task_id_missing" if cfg.poll.task_id_path else "status_url_missing")
+            diag.record_event(
+                "submit",
+                str(exc),
+                mapping_path=cfg.poll.url_path or cfg.poll.task_id_path,
+                error=str(exc),
+            )
+        raise
+    result_url = await _resolve_submit_result_url(
+        cfg, submit_result=submit_result, task_id=task_id, api_url=api_url, diag=diag
+    )
+    cancel_url = await _resolve_cancel_url(
+        cfg, submit_result=submit_result, task_id=task_id, api_url=api_url, diag=diag
+    )
+    task = _RemoteTask(
+        task_id=task_id,
+        status_url=status_url,
+        result_url=result_url,
+        cancel_url=cancel_url,
+        deadline=_now() + timedelta(seconds=int(cfg.poll.timeout_seconds)),
+        submit_result=submit_result,
+    )
+    if checkpoint is not None:
+        await checkpoint(
+            {
+                **remote_state,
+                "phase": "submitted",
+                "api_url": api_url,
+                "origin": secrets.canonical_origin(api_url),
+                "provider_config": cfg.snapshot,
+                "deadline_at": task.deadline.isoformat(),
+                "task_id": task_id,
+                "status_url": status_url,
+                "result_url": result_url,
+                "cancel_url": cancel_url,
+            }
+        )
+    return task, None
+
+
+async def _poll_until_done(
+    cfg: ResolvedProviderConfig,
+    task: _RemoteTask,
+    *,
+    session: aiohttp.ClientSession,
+    headers: dict[str, str],
+    socks5_proxy: str | None,
+    progress: ProgressCallback | None,
+    diag: UnitDiagnostics | None,
+) -> dict[str, Any]:
+    """Poll the status URL until a terminal status; returns the final poll response."""
+    assert cfg.poll is not None
+    poll_method = str(getattr(cfg.poll, "method", "GET") or "GET")
+    delay = float(cfg.poll.interval_seconds)
+    poll_count = 0
+    last_status: str | None = None
+    while True:
+        remaining = (task.deadline - _now()).total_seconds()
+        if remaining <= 0:
+            raise _PollTimeout()
+        try:
+            poll_result, poll_status = await asyncio.wait_for(
+                _poll_json(
+                    session,
+                    task.status_url,
+                    headers=headers,
+                    socks5_proxy=socks5_proxy,
+                    method=poll_method,
+                ),
+                timeout=remaining,
+            )
+        except _RetryablePollError as exc:
+            if diag:
+                diag.record_http(
+                    "poll",
+                    method=poll_method,
+                    url=task.status_url,
+                    status=exc.status,
+                    error=str(exc),
+                    extra={"retryable": True},
+                )
+        except _PollHttpError as exc:
+            if diag:
+                diag.record_http(
+                    "poll",
+                    method=poll_method,
+                    url=task.status_url,
+                    status=exc.status,
+                    error=str(exc),
+                )
+            raise
+        except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as exc:
+            if diag:
+                diag.record_event("poll", "Provider poll request failed", error=str(exc))
+        else:
+            poll_count += 1
+            raw_status = select_first(poll_result, cfg.poll.status_path)
+            status = "" if raw_status is None else str(raw_status)
+            if diag and (poll_count == 1 or status != last_status):
+                diag.record_http(
+                    "poll",
+                    method=poll_method,
+                    url=task.status_url,
+                    status=poll_status,
+                    snapshot=poll_result,
+                    extra={"status": status, "poll_count": poll_count},
+                )
+            last_status = status
+            if status in cfg.poll.done:
+                return poll_result
+            if status in cfg.poll.failed:
+                if diag:
+                    diag.set_code("provider_task_failed")
+                raise UpstreamApiError(
+                    redact_sensitive_text(f"Provider task failed with status {status}")
+                )
+            if _now() >= task.deadline:
+                raise _PollTimeout()
+            if progress:
+                progress("polling_provider", f"Provider task status: {status or 'unknown'}")
+            delay = await _backoff_sleep(delay, task.deadline, cfg.poll.interval_seconds)
+            continue
+        # Retryable HTTP error or transport failure: back off and poll again.
+        if _now() >= task.deadline:
+            raise _PollTimeout() from None
+        if progress:
+            progress("polling_provider", "Provider poll request failed; retrying")
+        delay = await _backoff_sleep(delay, task.deadline, cfg.poll.interval_seconds)
+
+
+async def _fetch_result_items(
+    cfg: ResolvedProviderConfig,
+    task: _RemoteTask,
+    poll_result: dict[str, Any],
+    *,
+    session: aiohttp.ClientSession,
+    api_url: str,
+    headers: dict[str, str],
+    socks5_proxy: str | None,
+    progress: ProgressCallback | None,
+    diag: UnitDiagnostics | None,
+) -> tuple[list[dict[str, Any]], str]:
+    source: Any = poll_result
+    result_url = task.result_url
+    if result_url is None:
+        result_url = await _resolve_result_url(
+            cfg,
+            submit_result=task.submit_result,
+            poll_result=poll_result,
+            task_id=task.task_id,
+            api_url=api_url,
+            diag=diag,
+        )
+    if result_url:
+        if progress:
+            progress("fetching_provider_result", "Fetching provider result")
+        source, _status = await _request_json(
+            session, "GET", result_url, headers=headers, socks5_proxy=socks5_proxy
+        )
+
+    items = _image_items(source, cfg)
+    if not items:
+        if diag:
+            diag.set_code("result_extraction_failed")
+            diag.record_http(
+                "result",
+                method="GET",
+                url=result_url or task.status_url,
+                snapshot=source,
+                mapping_path=cfg.result.images_path,
+            )
+        raise UpstreamApiError(
+            f"Provider result did not include any images at {cfg.result.images_path}"
+        )
+    return items, f"{_PROVIDER_LABEL} result: {len(items)} image(s)"
 
 
 async def run_async_provider(
@@ -575,7 +978,6 @@ async def run_async_provider(
         )
     submit_cfg = cfg.edit_submit if is_edit else cfg.submit
     assert submit_cfg is not None
-    sync_mode = cfg.mode == "sync"
     session = get_pool().get(timeout_kind=TIMEOUT_UPSTREAM, socks5_proxy=socks5_proxy)
     state_api_url = str(api_url).rstrip("/")
     remote_state = dict(remote or {})
@@ -588,301 +990,48 @@ async def run_async_provider(
         state_api_url = str(remote_state.get("api_url") or state_api_url).rstrip("/")
     headers = _auth_headers(cfg, api_key)
 
-    submit_result: dict[str, Any] | None = None
-    status_url = ""
-    task_id: str | None = None
-    result_url: str | None = None
-    cancel_url: str | None = None
-
     if phase == "submitted":
-        task_id = str(remote_state.get("task_id") or "") or None
-        status_url = await _validated_followup_url(
-            str(remote_state.get("status_url") or ""), state_api_url, "status"
+        task = await _resume_remote_task(
+            cfg, remote_state, api_url=state_api_url, progress=progress
         )
-        if remote_state.get("result_url"):
-            result_url = await _validated_followup_url(
-                str(remote_state["result_url"]), state_api_url, "result"
-            )
-        if remote_state.get("cancel_url") and cfg.cancel is not None:
-            try:
-                cancel_url = await _validated_followup_url(
-                    str(remote_state["cancel_url"]), state_api_url, "cancel"
-                )
-            except UpstreamApiError:
-                cancel_url = None
-        deadline = _parse_deadline(remote_state.get("deadline_at"))
-        if deadline is None:
-            assert cfg.poll is not None
-            deadline = _now() + timedelta(seconds=int(cfg.poll.timeout_seconds))
-        if progress:
-            progress("polling_provider", "Resuming provider task recovery")
     else:
-        idempotency_key = str(remote_state.get("idempotency_key") or "")
-        if phase == "submitting":
-            if not (cfg.submit.idempotency_header and idempotency_key):
-                raise UpstreamApiError(
-                    "Provider submit result is unknown and the mapping has no idempotency "
-                    "key for this task; automatic resubmission is not attempted"
-                )
-        else:
-            idempotency_key = uuid.uuid4().hex if cfg.submit.idempotency_header else ""
-            remote_state = {
-                "phase": "submitting",
-                "mode": cfg.mode,
-                "operation": "edit" if is_edit else "generation",
-                "api_url": state_api_url,
-                "origin": secrets.canonical_origin(state_api_url),
-                "provider_config": cfg.snapshot,
-                "submitted_at": utc_now(),
-            }
-            if idempotency_key:
-                remote_state["idempotency_key"] = idempotency_key
-        if checkpoint is not None:
-            await checkpoint(dict(remote_state))
-
-        variables = build_template_variables(payload, prompt_guard=prompt_guard)
-        allowed = EDIT_TEMPLATE_VARIABLES if is_edit else TEMPLATE_VARIABLES
-        if is_edit:
-            assert edit is not None
-            variables.update(edit.inline_variables)
-        try:
-            body = render_template(submit_cfg.body, variables, allowed=allowed)
-        except ProviderMappingError as exc:
-            if diag:
-                diag.set_code("request_template_invalid")
-                diag.record_event("submit", "Cannot build provider request", error=str(exc))
-            raise UpstreamApiError(f"Cannot build provider request: {exc}") from exc
-
-        submit_path = render_submit_path(
-            submit_cfg.path or cfg.submit.path, payload.model
-        )
-        submit_url = state_api_url + submit_path
-        submit_url = append_query(submit_url, submit_cfg.query, variables, allowed=allowed)
-        submit_url = await _validated_upstream_url(submit_url)
-        await _warn_if_socks5_upstream_resolves_private(submit_url, socks5_proxy)
-
-        if progress:
-            progress("submitting_provider_task", "Submitting task to provider")
-        request_headers = _auth_headers(
+        task, sync_result = await _submit_task(
             cfg,
-            api_key,
-            idempotency_key=idempotency_key,
-            json_body=submit_cfg.body_format == "json",
-        )
-        try:
-            submit_result, submit_status = await _submit_provider_request(
-                session,
-                submit_cfg,
-                submit_url,
-                headers=request_headers,
-                socks5_proxy=socks5_proxy,
-                body=body,
-                uploads=edit,
-            )
-        except asyncio.CancelledError:
-            raise
-        except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as exc:
-            if diag:
-                diag.set_code("submit_unknown")
-                diag.record_event(
-                    "submit",
-                    "Provider submit request failed without a response; "
-                    "the task is not resubmitted automatically",
-                    error=str(exc),
-                )
-            raise UpstreamApiError(
-                "Provider submit request failed without a response; no automatic "
-                "resubmission was attempted"
-            ) from exc
-        if diag:
-            diag.record_http(
-                "submit",
-                method="POST" if submit_cfg.body_format == "multipart" else submit_cfg.method,
-                url=submit_url,
-                status=submit_status,
-                snapshot=submit_result,
-            )
-
-        if sync_mode:
-            # The submit response carries the final images; there is no remote
-            # task to resume, so the "submitting" checkpoint stays the only
-            # recovery state (same-key retry or interrupted, per Phase 1).
-            items = _image_items(submit_result, cfg)
-            if not items:
-                if diag:
-                    diag.set_code("result_extraction_failed")
-                    diag.record_http(
-                        "result",
-                        method=submit_cfg.method,
-                        url=submit_url,
-                        snapshot=submit_result,
-                        mapping_path=cfg.result.images_path,
-                    )
-                raise UpstreamApiError(
-                    f"Provider result did not include any images at {cfg.result.images_path}"
-                )
-            return items, f"{_PROVIDER_LABEL} result: {len(items)} image(s)"
-
-        assert cfg.poll is not None
-        task_id = _select_string(submit_result, cfg.poll.task_id_path)
-        if cfg.poll.task_id_path and not task_id:
-            if diag:
-                diag.set_code("task_id_missing")
-                diag.record_event(
-                    "submit",
-                    f"Provider response did not include a task id at {cfg.poll.task_id_path}",
-                    mapping_path=cfg.poll.task_id_path,
-                    error="task id missing",
-                )
-            raise UpstreamApiError(
-                f"Provider response did not include a task id at {cfg.poll.task_id_path}"
-            )
-        try:
-            status_url, task_id = await _resolve_status_url(
-                cfg, submit_result, task_id=task_id, api_url=state_api_url
-            )
-        except UpstreamApiError as exc:
-            if diag:
-                diag.set_code(
-                    "task_id_missing" if cfg.poll.task_id_path else "status_url_missing"
-                )
-                diag.record_event(
-                    "submit",
-                    str(exc),
-                    mapping_path=cfg.poll.url_path or cfg.poll.task_id_path,
-                    error=str(exc),
-                )
-            raise
-        result_url = await _resolve_submit_result_url(
-            cfg,
-            submit_result=submit_result,
-            task_id=task_id,
+            submit_cfg,
+            session=session,
             api_url=state_api_url,
+            api_key=api_key,
+            payload=payload,
+            prompt_guard=prompt_guard,
+            remote_state=remote_state,
+            phase=phase,
+            is_edit=is_edit,
+            edit=edit,
+            progress=progress,
+            socks5_proxy=socks5_proxy,
+            checkpoint=checkpoint,
             diag=diag,
         )
-        cancel_url = await _resolve_cancel_url(
-            cfg,
-            submit_result=submit_result,
-            task_id=task_id,
-            api_url=state_api_url,
-            diag=diag,
-        )
-        deadline = _now() + timedelta(
-            seconds=int(cfg.poll.timeout_seconds)
-        )
-        remote_state = {
-            **remote_state,
-            "phase": "submitted",
-            "api_url": state_api_url,
-            "origin": secrets.canonical_origin(state_api_url),
-            "provider_config": cfg.snapshot,
-            "deadline_at": deadline.isoformat(),
-            "task_id": task_id,
-            "status_url": status_url,
-            "result_url": result_url,
-            "cancel_url": cancel_url,
-        }
-        if checkpoint is not None:
-            await checkpoint(dict(remote_state))
+        if sync_result is not None:
+            return sync_result
+        assert task is not None
 
     assert cfg.poll is not None
-    poll_method = str(getattr(cfg.poll, "method", "GET") or "GET")
-    delay = float(cfg.poll.interval_seconds)
-    poll_result: dict[str, Any] = {}
-    poll_count = 0
-    last_status: str | None = None
     try:
-        while True:
-            remaining = (deadline - _now()).total_seconds()
-            if remaining <= 0:
-                raise _PollTimeout()
-            try:
-                poll_result, poll_status = await asyncio.wait_for(
-                    _poll_json(
-                        session,
-                        status_url,
-                        headers=headers,
-                        socks5_proxy=socks5_proxy,
-                        method=poll_method,
-                    ),
-                    timeout=remaining,
-                )
-            except _RetryablePollError as exc:
-                if diag:
-                    diag.record_http(
-                        "poll",
-                        method=poll_method,
-                        url=status_url,
-                        status=exc.status,
-                        error=str(exc),
-                        extra={"retryable": True},
-                    )
-                if _now() >= deadline:
-                    raise _PollTimeout() from None
-                if progress:
-                    progress("polling_provider", "Provider poll request failed; retrying")
-                await _sleep(min(delay, max(0.0, (deadline - _now()).total_seconds())))
-                delay = min(
-                    delay * 1.25, max(float(cfg.poll.interval_seconds), _MAX_POLL_DELAY_SECONDS)
-                )
-                continue
-            except _PollHttpError as exc:
-                if diag:
-                    diag.record_http(
-                        "poll",
-                        method=poll_method,
-                        url=status_url,
-                        status=exc.status,
-                        error=str(exc),
-                    )
-                raise
-            except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as exc:
-                if diag:
-                    diag.record_event("poll", "Provider poll request failed", error=str(exc))
-                if _now() >= deadline:
-                    raise _PollTimeout() from None
-                if progress:
-                    progress("polling_provider", "Provider poll request failed; retrying")
-                await _sleep(min(delay, max(0.0, (deadline - _now()).total_seconds())))
-                delay = min(
-                    delay * 1.25, max(float(cfg.poll.interval_seconds), _MAX_POLL_DELAY_SECONDS)
-                )
-                continue
-
-            poll_count += 1
-            raw_status = select_first(poll_result, cfg.poll.status_path)
-            status = "" if raw_status is None else str(raw_status)
-            if diag and (poll_count == 1 or status != last_status):
-                diag.record_http(
-                    "poll",
-                    method=poll_method,
-                    url=status_url,
-                    status=poll_status,
-                    snapshot=poll_result,
-                    extra={"status": status, "poll_count": poll_count},
-                )
-            last_status = status
-            if status in cfg.poll.done:
-                break
-            if status in cfg.poll.failed:
-                if diag:
-                    diag.set_code("provider_task_failed")
-                raise UpstreamApiError(
-                    redact_sensitive_text(f"Provider task failed with status {status}")
-                )
-            if _now() >= deadline:
-                raise _PollTimeout()
-            if progress:
-                progress("polling_provider", f"Provider task status: {status or 'unknown'}")
-            await _sleep(min(delay, max(0.0, (deadline - _now()).total_seconds())))
-            delay = min(
-                delay * 1.25, max(float(cfg.poll.interval_seconds), _MAX_POLL_DELAY_SECONDS)
-            )
+        poll_result = await _poll_until_done(
+            cfg,
+            task,
+            session=session,
+            headers=headers,
+            socks5_proxy=socks5_proxy,
+            progress=progress,
+            diag=diag,
+        )
     except _PollTimeout:
         if diag:
             diag.set_code("poll_timeout")
         await _cancel_remote(
-            session, cfg, cancel_url=cancel_url, headers=headers, socks5_proxy=socks5_proxy
+            session, cfg, cancel_url=task.cancel_url, headers=headers, socks5_proxy=socks5_proxy
         )
         raise UpstreamApiError(
             f"Provider task did not finish within {cfg.poll.timeout_seconds} seconds"
@@ -896,39 +1045,22 @@ async def run_async_provider(
                 cancel_allowed = False
         if cancel_allowed:
             await _cancel_remote(
-                session, cfg, cancel_url=cancel_url, headers=headers, socks5_proxy=socks5_proxy
+                session,
+                cfg,
+                cancel_url=task.cancel_url,
+                headers=headers,
+                socks5_proxy=socks5_proxy,
             )
         raise
 
-    source: Any = poll_result
-    if result_url is None:
-        result_url = await _resolve_result_url(
-            cfg,
-            submit_result=submit_result,
-            poll_result=poll_result,
-            task_id=task_id,
-            api_url=state_api_url,
-            diag=diag,
-        )
-    if result_url:
-        if progress:
-            progress("fetching_provider_result", "Fetching provider result")
-        source, _status = await _request_json(
-            session, "GET", result_url, headers=headers, socks5_proxy=socks5_proxy
-        )
-
-    items = _image_items(source, cfg)
-    if not items:
-        if diag:
-            diag.set_code("result_extraction_failed")
-            diag.record_http(
-                "result",
-                method="GET",
-                url=result_url or status_url,
-                snapshot=source,
-                mapping_path=cfg.result.images_path,
-            )
-        raise UpstreamApiError(
-            f"Provider result did not include any images at {cfg.result.images_path}"
-        )
-    return items, f"{_PROVIDER_LABEL} result: {len(items)} image(s)"
+    return await _fetch_result_items(
+        cfg,
+        task,
+        poll_result,
+        session=session,
+        api_url=state_api_url,
+        headers=headers,
+        socks5_proxy=socks5_proxy,
+        progress=progress,
+        diag=diag,
+    )
