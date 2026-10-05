@@ -16,7 +16,7 @@
 
   <p>
     <img alt="CI 通过" src="https://img.shields.io/badge/CI-passing-2cc653?logo=github&logoColor=white" />
-    <img alt="版本 v1.7.1" src="https://img.shields.io/badge/release-v1.7.1-0e8dcc" />
+    <img alt="版本 v1.7.10" src="https://img.shields.io/badge/release-v1.7.10-0e8dcc" />
     <img alt="Python 3.11+" src="https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white" />
     <img alt="Node.js 24" src="https://img.shields.io/badge/Node.js-24-339933?logo=node.js&logoColor=white" />
     <img alt="FastAPI 0.115+" src="https://img.shields.io/badge/FastAPI-0.115+-009688?logo=fastapi&logoColor=white" />
@@ -272,6 +272,7 @@ ALLOW_UNAUTHENTICATED=true .venv/bin/granian --interface asgi backend.app.main:a
 | `R2_*` | 可选 Cloudflare R2 Gallery 备份配置；自定义 endpoint host 需要配置 `R2_ENDPOINT_HOST_ALLOWLIST`。 |
 | `NODEIMAGE_API_KEY` | 可选 NodeImage API key，用于服务端 Gallery 图片上传；也可在 Web Settings 中配置 env ref。 |
 | `PUBLIC_ORIGIN` / `ALLOWED_HOSTS` | 反向代理 Host/CSRF 加固。 |
+| `UPSTREAM_USER_AGENT` | 上游服务商请求与图片下载请求使用的 `User-Agent`（默认 `opencode`）。 |
 | `ENABLE_NGINX_ACCEL_REDIRECT` / `PUBLIC_IMAGE_BASE_URL` / `PUBLIC_THUMBNAIL_BASE_URL` | 可选 nginx/CDN 图片字节服务行为。 |
 | `GRANIAN_*` | 生产运行时进程、线程和静态资源调优。 |
 | `ENABLE_METRICS` | 启用 JSON/Prometheus metrics 接口。 |
@@ -292,7 +293,7 @@ Overall Config 会把 override 持久化到 SQLite。部分配置可热更新；
 7. 保存预设，必要时执行健康检查。
 8. 输入 prompt 生成图片，或上传/选择源图执行编辑。
 9. 在 Gallery 中复用参数、筛选、收藏、批量操作、导入导出、执行 R2 同步或上传到 NodeImage。
-10. 可以把 `/?apiUrl=https://api.example.com&apiModel=gpt-image-2` 存为书签。打开后会提示用该 URL 和模型新建预设；确认前不会保存任何内容，API 密钥保持为空，并且这些参数会立即从地址栏移除。只接受 `https` URL，也不会从 URL 读取任何凭据。（`?model=` 已被 Gallery 筛选占用，所以参数名是 `apiModel`。）
+10. 可以把 `/?apiUrl=https://api.example.com&apiModel=gpt-image-2` 存为书签。打开后会提示用该 URL 和模型新建预设；确认横幅会突出显示目标主机，并提醒仅为可信主机输入 API 密钥。确认前不会保存任何内容，API 密钥保持为空，并且这些参数会立即从地址栏移除。只接受 `https` URL，也不会从 URL 读取任何凭据。（`?model=` 已被 Gallery 筛选占用，所以参数名是 `apiModel`。）
 11. 用“导出”把所选预设下载为带版本号、不含密钥的 JSON 包；用“分享链接”复制 `?preset=` 链接；用“导入”先预览文件、剪贴板 JSON 或分享链接，再确认应用。预设可通过拖拽手柄或上下箭头排序，顺序保存在 SQLite 中。
 12. 按需在“设置 → AI 助手”中开启 Agent 模式（选择支持 function calling 的模型），然后在页眉切换到 **Agent**。描述需求，用 `@`（如 `@round-1-image-1` 或 `@第1轮图1`）引用之前的图片，也可从 Gallery 添加图片，按 Ctrl/Cmd+Enter 发送。运行中可点“停止”取消；生成的图片会出现在 Gallery。
 

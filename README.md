@@ -18,7 +18,7 @@
 
   <p>
     <img alt="CI passing" src="https://img.shields.io/badge/CI-passing-2cc653?logo=github&logoColor=white" />
-    <img alt="Release v1.7.1" src="https://img.shields.io/badge/release-v1.7.1-0e8dcc" />
+    <img alt="Release v1.7.10" src="https://img.shields.io/badge/release-v1.7.10-0e8dcc" />
     <img alt="Python 3.11+" src="https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white" />
     <img alt="Node.js 24" src="https://img.shields.io/badge/Node.js-24-339933?logo=node.js&logoColor=white" />
     <img alt="FastAPI 0.115+" src="https://img.shields.io/badge/FastAPI-0.115+-009688?logo=fastapi&logoColor=white" />
@@ -283,6 +283,7 @@ Most runtime options live in `.env.example`. API presets, prompt optimizer, R2 b
 | `R2_*` | Optional Cloudflare R2 gallery backup sync settings; custom endpoint hosts require `R2_ENDPOINT_HOST_ALLOWLIST`. |
 | `NODEIMAGE_API_KEY` | Optional NodeImage API key for server-side Gallery uploads. |
 | `PUBLIC_ORIGIN` / `ALLOWED_HOSTS` | Reverse-proxy Host/CSRF hardening. |
+| `UPSTREAM_USER_AGENT` | `User-Agent` header sent on upstream provider and image-download requests (default `opencode`). |
 | `ENABLE_NGINX_ACCEL_REDIRECT` / `PUBLIC_IMAGE_BASE_URL` / `PUBLIC_THUMBNAIL_BASE_URL` | Optional nginx/CDN image byte serving behavior. |
 | `GRANIAN_*` | Production runtime process/thread/static-asset tuning. |
 | `ENABLE_METRICS` | Enables JSON/Prometheus metrics endpoints. |
@@ -317,7 +318,7 @@ With `ENABLE_METRICS=true`, `/api/metrics` exposes diagnostics for sizing SQLite
 7. Save the preset and run its health check if needed.
 8. Generate images from a prompt, or upload/select source images and run edits.
 9. Use Gallery for reuse, filtering, favorites, batch actions, import/export, and R2 sync.
-10. Bookmark a preset shortcut with `/?apiUrl=https://api.example.com&apiModel=gpt-image-2`. Opening it offers to create a new preset with that URL and model; nothing is saved until you confirm, the API key stays empty, and the parameters are removed from the address bar. Only `https` URLs are accepted and credentials are never read from the URL. (`?model=` is the gallery filter, hence `apiModel`.)
+10. Bookmark a preset shortcut with `/?apiUrl=https://api.example.com&apiModel=gpt-image-2`. Opening it offers to create a new preset with that URL and model; the confirmation banner shows the destination host prominently and warns to enter an API key only for a trusted host. Nothing is saved until you confirm, the API key stays empty, and the parameters are removed from the address bar. Only `https` URLs are accepted and credentials are never read from the URL. (`?model=` is the gallery filter, hence `apiModel`.)
 11. Use **Export** to download the selected preset as a versioned JSON package (never containing the key), **Share link** to copy a `?preset=` link, and **Import** to preview a file, clipboard JSON, or shared link before applying it. Order presets with the drag handle or the arrow buttons; the order is stored in SQLite.
 12. Optionally enable Agent mode in Settings → AI Assistant (pick a model that supports function calling), then switch to **Agent** in the header. Describe what you want, reference earlier images with `@` (for example `@round-1-image-1`), attach gallery images, and press Ctrl/Cmd+Enter. Use Stop to cancel a running reply; generated images appear in the gallery.
 

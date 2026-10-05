@@ -16,7 +16,7 @@
 
   <p>
     <img alt="CI 通過" src="https://img.shields.io/badge/CI-passing-2cc653?logo=github&logoColor=white" />
-    <img alt="版本 v1.7.1" src="https://img.shields.io/badge/release-v1.7.1-0e8dcc" />
+    <img alt="版本 v1.7.10" src="https://img.shields.io/badge/release-v1.7.10-0e8dcc" />
     <img alt="Python 3.11+" src="https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white" />
     <img alt="Node.js 24" src="https://img.shields.io/badge/Node.js-24-339933?logo=node.js&logoColor=white" />
     <img alt="FastAPI 0.115+" src="https://img.shields.io/badge/FastAPI-0.115+-009688?logo=fastapi&logoColor=white" />
@@ -272,6 +272,7 @@ ALLOW_UNAUTHENTICATED=true .venv/bin/granian --interface asgi backend.app.main:a
 | `R2_*` | 選用的 Cloudflare R2 Gallery 備份設定；自訂 Endpoint Host 須設定 `R2_ENDPOINT_HOST_ALLOWLIST`。 |
 | `NODEIMAGE_API_KEY` | 選用的 NodeImage API key，用於從伺服器上傳 Gallery 圖片；也可在 Web Settings 中設定 env ref。 |
 | `PUBLIC_ORIGIN` / `ALLOWED_HOSTS` | Reverse Proxy Host/CSRF 強化。 |
+| `UPSTREAM_USER_AGENT` | 上游供應商要求與圖片下載要求使用的 `User-Agent`（預設 `opencode`）。 |
 | `ENABLE_NGINX_ACCEL_REDIRECT` / `PUBLIC_IMAGE_BASE_URL` / `PUBLIC_THUMBNAIL_BASE_URL` | 選用的 nginx/CDN 圖片位元組傳送行為。 |
 | `GRANIAN_*` | 正式環境程序、執行緒與靜態資源調校。 |
 | `ENABLE_METRICS` | 啟用 JSON/Prometheus 指標端點。 |
@@ -292,7 +293,7 @@ Overall Config 會將 Override 持久化至 SQLite。部分設定可熱更新；
 7. 儲存預設，必要時執行健康檢查。
 8. 輸入 Prompt 生成圖片，或上傳/選取來源圖片進行編輯。
 9. 在 Gallery 中沿用參數、篩選、收藏、批次操作、匯入/匯出、執行 R2 同步，或上傳至 NodeImage。
-10. 可以把 `/?apiUrl=https://api.example.com&apiModel=gpt-image-2` 存成書籤。開啟後會提示以該 URL 與模型建立新預設；確認前不會儲存任何內容，API 金鑰保持空白，且這些參數會立即從網址列移除。只接受 `https` URL，也不會從 URL 讀取任何憑證。（`?model=` 已被 Gallery 篩選占用，因此參數名稱是 `apiModel`。）
+10. 可以把 `/?apiUrl=https://api.example.com&apiModel=gpt-image-2` 存成書籤。開啟後會提示以該 URL 與模型建立新預設；確認橫幅會醒目顯示目標主機，並提醒僅為可信主機輸入 API 金鑰。確認前不會儲存任何內容，API 金鑰保持空白，且這些參數會立即從網址列移除。只接受 `https` URL，也不會從 URL 讀取任何憑證。（`?model=` 已被 Gallery 篩選占用，因此參數名稱是 `apiModel`。）
 11. 用「匯出」把所選預設下載成帶版本、不含金鑰的 JSON 套件；用「分享連結」複製 `?preset=` 連結；用「匯入」先預覽檔案、剪貼簿 JSON 或分享連結，再確認套用。預設可透過拖曳手柄或上下箭頭排序，順序儲存在 SQLite。
 12. 視需要在「設定 → AI Assistant」中開啟 Agent 模式（選擇支援 function calling 的模型），然後在頁首切換到 **Agent**。描述需求，用 `@`（例如 `@round-1-image-1` 或 `@第1輪圖1`）引用先前的圖片，也可從 Gallery 加入圖片，按 Ctrl/Cmd+Enter 送出。執行中可按「停止」取消；產生的圖片會出現在 Gallery。
 
