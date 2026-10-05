@@ -1,0 +1,35 @@
+# Keeps the modules cleaned up in the v1.7.0-v1.7.8 review free of unused
+# imports and variables. Extend FILES as more modules are cleaned; the legacy
+# re-export facades under backend/app/repositories/db are intentionally excluded.
+name: Lint
+
+on:
+  push:
+    paths: ["backend/**", ".github/workflows/lint.yml"]
+  pull_request:
+    paths: ["backend/**", ".github/workflows/lint.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  ruff-unused:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check unused imports and variables
+        env:
+          FILES: >-
+            backend/app/api/routers/settings.py
+            backend/app/core/diagnostics.py
+            backend/app/core/overall_config.py
+            backend/app/core/redaction.py
+            backend/app/integrations/upstream/async_provider.py
+            backend/app/integrations/upstream/generation.py
+            backend/app/integrations/upstream/payloads.py
+            backend/app/services/agent_refs.py
+            backend/app/services/presets.py
+        run: |
+          # shellcheck disable=SC2086
+          pipx run ruff check --select F401,F841 $FILES
