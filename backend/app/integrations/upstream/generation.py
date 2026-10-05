@@ -139,7 +139,7 @@ async def _prepare_upstream_request(
 
     headers = {
         "Authorization": f"Bearer {api_key}",
-        "User-Agent": "opencode",
+        "User-Agent": config.UPSTREAM_USER_AGENT,
     }
     if json_content_type:
         headers["Content-Type"] = "application/json"

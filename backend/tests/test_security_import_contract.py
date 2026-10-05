@@ -556,6 +556,7 @@ def test_prepare_upstream_request_centralizes_security_headers_and_peer_check(tm
     monkeypatch.setattr(upstream_client, "_warn_if_socks5_upstream_resolves_private", fake_warn)
     monkeypatch.setattr(upstream_client.ssrf, "validate_upstream_url_async", fake_validate)
     monkeypatch.setattr(upstream_client.ssrf, "validate_response_peer_ip", fake_peer)
+    monkeypatch.setattr(config, "UPSTREAM_USER_AGENT", "panel-test-agent")
     monkeypatch.setattr(upstream_client, "get_pool", lambda: FakePool())
 
     prepared = asyncio.run(
@@ -569,7 +570,7 @@ def test_prepare_upstream_request_centralizes_security_headers_and_peer_check(tm
     assert prepared.upstream_url == "https://api.example.com/v1/images/generations"
     assert prepared.headers == {
         "Authorization": "Bearer key",
-        "User-Agent": "opencode",
+        "User-Agent": "panel-test-agent",
         "Content-Type": "application/json",
     }
 

@@ -37,3 +37,45 @@ def test_json_body_replay_coalesces_tiny_frames_and_preserves_disconnect(disconn
     assert len(received) == (2 if disconnect else 1)
     if disconnect:
         assert received[1] == {"type": "http.disconnect"}
+
+
+def test_path_limit_matches_whole_segments_only():
+    from backend.app.api.body_limit import _max_body_for_path
+    from backend.app.core import settings as config
+
+    import_limit = config.IMPORT_ARCHIVE_MAX_MB * 1024 * 1024
+    assert _max_body_for_path("/api/import") == import_limit
+    assert _max_body_for_path("/api/import/") == import_limit
+    assert _max_body_for_path("/api/imports", "application/json") == config.MAX_JSON_BODY_MB * 1024 * 1024
+    assert _max_body_for_path("/api/importer") != import_limit
+
+
+def test_bodyless_methods_skip_route_scan():
+    app = FastAPI()
+
+    @app.get("/ping")
+    def ping():
+        return {}
+
+    class ExplodingRoutes:
+        def __iter__(self):
+            raise AssertionError("GET requests must not scan routes")
+
+    reached = []
+
+    async def downstream(scope, receive, send):
+        reached.append(scope["path"])
+
+    async def receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message):
+        pytest.fail("unexpected response")
+
+    class FakeApp:
+        routes = ExplodingRoutes()
+
+    scope = {"type": "http", "app": FakeApp(), "method": "GET", "path": "/ping", "root_path": "",
+             "headers": [], "scheme": "http"}
+    asyncio.run(BodyLimitMiddleware(downstream)(scope, receive, send))
+    assert reached == ["/ping"]

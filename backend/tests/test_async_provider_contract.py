@@ -370,3 +370,25 @@ def test_async_preset_health_reports_broken_stored_mapping(client, monkeypatch):
     checks = {check["name"]: check for check in body["checks"]}
     assert checks["provider_config"]["status"] == "error"
     assert body["status"] == "error"
+
+
+def test_backoff_sleep_grows_and_never_sleeps_past_deadline(monkeypatch):
+    import asyncio
+    from datetime import timedelta
+
+    from backend.app.integrations.upstream import async_provider
+
+    slept = []
+
+    async def fake_sleep(seconds):
+        slept.append(seconds)
+
+    monkeypatch.setattr(async_provider, "_sleep", fake_sleep)
+    deadline = async_provider._now() + timedelta(seconds=100)
+    nxt = asyncio.run(async_provider._backoff_sleep(4.0, deadline, 4.0))
+    assert slept == [4.0] and nxt == 5.0
+    # Delay is capped at the maximum poll delay.
+    assert asyncio.run(async_provider._backoff_sleep(15.0, deadline, 4.0)) == async_provider._MAX_POLL_DELAY_SECONDS
+    # An already-passed deadline sleeps for zero seconds.
+    asyncio.run(async_provider._backoff_sleep(4.0, async_provider._now() - timedelta(seconds=1), 4.0))
+    assert slept[-1] == 0.0

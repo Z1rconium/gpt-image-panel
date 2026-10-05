@@ -433,6 +433,7 @@ test('link parameters offer a new preset without saving anything', async ({ page
   const banner = drawer.getByTestId('settings-prefill-banner');
   await expect(banner).toContainText('https://new-gateway.example/v1', { timeout: 15_000 });
   await expect(banner).toContainText('gateway-model');
+  await expect(banner.getByTestId('settings-prefill-host')).toContainText('new-gateway.example');
   await expect(page).not.toHaveURL(/apiUrl|apiModel|apiKey/);
 
   const createRequest = page.waitForRequest(

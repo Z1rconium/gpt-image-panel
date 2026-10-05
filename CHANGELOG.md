@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.7.10
+
+- The `?apiUrl=` link banner now shows the destination host prominently and warns to enter an API key only for a trusted host.
+- Request body limits no longer scan routes for GET/HEAD/OPTIONS requests, and per-path limits (`/api/import`, `/api/edits`, `/api/assistant/image/prompt`) match whole path segments instead of any string prefix.
+- The upstream `User-Agent` (previously hard-coded in four places) is read from the new `UPSTREAM_USER_AGENT` setting; the default stays `opencode`.
+- Internal refactor, behavior unchanged: `run_async_provider` is split into resume, submit, poll and result-fetch helpers with a single poll backoff and one result/cancel URL resolver. `run_claimed_image_unit`, `create_turn` and the generation/edit API pair were deliberately not touched.
+- Validation: 889 backend tests pass (22 skipped); `svelte-check` and the 182 frontend unit tests pass; the two prefill-banner browser tests pass. The full browser suite was not run for this release.
+
 ## v1.7.9
 
 - Agent image aliases such as `@第N轮图M` accept at most 10 digits per number in the shared mention pattern; longer digit runs stay plain text instead of raising from Python's integer-conversion limit while building turn context. The branch-selection path keeps its explicit "not on this branch" error.
