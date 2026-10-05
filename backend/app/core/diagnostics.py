@@ -1,6 +1,6 @@
 """Bounded, redacted diagnostics for one image job unit.
 
-Records the submit/poll/result/download stages of a unit, including trimmed
+Records the submit/poll/result stages of a unit, including trimmed
 upstream response snapshots, so a failed mapping can be diagnosed from the job
 history. Everything stored here is redacted and size-capped: credentials are
 replaced, URL queries and fragments are stripped, image base64 is omitted, and
@@ -163,21 +163,6 @@ class UnitDiagnostics:
             "message": self._redact(message)[:_MAX_STRING_CHARS],
         }
         self._finish_record(record, snapshot=snapshot, mapping_path=mapping_path, error=error, extra=extra)
-
-    def record_download(
-        self,
-        *,
-        url: str | None = None,
-        status: int | None = None,
-        error: str | None = None,
-        extra: dict[str, Any] | None = None,
-    ) -> None:
-        record: dict[str, Any] = {"phase": "download", "at": utc_now()}
-        if url is not None:
-            record["url"] = self._redact(url)[:_MAX_STRING_CHARS]
-        if status is not None:
-            record["status"] = int(status)
-        self._finish_record(record, snapshot=None, mapping_path=None, error=error, extra=extra)
 
     def _finish_record(
         self,

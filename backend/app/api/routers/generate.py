@@ -71,7 +71,6 @@ def _unit_diagnostics_entry(unit: dict) -> dict:
             "has_result_url": bool(remote.get("result_url")),
             "has_cancel_url": bool(remote.get("cancel_url")),
             "has_idempotency_key": bool(remote.get("idempotency_key")),
-            "poll_count": remote.get("poll_count"),
         }
     return {
         "unit_id": str(unit.get("unit_id") or ""),

@@ -1,7 +1,6 @@
 import aiohttp
 import asyncio
 import base64
-import json
 import logging
 import time
 from contextlib import asynccontextmanager
@@ -285,9 +284,10 @@ async def save_gallery_entries_from_upstream_data(
             del image_bytes
 
     if total <= 1 or any(item.get("b64_json") for item in data):
-        entries = [await process_one(0, data[0])]
-        for image_index, image_data in enumerate(data[1:], start=1):
-            entries.append(await process_one(image_index, image_data))
+        entries = [
+            await process_one(image_index, image_data)
+            for image_index, image_data in enumerate(data)
+        ]
     else:
         sem = asyncio.Semaphore(DOWNLOAD_CONCURRENCY)
 
@@ -928,7 +928,6 @@ async def call_image_edit_api(
     mask_source: ImageEditSource | None = None,
     mask_coverage: float | None = None,
     prompt_guard: bool = False,
-    image_id_factory: Callable[[int], str] | None = None,
 ) -> list[GalleryEntry]:
     if not image_sources:
         raise UpstreamApiError("At least one edit source image is required")

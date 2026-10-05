@@ -164,7 +164,6 @@ class JobUnitRemoteSummary(BaseModel):
     has_result_url: bool = False
     has_cancel_url: bool = False
     has_idempotency_key: bool = False
-    poll_count: Optional[int] = None
 
 
 class JobUnitDiagnostics(BaseModel):

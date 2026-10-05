@@ -10,7 +10,9 @@ import re
 
 LABEL_PATTERN = r"round-\d+-(?:image|input)-\d+"
 LABEL_RE = re.compile(rf"^{LABEL_PATTERN}$")
-MENTION_RE = re.compile(rf"@({LABEL_PATTERN})|@第?(\d+)轮图(\d+)")
+# Alias numbers are untrusted text that reaches int(); bound them so a run of
+# thousands of digits is plain text instead of tripping Python's conversion cap.
+MENTION_RE = re.compile(rf"@({LABEL_PATTERN})|@第?(\d{{1,10}})轮图(\d{{1,10}})(?!\d)")
 REF_TAG_RE = re.compile(r"<ref\s+id=\"(" + LABEL_PATTERN + r")\"\s*/>")
 _ANY_REF_TAG_RE = re.compile(r"<(?:removed_)?ref\b[^>]*>")
 _TAG_HEADS = ("<ref", "<removed_ref")

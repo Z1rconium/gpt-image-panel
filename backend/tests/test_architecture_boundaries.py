@@ -57,7 +57,7 @@ ALLOWED_DEFERRED_IMPORTS: frozenset[str] = frozenset(
         "backend/app/api/routers/settings.py:update_settings -> backend.app.services.presets",
         "backend/app/core/overall_config.py:apply_rows_to_config -> backend.app.core.secrets",
         "backend/app/core/overall_config.py:apply_rows_to_config -> backend.app.core.security",
-        "backend/app/core/redaction.py:redact_sensitive_text -> backend.app.core.secrets",
+        "backend/app/core/redaction.py:_active_secrets -> backend.app.core.secrets",
         "backend/app/core/secrets.py:_builtin_entries -> backend.app.core",
         "backend/app/core/secrets.py:active_secret_values -> backend.app.core",
         "backend/app/core/secrets.py:resolve_secret_reference -> backend.app.core.validators",

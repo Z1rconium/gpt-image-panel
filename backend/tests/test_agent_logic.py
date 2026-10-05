@@ -22,6 +22,15 @@ def test_mentions_parse_both_syntaxes_and_rewrite_to_tags():
     assert agent_refs.parse_user_mentions("email me@example.com or @round-x-image-1") == []
 
 
+def test_oversized_alias_numbers_are_plain_text_not_mentions():
+    # Thousands of digits must not reach int() (Python caps conversion at 4300).
+    huge = "9" * 5000
+    text = f"look at @第{huge}轮图1 and @第1轮图{huge} then @第2轮图3"
+    assert agent_refs.parse_user_mentions(text) == ["round-2-image-3"]
+    rewritten = agent_refs.rewrite_mentions_to_ref_tags(text)
+    assert rewritten.count("<ref") == 1 and f"@第{huge}轮图1" in rewritten
+
+
 def test_ref_tag_helpers():
     assert agent_refs.is_valid_label("round-12-image-3") and agent_refs.is_valid_label("round-1-input-1")
     assert not agent_refs.is_valid_label("round-1-video-1") and not agent_refs.is_valid_label("../x")
