@@ -44,18 +44,7 @@ frontend/node_modules/
 frontend/.svelte-kit/
 frontend/build/
 npm-debug.log*
-security_performance_feature_plan.md
-code_review_report.md
-architecture_code_review_2026-05-12.md
-REVIEW.md
 AGENTS.md
-CODE_REVIEW.md
-PERFORMANCE_UX_AUDIT.md
-CODE_REVIEW_OPTIMIZATION_PLAN.md
-REVIEW_REPORT.md
-docs/product-brainstorm-report.md
-CODEBASE_CLEANUP_PLAN.md
-STREAMING_PREVIEW_COST_ESTIMATION_PLAN.md
 # Local planning and acceptance notes
 /plan/
 /MASK_RETRY_ACCEPTANCE_*.md
