@@ -1,7 +1,11 @@
+import logging
 import re
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
+
+logger = logging.getLogger(__name__)
+_secret_lookup_failure_logged = False
 
 _URL_RE = re.compile(r"(?i)\b(?:https?|socks5)://[^\s<>\"']+")
 _AUTH_RE = re.compile(
@@ -57,18 +61,31 @@ def _redact_url(match: re.Match[str]) -> str:
     return urlunsplit((parsed.scheme, host, parsed.path, query, fragment)) + trailing
 
 
+def _active_secrets() -> tuple[str, ...]:
+    global _secret_lookup_failure_logged
+    try:
+        from .secrets import active_secret_values
+
+        return active_secret_values()
+    except Exception as exc:  # noqa: BLE001 - redaction must never raise
+        if not _secret_lookup_failure_logged:
+            _secret_lookup_failure_logged = True
+            # Class name only: the message could itself carry secret material.
+            logger.warning(
+                "Registered secrets are unavailable for redaction (%s); "
+                "only explicit and pattern-based redaction applies",
+                type(exc).__name__,
+            )
+        return ()
+
+
 def redact_sensitive_text(value: Any, *, secret_values: tuple[str | None, ...] = ()) -> str:
     text = str(value or "")
     for secret in sorted((value for value in secret_values if value), key=len, reverse=True):
         text = text.replace(secret, "[REDACTED]")
-    try:
-        from .secrets import active_secret_values
-
-        for secret in active_secret_values():
-            if secret and secret in text:
-                text = text.replace(secret, "[REDACTED]")
-    except Exception:
-        pass
+    for secret in _active_secrets():
+        if secret and secret in text:
+            text = text.replace(secret, "[REDACTED]")
 
     lowered = text.lower()
     if not any(hint in lowered for hint in _REDACTION_HINTS):
