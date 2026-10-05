@@ -1,5 +1,4 @@
 import asyncio
-import os
 import uuid
 
 from fastapi import APIRouter, Body, HTTPException
@@ -21,7 +20,6 @@ from ...services.presets import (
     reorder_api_presets,
     end_api_settings_write,
     get_active_preset,
-    get_api_key_env_var,
     get_api_presets,
     get_effective_preset_api_key,
     get_exception_message,
@@ -29,7 +27,6 @@ from ...services.presets import (
     get_preset_by_id,
     get_upstream_socks5_proxy,
     get_webhook_url,
-    is_malformed_api_key_env_ref,
     load_api_settings,
     mask_socks5_proxy_url,
     mask_webhook_url,

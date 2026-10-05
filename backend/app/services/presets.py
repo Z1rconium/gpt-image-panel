@@ -44,7 +44,6 @@ from ..integrations.nodeimage.client import (
     NodeImageConfigurationError,
     resolve_nodeimage_settings,
 )
-from ..integrations.upstream.async_provider import render_url_template
 from ..core.utils import utc_now
 from ..repositories.settings import (
     load_ai_assistant_settings,

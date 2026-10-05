@@ -226,10 +226,6 @@ def _select_string(source: Any, path: str | None) -> str | None:
     return text or None
 
 
-def _select_task_id(source: Any, path: str | None) -> str | None:
-    return _select_string(source, path)
-
-
 async def _request_json(
     session: aiohttp.ClientSession,
     method: str,
@@ -395,7 +391,7 @@ async def _resolve_status_url(
         url = await _validated_followup_url(value, api_url, "status")
         url = append_query(url, poll_query, _task_query_vars(task_id), allowed={"task_id"})
         return url, task_id
-    resolved_task_id = task_id or _select_task_id(submit_result, cfg.poll.task_id_path)
+    resolved_task_id = task_id or _select_string(submit_result, cfg.poll.task_id_path)
     if not resolved_task_id:
         raise UpstreamApiError(
             f"Provider response did not include a task id at {cfg.poll.task_id_path}"
@@ -426,7 +422,7 @@ async def _resolve_submit_result_url(
                 return None
             return await _validated_followup_url(value, api_url, "result")
         if source.task_id_path and source.url_template:
-            resolved = task_id or _select_task_id(submit_result, source.task_id_path)
+            resolved = task_id or _select_string(submit_result, source.task_id_path)
             if not resolved:
                 return None
             return await _validated_upstream_url(
@@ -461,7 +457,7 @@ async def _resolve_cancel_url(
             if not value:
                 return None
             return await _validated_followup_url(value, api_url, "cancel")
-        resolved = task_id or _select_task_id(submit_result, cancel.task_id_path)
+        resolved = task_id or _select_string(submit_result, cancel.task_id_path)
         if not resolved:
             return None
         return await _validated_upstream_url(
@@ -500,8 +496,8 @@ async def _resolve_result_url(
         if source.task_id_path and source.url_template:
             resolved = (
                 task_id
-                or _select_task_id(submit_result, source.task_id_path)
-                or _select_task_id(poll_result, source.task_id_path)
+                or _select_string(submit_result, source.task_id_path)
+                or _select_string(poll_result, source.task_id_path)
             )
             if not resolved:
                 raise UpstreamApiError(
@@ -728,7 +724,7 @@ async def run_async_provider(
             return items, f"{_PROVIDER_LABEL} result: {len(items)} image(s)"
 
         assert cfg.poll is not None
-        task_id = _select_task_id(submit_result, cfg.poll.task_id_path)
+        task_id = _select_string(submit_result, cfg.poll.task_id_path)
         if cfg.poll.task_id_path and not task_id:
             if diag:
                 diag.set_code("task_id_missing")
