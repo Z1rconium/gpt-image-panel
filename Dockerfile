@@ -10,7 +10,7 @@ WORKDIR /frontend
 COPY frontend/package*.json ./
 RUN --mount=type=cache,target=/root/.npm \
     npm ci
-COPY frontend/svelte.config.js frontend/vite.config.ts frontend/tsconfig.json frontend/tailwind.config.ts frontend/postcss.config.cjs ./
+COPY frontend/svelte.config.js frontend/vite.config.ts frontend/tsconfig.json ./
 COPY frontend/static/ ./static/
 COPY frontend/src/ ./src/
 RUN --mount=type=cache,target=/root/.npm \
