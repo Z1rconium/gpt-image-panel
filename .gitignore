@@ -51,3 +51,6 @@ AGENTS.md
 
 test-results
 .commandcode
+
+# Local review artifacts
+/reviews/
