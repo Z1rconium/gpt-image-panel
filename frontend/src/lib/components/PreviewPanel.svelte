@@ -258,13 +258,13 @@
                     loading="eager"
                     decoding="async"
                   />
-                  <span class="absolute left-2 top-2 rounded bg-black/60 px-2 py-1 text-xs font-medium text-white">{finalImage ? $t.statuses.success : $t.preview.streamingPreviewBadge} {slotIndex + 1}</span>
+                  <span class="absolute left-2 top-2 rounded-sm bg-black/60 px-2 py-1 text-xs font-medium text-white">{finalImage ? $t.statuses.success : $t.preview.streamingPreviewBadge} {slotIndex + 1}</span>
                 </div>
               {:else}
                 <div class="flex h-full w-full flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-stone-300 dark:border-zinc-700">
                   <span class:spinner={!unitStatus || unitStatus === 'running' || unitStatus === 'queued'}></span>
                   <span class="text-xs text-stone-500 dark:text-zinc-400">{unitStatus && unitStatus !== 'running' && unitStatus !== 'queued' ? statusLabel(unitStatus, $t.statuses) : $t.preview.streamingSlotWaiting}</span>
-                  <span class="absolute left-2 top-2 rounded bg-black/60 px-2 py-1 text-xs font-medium text-white">{slotIndex + 1}</span>
+                  <span class="absolute left-2 top-2 rounded-sm bg-black/60 px-2 py-1 text-xs font-medium text-white">{slotIndex + 1}</span>
                 </div>
               {/if}
             </div>
@@ -335,9 +335,9 @@
               />
             {/if}
             {#if job?.mask_applied && !showOriginal}
-              <span class="absolute left-2 top-2 rounded border border-emerald-500/40 bg-black/60 px-2 py-1 text-xs font-medium text-emerald-300">{$t.jobs.maskedBadge}</span>
+              <span class="absolute left-2 top-2 rounded-sm border border-emerald-500/40 bg-black/60 px-2 py-1 text-xs font-medium text-emerald-300">{$t.jobs.maskedBadge}</span>
               {#if selectedImage?.paste_back}
-                <span class="absolute left-2 top-10 rounded border border-emerald-500/40 bg-black/60 px-2 py-1 text-xs font-medium text-emerald-300" title={$t.jobs.pasteBackDetail(selectedImage.paste_back, selectedImage.paste_back_scale ?? null)}>{$t.jobs.pasteBackBadge(selectedImage.paste_back)}</span>
+                <span class="absolute left-2 top-10 rounded-sm border border-emerald-500/40 bg-black/60 px-2 py-1 text-xs font-medium text-emerald-300" title={$t.jobs.pasteBackDetail(selectedImage.paste_back, selectedImage.paste_back_scale ?? null)}>{$t.jobs.pasteBackBadge(selectedImage.paste_back)}</span>
               {/if}
             {/if}
             {#if previewFailed}
@@ -367,7 +367,7 @@
                     decoding="async"
                     onerror={() => (failedStripThumbs = { ...failedStripThumbs, [result.image_id]: true })}
                   />
-                  <span class="absolute left-1.5 top-1.5 rounded bg-white/90 px-1.5 py-0.5 text-xs font-semibold text-stone-700 dark:bg-zinc-950/80 dark:text-zinc-200">{index + 1}</span>
+                  <span class="absolute left-1.5 top-1.5 rounded-sm bg-white/90 px-1.5 py-0.5 text-xs font-semibold text-stone-700 dark:bg-zinc-950/80 dark:text-zinc-200">{index + 1}</span>
                 </button>
               {/each}
             </div>
@@ -392,7 +392,7 @@
               loading="eager"
               decoding="async"
             />
-            <span class="absolute left-2 top-2 rounded bg-black/60 px-2 py-1 text-xs font-medium text-white">{$t.preview.streamingPreviewBadge}</span>
+            <span class="absolute left-2 top-2 rounded-sm bg-black/60 px-2 py-1 text-xs font-medium text-white">{$t.preview.streamingPreviewBadge}</span>
           </div>
         </div>
       </div>

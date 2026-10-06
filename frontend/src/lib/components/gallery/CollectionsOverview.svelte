@@ -80,7 +80,7 @@
                 </span>
               {/if}
               {#if collection.is_default}
-                <span class="absolute right-1.5 top-1.5 rounded bg-emerald-600/90 px-1.5 py-0.5 text-xs font-medium text-white">{$t.collections.default}</span>
+                <span class="absolute right-1.5 top-1.5 rounded-sm bg-emerald-600/90 px-1.5 py-0.5 text-xs font-medium text-white">{$t.collections.default}</span>
               {/if}
             </span>
             <span class="flex items-center justify-between gap-2 px-2.5 py-2">

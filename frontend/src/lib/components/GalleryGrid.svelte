@@ -405,7 +405,7 @@
         {#if gallery?.total_bytes}
           <span class="ml-2">{formatBytes(gallery.total_bytes)}</span>
         {:else if gallery?.total}
-          <button type="button" class="control-focus ml-2 rounded text-xs font-medium text-stone-600 hover:text-stone-900 dark:text-zinc-400 dark:hover:text-zinc-200" onclick={onLoadStats}>
+          <button type="button" class="control-focus ml-2 rounded-sm text-xs font-medium text-stone-600 hover:text-stone-900 dark:text-zinc-400 dark:hover:text-zinc-200" onclick={onLoadStats}>
             {$t.gallery.showSize}
           </button>
         {/if}
@@ -539,11 +539,11 @@
         <div class="overflow-hidden rounded-xl border border-stone-200 bg-stone-100/90 dark:border-zinc-800 dark:bg-zinc-950/45">
           <div class="aspect-square animate-pulse bg-stone-200/80 dark:bg-zinc-800/60"></div>
           <div class="space-y-3 p-3">
-            <div class="h-4 w-5/6 animate-pulse rounded bg-stone-200 dark:bg-zinc-800/70"></div>
-            <div class="h-3 w-1/2 animate-pulse rounded bg-stone-200 dark:bg-zinc-800/60"></div>
+            <div class="h-4 w-5/6 animate-pulse rounded-sm bg-stone-200 dark:bg-zinc-800/70"></div>
+            <div class="h-3 w-1/2 animate-pulse rounded-sm bg-stone-200 dark:bg-zinc-800/60"></div>
             <div class="flex gap-2">
-              <div class="h-7 w-14 animate-pulse rounded bg-stone-200 dark:bg-zinc-800/60"></div>
-              <div class="h-7 w-16 animate-pulse rounded bg-stone-200 dark:bg-zinc-800/60"></div>
+              <div class="h-7 w-14 animate-pulse rounded-sm bg-stone-200 dark:bg-zinc-800/60"></div>
+              <div class="h-7 w-16 animate-pulse rounded-sm bg-stone-200 dark:bg-zinc-800/60"></div>
             </div>
           </div>
         </div>
@@ -704,7 +704,7 @@
       </div>
       {#if bandRectState}
         <div
-          class="pointer-events-none absolute z-20 rounded border border-emerald-500/70 bg-emerald-500/10"
+          class="pointer-events-none absolute z-20 rounded-sm border border-emerald-500/70 bg-emerald-500/10"
           style={`left:${bandRectState.left}px;top:${bandRectState.top}px;width:${bandRectState.width}px;height:${bandRectState.height}px;`}
           aria-hidden="true"
         ></div>

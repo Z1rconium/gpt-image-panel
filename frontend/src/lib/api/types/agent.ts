@@ -133,6 +133,8 @@ export type AgentTurnRequest = {
   text: string;
   attachments: { kind: 'gallery'; image_id: string }[];
   image_params: AgentImageParams;
+  // Omitted: allowed, except web-search turns default to discuss/search only.
+  allow_image_tools?: boolean;
 };
 
 export type AgentTurnAccepted = {

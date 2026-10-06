@@ -227,7 +227,20 @@ test('settings and prompt snippets preserve dark surfaces for a dark system them
   await expect(settingsDrawer.getByLabel('Assistant vision engine')).toHaveCSS('background-color', 'rgb(9, 9, 11)');
   await expect(settingsDrawer.getByRole('heading', { name: 'R2 Backup' })).toHaveCSS('color', 'rgb(228, 228, 231)');
   await settingsDrawer.getByRole('button', { name: 'Test Prompt Optimizer' }).click();
-  await expect(page.getByTestId('prompt-optimizer-health-result')).toHaveCSS('background-color', 'rgba(16, 185, 129, 0.1)');
+  // Browsers may serialize the same palette color as rgb() or oklab().
+  // Sample it in sRGB; translucent canvas pixels have 8-bit rounding error.
+  const healthColor = await page.getByTestId('prompt-optimizer-health-result').evaluate((element) => {
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 1;
+    const context = canvas.getContext('2d')!;
+    context.fillStyle = getComputedStyle(element).backgroundColor;
+    context.fillRect(0, 0, 1, 1);
+    return Array.from(context.getImageData(0, 0, 1, 1).data);
+  });
+  for (const [index, expected] of [16, 185, 129].entries()) {
+    expect(Math.abs(healthColor[index] - expected)).toBeLessThanOrEqual(5);
+  }
+  expect(healthColor[3]).toBe(26);
   await expect.poll(() => page.evaluate(() => window.localStorage.getItem('gpt-image-panel-theme'))).toBeNull();
   await settingsDrawer.getByRole('button', { name: 'Close settings' }).click();
 

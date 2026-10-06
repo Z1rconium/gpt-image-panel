@@ -195,7 +195,7 @@
           <div class="mb-3 flex items-center justify-between gap-3">
             <h3 id="prompt-snippet-form-title" class="text-sm font-semibold text-stone-800 dark:text-zinc-200">{isEditing ? $t.promptSnippets.editTitle : $t.promptSnippets.newTitle}</h3>
             {#if isEditing}
-              <button type="button" class="control-focus rounded text-xs font-medium text-stone-600 hover:text-stone-900 dark:text-zinc-400 dark:hover:text-zinc-100" onclick={cancelEdit}>
+              <button type="button" class="control-focus rounded-sm text-xs font-medium text-stone-600 hover:text-stone-900 dark:text-zinc-400 dark:hover:text-zinc-100" onclick={cancelEdit}>
                 {$t.promptSnippets.cancelEdit}
               </button>
             {/if}

@@ -956,6 +956,8 @@ const en = {
   },
   agent: {
     searchEnabled: 'Web search is enabled. The Agent can search when useful.',
+    allowImageTools: 'Allow image generation and editing this turn',
+    allowImageToolsHint: 'Off: search and discuss only. Web content can never switch this on.',
     searchUnavailable: 'Web search needs a supported model and /v1/responses. Update the Agent settings or disable search before sending.',
     sources: 'Sources',
     searchAction: (action: string) => ({ open_page: 'Reading a page', find_in_page: 'Finding text on a page' })[action] || '',

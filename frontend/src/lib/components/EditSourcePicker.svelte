@@ -114,7 +114,7 @@
     class="control-focus flex min-h-[58px] w-full items-center justify-center gap-3.5 rounded-lg px-3 py-2 text-left transition-colors hover:bg-stone-100/80 dark:hover:bg-zinc-900/80"
     on:click={openPicker}
   >
-    <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-stone-200 bg-white text-stone-600 shadow-sm dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300" aria-hidden="true">
+    <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-stone-200 bg-white text-stone-600 shadow-xs dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300" aria-hidden="true">
       <Upload size={18} strokeWidth={1.9} />
     </span>
     <span class="min-w-0">
@@ -145,7 +145,7 @@
     </div>
     <ul class="mt-2 grid max-w-full grid-cols-1 gap-2.5 min-[480px]:grid-cols-2 sm:grid-cols-3 lg:grid-cols-4" aria-label={$t.promptForm.selectedEditSources}>
       {#each sources as source (source.id)}
-        <li class="relative min-w-0 overflow-hidden rounded-lg border border-stone-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900" data-source-id={source.id} data-source-kind={source.kind}>
+        <li class="relative min-w-0 overflow-hidden rounded-lg border border-stone-200 bg-white shadow-xs dark:border-zinc-800 dark:bg-zinc-900" data-source-id={source.id} data-source-kind={source.kind}>
           <button
             type="button"
             class="control-focus flex w-full min-w-0 items-center gap-2.5 rounded-lg p-1.5 pr-11 text-left transition-colors hover:bg-stone-50 dark:hover:bg-zinc-800/80"
@@ -157,11 +157,11 @@
             <span class="min-w-0">
               <span class="block truncate text-xs font-medium text-stone-800 dark:text-zinc-200" title={source.label}>{source.label}</span>
               <span class="mt-0.5 flex flex-wrap items-center gap-1">
-                <span class="inline-block rounded bg-stone-100 px-1.5 py-0.5 text-[10px] font-medium text-stone-600 dark:bg-zinc-800 dark:text-zinc-400">
+                <span class="inline-block rounded-sm bg-stone-100 px-1.5 py-0.5 text-[10px] font-medium text-stone-600 dark:bg-zinc-800 dark:text-zinc-400">
                   {source.kind === 'gallery' ? $t.promptForm.gallerySourceBadge : $t.promptForm.uploadSourceBadge}
                 </span>
                 {#if source.isPrimary}
-                  <span class="inline-block rounded bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-300">
+                  <span class="inline-block rounded-sm bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-300">
                     {$t.promptForm.primarySourceBadge}
                   </span>
                 {/if}
@@ -188,7 +188,7 @@
                 </span>
               </button>
               {#if source.maskCoverage != null && source.maskOrigin}
-                <span class="shrink-0 rounded bg-stone-100 px-1.5 py-0.5 text-[10px] font-medium text-stone-500 dark:bg-zinc-800 dark:text-zinc-400">
+                <span class="shrink-0 rounded-sm bg-stone-100 px-1.5 py-0.5 text-[10px] font-medium text-stone-500 dark:bg-zinc-800 dark:text-zinc-400">
                   {maskOriginLabel(source.maskOrigin)}
                 </span>
               {/if}

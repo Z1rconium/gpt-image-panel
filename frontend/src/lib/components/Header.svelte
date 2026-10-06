@@ -88,7 +88,7 @@
             >
               {version}
               {#if hasVersionUpdate}
-                <span class="ml-1 rounded bg-amber-500/15 px-1 py-px text-[10px] text-amber-800 dark:bg-amber-400/20 dark:text-amber-300">{$t.header.newVersion}</span>
+                <span class="ml-1 rounded-sm bg-amber-500/15 px-1 py-px text-[10px] text-amber-800 dark:bg-amber-400/20 dark:text-amber-300">{$t.header.newVersion}</span>
               {/if}
             </a>
           {/if}

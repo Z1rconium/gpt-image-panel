@@ -338,11 +338,11 @@
       <div class="mb-2 text-xs font-semibold text-stone-500 dark:text-zinc-400">{$t.aiAssistant.paramsResult}</div>
       <p class="text-sm leading-6 text-stone-900 dark:text-zinc-100">{paramsResult.rationale}</p>
       <div class="mt-3 flex flex-wrap gap-2 text-[11px] text-zinc-400">
-        {#if paramsResult.model_name}<span class="rounded border border-zinc-700 px-2 py-1">model: {paramsResult.model_name}</span>{/if}
-        {#if paramsResult.size}<span class="rounded border border-zinc-700 px-2 py-1">size: {paramsResult.size}</span>{/if}
-        {#if paramsResult.quality}<span class="rounded border border-zinc-700 px-2 py-1">quality: {paramsResult.quality}</span>{/if}
-        {#if paramsResult.output_format}<span class="rounded border border-zinc-700 px-2 py-1">format: {paramsResult.output_format}</span>{/if}
-        {#if paramsResult.n}<span class="rounded border border-zinc-700 px-2 py-1">n: {paramsResult.n}</span>{/if}
+        {#if paramsResult.model_name}<span class="rounded-sm border border-zinc-700 px-2 py-1">model: {paramsResult.model_name}</span>{/if}
+        {#if paramsResult.size}<span class="rounded-sm border border-zinc-700 px-2 py-1">size: {paramsResult.size}</span>{/if}
+        {#if paramsResult.quality}<span class="rounded-sm border border-zinc-700 px-2 py-1">quality: {paramsResult.quality}</span>{/if}
+        {#if paramsResult.output_format}<span class="rounded-sm border border-zinc-700 px-2 py-1">format: {paramsResult.output_format}</span>{/if}
+        {#if paramsResult.n}<span class="rounded-sm border border-zinc-700 px-2 py-1">n: {paramsResult.n}</span>{/if}
       </div>
       {#if paramsResult.warnings.length}
         <div class="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">{paramsResult.warnings.join(' ')}</div>

@@ -62,6 +62,8 @@
   let params = $state<AgentImageParams>(loadParams());
   let activeIndex = $state(0);
   let dismissedAt = $state<number | null>(null);
+  // Per-turn capability; with web search on, the server default is discuss/search only.
+  let allowImageTools = $state(false);
 
   const mention = $derived(findMentionQuery(text, caret));
   const options = $derived(mention ? filterMentionOptions(imageRefs, mention.query).slice(0, MAX_MENTION_OPTIONS) : []);
@@ -113,7 +115,8 @@
     const input: AgentSendInput = {
       text,
       attachmentIds: attachments.map((entry) => entry.id),
-      imageParams: { ...params }
+      imageParams: { ...params },
+      ...(searchEnabled ? { allowImageTools } : {})
     };
     const ok = await onSend(input);
     if (ok) {
@@ -181,6 +184,13 @@
     <p class="text-xs text-stone-500 dark:text-zinc-400" role={searchUnavailable ? 'alert' : 'status'} data-testid="agent-search-capability">
       {searchUnavailable ? $t.agent.searchUnavailable : $t.agent.searchEnabled}
     </p>
+    <label class="flex items-start gap-2 text-xs text-stone-600 dark:text-zinc-300">
+      <input type="checkbox" class="mt-0.5" bind:checked={allowImageTools} data-testid="agent-allow-image-tools" />
+      <span>
+        {$t.agent.allowImageTools}
+        <span class="block text-stone-500 dark:text-zinc-400">{$t.agent.allowImageToolsHint}</span>
+      </span>
+    </label>
   {/if}
   {#if error}
     <div class="status-error flex items-start justify-between gap-3 px-3 py-2 text-sm" role="alert" data-testid="agent-error">
@@ -257,7 +267,7 @@
             }}
           >
             {#if ref.filename}
-              <img src={thumbnailUrl(ref.filename)} alt="" class="h-9 w-9 rounded object-cover" />
+              <img src={thumbnailUrl(ref.filename)} alt="" class="h-9 w-9 rounded-sm object-cover" />
             {/if}
             <span class="min-w-0">
               <span class="block font-medium text-stone-900 dark:text-zinc-100">{optionLabel(ref)}</span>

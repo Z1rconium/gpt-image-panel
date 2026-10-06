@@ -126,7 +126,7 @@
                 <div class="rounded-md border border-stone-200 bg-white/70 p-2 text-stone-700 dark:border-zinc-800 dark:bg-zinc-950/50 dark:text-zinc-300">
                   <div class="flex items-center justify-between gap-2">
                     <span class="font-mono text-[11px] text-stone-500 dark:text-zinc-500">{check.name}</span>
-                    <span class={`rounded border px-1.5 py-0.5 text-[10px] font-semibold ${healthBadgeClass(check.status)}`}>
+                    <span class={`rounded-sm border px-1.5 py-0.5 text-[10px] font-semibold ${healthBadgeClass(check.status)}`}>
                       {healthStatusLabel(check.status)}
                     </span>
                   </div>

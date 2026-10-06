@@ -107,8 +107,8 @@
     <div class="flex flex-wrap items-center justify-between gap-2">
       <span class="font-semibold text-stone-700 dark:text-zinc-200">{$t.jobs.diagnostics}</span>
       <span class="flex gap-2">
-        {#if response}<button type="button" class="control-focus rounded border border-stone-300 px-2 py-1 text-[11px] text-stone-600 hover:bg-stone-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800" onclick={copyDiagnostics}>{copied ? $t.jobs.diagnosticsCopied : $t.jobs.diagnosticsCopy}</button>{/if}
-        <button type="button" class="control-focus rounded border border-stone-300 px-2 py-1 text-[11px] text-stone-600 hover:bg-stone-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800" onclick={() => { loaded = false; void load(); }}>{$t.jobs.diagnosticsRefresh}</button>
+        {#if response}<button type="button" class="control-focus rounded-sm border border-stone-300 px-2 py-1 text-[11px] text-stone-600 hover:bg-stone-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800" onclick={copyDiagnostics}>{copied ? $t.jobs.diagnosticsCopied : $t.jobs.diagnosticsCopy}</button>{/if}
+        <button type="button" class="control-focus rounded-sm border border-stone-300 px-2 py-1 text-[11px] text-stone-600 hover:bg-stone-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800" onclick={() => { loaded = false; void load(); }}>{$t.jobs.diagnosticsRefresh}</button>
       </span>
     </div>
     {#if loading}
@@ -124,7 +124,7 @@
             <div class="flex flex-wrap items-center gap-2">
               <span class="font-medium text-stone-800 dark:text-zinc-200">{$t.jobs.diagnosticsUnit(unit.unit_index + 1)}</span>
               <span class="text-stone-500 dark:text-zinc-500">{unit.status}{unit.stage ? ` · ${unit.stage}` : ''}</span>
-              {#if codeOf(unit)}<span class="rounded border border-amber-400/40 bg-amber-500/10 px-1.5 py-0.5 font-mono text-[10px] text-amber-800 dark:text-amber-200">{codeOf(unit)}</span>{/if}
+              {#if codeOf(unit)}<span class="rounded-sm border border-amber-400/40 bg-amber-500/10 px-1.5 py-0.5 font-mono text-[10px] text-amber-800 dark:text-amber-200">{codeOf(unit)}</span>{/if}
               {#if unit.recovery_count > 0}<span class="text-stone-500 dark:text-zinc-500">{$t.jobs.diagnosticsRecovery(unit.recovery_count)}</span>{/if}
             </div>
             {#if unit.error}<p class="mt-1 break-words text-amber-700 dark:text-amber-300">{unit.error}</p>{/if}
@@ -139,7 +139,7 @@
             {#if stagesOf(unit).length}
               <ul class="mt-2 space-y-2">
                 {#each stagesOf(unit) as stage, stageIndex (stageIndex)}
-                  <li class="rounded border border-stone-200 bg-stone-50/80 p-2 dark:border-zinc-800 dark:bg-zinc-900/40">
+                  <li class="rounded-sm border border-stone-200 bg-stone-50/80 p-2 dark:border-zinc-800 dark:bg-zinc-900/40">
                     <div class="flex flex-wrap items-center gap-2">
                       <span class="font-mono text-[11px] text-stone-700 dark:text-zinc-300">[{stage.phase || 'stage'}]</span>
                       <span class="font-mono text-[11px] text-stone-500 dark:text-zinc-500">{httpLine(stage)}</span>

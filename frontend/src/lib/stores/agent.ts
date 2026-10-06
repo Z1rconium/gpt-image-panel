@@ -6,68 +6,33 @@ import {
   getAgentConversation,
   getAgentTurn,
   listAgentConversations,
-  openAgentTurnEvents,
   renameAgentConversation,
   startAgentTurn,
   selectAgentBranch
 } from '$lib/api/agent';
 import { ApiError } from '$lib/api/client';
 import type {
-  AgentBlock,
-  AgentBranch,
   AgentConversationDetail,
-  AgentConversationSummary,
   AgentImageParams,
-  AgentImageRef,
   AgentMessage,
-  AgentStreamEvent,
   AgentTurnStatusResponse
 } from '$lib/api/types/agent';
 import { t } from '$lib/i18n';
-import { applyAgentEvent } from '$lib/utils/agentBlocks';
 import { observeAgentTurn } from '$lib/utils/completionNotifications';
 import { isAbortError } from './assistant';
+import {
+  foldStreamBatch,
+  initialAgentState,
+  withAssistantMessage,
+  withDetail,
+  withEarlierPage,
+  type AgentState,
+  type PendingAgentEvent,
+  type TerminalEventName
+} from './agentState';
+import { createAgentStreamController } from './agentStream';
 
-export type AgentState = {
-  conversations: AgentConversationSummary[];
-  listLoading: boolean;
-  listError: string | null;
-  activeId: string | null;
-  messages: AgentMessage[];
-  imageRefs: AgentImageRef[];
-  hasMore: boolean;
-  branches: AgentBranch[];
-  selectedTurnId: string | null;
-  branchRevision: number;
-  detailLoading: boolean;
-  detailError: string | null;
-  activeTurnId: string | null;
-  sending: boolean;
-  cancelling: boolean;
-  actionError: string | null;
-  /** Short status text for the screen-reader live region; never the reply itself. */
-  announcement: string;
-};
-
-const initialState: AgentState = {
-  conversations: [],
-  listLoading: false,
-  listError: null,
-  activeId: null,
-  messages: [],
-  imageRefs: [],
-  hasMore: false,
-  branches: [],
-  selectedTurnId: null,
-  branchRevision: 0,
-  detailLoading: false,
-  detailError: null,
-  activeTurnId: null,
-  sending: false,
-  cancelling: false,
-  actionError: null,
-  announcement: ''
-};
+export type { AgentState } from './agentState';
 
 export const AGENT_MAX_ATTACHMENTS = 8;
 const IMAGE_SYNC_DEBOUNCE_MS = 350;
@@ -76,15 +41,13 @@ const MAX_RECOVER_ATTEMPTS = 5;
 const CANCEL_POLL_INTERVAL_MS = 1500;
 const CANCEL_POLL_ATTEMPTS = 10;
 
-type TerminalEventName = 'turn.completed' | 'turn.failed' | 'turn.cancelled';
-type PendingAgentEvent = { event: AgentStreamEvent; seq: number };
-
 export type AgentSendInput = {
   text: string;
   action?: 'continue' | 'edit' | 'regenerate';
   sourceTurnId?: string;
   attachmentIds: string[];
   imageParams: AgentImageParams;
+  allowImageTools?: boolean;
 };
 
 export function newClientTurnId(): string {
@@ -98,72 +61,29 @@ function errorMessage(error: unknown, fallback: string): string {
   return fallback;
 }
 
-function blockToImageRef(block: Extract<AgentBlock, { type: 'image_task' }>, messageId: string): AgentImageRef {
-  return {
-    ref_label: block.ref_label,
-    round_no: block.round_no,
-    path_round_no: block.path_round_no,
-    image_index: block.image_index,
-    role: 'output',
-    image_id: block.image_id,
-    filename: block.filename,
-    job_id: block.job_id,
-    item_id: block.item_id,
-    prompt: block.prompt,
-    mode: block.mode,
-    status: block.status,
-    error: block.error,
-    deleted: Boolean(block.deleted),
-    message_id: messageId
-  };
-}
-
-function upsertRef(refs: AgentImageRef[], next: AgentImageRef): AgentImageRef[] {
-  const index = refs.findIndex((ref) => ref.ref_label === next.ref_label);
-  if (index === -1) return [...refs, next];
-  const copy = refs.slice();
-  copy[index] = next;
-  return copy;
-}
-
 function createAgentStore() {
-  const { subscribe, update } = writable<AgentState>(initialState);
-  let state = initialState;
+  const { subscribe, update } = writable<AgentState>(initialAgentState);
+  let state = initialAgentState;
   subscribe((value) => {
     state = value;
   });
 
-  let source: EventSource | null = null;
   let detailController: AbortController | null = null;
   let imageSyncHandler: (() => void) | null = null;
   let imageSyncTimer: ReturnType<typeof setTimeout> | null = null;
   let recoverTimer: ReturnType<typeof setTimeout> | null = null;
   let cancelPollTimer: ReturnType<typeof setTimeout> | null = null;
   let recoverAttempts = 0;
-  let streamTurnId: string | null = null;
-  let streamEpoch = 0;
-  let lastEventSeq = 0;
-  let pendingEvents: PendingAgentEvent[] = [];
-  let frameHandle: number | null = null;
   let pendingSubmission: { conversationId: string; fingerprint: string; clientTurnId: string; revision: number } | null = null;
 
   function announce(message: string) {
     update((current) => ({ ...current, announcement: message }));
   }
 
-  function closeSource() {
-    streamEpoch += 1;
-    if (source) source.close();
-    source = null;
-    streamTurnId = null;
-  }
-
-  function cancelFrame() {
-    if (frameHandle !== null && typeof cancelAnimationFrame === 'function') {
-      cancelAnimationFrame(frameHandle);
-    }
-    frameHandle = null;
-  }
+  const stream = createAgentStreamController({
+    onBatch: (turnId, batch) => handleStreamBatch(turnId, batch),
+    onBroken: (turnId) => scheduleRecover(turnId)
+  });
 
   function clearCancelPoll() {
     if (cancelPollTimer) clearTimeout(cancelPollTimer);
@@ -183,20 +103,7 @@ function createAgentStore() {
     for (const message of detail.messages) {
       if (message.role === 'assistant') observeCompletion(message, detail.conversation.id);
     }
-    update((current) => ({
-      ...current,
-      messages: detail.messages,
-      imageRefs: detail.image_refs,
-      hasMore: detail.has_more,
-      branches: detail.branches ?? [],
-      selectedTurnId: detail.conversation.selected_turn_id ?? null,
-      branchRevision: detail.conversation.branch_revision ?? 0,
-      detailLoading: false,
-      detailError: null,
-      conversations: current.conversations.some((item) => item.id === detail.conversation.id)
-        ? current.conversations.map((item) => (item.id === detail.conversation.id ? detail.conversation : item))
-        : current.conversations
-    }));
+    update((current) => withDetail(current, detail));
   }
 
   async function loadList() {
@@ -240,12 +147,7 @@ function createAgentStore() {
   }
 
   function updateAssistantMessage(turnId: string, apply: (message: AgentMessage) => AgentMessage) {
-    update((current) => ({
-      ...current,
-      messages: current.messages.map((message) =>
-        message.turn_id === turnId && message.role === 'assistant' ? apply(message) : message
-      )
-    }));
+    update((current) => withAssistantMessage(current, turnId, apply));
   }
 
   function finishTurn(eventName: TerminalEventName) {
@@ -255,7 +157,7 @@ function createAgentStore() {
       ...message, status: eventName === 'turn.completed' ? 'complete' : eventName === 'turn.failed' ? 'failed' : 'cancelled'
     }, state.activeId);
     clearCancelPoll();
-    closeSource();
+    stream.close();
     recoverAttempts = 0;
     const labels = get(t).agent;
     announce(
@@ -282,75 +184,20 @@ function createAgentStore() {
     });
   }
 
-  /**
-   * Fold every buffered event into the store in one pass, so a burst of
-   * stream frames costs a single notification instead of one per frame.
-   */
-  function flushPendingEvents() {
-    cancelFrame();
-    if (!pendingEvents.length || !streamTurnId) {
-      pendingEvents = [];
-      return;
-    }
-    const batch = pendingEvents;
-    pendingEvents = [];
-    const turnId = streamTurnId;
+  /** A burst of stream frames costs one store notification instead of one per frame. */
+  function handleStreamBatch(turnId: string, batch: PendingAgentEvent[]) {
     const labels = get(t).agent;
-
-    let started = false;
-    let terminal: TerminalEventName | null = null;
-    const blockEvents: PendingAgentEvent[] = [];
-    for (const entry of batch) {
-      if (entry.seq > lastEventSeq) lastEventSeq = entry.seq;
-      const name = entry.event.event;
-      if (name === 'turn.started') started = true;
-      if (name === 'turn.completed' || name === 'turn.failed' || name === 'turn.cancelled') {
-        terminal = name;
-      }
-      if (name === 'block.upsert' || name === 'block.text') {
-        blockEvents.push(entry);
-      }
-    }
-
-    if (blockEvents.length) {
-      let messageId = '';
-      const refUpdates: AgentImageRef[] = [];
-      updateAssistantMessage(turnId, (message) => {
-        messageId = message.id;
-        let blocks = message.blocks;
-        for (const entry of blockEvents) {
-          blocks = applyAgentEvent(blocks, entry.event);
-          if (entry.event.event === 'block.upsert' && entry.event.data.block.type === 'image_task') {
-            refUpdates.push(blockToImageRef(entry.event.data.block, messageId));
-          }
-        }
-        return { ...message, blocks };
-      });
-      for (const ref of refUpdates) {
-        update((current) => ({ ...current, imageRefs: upsertRef(current.imageRefs, ref) }));
-        if (ref.status === 'succeeded') {
-          announce(labels.announceImage(ref.ref_label));
-          scheduleImageSync();
-        }
-      }
-    }
-
-    if (started) announce(labels.announceStarted);
-    if (terminal) finishTurn(terminal);
-  }
-
-  function enqueueEvent(turnId: string, event: AgentStreamEvent, seq: number) {
-    if (streamTurnId !== turnId) return;
-    pendingEvents.push({ event, seq });
-    if (typeof requestAnimationFrame !== 'function') {
-      flushPendingEvents();
-      return;
-    }
-    if (frameHandle !== null) return;
-    frameHandle = requestAnimationFrame(() => {
-      frameHandle = null;
-      flushPendingEvents();
+    let result!: ReturnType<typeof foldStreamBatch>;
+    update((current) => {
+      result = foldStreamBatch(current, turnId, batch);
+      return result.state;
     });
+    for (const label of result.succeededLabels) {
+      announce(labels.announceImage(label));
+      scheduleImageSync();
+    }
+    if (result.started) announce(labels.announceStarted);
+    if (result.terminal) finishTurn(result.terminal);
   }
 
   /**
@@ -358,27 +205,17 @@ function createAgentStore() {
    * the last applied event id; a fresh attach rebuilds the message from scratch.
    */
   function attachStream(turnId: string, resume = false) {
-    flushPendingEvents();
-    closeSource();
-    if (!resume) {
-      lastEventSeq = 0;
-      updateAssistantMessage(turnId, (message) => ({ ...message, blocks: [], status: 'streaming' }));
-    }
-    streamTurnId = turnId;
-    const epoch = streamEpoch;
+    stream.flush();
+    stream.close();
+    if (!resume) updateAssistantMessage(turnId, (message) => ({ ...message, blocks: [], status: 'streaming' }));
     if (state.activeId) void observeAgentTurn({ turnId, conversationId: state.activeId, status: 'running', successCount: 0, failureCount: 0 });
     update((current) => ({ ...current, activeTurnId: turnId }));
-    source = openAgentTurnEvents(turnId, lastEventSeq, {
-      onEvent: (event, lastEventId) => { if (epoch === streamEpoch) enqueueEvent(turnId, event, lastEventId); },
-      onError: () => { if (epoch === streamEpoch) scheduleRecover(turnId); },
-      // EventSource reconnects by itself and resumes through Last-Event-ID.
-      onNetworkError: () => {}
-    });
+    stream.attach(turnId, !resume);
   }
 
   function scheduleRecover(turnId: string) {
-    flushPendingEvents();
-    closeSource();
+    stream.flush();
+    stream.close();
     if (state.activeTurnId !== turnId) return;
     if (recoverAttempts >= MAX_RECOVER_ATTEMPTS) {
       updateAssistantMessage(turnId, (message) => ({ ...message, status: 'interrupted' }));
@@ -396,8 +233,8 @@ function createAgentStore() {
 
   async function open(conversationId: string | null) {
     if (conversationId !== state.activeId) pendingSubmission = null;
-    flushPendingEvents();
-    closeSource();
+    stream.flush();
+    stream.close();
     clearCancelPoll();
     if (recoverTimer) clearTimeout(recoverTimer);
     recoverTimer = null;
@@ -510,7 +347,8 @@ function createAgentStore() {
         source_turn_id: input.sourceTurnId,
         branch_revision: pendingSubmission.revision,
         attachments: input.attachmentIds.slice(0, AGENT_MAX_ATTACHMENTS).map((imageId) => ({ kind: 'gallery', image_id: imageId })),
-        image_params: input.imageParams
+        image_params: input.imageParams,
+        ...(input.allowImageTools === undefined ? {} : { allow_image_tools: input.allowImageTools })
       });
       pendingSubmission = null;
       if (!accepted.replayed) void observeAgentTurn({ turnId: accepted.turn_id, conversationId, status: 'queued', successCount: 0, failureCount: 0 });
@@ -604,12 +442,7 @@ function createAgentStore() {
         await open(conversationId);
         return;
       }
-      update((current) => ({
-        ...current,
-        messages: [...response.messages, ...current.messages.filter((message) => !response.messages.some((earlier) => earlier.id === message.id))],
-        imageRefs: [...response.image_refs, ...current.imageRefs.filter((ref) => !response.image_refs.some((earlier) => earlier.ref_label === ref.ref_label))],
-        hasMore: response.has_more
-      }));
+      update((current) => withEarlierPage(current, response));
     } catch (error) {
       update((current) => ({ ...current, actionError: errorMessage(error, get(t).agent.errorLoadConversation) }));
     }
@@ -620,8 +453,8 @@ function createAgentStore() {
     if (!conversationId || state.sending) return;
     pendingSubmission = null;
     update((current) => ({ ...current, sending: true, actionError: null }));
-    flushPendingEvents();
-    closeSource();
+    stream.flush();
+    stream.close();
     detailController?.abort();
     try {
       await selectAgentBranch(conversationId, turnId, state.branchRevision);
@@ -658,21 +491,19 @@ function createAgentStore() {
     if (typeof document === 'undefined') return () => {};
     const onChange = () => {
       if (document.hidden) {
-        flushPendingEvents();
-        closeSource();
+        stream.flush();
+        stream.close();
         return;
       }
       const turnId = state.activeTurnId;
-      if (turnId && !source && state.messages.some((message) => message.turn_id === turnId)) attachStream(turnId, true);
+      if (turnId && !stream.connected && state.messages.some((message) => message.turn_id === turnId)) attachStream(turnId, true);
     };
     document.addEventListener('visibilitychange', onChange);
     return () => document.removeEventListener('visibilitychange', onChange);
   }
 
   function dispose() {
-    flushPendingEvents();
-    closeSource();
-    cancelFrame();
+    stream.dispose();
     clearCancelPoll();
     detailController?.abort();
     if (imageSyncTimer) clearTimeout(imageSyncTimer);
@@ -680,7 +511,6 @@ function createAgentStore() {
     imageSyncTimer = null;
     recoverTimer = null;
     imageSyncHandler = null;
-    pendingEvents = [];
   }
 
   return {

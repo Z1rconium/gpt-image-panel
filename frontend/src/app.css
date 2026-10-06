@@ -1,10 +1,35 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss" source(none);
+@import "./lib/styles/tailwind-theme.css";
+@source "./";
+@custom-variant dark (&:where(.dark, .dark *));
+
+@layer base {
+  *, ::before, ::after { border-color: var(--color-gray-200, #e5e7eb); }
+  button:not(:disabled), [role='button']:not(:disabled) { cursor: pointer; }
+}
+
+@utility ui-button {
+  @apply inline-flex items-center justify-center px-3 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50;
+  min-height: 40px;
+  border-radius: 6px;
+  transition:
+    background-color var(--dur-state) var(--ease-std),
+    border-color var(--dur-state) var(--ease-std),
+    color var(--dur-state) var(--ease-std),
+    box-shadow var(--dur-state) var(--ease-std),
+    transform var(--dur-press) var(--ease-std);
+}
+
+/* Keep the touch minimum above utility sizes such as min-w-10. */
+.mobile-touch-target, .header-command {
+  min-width: 44px;
+  min-height: 44px;
+}
 
 @layer components {
-  .control-focus {
-    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/60 focus-visible:ring-offset-2 focus-visible:ring-offset-stone-100 dark:focus-visible:ring-offset-zinc-950;
+  .control-focus, .header-command, .ui-field, .ui-icon-button,
+  .ui-button, .ui-button-primary, .ui-button-secondary, .ui-button-danger {
+    @apply focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-emerald-400/60 focus-visible:ring-offset-2 focus-visible:ring-offset-stone-100 dark:focus-visible:ring-offset-zinc-950;
   }
 
   .form-select {
@@ -61,7 +86,7 @@
   }
 
   .header-command {
-    @apply mobile-touch-target control-focus inline-flex h-10 min-w-10 items-center justify-center rounded-lg px-2 text-stone-500;
+    @apply inline-flex h-10 min-w-10 items-center justify-center rounded-lg px-2 text-stone-500;
     transition:
       background-color var(--dur-state) var(--ease-std),
       color var(--dur-state) var(--ease-std),
@@ -88,7 +113,7 @@
   }
 
   .ui-field {
-    @apply control-focus w-full px-3 text-sm disabled:cursor-not-allowed disabled:opacity-50;
+    @apply w-full px-3 text-sm disabled:cursor-not-allowed disabled:opacity-50;
     min-height: 40px;
     border: 1px solid var(--border-default);
     border-radius: 6px;
@@ -99,18 +124,6 @@
     transition:
       border-color var(--dur-state) var(--ease-std),
       box-shadow var(--dur-state) var(--ease-std);
-  }
-
-  .ui-button {
-    @apply control-focus inline-flex items-center justify-center px-3 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50;
-    min-height: 40px;
-    border-radius: 6px;
-    transition:
-      background-color var(--dur-state) var(--ease-std),
-      border-color var(--dur-state) var(--ease-std),
-      color var(--dur-state) var(--ease-std),
-      box-shadow var(--dur-state) var(--ease-std),
-      transform var(--dur-press) var(--ease-std);
   }
 
   .ui-button-primary {
@@ -169,7 +182,7 @@
   }
 
   .ui-icon-button {
-    @apply control-focus inline-flex items-center justify-center disabled:cursor-not-allowed disabled:opacity-50;
+    @apply inline-flex items-center justify-center disabled:cursor-not-allowed disabled:opacity-50;
     width: 44px;
     min-width: 44px;
     min-height: 44px;
@@ -1060,10 +1073,6 @@ html.dark .gallery-loading-overlay {
   }
 }
 
-.mobile-touch-target {
-  min-width: 44px;
-  min-height: 44px;
-}
 
 @media (prefers-reduced-motion: reduce) {
   /* Depth stays; travel and duration go to zero. */

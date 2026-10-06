@@ -54,12 +54,12 @@
                               <div class="mt-1 text-xs leading-5 text-stone-500 dark:text-zinc-500">{item.description}</div>
                             </div>
                             <div class="flex shrink-0 flex-wrap justify-end gap-1.5">
-                              <span class="rounded border border-stone-300 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-stone-600 dark:border-zinc-700 dark:text-zinc-400">{sourceLabel(item.source)}</span>
+                              <span class="rounded-sm border border-stone-300 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-stone-600 dark:border-zinc-700 dark:text-zinc-400">{sourceLabel(item.source)}</span>
                               {#if item.restart_required}
-                                <span class="rounded border border-amber-500/40 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-amber-700 dark:text-amber-300">{$t.settings.restartRequired}</span>
+                                <span class="rounded-sm border border-amber-500/40 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-amber-700 dark:text-amber-300">{$t.settings.restartRequired}</span>
                               {/if}
                               {#if item.build_only}
-                                <span class="rounded border border-sky-500/40 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-sky-700 dark:text-sky-300">{$t.settings.buildOnly}</span>
+                                <span class="rounded-sm border border-sky-500/40 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-sky-700 dark:text-sky-300">{$t.settings.buildOnly}</span>
                               {/if}
                             </div>
                           </div>

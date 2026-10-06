@@ -957,6 +957,8 @@ const zh: Translation = {
   },
   agent: {
     searchEnabled: '已允许联网搜索，Agent 会在需要时检索。',
+    allowImageTools: '本轮允许生成和编辑图片',
+    allowImageToolsHint: '关闭时仅搜索和讨论；网页内容无法自行开启图片工具。',
     searchUnavailable: '联网搜索需要兼容模型及 /v1/responses。请调整 Agent 设置或关闭搜索后再发送。',
     sources: '来源',
     searchAction: (action: string) => ({ open_page: '读取网页', find_in_page: '查找网页内容' })[action] || '',

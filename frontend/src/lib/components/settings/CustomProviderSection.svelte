@@ -201,11 +201,11 @@
       {#if capabilities}
         <div class="flex flex-wrap items-center gap-1.5" aria-label={$t.settings.mappingCapabilities}>
           <span class="text-xs font-medium text-stone-500 dark:text-zinc-500">{$t.settings.mappingCapabilities}</span>
-          {#if capabilities.edit}<span class="rounded bg-emerald-100 px-1.5 py-0.5 text-[11px] text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">{$t.settings.mappingCapEdit}</span>{/if}
-          {#if capabilities.mask}<span class="rounded bg-emerald-100 px-1.5 py-0.5 text-[11px] text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">{$t.settings.mappingCapMask}</span>{/if}
-          {#if capabilities.stream}<span class="rounded bg-emerald-100 px-1.5 py-0.5 text-[11px] text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">{$t.settings.mappingCapStream}</span>{/if}
-          {#if capabilities.transparent_background}<span class="rounded bg-emerald-100 px-1.5 py-0.5 text-[11px] text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">{$t.settings.mappingCapTransparent}</span>{/if}
-          <span class="rounded bg-stone-100 px-1.5 py-0.5 font-mono text-[11px] text-stone-600 dark:bg-zinc-800 dark:text-zinc-300">{$t.settings.mappingCapFormats(capabilities.formats.join('/'))}</span>
+          {#if capabilities.edit}<span class="rounded-sm bg-emerald-100 px-1.5 py-0.5 text-[11px] text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">{$t.settings.mappingCapEdit}</span>{/if}
+          {#if capabilities.mask}<span class="rounded-sm bg-emerald-100 px-1.5 py-0.5 text-[11px] text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">{$t.settings.mappingCapMask}</span>{/if}
+          {#if capabilities.stream}<span class="rounded-sm bg-emerald-100 px-1.5 py-0.5 text-[11px] text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">{$t.settings.mappingCapStream}</span>{/if}
+          {#if capabilities.transparent_background}<span class="rounded-sm bg-emerald-100 px-1.5 py-0.5 text-[11px] text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">{$t.settings.mappingCapTransparent}</span>{/if}
+          <span class="rounded-sm bg-stone-100 px-1.5 py-0.5 font-mono text-[11px] text-stone-600 dark:bg-zinc-800 dark:text-zinc-300">{$t.settings.mappingCapFormats(capabilities.formats.join('/'))}</span>
         </div>
       {/if}
 

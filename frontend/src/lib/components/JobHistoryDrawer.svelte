@@ -185,10 +185,10 @@
 
       <div class="flex flex-col gap-3 border-b border-stone-200 p-5 sm:flex-row sm:items-center sm:justify-between dark:border-zinc-800">
         <div class="grid grid-cols-2 rounded-lg border border-stone-200 bg-stone-100 p-1 text-xs font-medium dark:border-zinc-800 dark:bg-zinc-950">
-          <button type="button" class={`control-focus rounded-md px-3 py-1.5 ${currentTab === 'running' ? 'bg-white text-stone-900 shadow-sm dark:bg-zinc-800 dark:text-zinc-100 dark:shadow-none' : 'text-stone-500 hover:text-stone-900 dark:text-zinc-500 dark:hover:text-zinc-200'}`} onclick={() => selectTab('running')}>
+          <button type="button" class={`control-focus rounded-md px-3 py-1.5 ${currentTab === 'running' ? 'bg-white text-stone-900 shadow-xs dark:bg-zinc-800 dark:text-zinc-100 dark:shadow-none' : 'text-stone-500 hover:text-stone-900 dark:text-zinc-500 dark:hover:text-zinc-200'}`} onclick={() => selectTab('running')}>
             {$t.jobs.runningTab}
           </button>
-          <button type="button" class={`control-focus rounded-md px-3 py-1.5 ${currentTab === 'history' ? 'bg-white text-stone-900 shadow-sm dark:bg-zinc-800 dark:text-zinc-100 dark:shadow-none' : 'text-stone-500 hover:text-stone-900 dark:text-zinc-500 dark:hover:text-zinc-200'}`} onclick={() => selectTab('history')}>
+          <button type="button" class={`control-focus rounded-md px-3 py-1.5 ${currentTab === 'history' ? 'bg-white text-stone-900 shadow-xs dark:bg-zinc-800 dark:text-zinc-100 dark:shadow-none' : 'text-stone-500 hover:text-stone-900 dark:text-zinc-500 dark:hover:text-zinc-200'}`} onclick={() => selectTab('history')}>
             {$t.jobs.historyTab}
           </button>
         </div>

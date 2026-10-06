@@ -86,9 +86,9 @@
       <dd class="flex flex-wrap items-center gap-1.5">
         <span>{image.reported_size || $t.trace.unprovided}</span>
         {#if sizeComparison === 'differs'}
-          <span class="rounded border border-amber-400/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-800 dark:text-amber-200">{$t.trace.differs}</span>
+          <span class="rounded-sm border border-amber-400/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-800 dark:text-amber-200">{$t.trace.differs}</span>
         {:else if sizeComparison === 'match'}
-          <span class="rounded border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-300">{$t.trace.matches}</span>
+          <span class="rounded-sm border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-300">{$t.trace.matches}</span>
         {:else if sizeComparison === 'unreported'}
           <span class="text-[10px] text-stone-400 dark:text-zinc-500">{$t.trace.notReported}</span>
         {/if}
@@ -100,9 +100,9 @@
       <dd class="flex flex-wrap items-center gap-1.5">
         <span>{image.reported_quality || $t.trace.unprovided}</span>
         {#if qualityComparison === 'differs'}
-          <span class="rounded border border-amber-400/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-800 dark:text-amber-200">{$t.trace.differs}</span>
+          <span class="rounded-sm border border-amber-400/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-800 dark:text-amber-200">{$t.trace.differs}</span>
         {:else if qualityComparison === 'match'}
-          <span class="rounded border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-300">{$t.trace.matches}</span>
+          <span class="rounded-sm border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-300">{$t.trace.matches}</span>
         {:else if qualityComparison === 'unreported'}
           <span class="text-[10px] text-stone-400 dark:text-zinc-500">{$t.trace.notReported}</span>
         {/if}

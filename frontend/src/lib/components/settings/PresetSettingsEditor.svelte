@@ -186,14 +186,14 @@
                 <button
                   type="button"
                   disabled={index === 0}
-                  class="control-focus rounded border border-stone-300 px-1.5 text-[10px] leading-4 text-stone-600 hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-30 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
+                  class="control-focus rounded-sm border border-stone-300 px-1.5 text-[10px] leading-4 text-stone-600 hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-30 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
                   aria-label={$t.settings.movePresetUp}
                   on:click={() => reorderFrom(index, index - 1)}
                 >&#9650;</button>
                 <button
                   type="button"
                   disabled={index === (settings?.presets.length || 0) - 1}
-                  class="control-focus rounded border border-stone-300 px-1.5 text-[10px] leading-4 text-stone-600 hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-30 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
+                  class="control-focus rounded-sm border border-stone-300 px-1.5 text-[10px] leading-4 text-stone-600 hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-30 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
                   aria-label={$t.settings.movePresetDown}
                   on:click={() => reorderFrom(index, index + 1)}
                 >&#9660;</button>

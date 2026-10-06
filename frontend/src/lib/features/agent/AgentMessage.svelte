@@ -58,7 +58,7 @@
       <p class="whitespace-pre-wrap break-words text-sm leading-6 text-stone-900 dark:text-zinc-100">
         {#each parts as part}
           {#if part.type === 'mention'}
-            <code class="rounded bg-stone-200 px-1 py-0.5 font-mono text-xs dark:bg-zinc-700">{part.value}</code>
+            <code class="rounded-sm bg-stone-200 px-1 py-0.5 font-mono text-xs dark:bg-zinc-700">{part.value}</code>
           {:else}{part.value}{/if}
         {/each}
       </p>

@@ -57,11 +57,7 @@
     snippetsPanel
   } from '$lib/features/workspace/panels';
   import { promptForm } from '$lib/features/workspace/formState.svelte';
-  import {
-    measureMaskBlob,
-    readPngSize,
-    type MaskMeasurements
-  } from '$lib/features/mask/maskImage';
+  import type { MaskMeasurements } from '$lib/features/mask/maskImage';
   import { createLightboxController } from '$lib/features/workspace/lightbox';
   import { createPanelController } from '$lib/features/workspace/panelController';
   import { installWorkspaceLifecycle } from '$lib/features/workspace/lifecycle';
@@ -1226,8 +1222,13 @@
     const sourceId = primaryEditSourceId($editSourceStore);
     if (!sourceId) return 'missing';
     let fetched: JobMaskFetch;
+    let maskHelpers: typeof import('$lib/features/mask/maskImage');
     try {
-      const { fetchJobMaskBlob } = await import('$lib/features/workspace/jobMaskRestore');
+      const [{ fetchJobMaskBlob }, helpers] = await Promise.all([
+        import('$lib/features/workspace/jobMaskRestore'),
+        import('$lib/features/mask/maskImage')
+      ]);
+      maskHelpers = helpers;
       const state = $editSourceStore;
       const upload = state.files[0];
       if (!state.selectedGalleryImageId && !upload) return 'missing';
@@ -1249,12 +1250,12 @@
     // measureMaskBlob() when either fast path comes back empty (an older
     // server build, or an unreadable/never-PNG response).
     let measurements: MaskMeasurements;
-    const fastSize = fetched.coverage !== null ? readPngSize(new Uint8Array(await blob.arrayBuffer())) : null;
+    const fastSize = fetched.coverage !== null ? maskHelpers.readPngSize(new Uint8Array(await blob.arrayBuffer())) : null;
     if (fastSize && fetched.coverage !== null) {
       measurements = { width: fastSize.width, height: fastSize.height, coverage: fetched.coverage };
     } else {
       try {
-        measurements = await measureMaskBlob(blob);
+        measurements = await maskHelpers.measureMaskBlob(blob);
       } catch {
         return 'missing';
       }

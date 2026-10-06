@@ -109,7 +109,7 @@
               >
                 <span class="min-w-0 truncate">{titleOf(conversation)}</span>
                 {#if conversation.active_turn_id}
-                  <span class="shrink-0 rounded bg-emerald-600 px-1.5 py-0.5 text-[10px] font-semibold text-white">{$t.agent.activeBadge}</span>
+                  <span class="shrink-0 rounded-sm bg-emerald-600 px-1.5 py-0.5 text-[10px] font-semibold text-white">{$t.agent.activeBadge}</span>
                 {/if}
               </button>
               {#if active}

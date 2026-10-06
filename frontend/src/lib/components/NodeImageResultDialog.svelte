@@ -126,7 +126,7 @@
                       <div class="flex min-w-0 items-center gap-2">
                         <div class="min-w-0 flex-1">
                           <div class="text-xs font-medium text-stone-600 dark:text-zinc-400">{$t.gallery.nodeImageDirectLink}</div>
-                          <a href={item.url} target="_blank" rel="noopener noreferrer" class="control-focus mt-1 block break-all rounded text-xs leading-5 text-emerald-700 underline decoration-emerald-500/40 underline-offset-2 hover:text-emerald-800 dark:text-emerald-300 dark:hover:text-emerald-200">{item.url}</a>
+                          <a href={item.url} target="_blank" rel="noopener noreferrer" class="control-focus mt-1 block break-all rounded-sm text-xs leading-5 text-emerald-700 underline decoration-emerald-500/40 underline-offset-2 hover:text-emerald-800 dark:text-emerald-300 dark:hover:text-emerald-200">{item.url}</a>
                         </div>
                         <button
                           type="button"

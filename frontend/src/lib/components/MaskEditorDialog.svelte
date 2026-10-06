@@ -1504,7 +1504,7 @@
         <div class="relative flex flex-wrap items-center gap-2">
           {#if showHelp}
             <div
-              class="absolute bottom-full right-0 z-20 mb-2 w-80 rounded-xl border border-zinc-800 bg-zinc-900 p-3 shadow-xl"
+              class="absolute bottom-full right-0 z-20 mb-2 w-80 max-w-full rounded-xl border border-zinc-800 bg-zinc-900 p-3 shadow-xl"
               role="note"
               aria-label={$t.maskEditor.shortcutsTitle}
             >
@@ -1525,7 +1525,7 @@
 
           {#if showRegionPanel}
             <div
-              class="absolute bottom-full left-0 z-20 mb-2 w-80 space-y-3 rounded-xl border border-zinc-800 bg-zinc-900 p-3 shadow-xl"
+              class="absolute bottom-full left-0 z-20 mb-2 w-80 max-w-full space-y-3 rounded-xl border border-zinc-800 bg-zinc-900 p-3 shadow-xl"
               role="note"
               aria-label={$t.maskEditor.regionGroupLabel}
             >
@@ -1631,7 +1631,7 @@
             </div>
           {/if}
 
-          <div class="flex items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-900/60 p-1" role="group">
+          <div class="flex max-w-full flex-wrap items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-900/60 p-1" role="group">
             <button
               type="button"
               class="mobile-touch-target control-focus flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors"
@@ -1726,7 +1726,7 @@
 
           {#if snapAvailable}
             <div
-              class="flex items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-900/60 p-1"
+              class="flex max-w-full flex-wrap items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-900/60 p-1"
               role="group"
               aria-label={$t.maskEditor.snapGroupLabel}
             >
@@ -1768,7 +1768,7 @@
           {/if}
 
           <div
-            class="flex items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-900/60 p-1"
+            class="flex max-w-full flex-wrap items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-900/60 p-1"
             role="group"
             aria-label={$t.maskEditor.regionGroupLabel}
           >
@@ -1802,7 +1802,7 @@
 
           {#if tool === 'rect' || tool === 'ellipse' || tool === 'lasso'}
             <div
-              class="flex items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-900/60 p-1"
+              class="flex max-w-full flex-wrap items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-900/60 p-1"
               role="group"
               aria-label={$t.maskEditor.modeGroupLabel}
             >
@@ -1856,7 +1856,7 @@
             </label>
           {/if}
 
-          <div class="flex items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-900/60 p-1" role="group">
+          <div class="flex max-w-full flex-wrap items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-900/60 p-1" role="group">
             <button
               type="button"
               class="mobile-touch-target control-focus rounded-md p-1.5 text-zinc-300 transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40"
@@ -1897,7 +1897,7 @@
             </button>
           </div>
 
-          <div class="flex items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-900/60 p-1" role="group">
+          <div class="flex max-w-full flex-wrap items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-900/60 p-1" role="group">
             <button
               type="button"
               class="mobile-touch-target control-focus flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors"
@@ -1928,7 +1928,7 @@
             </button>
           </div>
 
-          <div class="flex items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-900/60 p-1" role="group" aria-label={$t.maskEditor.zoomLabel}>
+          <div class="flex max-w-full flex-wrap items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-900/60 p-1" role="group" aria-label={$t.maskEditor.zoomLabel}>
             <button
               type="button"
               class="mobile-touch-target control-focus rounded-md p-1.5 text-zinc-300 transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40"

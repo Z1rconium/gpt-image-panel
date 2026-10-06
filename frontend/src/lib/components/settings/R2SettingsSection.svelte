@@ -54,7 +54,7 @@ import type { R2HealthResponse } from '$lib/api/types/settings';
     {#if health}
       <div class={`rounded-md border p-3 text-xs ${panelClass(health.status)}`}>
         <div class="flex items-center justify-between gap-3"><span class="font-semibold">{$t.settings.r2HealthStatus}</span><span class={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${badgeClass(health.status)}`}>{statusLabel(health.status)}</span></div>
-        <div class="mt-2 space-y-1.5">{#each health.checks as check}<div class="rounded-md border border-stone-200 bg-white/70 p-2 text-stone-700 dark:border-zinc-800 dark:bg-zinc-950/50 dark:text-zinc-300"><div class="flex justify-between gap-2"><span class="font-mono text-[11px] text-stone-500 dark:text-zinc-500">{check.name}</span><span class={`rounded border px-1.5 py-0.5 text-[10px] ${badgeClass(check.status)}`}>{statusLabel(check.status)}</span></div><div class="mt-1 text-stone-600 dark:text-zinc-400">{check.message}</div></div>{/each}</div>
+        <div class="mt-2 space-y-1.5">{#each health.checks as check}<div class="rounded-md border border-stone-200 bg-white/70 p-2 text-stone-700 dark:border-zinc-800 dark:bg-zinc-950/50 dark:text-zinc-300"><div class="flex justify-between gap-2"><span class="font-mono text-[11px] text-stone-500 dark:text-zinc-500">{check.name}</span><span class={`rounded-sm border px-1.5 py-0.5 text-[10px] ${badgeClass(check.status)}`}>{statusLabel(check.status)}</span></div><div class="mt-1 text-stone-600 dark:text-zinc-400">{check.message}</div></div>{/each}</div>
       </div>
     {/if}
   </div>
