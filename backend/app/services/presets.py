@@ -1,9 +1,6 @@
+import logging
 
-import json
-import uuid
-from typing import Any
-
-from ..core.errors import NotFoundError, UnprocessableRequestError
+from ..core.errors import UnprocessableRequestError
 from ..runtime.state import state
 from ..core import secrets
 from ..core import settings as config
@@ -44,7 +41,6 @@ from ..integrations.nodeimage.client import (
     NodeImageConfigurationError,
     resolve_nodeimage_settings,
 )
-from ..core.utils import utc_now
 from ..repositories.settings import (
     load_ai_assistant_settings,
     load_prompt_optimizer_settings,
@@ -54,10 +50,8 @@ from ..repositories.settings import (
     save_settings,
 )
 from ..schemas.settings import (
-    MAX_PRESET_IMPORT_BYTES,
     AIAssistantSettingsResponse,
     ApiPresetResponse,
-    PresetExportPackage,
     PromptOptimizerSettingsResponse,
     R2BackupSettingsResponse,
     NodeImageSettingsResponse,
@@ -87,7 +81,22 @@ def is_malformed_api_key_env_ref(api_key: str) -> bool:
     return "${" in str(api_key or "") or "}" in str(api_key or "")
 
 
-def resolve_api_key(api_key: str) -> str:
+def resolve_api_key(
+    api_key: str,
+    *,
+    purpose: secrets.SecretPurpose,
+    target_url: str,
+    host_allowlist: str,
+) -> str:
+    """Resolve an API key reference; ${ENV} is only read through a declared purpose/origin binding."""
+    env_var = get_env_var_ref_name(api_key)
+    if env_var:
+        try:
+            return secrets.resolve_env_ref(
+                env_var, purpose=purpose, target_url=target_url, host_allowlist=host_allowlist, field_name="API Key"
+            )
+        except secrets.SecretRegistryError as exc:
+            raise UnprocessableRequestError(str(exc)) from exc
     return resolve_env_var_ref(api_key)
 
 
@@ -144,7 +153,12 @@ def get_effective_preset_api_key(preset: dict) -> str:
         raise UnprocessableRequestError("API credential is not configured")
     env_var = get_api_key_env_var(secret_id)
     if secret_id not in secrets.configured_secret_ids():
-        resolved_key = resolve_api_key(secret_id)
+        resolved_key = resolve_api_key(
+            secret_id,
+            purpose="upstream_api",
+            target_url=str(preset.get("api_url") or ""),
+            host_allowlist=config.UPSTREAM_HOST_ALLOWLIST,
+        )
         if resolved_key:
             return resolved_key
         if env_var:
@@ -472,254 +486,20 @@ def _stored_provider_config(preset: dict) -> ProviderConfigPayload | None:
         return None
 
 
-def _preset_export_item(preset: dict) -> dict:
-    provider_config = _stored_provider_config(preset)
-    return {
-        "name": str(preset.get("name") or "Untitled preset"),
-        "api_url": str(preset.get("api_url") or "").rstrip("/"),
-        "api_path": normalize_api_path(preset.get("api_path")),
-        "default_model": str(preset.get("default_model") or ""),
-        "default_response_format": normalize_default_response_format(
-            preset.get("default_response_format")
-        ),
-        "supports_mask": normalize_supports_mask(preset.get("supports_mask")),
-        "prompt_guard": normalize_prompt_guard(preset.get("prompt_guard")),
-        "provider_kind": normalize_provider_kind(preset.get("provider_kind")),
-        "provider_config": (
-            provider_config.model_dump(mode="json") if provider_config is not None else None
-        ),
-    }
 
 
-def build_preset_export(preset_id: str) -> dict:
-    """Build the secret-free export package for one preset."""
-    preset = get_preset_by_id(preset_id)
-    if not preset:
-        raise NotFoundError("Preset not found")
-    return {
-        "format": "gpt-image-panel-presets",
-        "format_version": 1,
-        "exported_at": utc_now(),
-        "presets": [_preset_export_item(preset)],
-    }
 
 
-def _package_errors(exc: ValidationError) -> list[dict]:
-    issues: list[dict] = []
-    for error in exc.errors()[:24]:
-        location = ".".join(str(part) for part in error.get("loc", ()))
-        issues.append(
-            {"path": location or "package", "message": str(error.get("msg") or "invalid value")}
-        )
-    return issues
 
 
-def validate_preset_import_package(package: Any) -> tuple[Any | None, list[dict], int]:
-    """Validate a raw import package, returning `(package, errors, byte_size)`."""
-    if isinstance(package, str):
-        try:
-            package = json.loads(package)
-        except json.JSONDecodeError as exc:
-            return None, [{"path": "package", "message": f"not valid JSON: {exc.msg}"}], len(
-                package.encode("utf-8")
-            )
-    if not isinstance(package, dict):
-        return None, [{"path": "package", "message": "expected a JSON object"}], 0
-    size = len(json.dumps(package, ensure_ascii=False).encode("utf-8"))
-    if size > MAX_PRESET_IMPORT_BYTES:
-        return (
-            None,
-            [
-                {
-                    "path": "package",
-                    "message": f"package is too large ({size} bytes; max {MAX_PRESET_IMPORT_BYTES})",
-                }
-            ],
-            size,
-        )
-    try:
-        parsed = PresetExportPackage.model_validate(package)
-    except ValidationError as exc:
-        return None, _package_errors(exc), size
-    issues: list[dict] = []
-    for index, item in enumerate(parsed.presets):
-        if item.provider_kind == PROVIDER_KIND_ASYNC_JSON and item.provider_config is None:
-            issues.append(
-                {
-                    "path": f"presets.{index}.provider_config",
-                    "message": "provider_config is required when provider_kind is async_json",
-                }
-            )
-    if issues:
-        return None, issues, size
-    return parsed, [], size
 
 
-def build_preset_import_preview(package: Any) -> dict:
-    parsed, errors, size = validate_preset_import_package(package)
-    if parsed is None:
-        return {"valid": False, "errors": errors, "items": [], "total_bytes": size}
-    existing = get_api_presets()
-    items = []
-    for index, item in enumerate(parsed.presets):
-        duplicate = next(
-            (
-                preset
-                for preset in existing
-                if str(preset.get("name") or "").strip().lower() == item.name.strip().lower()
-            ),
-            None,
-        )
-        will_reuse_key = bool(
-            duplicate and secrets.same_origin(duplicate.get("api_url"), item.api_url)
-        )
-        warnings = []
-        if not will_reuse_key:
-            warnings.append("The API key is not included; enter it after importing.")
-        if item.provider_kind == PROVIDER_KIND_ASYNC_JSON:
-            warnings.append("Async providers support generation only.")
-        items.append(
-            {
-                "index": index,
-                "name": item.name,
-                "api_url": item.api_url,
-                "provider_kind": item.provider_kind,
-                "duplicate_preset_id": str(duplicate.get("id")) if duplicate else None,
-                "duplicate_preset_name": str(duplicate.get("name")) if duplicate else None,
-                "will_reuse_api_key": will_reuse_key,
-                "warnings": warnings,
-            }
-        )
-    return {"valid": True, "errors": [], "items": items, "total_bytes": size}
 
 
-def _new_preset_from_export(item: Any) -> dict:
-    preset = {
-        "id": uuid.uuid4().hex,
-        "name": item.name,
-        "api_url": str(item.api_url).rstrip("/"),
-        "api_key": "",
-        "api_path": normalize_api_path(item.api_path),
-        "default_model": str(item.default_model or ""),
-        "default_response_format": normalize_default_response_format(
-            item.default_response_format
-        ),
-        "supports_mask": normalize_supports_mask(item.supports_mask),
-        "prompt_guard": normalize_prompt_guard(item.prompt_guard),
-        "provider_kind": normalize_provider_kind(item.provider_kind),
-        "provider_config": (
-            item.provider_config.model_dump(mode="json")
-            if item.provider_config is not None
-            else None
-        ),
-    }
-    if preset["provider_kind"] == PROVIDER_KIND_ASYNC_JSON:
-        preset["supports_mask"] = provider_capabilities(preset["provider_config"]).mask
-    return preset
 
 
-def _merge_preset_from_export(target: dict, item: Any) -> None:
-    same_origin = secrets.same_origin(target.get("api_url"), item.api_url)
-    target["name"] = item.name
-    target["api_url"] = str(item.api_url).rstrip("/")
-    target["api_path"] = normalize_api_path(item.api_path)
-    target["default_model"] = str(item.default_model or "")
-    target["default_response_format"] = normalize_default_response_format(
-        item.default_response_format
-    )
-    target["supports_mask"] = normalize_supports_mask(item.supports_mask)
-    target["prompt_guard"] = normalize_prompt_guard(item.prompt_guard)
-    target["provider_kind"] = normalize_provider_kind(item.provider_kind)
-    target["provider_config"] = (
-        item.provider_config.model_dump(mode="json")
-        if item.provider_config is not None
-        else None
-    )
-    if target["provider_kind"] == PROVIDER_KIND_ASYNC_JSON:
-        target["supports_mask"] = provider_capabilities(target["provider_config"]).mask
-    if not same_origin:
-        # Never carry a stored key across origins.
-        target["api_key"] = ""
 
 
-def apply_preset_import(package: Any, instructions: list[dict]) -> None:
-    """Apply an import atomically; every validation happens before any write."""
-    parsed, errors, _size = validate_preset_import_package(package)
-    if parsed is None:
-        detail = "; ".join(f"{issue['path']}: {issue['message']}" for issue in errors[:3])
-        raise UnprocessableRequestError(detail or "Invalid preset import package")
-
-    presets = get_api_presets()
-    by_id = {str(preset.get("id")): preset for preset in presets}
-    actions: dict[int, dict] = {}
-    for entry in instructions:
-        index = int(entry.get("index"))
-        if index in actions:
-            raise UnprocessableRequestError(
-                f"Duplicate import instruction for preset #{index + 1}"
-            )
-        if index < 0 or index >= len(parsed.presets):
-            raise UnprocessableRequestError("Import instruction refers to an unknown preset")
-        actions[index] = entry
-
-    updates: dict[str, int] = {}
-    for index, entry in actions.items():
-        if str(entry.get("action") or "create") != "update":
-            continue
-        target_id = str(entry.get("target_preset_id") or "")
-        if target_id not in by_id:
-            raise UnprocessableRequestError("Import update target was not found")
-        if target_id in updates:
-            raise UnprocessableRequestError("Two import items cannot update the same preset")
-        updates[target_id] = index
-
-    new_presets = [dict(preset) for preset in presets]
-    for index, item in enumerate(parsed.presets):
-        action = str(actions.get(index, {}).get("action") or "create")
-        if action == "skip":
-            continue
-        if action == "update":
-            target_id = str(actions[index].get("target_preset_id") or "")
-            position = next(
-                position
-                for position, preset in enumerate(new_presets)
-                if str(preset.get("id")) == target_id
-            )
-            target = dict(new_presets[position])
-            _merge_preset_from_export(target, item)
-            new_presets[position] = target
-        else:
-            new_presets.append(_new_preset_from_export(item))
-
-    previous_presets = list(state.api_presets or [])
-    previous_active_id = str(getattr(state, "active_preset_id", "") or "")
-    begin_api_settings_write()
-    try:
-        state.api_presets = new_presets
-        for target_id in updates:
-            if target_id == previous_active_id:
-                updated = next(
-                    preset for preset in new_presets if str(preset.get("id")) == target_id
-                )
-                apply_api_preset(updated)
-                break
-        persist_api_settings()
-    except Exception:
-        state.api_presets = previous_presets
-        if previous_active_id:
-            previous = next(
-                (
-                    preset
-                    for preset in previous_presets
-                    if str(preset.get("id")) == previous_active_id
-                ),
-                None,
-            )
-            if previous is not None:
-                apply_api_preset(previous)
-        raise
-    finally:
-        end_api_settings_write()
 
 
 def reorder_api_presets(preset_ids: list[str]) -> None:
@@ -888,7 +668,12 @@ def resolve_prompt_optimizer_api_key(raw: dict | None) -> str:
         return ""
     env_var = get_api_key_env_var(secret_id)
     if secret_id not in secrets.configured_secret_ids():
-        resolved_key = resolve_api_key(secret_id)
+        resolved_key = resolve_api_key(
+            secret_id,
+            purpose="prompt_optimizer",
+            target_url=str(settings.get("api_url") or ""),
+            host_allowlist=config.PROMPT_OPTIMIZER_HOST_ALLOWLIST,
+        )
         if resolved_key:
             return resolved_key
         if env_var:
@@ -912,7 +697,12 @@ def resolve_ai_assistant_api_key(raw: dict | None) -> str:
         return ""
     env_var = get_api_key_env_var(secret_id)
     if secret_id not in secrets.configured_secret_ids():
-        resolved_key = resolve_api_key(secret_id)
+        resolved_key = resolve_api_key(
+            secret_id,
+            purpose="prompt_optimizer",
+            target_url=str(settings.get("api_url") or ""),
+            host_allowlist=config.PROMPT_OPTIMIZER_HOST_ALLOWLIST,
+        )
         if resolved_key:
             return resolved_key
         if env_var:
@@ -961,6 +751,43 @@ def get_r2_backup_settings() -> dict:
 
 def get_nodeimage_settings() -> dict:
     return load_nodeimage_settings()
+
+
+def list_env_ref_migrations() -> list[dict]:
+    """Inventory of persisted ${ENV_VAR} credential references (names only, never values).
+
+    Migration preflight: each entry says which setting uses the reference, for what
+    purpose, and whether SECRET_REGISTRY_JSON declares the variable. Undeclared names
+    stop resolving unless ALLOW_LEGACY_ENV_REFS=true.
+    """
+    declared = secrets.declared_env_names()
+    found: list[dict] = []
+
+    def note(source: str, purpose: str, value: object) -> None:
+        env_var = get_env_var_ref_name(str(value or "").strip())
+        if env_var:
+            found.append({"source": source, "purpose": purpose, "env_var": env_var, "declared": env_var in declared})
+
+    for preset in get_api_presets():
+        note(f"preset:{preset.get('name') or preset.get('id')}", "upstream_api", preset.get("api_key"))
+    note("prompt_optimizer", "prompt_optimizer", normalize_prompt_optimizer_settings(get_prompt_optimizer_settings()).get("api_key"))
+    r2 = get_r2_backup_settings()
+    note("r2_backup", "r2_access_key_id", r2.get("access_key_id"))
+    note("r2_backup", "r2_secret_access_key", r2.get("secret_access_key"))
+    note("nodeimage", "nodeimage_api_key", get_nodeimage_settings().get("api_key"))
+    return found
+
+
+def warn_undeclared_env_refs() -> None:
+    pending = [item for item in list_env_ref_migrations() if not item["declared"]]
+    if not pending or config.ALLOW_LEGACY_ENV_REFS:
+        return
+    logging.getLogger(__name__).warning(
+        "Credential references to undeclared environment variables will not resolve; "
+        "declare them in SECRET_REGISTRY_JSON (purpose + origin) or set ALLOW_LEGACY_ENV_REFS=true "
+        "while migrating: %s",
+        "; ".join(f"{item['source']} -> ${{{item['env_var']}}} ({item['purpose']})" for item in pending),
+    )
 
 
 def validate_configured_secret_bindings() -> None:

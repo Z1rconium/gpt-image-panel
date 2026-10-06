@@ -84,6 +84,15 @@ def test_edit_preserves_original_descendants_and_isolates_model_context(client, 
     assert [message["turn_id"] for message in earlier["messages"]] == [second["turn_id"]] * 2
 
 
+def test_before_seq_is_bounded_to_sqlite_integers(client, monkeypatch):
+    enable_agent(client)
+    conversation = new_conversation(client)
+    base = f"/api/agent/conversations/{conversation}"
+    assert client.get(f"{base}?before_seq={2**63 - 1}").status_code == 200
+    for value in (2**63, -1, 0, "9" * 40):
+        assert client.get(f"{base}?before_seq={value}").status_code == 422
+
+
 def test_regenerate_replays_original_input_and_keeps_original_answer(client, monkeypatch):
     enable_agent(client)
     model = install_model(monkeypatch, [text_round("old answer"), text_round("new answer")])

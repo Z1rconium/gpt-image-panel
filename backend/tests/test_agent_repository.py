@@ -172,7 +172,7 @@ def test_sweep_rechecks_expiry_after_candidate_read(tmp_path, monkeypatch):
                 conn.execute("UPDATE agent_turns SET lease_expires_at = ? WHERE id = ?", (_future(), turn_id))
         return original(turn_id, status, **kwargs)
 
-    monkeypatch.setattr(agent_repo, "finish_turn", renew_before_write)
+    monkeypatch.setattr(agent_repo.turns, "finish_turn", renew_before_write)
     assert agent_repo.sweep_stale_turns() == []
     assert agent_repo.get_turn(turn["id"])["status"] == "running"
     assert agent_repo.get_message(turn["assistant_message_id"])["status"] == "streaming"

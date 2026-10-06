@@ -4,7 +4,7 @@ from backend.tests.support.contract import *  # noqa: F403
 
 from backend.app.integrations.upstream.errors import UpstreamApiError
 from backend.app.core.utils import utc_now
-from backend.app.services import job_executor
+from backend.app.services import image_unit_session, job_executor
 
 
 def _mark_running_with_expired_lease(
@@ -320,7 +320,7 @@ def test_lease_is_renewed_during_slow_upstream(client, monkeypatch):
         renewed_tokens.append(claim_token)
         return real_renew(unit_id, claim_token, claim_expires_at)
 
-    monkeypatch.setattr(job_executor, "renew_image_job_unit_lease", tracking_renew)
+    monkeypatch.setattr(image_unit_session, "renew_image_job_unit_lease", tracking_renew)
 
     response = client.post(
         "/api/generate", json={"prompt": "slow", "model": "gpt-image-2"}
@@ -602,7 +602,7 @@ def test_transient_renewal_error_retries_without_aborting_upstream(
     locally tracked lease is still valid; the loop retries and recovers."""
     monkeypatch.setattr(config, "IMAGE_JOB_UNIT_LEASE_SECONDS", 30)
     monkeypatch.setattr(config, "IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS", 0.3)
-    monkeypatch.setattr(job_executor, "IMAGE_UNIT_LEASE_RENEW_RETRY_SECONDS", 0.2)
+    monkeypatch.setattr(image_unit_session, "IMAGE_UNIT_LEASE_RENEW_RETRY_SECONDS", 0.2)
 
     state = {"started": False, "cancelled": False, "finished": False}
     monkeypatch.setattr(
@@ -624,7 +624,7 @@ def test_transient_renewal_error_retries_without_aborting_upstream(
             raise RuntimeError("simulated transient renewal DB failure")
         return real_renew(unit_id, claim_token, claim_expires_at)
 
-    monkeypatch.setattr(job_executor, "renew_image_job_unit_lease", flaky_renew)
+    monkeypatch.setattr(image_unit_session, "renew_image_job_unit_lease", flaky_renew)
     counters_before = metrics.snapshot()["counters"]
     lease_lost_before = counters_before.get("image_jobs.lease_lost", 0)
     retry_before = counters_before.get("image_jobs.lease_renew_retry", 0)
@@ -663,7 +663,7 @@ def test_persistent_renewal_errors_abort_before_lease_deadline(client, monkeypat
     unit shortly before expiry without writing a terminal state."""
     monkeypatch.setattr(config, "IMAGE_JOB_UNIT_LEASE_SECONDS", 2)
     monkeypatch.setattr(config, "IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS", 0.3)
-    monkeypatch.setattr(job_executor, "IMAGE_UNIT_LEASE_RENEW_RETRY_SECONDS", 0.2)
+    monkeypatch.setattr(image_unit_session, "IMAGE_UNIT_LEASE_RENEW_RETRY_SECONDS", 0.2)
 
     state = {"started": False, "cancelled": False, "finished": False}
     monkeypatch.setattr(
@@ -678,7 +678,7 @@ def test_persistent_renewal_errors_abort_before_lease_deadline(client, monkeypat
         renew_calls.append(claim_token)
         raise RuntimeError("simulated persistent renewal DB failure")
 
-    monkeypatch.setattr(job_executor, "renew_image_job_unit_lease", failing_renew)
+    monkeypatch.setattr(image_unit_session, "renew_image_job_unit_lease", failing_renew)
     lease_lost_before = metrics.snapshot()["counters"].get("image_jobs.lease_lost", 0)
 
     unit_id, _parent_id, task = _run_unit_until_upstream_started(
@@ -713,17 +713,17 @@ def test_persistent_renewal_errors_abort_before_lease_deadline(client, monkeypat
 def test_renew_interval_clamps_when_misconfigured(monkeypatch):
     monkeypatch.setattr(config, "IMAGE_JOB_UNIT_LEASE_SECONDS", 120)
     monkeypatch.setattr(config, "IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS", 100.0)
-    assert job_executor.image_unit_lease_renew_interval() == 30.0
+    assert image_unit_session.image_unit_lease_renew_interval() == 30.0
 
     monkeypatch.setattr(config, "IMAGE_JOB_UNIT_LEASE_SECONDS", 30)
     monkeypatch.setattr(config, "IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS", 6.0)
-    assert job_executor.image_unit_lease_renew_interval() == 6.0
+    assert image_unit_session.image_unit_lease_renew_interval() == 6.0
 
     monkeypatch.setattr(config, "IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS", 15.0)
-    assert job_executor.image_unit_lease_renew_interval() == 7.5
+    assert image_unit_session.image_unit_lease_renew_interval() == 7.5
 
     monkeypatch.setattr(config, "IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS", 0.0)
-    assert job_executor.image_unit_lease_renew_interval() == 7.5
+    assert image_unit_session.image_unit_lease_renew_interval() == 7.5
 
 
 def test_lease_loss_pops_terminal_parent_memory(client, monkeypatch):

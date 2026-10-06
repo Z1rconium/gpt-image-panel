@@ -32,14 +32,14 @@ class TurnSearch:
             if len(self.calls) >= run.agent.max_tool_rounds or run.rounds_used >= run.agent.max_tool_rounds:
                 raise SearchBudgetExceeded("The Agent web search tool budget was exceeded.")
             run.rounds_used += 1
-            block = {"id": run._next_block_id("s"), "type": "search", "call_id": event.call_id}
+            block = {"id": run.events.next_block_id("s"), "type": "search", "call_id": event.call_id}
             self.calls[event.call_id] = block
         # Progress-only events must not erase an action/queries already reported.
         block = {**block, "status": event.status}
         if event.queries or event.url or "action" not in block:
             block.update(action=event.action, queries=list(event.queries), url=event.url)
         self.calls[event.call_id] = block
-        await run.upsert_block(block)
+        await run.events.upsert_block(block)
 
     async def publish_sources(self, run: Any) -> None:
         if not self.citations:
@@ -60,13 +60,13 @@ class TurnSearch:
                                   end_index=segment["offset"] + len(strip_ref_tags(raw[start:citation.end_index])))
             sources.append(source)
         if self.sources_block is None:
-            self.sources_block = {"id": run._next_block_id("c"), "type": "sources"}
+            self.sources_block = {"id": run.events.next_block_id("c"), "type": "sources"}
         self.sources_block = {**self.sources_block, "sources": sources}
-        await run.upsert_block(self.sources_block)
+        await run.events.upsert_block(self.sources_block)
 
     async def settle(self, run: Any, status: str) -> None:
         for call_id, block in list(self.calls.items()):
             if block.get("status") not in {"completed", "failed", "cancelled", "interrupted"}:
                 block = {**block, "status": "failed" if status == "failed" else "cancelled" if status == "cancelled" else "interrupted"}
                 self.calls[call_id] = block
-                await run.upsert_block(block)
+                await run.events.upsert_block(block)

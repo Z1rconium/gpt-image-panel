@@ -18,9 +18,9 @@ from ..repositories.image_jobs import (
 from .claim_loop import fail_open_precheck, run_claim_loop
 from .job_executor import (
     aggregate_parent_image_job,
-    image_unit_lease_expires_at,
     run_claimed_image_unit,
 )
+from .image_unit_session import image_unit_lease_expires_at
 from .job_queue import get_image_unit_dispatcher_kick_event
 from ..runtime.blocking import run_db_operation
 

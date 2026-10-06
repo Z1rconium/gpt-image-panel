@@ -3,14 +3,20 @@ ASGI middleware that enforces request body size limits before Starlette/FastAPI
 parses multipart forms, preventing disk/memory exhaustion from oversized uploads.
 """
 
+import asyncio
+import time
+
 from fastapi import HTTPException
 from fastapi.params import Body, File, Form
 from fastapi.routing import APIRoute
+from starlette.requests import Request
 from starlette.routing import Match
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from ..core import security as auth
 from ..core import settings as config
+from .middleware import AUTH_EXEMPT_PATHS, AUTH_EXEMPT_PREFIXES
 from .edit_limits import (
     EDIT_MULTIPART_METADATA_OVERHEAD_BYTES,
     MAX_EDIT_MASK_BYTES,
@@ -18,6 +24,14 @@ from .edit_limits import (
 )
 
 ASSISTANT_IMAGE_MULTIPART_OVERHEAD_BYTES = 64 * 1024
+
+
+def _needs_access_token(path: str) -> bool:
+    return bool(config.ACCESS_KEY) and path not in AUTH_EXEMPT_PATHS and not path.startswith(AUTH_EXEMPT_PREFIXES)
+
+
+def _has_valid_access_token(scope: Scope) -> bool:
+    return auth.verify_access_token(Request(scope).cookies.get(config.ACCESS_KEY_COOKIE_NAME))
 
 
 def _is_json_content_type(content_type: str) -> bool:
@@ -108,14 +122,29 @@ class BodyLimitMiddleware:
             except (ValueError, TypeError):
                 pass
 
+        if json_body and _needs_access_token(path) and not _has_valid_access_token(scope):
+            # Unauthenticated callers never get their body buffered; the access
+            # middleware rejects the request without reading it.
+            await self.app(scope, receive, send)
+            return
+
         if json_body:
             # Validate the complete bounded JSON body before routing or parsing.
             # BaseHTTPMiddleware can wrap receive exceptions in ExceptionGroup,
             # which FastAPI otherwise translates into an incorrect generic 400.
             body = bytearray()
             total = 0
+            deadline = time.monotonic() + config.REQUEST_BODY_TOTAL_TIMEOUT_SECONDS
             while True:
-                message = await receive()
+                try:
+                    message = await asyncio.wait_for(
+                        receive(),
+                        max(0.001, min(config.REQUEST_BODY_IDLE_TIMEOUT_SECONDS, deadline - time.monotonic())),
+                    )
+                except asyncio.TimeoutError:
+                    response = JSONResponse(status_code=408, content={"status": "error", "detail": "Request body read timed out"})
+                    await response(scope, receive, send)
+                    return
                 total += len(message.get("body", b""))
                 if total > max_bytes:
                     response = JSONResponse(status_code=413, content={"status": "error", "detail": "Request body too large"})

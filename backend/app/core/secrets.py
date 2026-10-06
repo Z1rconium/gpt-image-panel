@@ -51,6 +51,7 @@ class SecretEntry:
 
 
 _registry: dict[str, SecretEntry] = {}
+_env_bindings: dict[str, tuple[SecretEntry, ...]] = {}
 _registry_lock = RLock()
 _registry_generation = 0
 _ACTIVE_SECRET_CONFIG_NAMES = (
@@ -132,12 +133,13 @@ def _validate_entry(secret_id: str, raw: object) -> SecretEntry:
     )
 
 
-def _builtin_entries() -> dict[str, SecretEntry]:
-    # Direct startup secrets never pass through the web settings API. Stable IDs
-    # let defaults use the same purpose/origin checks as operator-declared entries.
+_ENV_REF_RE = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
+
+
+def _builtin_candidates() -> tuple[tuple[str, str, str, str], ...]:
     from . import settings as config
 
-    candidates = (
+    return (
         (
             "builtin-default-api-key",
             "upstream_api",
@@ -175,6 +177,29 @@ def _builtin_entries() -> dict[str, SecretEntry]:
             config.NODEIMAGE_API_KEY,
         ),
     )
+
+
+def _builtin_env_bindings() -> dict[str, list[SecretEntry]]:
+    """Startup config such as DEFAULT_API_KEY=${NAME} is operator-owned: it binds NAME to its purpose/origin."""
+    bindings: dict[str, list[SecretEntry]] = {}
+    for secret_id, purpose, target_url, value in _builtin_candidates():
+        match = _ENV_REF_RE.match(str(value or "").strip())
+        if not match or not str(target_url or "").strip():
+            continue
+        try:
+            origin = canonical_origin(target_url)
+        except SecretRegistryError:
+            continue
+        bindings.setdefault(match.group(1), []).append(
+            SecretEntry(secret_id=secret_id, purpose=purpose, origin=origin, env_name=match.group(1))
+        )
+    return bindings
+
+
+def _builtin_entries() -> dict[str, SecretEntry]:
+    # Direct startup secrets never pass through the web settings API. Stable IDs
+    # let defaults use the same purpose/origin checks as operator-declared entries.
+    candidates = _builtin_candidates()
     entries: dict[str, SecretEntry] = {}
     for secret_id, purpose, target_url, value in candidates:
         normalized_value = str(value or "").strip()
@@ -216,11 +241,63 @@ def configure_registry(raw_json: str | None = None) -> None:
     if overlap:
         raise SecretRegistryError(f"Reserved secret_id cannot be overridden: {sorted(overlap)[0]}")
     entries.update(declared)
+    bindings = _builtin_env_bindings()
+    for entry in declared.values():
+        if entry.env_name:
+            bindings.setdefault(entry.env_name, []).append(entry)
     with _registry_lock:
-        global _registry, _registry_generation, _active_secret_values_cache
+        global _registry, _env_bindings, _registry_generation, _active_secret_values_cache
         _registry = entries
+        _env_bindings = {name: tuple(items) for name, items in bindings.items()}
         _registry_generation += 1
         _active_secret_values_cache = None
+
+
+def declared_env_names() -> frozenset[str]:
+    with _registry_lock:
+        return frozenset(_env_bindings)
+
+
+def resolve_env_ref(
+    env_name: str,
+    *,
+    purpose: SecretPurpose,
+    target_url: str,
+    host_allowlist: str,
+    field_name: str = "credential",
+) -> str:
+    """Resolve ${ENV_NAME} only through a declared binding for this purpose and origin.
+
+    Unknown names are rejected before the process environment is read.
+    """
+    from . import settings as config
+
+    if config.ALLOW_LEGACY_ENV_REFS:
+        value = os.getenv(env_name, "").strip()
+        if not value:
+            raise SecretRegistryError(f"{field_name} environment variable {env_name} is not set or empty.")
+        return value
+    with _registry_lock:
+        candidates = _env_bindings.get(env_name, ())
+    if not candidates:
+        raise SecretRegistryError(
+            f"{field_name} environment variable {env_name} is not declared in SECRET_REGISTRY_JSON. "
+            "Declare it with a purpose and origin, then reference its secret_id."
+        )
+    error: SecretRegistryError | None = None
+    for entry in candidates:
+        try:
+            _check_entry_binding(
+                entry, purpose=purpose, target_url=target_url, host_allowlist=host_allowlist
+            )
+        except SecretRegistryError as exc:
+            error = exc
+            continue
+        value = entry.resolve()
+        if value:
+            return value
+        error = SecretRegistryError(f"{field_name} environment variable {env_name} is not set or empty.")
+    raise SecretRegistryError(f"{field_name}: {error}") from error
 
 
 def configured_secret_ids() -> tuple[str, ...]:
@@ -257,7 +334,18 @@ def validate_secret_binding(
     target_url: str,
     host_allowlist: str,
 ) -> SecretEntry:
-    entry = secret_entry(secret_id)
+    return _check_entry_binding(
+        secret_entry(secret_id), purpose=purpose, target_url=target_url, host_allowlist=host_allowlist
+    )
+
+
+def _check_entry_binding(
+    entry: SecretEntry,
+    *,
+    purpose: SecretPurpose,
+    target_url: str,
+    host_allowlist: str,
+) -> SecretEntry:
     if entry.purpose != purpose:
         raise SecretRegistryError("secret_id is not permitted for this purpose")
     if entry.origin != canonical_origin(target_url):
@@ -317,15 +405,16 @@ def resolve_secret_reference(
 
     # Keep the parser local to avoid making the validators module import the
     # secrets registry during application startup.
-    from .validators import get_env_var_ref_name, resolve_env_var_ref
+    from .validators import get_env_var_ref_name
 
     env_var = get_env_var_ref_name(raw)
     if env_var:
-        resolved = resolve_env_var_ref(raw)
-        if resolved:
-            return resolved
-        raise SecretRegistryError(
-            f"{field_name} environment variable {env_var} is not set or empty."
+        return resolve_env_ref(
+            env_var,
+            purpose=purpose,
+            target_url=target_url,
+            host_allowlist=host_allowlist,
+            field_name=field_name,
         )
 
     if "${" in raw or "}" in raw:

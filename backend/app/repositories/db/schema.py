@@ -1396,6 +1396,13 @@ def _migration_agent_search(conn: sqlite3.Connection):
         conn.execute("ALTER TABLE agent_turns ADD COLUMN web_search_enabled INTEGER NOT NULL DEFAULT 0")
 
 
+def _migration_agent_execution_snapshot(conn: sqlite3.Connection):
+    # '{}' marks a legacy turn accepted before snapshots existed; it runs on live settings.
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(agent_turns)")}
+    if "execution_snapshot_json" not in columns:
+        conn.execute("ALTER TABLE agent_turns ADD COLUMN execution_snapshot_json TEXT NOT NULL DEFAULT '{}'")
+
+
 SCHEMA_MIGRATIONS = (
     (1, "baseline_legacy_schema", _migration_baseline_legacy_schema),
     (2, "gallery_filter_options", _migration_gallery_filter_options),
@@ -1435,4 +1442,5 @@ SCHEMA_MIGRATIONS = (
     (36, "image_job_preview_context", _migration_image_job_preview_context),
     (37, "agent_branches", _migration_agent_branches),
     (38, "agent_search", _migration_agent_search),
+    (39, "agent_execution_snapshot", _migration_agent_execution_snapshot),
 )

@@ -17,6 +17,7 @@ from .presets import (
     get_webhook_url,
     load_api_settings,
 )
+from .image_preset_snapshot import apply_image_preset_snapshot
 from ..core.errors import (
     InvalidRequestError,
     RateLimitedError,
@@ -388,6 +389,7 @@ async def queue_image_job(
     job_id: str | None = None,
     agent_turn_id: str | None = None,
     agent_conversation_id: str | None = None,
+    preset_snapshot: dict | None = None,
 ) -> GenerateJobResponse:
     await run_db_operation(load_api_settings, metric_name="load_api_settings")
     active_preset = get_active_preset()
@@ -400,6 +402,8 @@ async def queue_image_job(
         )
         if active_preset is None:
             raise UnprocessableRequestError("API preset not found")
+    if preset_snapshot is not None:
+        active_preset = apply_image_preset_snapshot(active_preset, preset_snapshot)
     active_preset_id = str(active_preset.get("id") or "default")
     api_url = str(active_preset.get("api_url") or "").rstrip("/")
     api_preset_name = active_preset.get("name") or "Untitled preset"
@@ -555,6 +559,7 @@ async def queue_edit_job(
     *,
     agent_turn_id: str | None = None,
     agent_conversation_id: str | None = None,
+    preset_snapshot: dict | None = None,
 ) -> GenerateJobResponse:
     job_id = str(uuid.uuid4())
     if mask_source is not None:
@@ -589,6 +594,7 @@ async def queue_edit_job(
             job_id=job_id,
             agent_turn_id=agent_turn_id,
             agent_conversation_id=agent_conversation_id,
+            preset_snapshot=preset_snapshot,
         )
     except BaseException:
         if mask_source is not None:

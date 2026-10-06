@@ -19,16 +19,18 @@ from ..core.errors import (
     UpstreamTimeoutError,
 )
 from ..runtime.state import state, utc_lease_expires_at
+from ..core import secrets
 from ..core import settings as config
 from ..core import validators as ssrf
 from ..core.utils import utc_now
-from ..integrations import assistant_client
+from ..integrations import agent_client, assistant_client
 from ..repositories.coordination import (
     acquire_background_slot,
     claim_next_gallery_job,
     delete_gallery_job,
     get_gallery_job,
     release_background_slot,
+    renew_background_slot,
     renew_gallery_job_lease,
     reserve_gallery_job_capacity,
     update_gallery_job,
@@ -196,9 +198,19 @@ def _assistant_request_semaphore() -> asyncio.Semaphore:
     return cached[1]
 
 
+ASSISTANT_SLOT_CLEANUP_MARGIN_SECONDS = 30
+AGENT_SNAPSHOT_VERSION = 1
+
+
+def _assistant_slot_lease_seconds(timeout_seconds: int) -> int:
+    """Lease covers the whole request deadline plus cleanup; renewal extends it further."""
+    timeout = int(timeout_seconds or config.PROMPT_OPTIMIZER_TIMEOUT_SECONDS)
+    total = agent_client.request_total_timeout_seconds(timeout)
+    return int(total) + ASSISTANT_SLOT_CLEANUP_MARGIN_SECONDS
+
+
 def _assistant_slot_expires_at(timeout_seconds: int) -> str:
-    lease_seconds = max(30, int(timeout_seconds or config.PROMPT_OPTIMIZER_TIMEOUT_SECONDS) + 30)
-    return utc_lease_expires_at(lease_seconds)
+    return utc_lease_expires_at(_assistant_slot_lease_seconds(timeout_seconds))
 
 
 def _assistant_slot_owner() -> str:
@@ -231,6 +243,32 @@ async def _release_assistant_slot(slot_name: str, owner: str) -> None:
         )
     except Exception:
         logger.warning("Failed to release AI Assistant concurrency slot %s", slot_name, exc_info=True)
+
+
+async def _renew_assistant_slot_loop(
+    slot_name: str, owner: str, timeout_seconds: int, on_lost
+) -> None:
+    lease_seconds = _assistant_slot_lease_seconds(timeout_seconds)
+    interval = max(1.0, lease_seconds / 3)
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            renewed = await run_db_operation(
+                renew_background_slot,
+                name=slot_name,
+                owner=owner,
+                lease_expires_at=utc_lease_expires_at(lease_seconds),
+                now=utc_now(),
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.warning("Assistant slot renewal failed for %s", slot_name, exc_info=True)
+            continue
+        if not renewed:
+            logger.warning("Assistant slot %s was lost; aborting the request", slot_name)
+            on_lost()
+            return
 
 
 @asynccontextmanager
@@ -289,7 +327,24 @@ async def _assistant_request_limit(
                     raise
                 retry = True
             if not retry:
-                yield
+                lost = False
+                host = asyncio.current_task()
+
+                def on_lost() -> None:
+                    nonlocal lost
+                    lost = True
+                    if host is not None:
+                        host.cancel()
+
+                renewer = asyncio.create_task(_renew_assistant_slot_loop(*slot, timeout_seconds, on_lost))
+                try:
+                    yield
+                except asyncio.CancelledError:
+                    if lost:
+                        raise DomainError("AI Assistant concurrency slot was lost.", status_code=503) from None
+                    raise
+                finally:
+                    renewer.cancel()
                 return
         finally:
             try:
@@ -374,22 +429,79 @@ class AgentRuntime:
     web_search_supported: bool = False
 
 
-def resolve_agent_runtime(settings: dict | None = None) -> AgentRuntime:
+def agent_execution_snapshot(agent: AgentRuntime) -> dict[str, Any]:
+    """Credential-free description of what an accepted turn will run against."""
+    runtime = agent.assistant
+    return {
+        "version": AGENT_SNAPSHOT_VERSION,
+        "assistant": {
+            "api_url": runtime.api_url,
+            "api_path": runtime.api_path,
+            "model": runtime.model,
+            "timeout_seconds": runtime.timeout_seconds,
+        },
+        "max_tool_rounds": agent.max_tool_rounds,
+        "system_prompt": agent.system_prompt,
+        "web_search": {"enabled": agent.web_search_enabled, "supported": agent.web_search_supported},
+    }
+
+
+def resolve_agent_runtime(settings: dict | None = None, snapshot: dict | None = None) -> AgentRuntime:
+    """Resolve the Agent endpoint, optionally pinned to a turn's execution snapshot.
+
+    The credential is always resolved live, but only for the snapshot's origin:
+    if the configured endpoint moved elsewhere the turn fails instead of being
+    silently sent to the new target. A legacy (empty) snapshot uses live settings.
+    """
     effective = presets.effective_ai_assistant_settings(
         settings if settings is not None else _assistant_settings()
     )
     runtime = _resolve_runtime(agent=True, settings=effective)
-    return AgentRuntime(
+    agent = AgentRuntime(
         assistant=runtime,
         max_tool_rounds=int(effective.get("agent_max_tool_rounds") or 1),
         system_prompt=str(effective.get("agent_system_prompt") or ""),
         web_search_enabled=bool(effective.get("agent_web_search_enabled", False)),
         web_search_supported=bool(effective.get("agent_web_search_supported", False)),
     )
+    pinned = snapshot.get("assistant") if isinstance(snapshot, dict) else None
+    if snapshot is None or not isinstance(pinned, dict) or snapshot.get("version") != AGENT_SNAPSHOT_VERSION:
+        return agent
+    try:
+        same_origin = secrets.same_origin(runtime.api_url, str(pinned.get("api_url") or ""))
+    except Exception:
+        same_origin = False
+    if not same_origin:
+        raise InvalidRequestError(
+            "The Agent endpoint changed after this turn was accepted. Start a new turn to use the new endpoint."
+        )
+    try:
+        endpoint = assistant_client.validate_assistant_endpoint(
+            str(pinned["api_url"]), str(pinned["api_path"])
+        )
+    except (KeyError, ValueError) as error:
+        raise InvalidRequestError(str(error)) from error
+    search = snapshot.get("web_search") if isinstance(snapshot.get("web_search"), dict) else {}
+    return AgentRuntime(
+        assistant=AssistantRuntime(
+            str(pinned["api_url"]),
+            runtime.api_key,
+            str(pinned["api_path"]),
+            endpoint,
+            str(pinned["model"]),
+            int(pinned.get("timeout_seconds") or runtime.timeout_seconds),
+        ),
+        max_tool_rounds=int(snapshot.get("max_tool_rounds") or agent.max_tool_rounds),
+        system_prompt=str(snapshot.get("system_prompt", agent.system_prompt)),
+        web_search_enabled=bool(search.get("enabled", False)),
+        web_search_supported=bool(search.get("supported", False)),
+    )
 
 
-async def resolve_agent_runtime_async(settings: dict | None = None) -> AgentRuntime:
-    return await asyncio.to_thread(resolve_agent_runtime, settings)
+async def resolve_agent_runtime_async(
+    settings: dict | None = None, snapshot: dict | None = None
+) -> AgentRuntime:
+    return await asyncio.to_thread(resolve_agent_runtime, settings, snapshot)
 
 
 assistant_request_limit = _assistant_request_limit

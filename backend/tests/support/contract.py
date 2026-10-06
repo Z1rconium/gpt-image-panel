@@ -152,6 +152,8 @@ def _configure_runtime(tmp_path: Path, *, access_key: str = "", allow_unauthenti
     config.AIOHTTP_CONNECTION_LIMIT = 100
     config.AIOHTTP_CONNECTION_LIMIT_PER_HOST = 20
     config.ALLOW_PLAINTEXT_SECRETS = False
+    # Most contract fixtures predate registry-bound env refs; strict mode has dedicated tests.
+    config.ALLOW_LEGACY_ENV_REFS = True
     config.ACCESS_KEY = access_key
     config.ALLOW_UNAUTHENTICATED = allow_unauthenticated
     config.ACCESS_KEY_COOKIE_NAME = "gpt_image_access"

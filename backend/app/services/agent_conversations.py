@@ -24,8 +24,9 @@ from ..schemas.agent import (
     AgentTurnRequest,
     AgentTurnStatus,
 )
-from . import agent_turns, assistant_runtime
+from . import agent_turns, assistant_runtime, presets
 from .job_events import resolve_generate_job_view
+from .image_preset_snapshot import image_preset_snapshot
 from ..core.constants import ACTIVE_GENERATE_JOB_STATUSES
 
 logger = logging.getLogger(__name__)
@@ -34,7 +35,6 @@ DEFAULT_DETAIL_LIMIT = 200
 MAX_DETAIL_LIMIT = 400
 EVENT_PURGE_INTERVAL_SECONDS = 60.0
 DELETE_WAIT_SECONDS = 10.0
-_IMAGE_BLOCK_FIELDS = ("status", "image_id", "error")
 
 
 def _summary(row: dict[str, Any]) -> AgentConversationSummary:
@@ -151,6 +151,7 @@ async def _create_reserved_turn(conversation_id: str, req: AgentTurnRequest) -> 
         )
     await run_db_operation(agent_repo.sweep_stale_turns, metric_name="agent_sweep_stale_turns")
     await _purge_events_if_due()
+    snapshot = await _execution_snapshot(agent, req)
     try:
         result = await run_db_operation(
             agent_repo.create_turn,
@@ -165,6 +166,7 @@ async def _create_reserved_turn(conversation_id: str, req: AgentTurnRequest) -> 
             source_turn_id=req.source_turn_id,
             branch_revision=req.branch_revision,
             web_search_enabled=agent.web_search_enabled,
+            execution_snapshot=snapshot,
             metric_name="agent_create_turn",
             critical=True,
         )
@@ -178,6 +180,23 @@ async def _create_reserved_turn(conversation_id: str, req: AgentTurnRequest) -> 
     if created:
         agent_turns.spawn_turn(turn["id"])
     return _accepted(turn, created)
+
+
+async def _execution_snapshot(agent: assistant_runtime.AgentRuntime, req: AgentTurnRequest) -> dict[str, Any]:
+    """Freeze endpoint, image preset and capabilities at accept time (no credentials)."""
+    await run_db_operation(presets.load_api_settings, metric_name="agent_load_api_settings")
+    preset = presets.get_active_preset()
+    allow_images = req.allow_image_tools
+    if allow_images is None:
+        allow_images = not agent.web_search_enabled
+    return {
+        **assistant_runtime.agent_execution_snapshot(agent),
+        "image": {
+            "preset_id": str(preset.get("id") or "default"),
+            "preset": image_preset_snapshot(preset),
+        },
+        "capabilities": {"image_tools": bool(allow_images)},
+    }
 
 
 def _accepted(turn: dict[str, Any], created: bool) -> AgentTurnAccepted:
@@ -232,7 +251,7 @@ async def _reconcile_images(conversation_id: str) -> None:
     )
     for turn in turns:
         pending = await run_db_operation(
-            agent_repo.list_pending_images_for_turn, turn["id"], metric_name="agent_pending_images"
+            agent_repo.list_reconcilable_images_for_turn, turn["id"], metric_name="agent_pending_images"
         )
         for row in pending:
             if not row.get("job_id"):

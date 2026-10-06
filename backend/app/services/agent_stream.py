@@ -12,7 +12,7 @@ from ..repositories import agent as agent_repo
 from ..repositories.sse_limiter import sse_limiter
 from ..runtime.blocking import run_db_operation
 from ..runtime.state import state
-from .agent_turns import TERMINAL_EVENT_TYPES
+from .agent_event_writer import TERMINAL_EVENT_TYPES
 from .gallery_common import PRIVATE_GALLERY_CACHE_CONTROL
 from .job_events import serialize_sse_event
 

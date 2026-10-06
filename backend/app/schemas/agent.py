@@ -59,6 +59,10 @@ class AgentTurnRequest(StrictRequestModel):
     action: Literal["continue", "edit", "regenerate"] = "continue"
     source_turn_id: Optional[ShortId] = None
     branch_revision: Optional[int] = Field(default=None, ge=0)
+    # Per-turn capability: may the model queue image generation/edit tools?
+    # Omitted means allowed, except that a web-search turn defaults to
+    # discuss/search only so untrusted pages cannot trigger paid tools.
+    allow_image_tools: Optional[bool] = None
 
     @model_validator(mode="after")
     def validate_branch_action(self) -> "AgentTurnRequest":

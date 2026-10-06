@@ -79,3 +79,60 @@ def test_bodyless_methods_skip_route_scan():
              "headers": [], "scheme": "http"}
     asyncio.run(BodyLimitMiddleware(downstream)(scope, receive, send))
     assert reached == ["/ping"]
+
+
+def _json_scope(app, headers=()):
+    return {"type": "http", "app": app, "method": "POST", "path": "/json", "root_path": "",
+            "headers": [(b"content-type", b"application/json"), *headers], "scheme": "http"}
+
+
+def _json_app():
+    app = FastAPI()
+
+    @app.post("/json")
+    def accept(body: dict):
+        return body
+
+    return app
+
+
+def test_slow_json_body_times_out_with_408(monkeypatch):
+    from backend.app.core import settings as config
+
+    monkeypatch.setattr(config, "ACCESS_KEY", "")
+    monkeypatch.setattr(config, "REQUEST_BODY_IDLE_TIMEOUT_SECONDS", 0.05)
+    sent = []
+
+    async def receive():
+        await asyncio.sleep(5)
+
+    async def send(message):
+        sent.append(message)
+
+    async def downstream(scope, receive, send):
+        pytest.fail("a stalled body must not reach the application")
+
+    asyncio.run(BodyLimitMiddleware(downstream)(_json_scope(_json_app()), receive, send))
+    assert sent[0]["status"] == 408
+
+
+def test_unauthenticated_json_body_is_not_buffered(monkeypatch):
+    from backend.app.core import settings as config
+
+    monkeypatch.setattr(config, "ACCESS_KEY", "secret-access-key")
+    reads = []
+
+    async def receive():
+        reads.append(1)
+        return {"type": "http.request", "body": b"{}", "more_body": False}
+
+    reached = []
+
+    async def downstream(scope, receive, send):
+        reached.append(True)
+
+    async def send(message):
+        pytest.fail("the gate must pass the request on without answering itself")
+
+    asyncio.run(BodyLimitMiddleware(downstream)(_json_scope(_json_app()), receive, send))
+    assert reached == [True] and reads == []

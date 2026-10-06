@@ -193,6 +193,8 @@ def _auth_headers(
     if json_body:
         headers["Content-Type"] = "application/json"
     if idempotency_key and cfg.submit.idempotency_header:
+        if cfg.submit.idempotency_header.lower() in {name.lower() for name in headers}:
+            raise ValueError("submit.idempotency_header cannot override a client-owned header")
         headers[cfg.submit.idempotency_header] = idempotency_key
     return headers
 

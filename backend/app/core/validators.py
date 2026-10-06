@@ -35,7 +35,7 @@ def normalize_secret_env_ref_or_plaintext(
     field_name: str,
     normalizer=None,
 ) -> str:
-    from .secrets import configured_secret_ids, normalize_secret_id
+    from .secrets import configured_secret_ids, declared_env_names, normalize_secret_id
 
     normalized = str(value or "").strip()
     if not normalized:
@@ -47,6 +47,11 @@ def normalize_secret_env_ref_or_plaintext(
 
     env_var = get_env_var_ref_name(normalized)
     if env_var:
+        if not config.ALLOW_LEGACY_ENV_REFS and env_var not in declared_env_names():
+            raise ValueError(
+                f"{field_name} references environment variable {env_var}, which is not declared "
+                "in SECRET_REGISTRY_JSON. Declare it with a purpose and origin and use its secret_id."
+            )
         return f"${{{env_var}}}"
 
     if normalized in configured_secret_ids():

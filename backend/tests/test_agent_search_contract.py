@@ -7,6 +7,7 @@ from backend.app.integrations import agent_client
 from backend.app.integrations.agent_client import AgentClientError, Finish, TextDelta
 from backend.app.integrations.agent_search import SearchStatus, SourceCitation, safe_source_url
 from backend.tests.support.contract import _assistant_runtime_payload
+from backend.app.repositories import agent as agent_repo
 from backend.tests.test_agent_contract import detail, enable_agent, install_model, new_conversation, parse_sse, run_turn, start_turn, text_round, wait_turn
 
 
@@ -130,7 +131,7 @@ def test_interleaved_search_text_and_image_tools_keep_citations_on_their_text_bl
         [TextDelta("Done.", "final"), Finish()],
     ])
     conversation = new_conversation(client)
-    _, status = run_turn(client, conversation, "search and draw")
+    _, status = run_turn(client, conversation, "search and draw", allow_image_tools=True)
     assert status["status"] == "completed" and status["rounds_used"] == 2
     blocks = detail(client, conversation)["messages"][-1]["blocks"]
     source = next(block for block in blocks if block["type"] == "sources")["sources"][0]
@@ -174,3 +175,15 @@ def test_abandoned_search_status_is_settled_by_durable_turn_finalization(tmp_pat
     repo.update_message_content(turn["assistant_message_id"], text="Partial", blocks=blocks)
     repo.finish_turn(turn["id"], "interrupted")
     assert repo.get_message(turn["assistant_message_id"])["blocks"][0]["status"] == "interrupted"
+
+
+def test_search_turns_default_to_discuss_only_unless_images_are_allowed(client, monkeypatch):
+    enable_search(client)
+    model = install_model(monkeypatch, [text_round("a"), text_round("b")])
+    conversation = new_conversation(client)
+    accepted, _ = run_turn(client, conversation, "search")
+    assert agent_repo.get_turn(accepted["turn_id"])["execution_snapshot"]["capabilities"]["image_tools"] is False
+    assert model.calls[0]["tools"] == []
+    accepted, _ = run_turn(client, conversation, "search and draw", allow_image_tools=True)
+    assert agent_repo.get_turn(accepted["turn_id"])["execution_snapshot"]["capabilities"]["image_tools"] is True
+    assert model.calls[1]["tools"]

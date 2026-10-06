@@ -1198,6 +1198,33 @@ def acquire_background_slot(
     return None
 
 
+def renew_background_slot(
+    *,
+    name: str,
+    owner: str,
+    lease_expires_at: str,
+    now: str | None = None,
+) -> bool:
+    """Extend a slot only while the caller still owns an unexpired lease."""
+    _ensure_database()
+    normalized_name = str(name or "").strip()
+    normalized_owner = str(owner or "").strip()
+    if not normalized_name or not normalized_owner:
+        return False
+    now = now or utc_now()
+    with _connect() as conn:
+        with _transaction(conn):
+            cursor = conn.execute(
+                """
+                UPDATE background_leases
+                SET lease_expires_at = ?, updated_at = ?
+                WHERE name = ? AND owner = ? AND lease_expires_at > ? AND completed_at IS NULL
+                """,
+                (lease_expires_at, now, normalized_name, normalized_owner, now),
+            )
+    return int(cursor.rowcount or 0) > 0
+
+
 def release_background_slot(
     *,
     name: str,

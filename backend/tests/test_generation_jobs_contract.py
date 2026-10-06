@@ -1844,7 +1844,7 @@ def test_background_transparent_with_jpeg_forces_png(tmp_path):
 
 
 def test_streaming_multi_image_job_attributes_previews_per_unit(client, monkeypatch):
-    import backend.app.services.job_executor as job_executor_module
+    import backend.app.services.image_unit_execution as job_executor_module
 
     calls = []
     calls_lock = threading.Lock()

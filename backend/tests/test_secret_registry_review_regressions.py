@@ -13,6 +13,7 @@ from backend.app.repositories import db as db_repo
 
 
 def test_resolve_secret_reference_supports_all_setting_sources(monkeypatch):
+    monkeypatch.setattr(config, "ALLOW_LEGACY_ENV_REFS", True)
     target_url = "https://api.nodeimage.com"
     options = {
         "purpose": "nodeimage_api_key",
@@ -162,6 +163,7 @@ def test_stored_legacy_secret_refs_are_preserved_on_load():
 
 
 def test_legacy_r2_secret_refs_fail_with_missing_env_hint(monkeypatch):
+    monkeypatch.setattr(config, "ALLOW_LEGACY_ENV_REFS", True)
     secrets.configure_registry("{}")
     monkeypatch.delenv("R2_ACCESS_KEY_ID", raising=False)
     monkeypatch.delenv("R2_SECRET_ACCESS_KEY", raising=False)
@@ -207,3 +209,60 @@ def test_http_exception_envelope_preserves_safe_detail():
     assert body["error"] == body["detail"]
     assert body["correlation_id"]
     assert response.headers["X-Correlation-ID"] == body["correlation_id"]
+
+
+def _upstream_options(url="https://api.example.com"):
+    return {"purpose": "upstream_api", "target_url": url, "host_allowlist": "api.example.com", "field_name": "API key"}
+
+
+def test_undeclared_env_refs_are_rejected_before_reading_the_environment(monkeypatch):
+    monkeypatch.setattr(config, "ALLOW_LEGACY_ENV_REFS", False)
+    secrets.configure_registry("{}")
+    monkeypatch.setenv("UNBOUND_SECRET", "must-not-leak")
+    with pytest.raises(secrets.SecretRegistryError, match="not declared") as error:
+        secrets.resolve_secret_reference("${UNBOUND_SECRET}", **_upstream_options("https://unbound.invalid"))
+    assert "must-not-leak" not in str(error.value)
+    with pytest.raises(ValueError, match="not declared"):
+        presets.normalize_secret_env_ref_or_plaintext("${UNBOUND_SECRET}", field_name="API key")
+
+
+def test_declared_env_refs_are_bound_to_purpose_and_origin(monkeypatch):
+    monkeypatch.setattr(config, "ALLOW_LEGACY_ENV_REFS", False)
+    monkeypatch.setenv("BOUND_KEY", "bound-value")
+    secrets.configure_registry(
+        json.dumps({"bound-key": {"purpose": "upstream_api", "origin": "https://api.example.com", "env": "BOUND_KEY"}})
+    )
+    assert secrets.resolve_secret_reference("${BOUND_KEY}", **_upstream_options()) == "bound-value"
+    assert secrets.resolve_secret_reference("bound-key", **_upstream_options()) == "bound-value"
+    # Other origin, other purpose, and hosts outside the startup allowlist are refused.
+    for options in (
+        _upstream_options("https://evil.example.net"),
+        {**_upstream_options(), "purpose": "prompt_optimizer"},
+        {**_upstream_options(), "host_allowlist": "other.example.com"},
+        _upstream_options("http://api.example.com"),
+    ):
+        with pytest.raises(secrets.SecretRegistryError):
+            secrets.resolve_secret_reference("${BOUND_KEY}", **options)
+    secrets.configure_registry("{}")
+
+
+def test_env_ref_migration_inventory_lists_names_and_declaration_state(monkeypatch, caplog):
+    monkeypatch.setattr(config, "ALLOW_LEGACY_ENV_REFS", False)
+    monkeypatch.setenv("DECLARED_KEY", "declared-secret-value")
+    secrets.configure_registry(
+        json.dumps({"declared-key": {"purpose": "upstream_api", "origin": "https://api.example.com", "env": "DECLARED_KEY"}})
+    )
+    monkeypatch.setattr(presets, "get_api_presets", lambda: [
+        {"id": "a", "name": "Declared", "api_key": "${DECLARED_KEY}"},
+        {"id": "b", "name": "Legacy", "api_key": "${LEGACY_KEY}"},
+        {"id": "c", "name": "Registry id", "api_key": "declared-key"},
+    ])
+    monkeypatch.setattr(presets, "get_prompt_optimizer_settings", lambda: {})
+    monkeypatch.setattr(presets, "get_r2_backup_settings", lambda: {})
+    monkeypatch.setattr(presets, "get_nodeimage_settings", lambda: {})
+    inventory = presets.list_env_ref_migrations()
+    assert [(item["env_var"], item["declared"]) for item in inventory] == [("DECLARED_KEY", True), ("LEGACY_KEY", False)]
+    with caplog.at_level("WARNING"):
+        presets.warn_undeclared_env_refs()
+    assert "LEGACY_KEY" in caplog.text and "declared-secret-value" not in caplog.text
+    secrets.configure_registry("{}")

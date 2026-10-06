@@ -16,7 +16,7 @@ from backend.app.integrations.agent_client import (
     UserItem,
 )
 from backend.app.repositories import agent as agent_repo
-from backend.app.services import agent_turns
+from backend.app.services import agent_run_lifecycle, agent_tool_executor, agent_turns
 from backend.tests.support.contract import *  # noqa: F403
 
 TERMINAL = {"completed", "failed", "cancelled", "interrupted"}
@@ -392,7 +392,7 @@ def test_agent_cancel_stops_a_silent_model_call(client, monkeypatch):
 def test_agent_cancel_does_not_wait_for_the_poll_interval(client, monkeypatch):
     """A cancel that lands on the runner's worker wakes it at once; the 1s poll is only the cross-worker fallback."""
     enable_agent(client)
-    monkeypatch.setattr(agent_turns, "CANCEL_POLL_SECONDS", 60.0)
+    monkeypatch.setattr(agent_run_lifecycle, "CANCEL_POLL_SECONDS", 60.0)
     started = threading.Event()
 
     async def silent(kwargs):
@@ -415,7 +415,7 @@ def test_agent_cancel_does_not_wait_for_the_poll_interval(client, monkeypatch):
 
 def test_agent_cancel_before_the_watcher_starts_is_still_seen(client, monkeypatch):
     enable_agent(client)
-    monkeypatch.setattr(agent_turns, "CANCEL_POLL_SECONDS", 60.0)
+    monkeypatch.setattr(agent_run_lifecycle, "CANCEL_POLL_SECONDS", 60.0)
     release = threading.Event()
 
     async def held(kwargs):
@@ -681,3 +681,123 @@ def test_renewal_loss_interrupts_running_model_and_preserves_terminal(client, mo
     assert stored["messages"][-1]["status"] == "interrupted"
     assert "This must never be written" not in stored["messages"][-1]["text"]
     assert agent_repo.finish_turn(accepted["turn_id"], "cancelled")["status"] == "interrupted"
+
+
+def test_agent_incomplete_rounds_never_run_tools(client, monkeypatch):
+    enable_agent(client)
+    for terminator in (
+        Finish("eof", truncated=True, complete=False),
+        Finish("length", truncated=True),
+    ):
+        calls = batch_call("c1", ("a", "a cat"))[:-1] + [terminator]
+        model = install_model(monkeypatch, [calls])
+        queued: list = []
+
+        async def forbid(*args, **kwargs):
+            queued.append(args)
+            raise AssertionError("image tool must not run")
+
+        monkeypatch.setattr(agent_tool_executor.job_queue, "queue_image_job", forbid)
+        conversation_id = new_conversation(client)
+        _accepted, status = run_turn(client, conversation_id, "draw")
+        assert status["status"] == "failed" and "incomplete" in status["error_message"]
+        assert not queued and len(model.calls) == 1
+        assert detail(client, conversation_id)["image_refs"] == []
+
+
+def test_chat_and_responses_parsers_mark_eof_incomplete():
+    chat = agent_client.ChatStreamParser()
+    chat.feed({"choices": [{"delta": {"content": "hi"}}]})
+    assert chat.finish()[-1] == Finish("eof", truncated=True, complete=False)
+    responses = agent_client.ResponsesStreamParser()
+    assert responses.finish()[-1].complete is False
+    done = agent_client.ResponsesStreamParser()
+    done.feed({"type": "response.completed", "response": {"status": "completed"}})
+    assert done.finish()[-1].complete is True
+
+
+def test_agent_image_wait_timeout_keeps_row_pending_and_reconciles(client, monkeypatch):
+    from backend.app.core import settings as app_config
+    from backend.app.services import agent_conversations
+
+    enable_agent(client)
+    monkeypatch.setattr(app_config, "AGENT_IMAGE_JOB_TIMEOUT_SECONDS", 0)
+
+    async def active(job_id):
+        return {"status": "queued", "stage": "queued"}
+
+    monkeypatch.setattr(agent_tool_executor, "resolve_generate_job_view", active)
+    monkeypatch.setattr(agent_conversations, "resolve_generate_job_view", active)
+    install_model(monkeypatch, [batch_call("c1", ("a", "slow cat")), text_round("Still rendering.")])
+    conversation_id = new_conversation(client)
+    _accepted, status = run_turn(client, conversation_id, "draw")
+    assert status["status"] == "completed"
+    task = next(b for b in assistant_blocks(detail(client, conversation_id), 1) if b["type"] == "image_task")
+    assert task["status"] == "pending" and task["job_id"] and not task["error"]
+
+    async def failed(job_id):
+        return {"status": "failed", "error": "upstream boom"}
+
+    monkeypatch.setattr(agent_conversations, "resolve_generate_job_view", failed)
+    task = next(b for b in assistant_blocks(detail(client, conversation_id), 1) if b["type"] == "image_task")
+    assert task["status"] == "failed" and task["error"] == "upstream boom"
+
+
+def test_agent_legacy_wait_timeout_failures_are_reconciled_once(client, monkeypatch):
+    from backend.app.services import agent_conversations
+
+    enable_agent(client)
+    install_model(monkeypatch, [batch_call("c1", ("a", "cat")), text_round("ok")])
+    conversation_id = new_conversation(client)
+    run_turn(client, conversation_id, "draw")
+    row = agent_repo.list_conversation_images(conversation_id)[0]
+    agent_repo.settle_image(row["id"], status="failed", error=agent_repo.LEGACY_IMAGE_WAIT_TIMEOUT_ERROR)
+
+    async def cancelled(job_id):
+        return {"status": "cancelled"}
+
+    monkeypatch.setattr(agent_conversations, "resolve_generate_job_view", cancelled)
+    task = next(b for b in assistant_blocks(detail(client, conversation_id), 1) if b["type"] == "image_task")
+    assert task["status"] == "cancelled"
+    # A genuine failure is never resurrected.
+    agent_repo.settle_image(row["id"], status="failed", error="real failure")
+    task = next(b for b in assistant_blocks(detail(client, conversation_id), 1) if b["type"] == "image_task")
+    assert task["status"] == "failed" and task["error"] == "real failure"
+
+
+def test_agent_discuss_only_turn_never_runs_image_tools(client, monkeypatch):
+    enable_agent(client)
+    model = install_model(monkeypatch, [batch_call("c1", ("a", "injected image")), text_round("I can only discuss.")])
+    conversation_id = new_conversation(client)
+    accepted, status = run_turn(client, conversation_id, "just chat", allow_image_tools=False)
+    assert status["status"] == "completed"
+    assert agent_repo.get_turn(accepted["turn_id"])["execution_snapshot"]["capabilities"] == {"image_tools": False}
+    assert model.calls[0]["tools"] == []
+    # Even if the model emits a tool call anyway, the execution point refuses it.
+    assert "not enabled" in json.loads(model.calls[1]["items"][-1].output)["error"]
+    assert detail(client, conversation_id)["image_refs"] == []
+    assert not [b for b in assistant_blocks(detail(client, conversation_id), 1) if b["type"] == "image_task"]
+
+
+def test_agent_turn_snapshot_pins_model_and_rejects_moved_endpoint(client, monkeypatch):
+    from backend.app.core.errors import InvalidRequestError
+    from backend.app.services import assistant_runtime
+
+    enable_agent(client, agent_model="model-at-accept")
+    install_model(monkeypatch, [text_round("ok")])
+    conversation_id = new_conversation(client)
+    accepted, _status = run_turn(client, conversation_id, "hello")
+    snapshot = agent_repo.get_turn(accepted["turn_id"])["execution_snapshot"]
+    assert snapshot["version"] == 1 and snapshot["assistant"]["model"] == "model-at-accept"
+    assert snapshot["image"]["preset_id"] and "api_key" not in json.dumps(snapshot)
+
+    enable_agent(client, agent_model="model-after-change")
+    assert assistant_runtime.resolve_agent_runtime().assistant.model == "model-after-change"
+    pinned = assistant_runtime.resolve_agent_runtime(snapshot=snapshot)
+    assert pinned.assistant.model == "model-at-accept"
+
+    moved = {**snapshot, "assistant": {**snapshot["assistant"], "api_url": "https://elsewhere.example.net/v1"}}
+    with pytest.raises(InvalidRequestError, match="endpoint changed"):
+        assistant_runtime.resolve_agent_runtime(snapshot=moved)
+    # Legacy turns (no snapshot) keep using live settings.
+    assert assistant_runtime.resolve_agent_runtime(snapshot={}).assistant.model == "model-after-change"

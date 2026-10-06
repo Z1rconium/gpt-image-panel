@@ -38,7 +38,7 @@ async def create_agent_conversation(req: AgentConversationCreateRequest):
 @router.get("/api/agent/conversations/{conversation_id}", response_model=AgentConversationDetail)
 async def get_agent_conversation(
     conversation_id: str,
-    before_seq: int | None = Query(default=None, ge=1),
+    before_seq: int | None = Query(default=None, ge=1, le=agent_stream.MAX_CURSOR),
     limit: int = Query(default=agent_conversations.DEFAULT_DETAIL_LIMIT, ge=1, le=agent_conversations.MAX_DETAIL_LIMIT),
 ):
     return await agent_conversations.get_conversation_detail(

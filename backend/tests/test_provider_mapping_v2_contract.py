@@ -119,6 +119,23 @@ def test_v2_idempotency_header_must_be_a_valid_http_token():
         resolve_provider_config(broken)
 
 
+@pytest.mark.parametrize(
+    "header",
+    ["Authorization", "authorization", "X-API-Key", "x-api-key", "Host", "Content-Length", "Transfer-Encoding", "Connection"],
+)
+def test_v2_idempotency_header_rejects_auth_and_transport_headers(header):
+    broken = json.loads(json.dumps(V2_CONFIG))
+    broken["submit"]["idempotency_header"] = header
+    with pytest.raises(Exception, match="idempotency_header"):
+        resolve_provider_config(broken)
+
+
+def test_v2_custom_idempotency_header_is_kept_and_auth_is_not_overridden():
+    config = resolve_provider_config(json.loads(json.dumps(V2_CONFIG)))
+    headers = async_provider._auth_headers(config, "secret", idempotency_key="key-1")
+    assert headers["Authorization"] == "Key secret" and headers["Idempotency-Key"] == "key-1"
+
+
 def test_task_id_is_encoded_as_a_single_path_segment():
     assert (
         async_provider.render_url_template("/jobs/{{task_id}}/status", "a/b c?d")

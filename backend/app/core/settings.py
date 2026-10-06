@@ -115,6 +115,8 @@ AIOHTTP_CONNECTION_LIMIT_PER_HOST = max(
 )
 ALLOW_PLAINTEXT_SECRETS = env_flag("ALLOW_PLAINTEXT_SECRETS")
 SECRET_REGISTRY_JSON = os.getenv("SECRET_REGISTRY_JSON", "").strip()
+# Deprecated escape hatch: resolve undeclared ${ENV_VAR} references without purpose/origin binding.
+ALLOW_LEGACY_ENV_REFS = env_flag("ALLOW_LEGACY_ENV_REFS")
 GITHUB_REPO = _validate_github_repo(os.getenv("GITHUB_REPO", "Z1rconium/gpt-image-linux"))
 ENABLE_VERSION_CHECK = env_flag("ENABLE_VERSION_CHECK", "true")
 VERSION_CHECK_TIMEOUT_SECONDS = float(os.getenv("VERSION_CHECK_TIMEOUT_SECONDS", "3"))
@@ -159,6 +161,8 @@ MAX_FILE_SIZE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "50"))
 MASK_PASTE_BACK_DEFAULT = env_flag("MASK_PASTE_BACK_DEFAULT", "true")
 NODEIMAGE_UPLOAD_CONCURRENCY = max(1, int(os.getenv("NODEIMAGE_UPLOAD_CONCURRENCY", "4")))
 MAX_JSON_BODY_MB = max(1, int(os.getenv("MAX_JSON_BODY_MB", "1")))
+REQUEST_BODY_IDLE_TIMEOUT_SECONDS = max(1.0, float(os.getenv("REQUEST_BODY_IDLE_TIMEOUT_SECONDS", "15")))
+REQUEST_BODY_TOTAL_TIMEOUT_SECONDS = max(1.0, float(os.getenv("REQUEST_BODY_TOTAL_TIMEOUT_SECONDS", "60")))
 MAX_UPSTREAM_JSON_MB = max(1, int(os.getenv("MAX_UPSTREAM_JSON_MB", "128")))
 MAX_UPSTREAM_IMAGE_BYTES_PER_TASK_MB = _env_or_derived(
     "MAX_UPSTREAM_IMAGE_BYTES_PER_TASK_MB",

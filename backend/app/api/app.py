@@ -73,6 +73,7 @@ async def lifespan(app: FastAPI):
     state._backfill_task = await startup_maintenance.run()
     presets.load_api_settings()
     presets.validate_configured_secret_bindings()
+    presets.warn_undeclared_env_refs()
     dispatchers.start()
     await asyncio.to_thread(job_events.reconcile_active_generate_jobs_from_storage)
     try:
