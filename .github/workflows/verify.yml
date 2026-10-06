@@ -1,0 +1,70 @@
+# Required validation for a commit. Runs on pushes and pull requests, and is
+# called by release-image.yml so a tag cannot be built without the same checks
+# passing on the same commit.
+name: Verify
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend tests and dependency audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      # Same minor version as the Dockerfile runtime image.
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r backend/requirements-dev.txt
+      - name: Backend test suite
+        run: python -m pytest backend/tests -q
+      - name: Dependency consistency
+        run: python -m pip check
+      - name: Audit locked runtime dependencies
+        run: pipx run pip-audit --require-hashes -r requirements.lock
+
+  frontend:
+    name: Frontend check, unit tests, build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm --prefix frontend ci
+      - run: npm --prefix frontend run check
+      - run: npm --prefix frontend run test:unit
+      - run: npm --prefix frontend run build
+      - run: npm --prefix frontend run check:bundle
+      - run: npm --prefix frontend run check:worker-build
+      - run: npm --prefix frontend audit
+
+  e2e:
+    name: Agent and settings browser tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm --prefix frontend ci
+      - run: npx --prefix frontend playwright install --with-deps chromium
+      - name: Agent, branches, search, access and settings specs
+        run: npm --prefix frontend run test:e2e -- agent access-settings

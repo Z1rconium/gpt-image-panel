@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+Implements the v1.7.0–v1.7.10 review (`reviews/`), findings R1–R11.
+
+- **Security — environment credential references (R1).** A `${ENV_VAR}` API key is resolved only when that variable is declared in `SECRET_REGISTRY_JSON` (or by the operator's own `DEFAULT_API_KEY=${…}`-style startup settings) and the purpose, target origin and startup host allowlist match; undeclared names are rejected before the environment is read, at save time and at use time. Startup logs the names of persisted references that need migrating (never values). **Behavior change:** existing settings that use undeclared `${VAR}` references stop resolving until declared; `ALLOW_LEGACY_ENV_REFS=true` restores the old behavior while migrating (deprecated).
+- **Agent tool safety (R2, R4).** A model round without a legitimate terminator (EOF, `length`, `incomplete`) never runs image tools; its text is kept and the turn fails with a clear message. Each turn persists an image-tool capability (`allow_image_tools`); a web-search turn defaults to discuss/search only, the composer shows a checkbox, and the runner refuses tool calls at the execution point.
+- **Execution snapshot (R7).** An accepted turn stores a credential-free snapshot (endpoint, model, tool rounds, system prompt, search flags, image preset, capabilities). The run uses the snapshot; if the endpoint's origin changed meanwhile the turn fails instead of being sent elsewhere. Image jobs use the preset frozen at accept time. Legacy turns (no snapshot) keep using live settings.
+- **Capacity (R3).** The global assistant request slot lease covers the full request deadline plus cleanup, is renewed by its owner while the request streams, and a lost lease aborts the request. New `renew_background_slot` is owner-fenced.
+- **Image wait timeout (R5).** When the Agent stops waiting for an image job, the image stays pending and is settled later from the job's real outcome; rows older versions marked failed only because of the wait timeout are repaired on read.
+- **Hardening (R6, R9, R10).** `submit.idempotency_header` rejects authentication and transport headers (case-insensitive); `before_seq` is bounded to SQLite integers (422 instead of 500); JSON bodies are no longer buffered for unauthenticated callers and are read under idle/total deadlines (`REQUEST_BODY_IDLE_TIMEOUT_SECONDS`, `REQUEST_BODY_TOTAL_TIMEOUT_SECONDS`, 408 on timeout).
+- **Dependencies and CI (R8, R11).** `multidict` 6.9.1 (GHSA-54p9-h82j-f925), `source-map-js` patch update. The remaining `npm audit` entries (`braces`, `postcss-selector-parser` via Tailwind 3) are build-time only and need the separate Tailwind 4 migration. A new `Verify` workflow (backend tests, `pip-audit`, frontend check/unit/build/budget/audit, Agent and settings browser tests) gates `release-image.yml`.
+- **Internal refactors, behavior unchanged.** Agent tool/image execution moved to `agent_tool_executor`; `repositories/agent` and `schemas/provider` became packages with re-exporting facades; image unit lease/progress handling moved to `image_unit_session` and parent aggregation to `image_job_aggregate`; preset export/import to `preset_package`; Agent model stream types and parsers to `agent_types`/`agent_parsers`; the frontend Agent store now delegates to pure reducers (`agentState`) and a stream controller (`agentStream`) with lifecycle tests.
+
 ## v1.7.10
 
 - The `?apiUrl=` link banner now shows the destination host prominently and warns to enter an API key only for a trusted host.

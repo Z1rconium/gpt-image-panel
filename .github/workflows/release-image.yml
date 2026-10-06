@@ -26,8 +26,15 @@ env:
   IMAGE: ghcr.io/z1rconium/gpt-image-linux
 
 jobs:
+  # The tag is only built after the full test, type-check and audit gates pass
+  # on this exact commit.
+  verify:
+    name: Verify
+    uses: ./.github/workflows/verify.yml
+
   build:
     name: Build ${{ matrix.arch }}
+    needs: verify
     strategy:
       # Let both native builds report their own failure; cancelling the other
       # architecture hides the actionable CI error and leaves no digest.

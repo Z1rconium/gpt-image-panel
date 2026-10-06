@@ -79,7 +79,7 @@ This project is only a self-hosted control panel. It does not provide, proxy, re
 - zipstream-ng
 - SvelteKit
 - TypeScript
-- Tailwind CSS
+- Tailwind CSS 4 (Vite integration). Browser baseline: Chrome 111+, Safari 16.4+, Firefox 128+.
 - Playwright
 - pytest
 
@@ -289,7 +289,7 @@ Most runtime options live in `.env.example`. API presets, prompt optimizer, R2 b
 | `ENABLE_METRICS` | Enables JSON/Prometheus metrics endpoints. |
 | `LOG_DIR` / `LOG_LEVEL` / `LOG_RETENTION_HOURS` | Backend logs on stdout plus rotated files, retained for 24h by default. |
 
-Secret fields prefer `${ENV_VAR_NAME}` references. Literal secrets stored in SQLite require `ALLOW_PLAINTEXT_SECRETS=true`.
+Secret fields prefer `${ENV_VAR_NAME}` references, and a referenced variable must be declared in `SECRET_REGISTRY_JSON` with its purpose and target origin (undeclared names are rejected; `ALLOW_LEGACY_ENV_REFS=true` is a deprecated migration switch). Literal secrets stored in SQLite require `ALLOW_PLAINTEXT_SECRETS=true`.
 
 Overall Config persists overrides in SQLite. Some settings are hot-reloaded; restart-required and build-only settings are marked in the UI and should still be changed through `.env`/Compose for reproducible deployments.
 

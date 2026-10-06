@@ -75,7 +75,7 @@ GPT Image Panel 是一套輕量 Web UI，可用於圖片生成、圖片編輯、
 - zipstream-ng
 - SvelteKit
 - TypeScript
-- Tailwind CSS
+- Tailwind CSS 4（Vite 整合）。瀏覽器最低版本：Chrome 111、Safari 16.4、Firefox 128。
 - Playwright
 - pytest
 
@@ -278,7 +278,7 @@ ALLOW_UNAUTHENTICATED=true .venv/bin/granian --interface asgi backend.app.main:a
 | `ENABLE_METRICS` | 啟用 JSON/Prometheus 指標端點。 |
 | `LOG_DIR` / `LOG_LEVEL` / `LOG_RETENTION_HOURS` | 後端日誌輸出至 stdout 與輪替檔案，預設保留 24 小時。 |
 
-Secret 欄位優先使用 `${ENV_VAR_NAME}` 參照。若要將純文字 Secret 儲存在 SQLite，必須明確設定 `ALLOW_PLAINTEXT_SECRETS=true`。
+Secret 欄位優先使用 `${ENV_VAR_NAME}` 參照，且被參照的變數必須在 `SECRET_REGISTRY_JSON` 中宣告用途與目標 origin（未宣告的變數會被拒絕；`ALLOW_LEGACY_ENV_REFS=true` 是遷移期的棄用開關）。若要將純文字 Secret 儲存在 SQLite，必須明確設定 `ALLOW_PLAINTEXT_SECRETS=true`。
 
 Overall Config 會將 Override 持久化至 SQLite。部分設定可熱更新；需要重新啟動或僅影響建置的設定會在 UI 中標示。為了可重現部署，仍建議透過 `.env`/Compose 管理。
 
