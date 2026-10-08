@@ -80,6 +80,56 @@ def test_generate_request_api_path_overrides_active_preset(client):
     assert entry.api_path == "/v1/responses"
 
 
+@pytest.mark.parametrize("operation", ["generation", "edit"])
+def test_single_request_keeps_four_relay_images(client, monkeypatch, operation):
+    from backend.app.integrations.upstream import generation as upstream_client
+
+    response_body = json.dumps({"data": [
+        {"b64_json": base64.b64encode(PNG_BYTES).decode("ascii"), "revised_prompt": f"image {index}"}
+        for index in range(4)
+    ]}).encode("utf-8")
+
+    class RelaySession(_FakePostSession):
+        calls = 0
+        json_payload = None
+
+        def post(self, url, **kwargs):
+            self.calls += 1
+            self.json_payload = kwargs.get("json")
+            return super().post(url, **kwargs)
+
+    session = RelaySession(_FakeResponse(
+        200, headers={"Content-Type": "application/json"},
+        chunks=[response_body], peer_ip="93.184.216.34",
+    ))
+    monkeypatch.setattr(upstream_client, "get_pool", lambda: _FakePool(session))
+    monkeypatch.setattr(upstream_client.ssrf, "validate_upstream_url", lambda *args, **kwargs: None)
+    monkeypatch.setattr(upstream_client.ssrf, "validate_response_peer_ip", lambda *args, **kwargs: None)
+    monkeypatch.setattr(backend_main.proxy, "call_image_generation_api", ORIGINAL_CALL_IMAGE_GENERATION_API)
+    monkeypatch.setattr(backend_main.proxy, "call_image_edit_api", ORIGINAL_CALL_IMAGE_EDIT_API)
+
+    if operation == "generation":
+        response = client.post("/api/generate", json={"prompt": "four relay images", "n": 1})
+    else:
+        response = client.post(
+            "/api/edits", data={"prompt": "four relay images", "n": "1"},
+            files=[("image", ("source.png", PNG_BYTES, "image/png"))],
+        )
+    assert response.status_code == 202
+    job = _wait_for_job(client, response.json()["job_id"])
+    assert job["status"] == "success"
+    assert job["n"] == 1
+    assert session.calls == 1
+    if operation == "generation":
+        assert session.json_payload["n"] == 1
+    assert len(job["images"]) == 4
+    assert len({image["image_id"] for image in job["images"]}) == 4
+    assert [image["revised_prompt"] for image in job["images"]] == [f"image {index}" for index in range(4)]
+    assert client.get("/api/gallery").json()["total"] == 4
+    for image in job["images"]:
+        assert client.get(image["image_url"]).content == PNG_BYTES
+
+
 def test_multi_image_job_returns_all_results(client, monkeypatch):
     calls = []
     calls_lock = threading.Lock()
@@ -1206,15 +1256,22 @@ def test_partial_failure_webhook_payload_includes_results_counts_and_summary():
     assert payload["correlation_id"]
 
 
-def test_upstream_image_data_is_bounded_and_schema_checked():
+def test_upstream_image_data_preserves_results_and_checks_limits():
     from backend.app.integrations.upstream.errors import UpstreamApiError
     from backend.app.integrations.upstream.payloads import validate_upstream_image_data
 
-    assert validate_upstream_image_data([{"url": "a"}, {"url": "b"}], 1) == [{"url": "a"}]
+    assert validate_upstream_image_data([{"url": "a"}, {"url": "b"}]) == [{"url": "a"}, {"url": "b"}]
     with pytest.raises(UpstreamApiError, match="must be an array"):
-        validate_upstream_image_data("not-an-array", 1)
+        validate_upstream_image_data("not-an-array")
     with pytest.raises(UpstreamApiError, match="entries must be objects"):
-        validate_upstream_image_data(["not-an-object"], 1)
+        validate_upstream_image_data(["not-an-object"])
+    with pytest.raises(UpstreamApiError, match="entries must be objects"):
+        validate_upstream_image_data([{"url": "valid"}, "not-an-object"])
+    assert len(validate_upstream_image_data([{"url": "a"}] * 10)) == 10
+    with pytest.raises(UpstreamApiError, match="limit of 10"):
+        validate_upstream_image_data([{"url": "a"}] * 11)
+
+
 def test_generate_queue_capacity_and_concurrency_limit(tmp_path, monkeypatch):
     _configure_runtime(tmp_path)
     config.MAX_ACTIVE_GENERATE_JOBS = 1

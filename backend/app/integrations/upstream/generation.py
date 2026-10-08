@@ -167,7 +167,7 @@ async def save_gallery_entries_from_upstream_data(
     chroma_mode: str | None = None,
     prompt_guard: bool = False,
 ) -> list[GalleryEntry]:
-    data = validate_upstream_image_data(data, payload.n)
+    data = validate_upstream_image_data(data)
     max_bytes = config.MAX_FILE_SIZE_MB * 1024 * 1024
     max_task_bytes = config.MAX_UPSTREAM_IMAGE_BYTES_PER_TASK_MB * 1024 * 1024
     decoded_task_bytes = 0
@@ -503,7 +503,7 @@ async def _call_async_provider_api(
         gallery_metadata["upstream_duration_ms"] = max(
             0, round((time.monotonic() - upstream_started) * 1000)
         )
-        data = validate_upstream_image_data(data, payload.n)
+        data = validate_upstream_image_data(data)
         return await save_gallery_entries_from_upstream_data(
             download_session=download_session,
             data=data,
@@ -662,7 +662,7 @@ async def call_image_provider_edit_api(
         gallery_metadata["upstream_duration_ms"] = max(
             0, round((time.monotonic() - upstream_started) * 1000)
         )
-        data = validate_upstream_image_data(data, payload.n)
+        data = validate_upstream_image_data(data)
         return await save_gallery_entries_from_upstream_data(
             download_session=download_session,
             data=data,
@@ -826,7 +826,7 @@ async def call_image_generation_api(
                     {**item, **reported_image_fields(result)} if isinstance(item, dict) else item
                     for item in raw_data
                 ] if isinstance(raw_data, list) else raw_data
-        data = validate_upstream_image_data(data, payload.n)
+        data = validate_upstream_image_data(data)
         if not data:
             raise UpstreamApiError(
                 f"No image data in upstream response: {response_text[:200]}"
@@ -883,7 +883,7 @@ async def call_image_generation_preview_api(
                 resp, api_path, None
             )
 
-        data = validate_upstream_image_data(result.get("data", []), 1)
+        data = validate_upstream_image_data(result.get("data", []))
         if not data:
             raise UpstreamApiError(
                 f"No image data in upstream response: {response_text[:200]}"
@@ -1046,7 +1046,7 @@ async def call_image_edit_api(
                 {**item, **reported_image_fields(result)} if isinstance(item, dict) else item
                 for item in raw_data
             ] if isinstance(raw_data, list) else raw_data
-        data = validate_upstream_image_data(data, payload.n)
+        data = validate_upstream_image_data(data)
         if not data:
             raise UpstreamApiError(f"No image data in upstream response: {response_text[:200]}")
 

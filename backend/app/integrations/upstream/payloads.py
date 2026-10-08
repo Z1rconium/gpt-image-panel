@@ -378,10 +378,14 @@ MARKDOWN_IMAGE_RE = re.compile(
 HTTP_IMAGE_URL_RE = re.compile(r"https?://[^\s<>'\")]+")
 
 
-def validate_upstream_image_data(value: Any, requested_n: int) -> list[dict[str, Any]]:
+def validate_upstream_image_data(value: Any) -> list[dict[str, Any]]:
+    """Keep every returned image, even when a relay returns a batch for n=1."""
     if not isinstance(value, list):
         raise UpstreamApiError("Upstream image data must be an array")
-    bounded = value[: max(1, int(requested_n))]
-    if any(not isinstance(item, dict) for item in bounded):
+    # Bound downstream downloads independently of the requested image count.
+    # Reject oversized batches explicitly instead of silently dropping results.
+    if len(value) > 10:
+        raise UpstreamApiError("Upstream image data exceeds the limit of 10 images per response")
+    if any(not isinstance(item, dict) for item in value):
         raise UpstreamApiError("Upstream image data entries must be objects")
-    return bounded
+    return value
