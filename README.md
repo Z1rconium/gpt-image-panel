@@ -18,7 +18,7 @@
 
   <p>
     <img alt="CI passing" src="https://img.shields.io/badge/CI-passing-2cc653?logo=github&logoColor=white" />
-    <img alt="Release v1.7.10" src="https://img.shields.io/badge/release-v1.7.10-0e8dcc" />
+    <img alt="Release v1.7.12" src="https://img.shields.io/badge/release-v1.7.12-0e8dcc" />
     <img alt="Python 3.11+" src="https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white" />
     <img alt="Node.js 24" src="https://img.shields.io/badge/Node.js-24-339933?logo=node.js&logoColor=white" />
     <img alt="FastAPI 0.115+" src="https://img.shields.io/badge/FastAPI-0.115+-009688?logo=fastapi&logoColor=white" />
@@ -39,14 +39,12 @@ This project is only a self-hosted control panel. It does not provide, proxy, re
 ## Features
 
 - Image generation through `/v1/images/generations`, `/v1/responses`, or OpenAI-compatible `/v1/chat/completions`.
-- Image editing through `/v1/images/edits`, including uploaded references and gallery-source edits.
-- Built-in mask editor for targeted inpainting edits (brush/eraser/shape/lasso tools, zoom, feathering, mask import, auto gap-fill/edge-smoothing), with masks persisted and restorable on retry, and default paste-back of the model's result onto the untouched original behind a color-drift guard.
+- Image editing through `/v1/images/edits`, using uploaded references or gallery images as sources, with a built-in mask editor (brush/eraser/shape/lasso, zoom, feathering, mask import, auto gap-fill/edge-smoothing). Masks persist and restore on retry; results paste back onto the untouched original behind a color-drift guard.
 - API presets with base URL/path/key, default model, response format, health checks, SOCKS5 proxy, webhook, and env-ref secret support.
-- Web-managed Overall Config for selected runtime settings, with env/default/override sources and restart/build-only badges.
-- Prompt helper tags, reusable prompt snippets, optional server-side prompt optimizer, and an AI Assistant subsystem for prompt rewrites/checks/variants, parameter recommendations, job diagnosis, edit planning, and gallery image analysis.
+- Prompt helper tags, reusable prompt snippets, an optional server-side prompt optimizer, and an AI Assistant subsystem for prompt rewrites/checks/variants, parameter recommendations, job diagnosis, edit planning, and gallery image analysis.
 - Agent conversation mode: a multi-turn chat where the model plans and creates images through the existing job queue (batches of images, dependent follow-up rounds, edits of earlier images via `@` references), with server-side history, resumable streaming, and every image saved to the gallery. Requires an AI Assistant endpoint whose model supports function calling.
 - SQLite-backed job queue with SSE progress, cancellation, retry/reuse, persisted history, stage timing metadata, and shared generation/edit concurrency limits.
-- Optional streaming partial-image preview for single-image `/v1/images/generations` and `/v1/images/edits` requests, delivered over SSE as the upstream generates. Job history shows per-job token usage and an estimated USD cost whenever the upstream reports `usage` for a model with a configured rate.
+- Optional streaming partial-image previews for `/v1/images/generations`, `/v1/images/edits`, and `/v1/responses` with 1–10 images, delivered over SSE as the upstream generates. Job history shows per-job token usage and an estimated USD cost whenever the upstream reports `usage` for a model with a configured rate.
 - Local gallery with cursor pagination, search/filtering, favorites, lightbox navigation, selection-token batch actions, ZIP import/export, thumbnails, byte-size metadata, and async export/import jobs.
 - Optional Cloudflare R2 gallery backup sync; local SQLite/images remain the source of truth.
 - Access-key gate, IP/Host allowlists, trusted proxy-header support, CSRF origin checks, CSP nonce injection, version checks, and optional JSON/Prometheus metrics.
@@ -56,61 +54,35 @@ This project is only a self-hosted control panel. It does not provide, proxy, re
 - Backend: FastAPI under `backend/app/`; ASGI entrypoint is `backend.app.main:app`.
 - Frontend: SvelteKit static app under `frontend/`; production backend serves `frontend/build/`.
 - Runtime storage: generated images under `images/`, thumbnails under `images/thumbs/`, SQLite data under `data/app.sqlite3`, and logs under `data/logs/` by default.
-- Multi-worker coordination: queued jobs, background leases, SSE slots, and scheduler ownership use SQLite leases. Image and thumbnail file writes/deletes use process-local locks only, and tolerate cross-process races through UUID filenames, atomic `Path.replace()`, and orphan-file GC TTL cleanup.
-- Public API routing: `backend/app/api/contract_app.py`.
-- DTOs: `backend/app/schemas/`.
-- Persistence: `backend/app/repositories/`.
-- Upstream API integration: `backend/app/integrations/`.
-- Runtime config: `backend/app/core/settings.py`, `backend/app/core/overall_config.py`, `.env.example`, and `docker-compose.yml`.
+- Multi-worker coordination: queued jobs, background leases, SSE slots, and scheduler ownership use SQLite leases. Image/thumbnail file writes use process-local locks and tolerate cross-process races through UUID filenames, atomic `Path.replace()`, and orphan-file GC TTL cleanup.
+- Key modules: public API routing in `backend/app/api/` (contract in `contract_app.py`), DTOs in `schemas/`, persistence in `repositories/`, upstream clients in `integrations/`, config in `core/settings.py` and `core/overall_config.py`.
 
 ## Tech Stack
 
-- Python 3.11+
-- FastAPI
-- Granian
-- aiohttp
-- aiohttp-socks
-- httpx
-- boto3
-- SQLite
-- Pydantic v2
-- Pillow
-- python-multipart
-- zipstream-ng
-- SvelteKit
-- TypeScript
-- Tailwind CSS 4 (Vite integration). Browser baseline: Chrome 111+, Safari 16.4+, Firefox 128+.
-- Playwright
-- pytest
+Python 3.11+, FastAPI, Granian, aiohttp (+aiohttp-socks), boto3, SQLite, Pydantic v2, Pillow, python-multipart, zipstream-ng · SvelteKit, TypeScript, Tailwind CSS 4 · Playwright, pytest. Browser baseline: Chrome 111+, Safari 16.4+, Firefox 128+.
 
 ## Project Structure
 
 ```text
 backend/
   app/
-    api/
-    core/
-    integrations/
-    repositories/
-    schemas/
-    services/
+    api/            # public API routing (contract_app.py)
+    core/           # settings, overall config
+    integrations/   # upstream API clients
+    repositories/   # persistence, SQLite coordination
+    runtime/        # blocking/concurrency helpers
+    schemas/        # DTOs
+    services/       # orchestration
   tests/
 frontend/
-  src/
-    lib/
-    routes/
+  src/lib/          # reusable frontend code
+  src/routes/       # SvelteKit routes
+  static/           # favicon
   tests/
-deploy/
-  nginx.conf
-images/
-data/
-Dockerfile
-docker-compose.yml
-.env.example
-requirements.txt
-requirements.lock
-backend/requirements-dev.txt
-package.json
+deploy/nginx.conf
+Dockerfile  docker-compose.yml  .env.example
+requirements.txt  requirements.lock  package.json
+images/  data/      # runtime output (generated)
 ```
 
 ## Quick Start
@@ -202,19 +174,10 @@ Caddy automatic HTTPS requires the hostname to resolve to the server and inbound
 
 ### Deployment Troubleshooting
 
-1. **Container exits on startup with `SecretRegistryError: credentials require a non-empty startup host allowlist`**
-   - **Cause**: `DEFAULT_API_KEY` is configured in `.env`, but `UPSTREAM_HOST_ALLOWLIST` is missing or empty.
-   - **Fix**: Add the raw hostname of `DEFAULT_API_URL` to `UPSTREAM_HOST_ALLOWLIST` in `.env` (e.g. `UPSTREAM_HOST_ALLOWLIST=api.openai.com` or `UPSTREAM_HOST_ALLOWLIST=cf.api.fan`).
-2. **Browser reports `400 Bad Request: Host is not allowed`**
-   - **Cause**: The incoming `Host` header does not match `ALLOWED_HOSTS` or `PUBLIC_ORIGIN` in `.env` (often due to domain typos or failing to recreate the container after editing `.env`).
-   - **Fix**: Ensure `PUBLIC_ORIGIN=https://panel.example.com` and `ALLOWED_HOSTS=panel.example.com` match the exact domain. Always run `docker compose up -d --force-recreate` after modifying `.env`.
-3. **Cannot log in or login loop under direct plain HTTP (no reverse proxy/SSL)**
-   - **Cause**: By default `ACCESS_COOKIE_SECURE=true` requires HTTPS; browsers reject storing or sending `Secure` cookies over plain HTTP.
-   - **Fix**: For direct HTTP testing, set `ACCESS_COOKIE_SECURE=false` in `.env`. Switch back to `true` once behind an HTTPS reverse proxy.
-4. **Clicking "Save Preset" in Web UI fails or drawer does not close**
-   - **Cause**:
-     - Saving literal plaintext API keys to SQLite via the UI is prohibited by default. Set `ALLOW_PLAINTEXT_SECRETS=true` in `.env` and restart the container if you need to paste raw API keys directly into Web Settings.
-     - If the preset API URL was modified, ensure its domain is also included in `UPSTREAM_HOST_ALLOWLIST`.
+1. **Container exits on startup with `SecretRegistryError: credentials require a non-empty startup host allowlist`** — `DEFAULT_API_KEY` is configured in `.env`, but `UPSTREAM_HOST_ALLOWLIST` is missing or empty. Add the raw hostname of `DEFAULT_API_URL` to `UPSTREAM_HOST_ALLOWLIST` in `.env` (e.g. `UPSTREAM_HOST_ALLOWLIST=api.openai.com` or `UPSTREAM_HOST_ALLOWLIST=cf.api.fan`).
+2. **Browser reports `400 Bad Request: Host is not allowed`** — the incoming `Host` header does not match `ALLOWED_HOSTS` or `PUBLIC_ORIGIN` in `.env` (often due to domain typos or failing to recreate the container after editing `.env`). Ensure both match the exact domain, and always run `docker compose up -d --force-recreate` after modifying `.env`.
+3. **Cannot log in or login loop under direct plain HTTP (no reverse proxy/SSL)** — by default `ACCESS_COOKIE_SECURE=true` requires HTTPS; browsers reject storing or sending `Secure` cookies over plain HTTP. For direct HTTP testing, set `ACCESS_COOKIE_SECURE=false` in `.env`. Switch back to `true` once behind an HTTPS reverse proxy.
+4. **Clicking "Save Preset" in Web UI fails or drawer does not close** — saving literal plaintext API keys to SQLite via the UI is prohibited by default; set `ALLOW_PLAINTEXT_SECRETS=true` in `.env` and restart the container if you need to paste raw API keys directly into Web Settings. If the preset API URL was modified, ensure its domain is also included in `UPSTREAM_HOST_ALLOWLIST`.
 
 ### Local Development
 
@@ -245,93 +208,61 @@ ALLOW_UNAUTHENTICATED=true .venv/bin/granian --interface asgi backend.app.main:a
 
 ## Configuration
 
-Most runtime options live in `.env.example`. API presets, prompt optimizer, R2 backup, and selected app/runtime options can also be managed through Web Settings / Overall Config. Important variables:
+Most runtime options live in `.env.example`. API presets, prompt optimizer, R2 backup, and selected app/runtime options can also be managed through Web Settings / Overall Config. Key variables:
 
 | Variable | Purpose |
 | --- | --- |
-| `ACCESS_KEY` | Access gate key. Required unless it is unset and `ALLOW_UNAUTHENTICATED=true`. |
-| `TURNSTILE_ENABLED` / `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` | Optional Cloudflare Turnstile human verification on the access gate; when enabled, unlocking requires a valid Turnstile token alongside `ACCESS_KEY`. |
-| `DEFAULT_API_URL` | Default upstream API base URL; may omit or include `/v1`. |
-| `DEFAULT_API_KEY` | Default upstream API key. Prefer env refs such as `${OPENAI_API_KEY}` in Web Settings. |
-| `DEFAULT_API_PATH` | `/v1/images/generations`, `/v1/responses`, or `/v1/chat/completions`. |
-| `DEFAULT_RESPONSES_MODEL` | Fallback model for `/v1/responses` when no request/preset model is provided. |
-| `AIOHTTP_CONNECTION_LIMIT` / `AIOHTTP_CONNECTION_LIMIT_PER_HOST` | Shared aiohttp connector limits for upstream/probe/download calls. |
-| `APP_VERSION` / `GITHUB_REPO` / `ENABLE_VERSION_CHECK` | UI/API version reporting and latest-release checks. |
-| `VERSION_CHECK_CACHE_SECONDS` | Per-process cache TTL for successful latest-release checks. |
-| `MAX_UPSTREAM_IMAGE_BYTES_PER_TASK_MB` / `UPSTREAM_MEMORY_BUDGET_MB` | Per-task decoded-image cap and process-local weighted upstream-memory admission budget. |
-| `DB_EXECUTOR_WORKERS` / `SQLITE_BUSY_*` / `SQLITE_CRITICAL_BUSY_*` / `SQLITE_SLOW_TXN_WARN_MS` | SQLite executor size (defaults to `max(4, MAX_ACTIVE_GENERATE_JOBS // 2 + 2)`) and busy-retry budgets — a larger `SQLITE_CRITICAL_BUSY_*` budget protects claim/lease/finalization writes from transient locks. Slow write transactions are logged. |
-| `IMAGE_CPU_CONCURRENCY` / `FILE_IO_CONCURRENCY` | Bounded full-image decode and blocking file-I/O concurrency per process. |
-| `VISION_PREVIEW_MEMORY_BUDGET_MB` | Independent vision-preview decode admission budget: **256 MiB per process** by default, range **32–16384**. Agent previews exceeding the conservative decoded-memory estimate are skipped; text references, original files, generation and editing remain available. Direct Assistant image analysis reports a 400 when its preview cannot fit. Configurable through environment or Overall Config. |
-| `IMAGE_JOB_PROGRESS_PERSIST_INTERVAL_SECONDS` | Minimum interval for coalesced image-unit progress writes. |
-| `RUNTIME_METRICS_REFRESH_SECONDS` / `EVENT_LOOP_LAG_SAMPLE_SECONDS` | Background coordination snapshot and event-loop lag sampling intervals. |
-| `MAX_ACTIVE_GENERATE_JOBS` | Global running generation/edit image-unit limit; expired leases from dead workers don't count against it, so a crashed worker can't deadlock the queue. |
-| `GRANIAN_WORKERS` | Granian worker process count; set it equal to the actual process count. Each worker claims at most `ceil(MAX_ACTIVE_GENERATE_JOBS / GRANIAN_WORKERS)` image units, so an `n>1` job spreads across workers. |
-| `MAX_QUEUED_GENERATE_JOBS` | Queue capacity before new jobs return `429`. |
-| `IMAGE_JOB_UNIT_LEASE_SECONDS` | SQLite claim lease for a running image unit — crash-detection latency only; the worker renews it while upstream is in flight, so slow upstreams don't lose ownership. |
-| `IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS` | Cadence at which the worker renews an image-unit lease (must stay under `lease/2`, defaults to `lease/3`). Only a renewal rejected by fencing (unit re-claimed or cancelled) aborts the in-flight upstream call, so cancelling a job stops it within one renewal interval. |
-| `IMAGE_JOB_UNIT_MAX_ATTEMPTS` | Max claim attempts per image unit; a unit whose lease expires on its last attempt is marked `interrupted` instead of retried forever. |
-| `MAX_PENDING_EDIT_SOURCE_MB` | Global pending edit-source byte reservation cap. |
+| `ACCESS_KEY` / `ALLOW_UNAUTHENTICATED` / `TURNSTILE_*` | Access gate key (required unless unset with `ALLOW_UNAUTHENTICATED=true`); `TURNSTILE_*` adds optional Cloudflare Turnstile verification. |
+| `DEFAULT_API_URL` / `DEFAULT_API_KEY` / `DEFAULT_API_PATH` / `DEFAULT_RESPONSES_MODEL` | Default upstream preset. Prefer env refs such as `${OPENAI_API_KEY}` for keys. |
+| `UPSTREAM_HOST_ALLOWLIST` | Required whenever an upstream API key is configured; lists allowed upstream hostnames. |
+| `PUBLIC_ORIGIN` / `ALLOWED_HOSTS` | Reverse-proxy Host/CSRF hardening; must match the deployed domain. |
+| `MAX_ACTIVE_GENERATE_JOBS` / `MAX_QUEUED_GENERATE_JOBS` | Global running image-unit limit and queue capacity (new jobs return `429` beyond it). |
+| `IMAGE_JOB_UNIT_LEASE_SECONDS` / `IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS` / `IMAGE_JOB_UNIT_MAX_ATTEMPTS` | SQLite claim lease for a running image unit (crash-detection latency), its renewal cadence, and max claim attempts. |
+| `GRANIAN_WORKERS` / `GRANIAN_*` | Worker process count and production runtime tuning; set equal to the actual process count. |
+| `VISION_PREVIEW_MEMORY_BUDGET_MB` | Vision-preview decode admission budget: **256 MiB per process** by default, range **32–16384**. Agent previews exceeding the conservative decoded-memory estimate are skipped; text references, original files, generation and editing remain available. |
+| `IMAGE_CPU_CONCURRENCY` / `FILE_IO_CONCURRENCY` / `UPSTREAM_MEMORY_BUDGET_MB` / `MAX_UPSTREAM_IMAGE_BYTES_PER_TASK_MB` | Bounded decode, file-I/O concurrency, and upstream image memory budgets. |
+| `DB_EXECUTOR_WORKERS` / `SQLITE_BUSY_*` / `SQLITE_CRITICAL_BUSY_*` / `SQLITE_SLOW_TXN_WARN_MS` | SQLite executor size and busy-retry budgets; critical claim/lease/finalization writes get a larger budget. |
+| `IMAGES_DIR` / `MASKS_DIR` / `THUMBNAILS_DIR` / `THUMBNAIL_*` / `DATA_DIR` / `DATABASE_FILE` / `LOG_DIR` / `LOG_LEVEL` / `LOG_RETENTION_HOURS` | Storage paths, thumbnail controls, and logging (rotated files retained 24h by default). |
 | `MASK_PASTE_BACK_DEFAULT` | Default for pasting a masked edit's result back onto the untouched primary image; overridable per edit request. |
 | `MAX_SSE_SUBSCRIBERS_GLOBAL` / `MAX_SSE_SUBSCRIBERS_PER_IP` / `SSE_CONNECTION_TTL_SECONDS` | SSE slot limits and max connection lifetime. |
-| `IMAGES_DIR` | Saved image directory. |
-| `MASKS_DIR` | Persisted edit-mask directory used to restore masks on job retry; keep under `IMAGES_DIR` unless volumes/backups are also adjusted. |
-| `THUMBNAILS_DIR` / `THUMBNAIL_*` | Gallery thumbnail storage and generation controls. |
-| `DATA_DIR` / `DATABASE_FILE` | SQLite runtime storage. |
 | `PROMPT_OPTIMIZER_*` | Optional server-side prompt optimizer settings. |
-| `AI_ASSISTANT_*` | AI Assistant is enabled by default (`AI_ASSISTANT_ENABLED=false` to disable); reuses `PROMPT_OPTIMIZER_*` for API URL/key/model/timeout/allowlist. `AI_ASSISTANT_MAX_CONCURRENCY` and `AI_ASSISTANT_BATCH_MAX_IMAGES` cap concurrency and gallery batch size. |
-| `AGENT_*` | Limits for Agent conversation mode (conversations, turns per conversation, message and prompt length, attachments, images per batch/turn, history images, tool-round ceiling, image-job timeout, turn lease, event retention, concurrent turns per worker). Agent mode itself is switched on in Settings → AI Assistant and reuses the `PROMPT_OPTIMIZER_*` endpoint. See `.env.example`. |
-| `R2_*` | Optional Cloudflare R2 gallery backup sync settings; custom endpoint hosts require `R2_ENDPOINT_HOST_ALLOWLIST`. |
+| `AI_ASSISTANT_*` | AI Assistant is enabled by default (`AI_ASSISTANT_ENABLED=false` to disable); reuses `PROMPT_OPTIMIZER_*` for API URL/key/model/timeout/allowlist. |
+| `AGENT_*` | Agent conversation-mode limits; the mode itself is switched on in Settings → AI Assistant and reuses the `PROMPT_OPTIMIZER_*` endpoint. |
+| `R2_*` | Optional Cloudflare R2 gallery backup sync; custom endpoint hosts require `R2_ENDPOINT_HOST_ALLOWLIST`. |
 | `NODEIMAGE_API_KEY` | Optional NodeImage API key for server-side Gallery uploads. |
-| `PUBLIC_ORIGIN` / `ALLOWED_HOSTS` | Reverse-proxy Host/CSRF hardening. |
-| `UPSTREAM_USER_AGENT` | `User-Agent` header sent on upstream provider and image-download requests (default `opencode`). |
-| `ENABLE_NGINX_ACCEL_REDIRECT` / `PUBLIC_IMAGE_BASE_URL` / `PUBLIC_THUMBNAIL_BASE_URL` | Optional nginx/CDN image byte serving behavior. |
-| `GRANIAN_*` | Production runtime process/thread/static-asset tuning. |
+| `IMAGE_COST_RATES_JSON` | Override/extend the builtin per-model USD rates used for cost estimates. |
+| `APP_VERSION` / `GITHUB_REPO` / `ENABLE_VERSION_CHECK` / `VERSION_CHECK_CACHE_SECONDS` | Version reporting and latest-release checks. |
+| `ENABLE_NGINX_ACCEL_REDIRECT` / `PUBLIC_IMAGE_BASE_URL` / `PUBLIC_THUMBNAIL_BASE_URL` | Optional nginx/CDN image byte serving. |
 | `ENABLE_METRICS` | Enables JSON/Prometheus metrics endpoints. |
-| `LOG_DIR` / `LOG_LEVEL` / `LOG_RETENTION_HOURS` | Backend logs on stdout plus rotated files, retained for 24h by default. |
+| `SECRET_REGISTRY_JSON` / `ALLOW_PLAINTEXT_SECRETS` / `ALLOW_LEGACY_ENV_REFS` | Secret handling: `${ENV_VAR}` references must be declared in `SECRET_REGISTRY_JSON`; literal secrets in SQLite require `ALLOW_PLAINTEXT_SECRETS=true`; `ALLOW_LEGACY_ENV_REFS=true` is a deprecated migration switch. |
 
-Secret fields prefer `${ENV_VAR_NAME}` references, and a referenced variable must be declared in `SECRET_REGISTRY_JSON` with its purpose and target origin (undeclared names are rejected; `ALLOW_LEGACY_ENV_REFS=true` is a deprecated migration switch). Literal secrets stored in SQLite require `ALLOW_PLAINTEXT_SECRETS=true`.
+Settings resolve in three layers: environment variables (read once at process start), Overall Config overrides persisted in SQLite via `/api/settings/overall-config` (hot-reloadable keys apply immediately, `restart_required` keys on next start), and names marked `exposed_in_settings` (API presets, prompt optimizer, AI assistant, R2, NodeImage), which are read from SQLite once saved through Web Settings — after that, the matching env var has no further effect. A handful of settings (e.g. `DB_EXECUTOR_WORKERS`, `AI_ASSISTANT_MAX_CONCURRENCY`, `IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS`) are derived from another value and recompute automatically. Known limit: changing `DB_EXECUTOR_WORKERS`, `IMAGE_CPU_CONCURRENCY`, or `FILE_IO_CONCURRENCY` at runtime does not resize an already-created thread pool.
 
-Overall Config persists overrides in SQLite. Some settings are hot-reloaded; restart-required and build-only settings are marked in the UI and should still be changed through `.env`/Compose for reproducible deployments.
-
-### Configuration precedence
-
-Settings resolve in three layers: environment variables, read once at process start; Overall Config overrides persisted in SQLite via `/api/settings/overall-config` (hot-reloadable keys apply immediately, `restart_required` keys apply on next start); and names marked `exposed_in_settings` (API presets, prompt optimizer, AI assistant, R2, NodeImage), which are read from SQLite once saved through Web Settings — after that, the matching env var has no further effect. A handful of settings (e.g. `DB_EXECUTOR_WORKERS`, `AI_ASSISTANT_MAX_CONCURRENCY`, `IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS`) are derived from another value and recompute automatically when their base changes.
-
-Known limits: changing `DB_EXECUTOR_WORKERS`, `IMAGE_CPU_CONCURRENCY`, or `FILE_IO_CONCURRENCY` at runtime does not resize an already-created thread pool. Each worker process re-reads API presets from SQLite per job, so workers stay in sync with each other.
-
-### SQLite write-lock and lease metrics
-
-With `ENABLE_METRICS=true`, `/api/metrics` exposes diagnostics for sizing SQLite coordination:
-
-- `sqlite.write_txn`, `sqlite.write_lock_wait_ms`, `sqlite.write_txn_hold_ms` — write-transaction rate and lock wait/hold times (p50/p95/p99/max); watch the p95 as `MAX_ACTIVE_GENERATE_JOBS x GRANIAN_WORKERS` grows.
-- `sqlite.busy`, `sqlite.busy_retries` — failed/retried lock attempts under contention.
-- `image_jobs.lease_renewed`, `lease_lost`, `unit_reclaimed`, `unit_exhausted` — image-unit lease health; `lease_lost` should stay at zero, since a non-zero rate means a unit was re-claimed or cancelled mid-flight.
+With `ENABLE_METRICS=true`, `/api/metrics` exposes diagnostics for sizing SQLite coordination: `sqlite.write_txn`, `sqlite.write_lock_wait_ms`, `sqlite.write_txn_hold_ms` (write-transaction rate and lock wait/hold times, p50–p99/max — watch the p95 as `MAX_ACTIVE_GENERATE_JOBS x GRANIAN_WORKERS` grows), `sqlite.busy`, `sqlite.busy_retries` (failed/retried lock attempts), and `image_jobs.lease_renewed`, `lease_lost`, `unit_reclaimed`, `unit_exhausted` (image-unit lease health; `lease_lost` should stay at zero).
 
 ## Usage
 
 1. Open the panel.
 2. Unlock with `ACCESS_KEY` if enabled.
-3. Open Settings.
-4. Create or select an API preset.
-5. Set API base URL, API path, model, response format, and API key/env ref.
-6. Optionally configure SOCKS5 proxy, webhook, prompt optimizer, AI Assistant, R2 backup, NodeImage upload, or Overall Config overrides.
-7. Save the preset and run its health check if needed.
-8. Generate images from a prompt, or upload/select source images and run edits.
-9. Use Gallery for reuse, filtering, favorites, batch actions, import/export, and R2 sync.
-10. Bookmark a preset shortcut with `/?apiUrl=https://api.example.com&apiModel=gpt-image-2`. Opening it offers to create a new preset with that URL and model; the confirmation banner shows the destination host prominently and warns to enter an API key only for a trusted host. Nothing is saved until you confirm, the API key stays empty, and the parameters are removed from the address bar. Only `https` URLs are accepted and credentials are never read from the URL. (`?model=` is the gallery filter, hence `apiModel`.)
-11. Use **Export** to download the selected preset as a versioned JSON package (never containing the key), **Share link** to copy a `?preset=` link, and **Import** to preview a file, clipboard JSON, or shared link before applying it. Order presets with the drag handle or the arrow buttons; the order is stored in SQLite.
-12. Optionally enable Agent mode in Settings → AI Assistant (pick a model that supports function calling), then switch to **Agent** in the header. Describe what you want, reference earlier images with `@` (for example `@round-1-image-1`), attach gallery images, and press Ctrl/Cmd+Enter. Use Stop to cancel a running reply; generated images appear in the gallery.
+3. Open Settings and create or select an API preset.
+4. Set API base URL, API path, model, response format, and API key/env ref.
+5. Optionally configure SOCKS5 proxy, webhook, prompt optimizer, AI Assistant, R2 backup, NodeImage upload, or Overall Config overrides.
+6. Save the preset and run its health check if needed.
+7. Generate images from a prompt, or upload/select source images and run edits.
+8. Use Gallery for reuse, filtering, favorites, batch actions, import/export, and R2 sync.
+9. Bookmark a preset shortcut with `/?apiUrl=https://api.example.com&apiModel=gpt-image-2`. Opening it offers to create a new preset with that URL and model; the confirmation banner shows the destination host prominently and warns to enter an API key only for a trusted host. Nothing is saved until you confirm, the API key stays empty, and the parameters are removed from the address bar. Only `https` URLs are accepted and credentials are never read from the URL. (`?model=` is the gallery filter, hence `apiModel`.)
+10. Use **Export** to download the selected preset as a versioned JSON package (never containing the key), **Share link** to copy a `?preset=` link, and **Import** to preview a file, clipboard JSON, or shared link before applying it. Order presets with the drag handle or the arrow buttons; the order is stored in SQLite.
+11. Optionally enable Agent mode in Settings → AI Assistant (pick a model that supports function calling), then switch to **Agent** in the header. Describe what you want, reference earlier images with `@` (for example `@round-1-image-1`), attach gallery images, and press Ctrl/Cmd+Enter. Use Stop to cancel a running reply; generated images appear in the gallery.
 
-### Agent paths, Markdown and optional search
+### Agent paths, Markdown, and optional search
 
-Assistant replies support headings, lists, tables, code and links. Raw HTML is escaped, external Markdown images stay text, and links allow only HTTP(S) URLs without credentials.
+Assistant replies support headings, lists, tables, code, and links. Raw HTML is escaped, external Markdown images stay text, and links allow only HTTP(S) URLs without credentials.
 
 Use **Edit message → Send as new branch** or **Regenerate** to create a sibling of a historical turn. **Conversation path** restores any original or new path after reload. Switching paths does not create requests or stop running work; stop the active turn before editing or regenerating. Only ancestors on the executing path enter model history. Image IDs and `@round-N-image-M` references are stable; displayed rounds and `@第N轮图M` follow the current path. To reuse an image from another path, attach it explicitly from Gallery. Deleting Gallery images invalidates references on all paths; deleting a conversation keeps its Gallery images.
 
 Web search is **off by default**. Under **Settings → AI Assistant**, declare that the actual endpoint/model supports Responses web search, then enable **Allow web search**. This requires the inherited Prompt Optimizer route to use `/v1/responses` and a compatible model; chat/completions continues with the existing function tools when search is off. Check your provider documentation before declaring support. Search-enabled incompatible configurations block submission (422 at the API); failures are shown and never automatically retried with search disabled.
 
-Search progress and citations supplied by upstream annotations are saved with the turn. Inline numbers link to the same sources listed under **Sources**, including quoted spans; reloads, stream replay and path switches restore them. Ordinary Markdown links do not become sources. Search shares tool-round, timeout and cancellation limits, uses bounded branch history, and does not invent costs when usage is missing. Migrations 37/38 apply automatically at startup.
-
+Search progress and citations supplied by upstream annotations are saved with the turn. Inline numbers link to the same sources listed under **Sources**, including quoted spans; reloads, stream replay, and path switches restore them. Ordinary Markdown links do not become sources. Search shares tool-round, timeout, and cancellation limits, uses bounded branch history, and does not invent costs when usage is missing. Migrations 37/38 apply automatically at startup.
 
 ## GPT Image 2.5
 
@@ -370,7 +301,7 @@ For `/v1/responses` and `/v1/chat/completions`, size/quality/format/compression/
 
 ## Custom Async Providers
 
-Some gateways accept a task, return status/result URLs and finish later. A preset can use a declarative JSON mapping instead of the OpenAI paths: choose **Custom async provider** in Settings and paste the mapping for your gateway (the example below shows every field; the empty field shows the same skeleton as a placeholder).
+Some gateways accept a task, return status/result URLs, and finish later. A preset can use a declarative JSON mapping instead of the OpenAI paths: choose **Custom async provider** in Settings and paste the mapping for your gateway (the example below shows every field; the empty field shows the same skeleton as a placeholder).
 
 ```json
 {
@@ -383,18 +314,17 @@ Some gateways accept a task, return status/result URLs and finish later. A prese
 }
 ```
 
-- **Flow**: `POST` the rendered body to `API URL + submit.path`, read the status URL from the response, poll until `status_path` is in `done` (or `failed`), optionally fetch `result.url_path`, then read images at `images_path` (URLs or base64).
-- **Variables**: `prompt`, `model`, `n`, `width`, `height`, `size`, `quality`, `output_format`, `background`. A field whose only content is a variable without a value (for example `width` when the size is `auto`) is left out. `submit.path` may use only `{{model}}`. Nothing is evaluated as code; paths support `$.a.b[0]` and `[*]` only.
-- **Task-id mappings (version 2)**: providers that return only a task id can set `"version": 2` and use `poll.task_id_path` with `poll.url_template` (and the same pair for `result`/`cancel`), for example `{"task_id_path": "$.data.id", "url_template": "/v1/jobs/{{task_id}}"}`. Templates are plain paths; the task id is percent-encoded as one path segment, and absolute URLs are rejected. An optional `submit.idempotency_header` (for example `Idempotency-Key`) lets an interrupted submit be retried under the same stable key.
-- **Sync mode**: v2 mappings can set `"mode": "sync"` when the submit response already contains the images — omit `poll` and `cancel` and read images with `result.images_path` from the submit response. An interrupted sync submit follows the same recovery rules as async ones (same-key retry with `submit.idempotency_header`, otherwise `interrupted`/`submit_unknown`).
+- **Flow**: `POST` the rendered body to `API URL + submit.path`, read the status URL from the response, poll until `status_path` is in `done` (or `failed`), optionally fetch `result.url_path`, then read images at `images_path` (URLs or base64). Nothing is evaluated as code; paths support `$.a.b[0]` and `[*]` only.
+- **Variables**: `prompt`, `model`, `n`, `width`, `height`, `size`, `quality`, `output_format`, `background`. A field whose only content is a variable without a value (for example `width` when the size is `auto`) is left out. `submit.path` may use only `{{model}}`.
+- **Task-id mappings (version 2)**: providers that return only a task id can set `"version": 2` and use `poll.task_id_path` with `poll.url_template` (and the same pair for `result`/`cancel`), for example `{"task_id_path": "$.data.id", "url_template": "/v1/jobs/{{task_id}}"}`. Templates are plain paths; the task id is percent-encoded as one path segment, and absolute URLs are rejected. An optional `submit.idempotency_header` (for example `Idempotency-Key`) lets an interrupted submit be retried under the same stable key. **Sync mode**: v2 mappings can set `"mode": "sync"` when the submit response already contains the images — omit `poll` and `cancel` and read images with `result.images_path` from the submit response.
 - **Methods and query mapping**: `submit.method` and `poll.method` accept `GET` or `POST` (a GET submit must have an empty body; a POST poll sends an empty JSON object). `submit.query`, `edit_submit.query` and `poll.query` map URL query parameters from templates — the submit variables for submits, `{{task_id}}` for polls; literal values may contain letters, digits and `- _ . ~` only.
-- **Image edits (edit_submit)**: adding an `edit_submit` section declares edit support. Multipart edits upload the validated reference images and mask as file parts (`files.images`, one part per image, and `files.mask`); JSON edits inline `{{reference_images}}` (the bounded list of data URLs) and optionally `{{mask}}` (one data URL) in `edit_submit.body`. Edits reuse the panel's upload validation, size caps, mask preprocessing, cancellation and result paste-back, and a configured mask is always sent — a mapping that cannot carry one is rejected before submit. Edit capability follows the mapping shape, so the mask editor appears only when the mask actually reaches the provider.
-- **Capabilities**: `capabilities.transparent_background` gates `background: transparent` (when omitted, the panel auto-detects it from `{{background}}` usage) and `capabilities.formats` narrows the accepted output formats; anything undeclared is refused before submit with a clear reason instead of being silently ignored. `stream` stays reserved. Chroma backgrounds remain available for generation — the provider receives the opaque background and the keyed prompt, and the panel removes the color locally.
+- **Image edits (edit_submit)**: adding an `edit_submit` section declares edit support. Multipart edits upload the validated reference images and mask as file parts (`files.images`, one part per image, and `files.mask`); JSON edits inline `{{reference_images}}` (the bounded list of data URLs) and optionally `{{mask}}` (one data URL) in `edit_submit.body`. Edits reuse the panel's upload validation, size caps, mask preprocessing, cancellation and result paste-back, and a configured mask is always sent — a mapping that cannot carry one is rejected before submit.
+- **Capabilities**: `capabilities.transparent_background` gates `background: transparent` (when omitted, the panel auto-detects it from `{{background}}` usage) and `capabilities.formats` narrows the accepted output formats; anything undeclared is refused before submit with a clear reason. `stream` stays reserved. Chroma backgrounds remain available for generation — the provider receives the opaque background and the keyed prompt, and the panel removes the color locally.
 - **Credentials**: the mapping never contains a key. The preset's API key (env reference or Secret Registry ID) is sent as `header: scheme key`; `header` is `Authorization` or `X-API-Key`, `scheme` is `Bearer`, `Key`, `Token` or empty.
 - **Safety**: status, result and cancel URLs come from upstream responses, so they must be on the same origin as the preset's API URL (the key travels with them) and pass the same SSRF and peer-IP checks as the submit URL. Images are downloaded without credentials. Errors are redacted.
-- **Recovery**: the unit persists the remote task id, follow-up URLs, absolute poll deadline, idempotency key and a snapshot of the non-secret mapping after submitting. If a worker dies, another worker resumes polling the same task instead of submitting it again; the deadline and takeover count survive restarts (5 takeovers by default). Because the running task keeps using the snapshot, editing the preset's mapping never changes what an in-flight or recovered task sends. A submit whose response was never recorded is marked `interrupted` with a `submit_unknown` diagnostic and is never resubmitted automatically. Losing a lease does not cancel the remote task; a user cancellation does send a best-effort `cancel` request. Throttling, 5xx and network errors during polling retry with bounded backoff until the deadline.
-- The health check validates the mapping and probes the submit URL; it never submits a task. Settings can copy a mapping-authoring prompt for an LLM (covering the v2 protocol, edits and capabilities) and validate a pasted mapping live, including verifying task-id, status and image extraction against sample responses pasted locally (nothing is sent upstream); the validation response also lists the resolved capabilities for the mapping.
-- **Diagnostics**: failed units keep a redacted, size-capped record of the submit/poll/result stages. Open **Job History → Diagnostics** on a failed job to inspect the stage, HTTP status, failed mapping path and response snapshot, and to copy the report for a bug tracker.
+- **Recovery**: the unit persists the remote task id, follow-up URLs, absolute poll deadline, idempotency key, and a snapshot of the non-secret mapping after submitting. If a worker dies, another worker resumes polling the same task instead of submitting it again; the deadline and takeover count survive restarts (5 takeovers by default). A submit whose response was never recorded is marked `interrupted` with a `submit_unknown` diagnostic and is never resubmitted automatically. Losing a lease does not cancel the remote task; a user cancellation does send a best-effort `cancel` request. Throttling, 5xx and network errors during polling retry with bounded backoff until the deadline.
+- The health check validates the mapping and probes the submit URL; it never submits a task. Settings can copy a mapping-authoring prompt for an LLM and validate a pasted mapping live, including verifying task-id, status, and image extraction against sample responses pasted locally (nothing is sent upstream); the validation response also lists the resolved capabilities.
+- **Diagnostics**: failed units keep a redacted, size-capped record of the submit/poll/result stages. Open **Job History → Diagnostics** on a failed job to inspect the stage, HTTP status, failed mapping path, and response snapshot, and to copy the report for a bug tracker.
 
 ## Streaming Preview & Cost Estimation
 
@@ -403,79 +333,36 @@ Some gateways accept a task, return status/result URLs and finish later. A prese
 - Partial images live only in server memory (one latest frame per running unit/output call, bounded by `PREVIEW_CACHE_MAX_ENTRY_MB`/`PREVIEW_CACHE_MAX_ENTRIES`, defaults 8 MiB / 500 entries). Slow SSE subscribers receive coalesced frames. Final results replace only their own slots; failed, cancelled and completed slots release previews. Reconnect restores the job snapshot before cached frames; a restarted or different worker has no preview frames to replay. A valid JSON final response is accepted from the original request without resubmission.
 - **Estimated cost is not a bill.** It's computed only from the `usage` object the upstream actually returns; when usage or a model price is missing, the UI shows why instead of `$0.00`. The builtin rate table covers `gpt-image-1` and GPT Image 2 / 2.5, taken from OpenAI's published pricing — third-party upstreams rarely match it. Override or add rates with `IMAGE_COST_RATES_JSON`.
 
-## Gallery, touch controls and completion notifications
+## Gallery, Touch Controls, and Completion Notifications
 
 - Drag a selection rectangle on desktop, or use Ctrl/⌘/Shift when selecting cards. On touch screens, a deliberate horizontal swipe toggles a card once; vertical movement keeps scrolling. Filter-wide selection retains its server selection token until **Exit select-all** is chosen.
-- **Collection overview** shows covers, counts and default markers from the collection list without per-cover detail requests. Opening a collection preserves other filters; management and ZIP export remain available for empty collections or missing covers.
-- The Lightbox supports pinch zoom, pan while enlarged, double tap to zoom, and long press for download, favorite and edit actions. Escape closes the action menu before closing the viewer.
+- **Collection overview** shows covers, counts, and default markers from the collection list without per-cover detail requests. Opening a collection preserves other filters; management and ZIP export remain available for empty collections or missing covers.
+- The Lightbox supports pinch zoom, pan while enlarged, double tap to zoom, and long press for download, favorite, and edit actions. Escape closes the action menu before closing the viewer.
 - **Workspace preferences → Notify when tasks finish** is off by default and asks permission only when enabled. Supported secure-context browsers notify while the page is in the background: once per image parent task or Agent turn, including partial-failure counts. A click opens the result or conversation. Web Locks and a bounded localStorage history coordinate tabs and replays; older browsers use best-effort coordination. The page must remain running; use Webhooks for integrations that need delivery after it closes.
 - Queued image tasks freeze non-secret provider settings. Credentials remain in the current preset; changing its API origin stops the queued task with an explicit error instead of sending the updated credentials to the saved origin.
 
 ## API Overview
 
-Key backend routes:
+Key backend routes (grouped by area):
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/health` | Health check. |
-| `GET` | `/api/access/status` | Read access state. |
+| `GET` | `/health`, `/api/access/status`, `/api/version`, `/api/version/latest` | Health check, access state, current/latest version. |
 | `POST` | `/api/access` | Unlock the panel with the access key. |
-| `GET` | `/api/version`, `/api/version/latest` | Read current version and optional latest release information. |
 | `GET/PUT` | `/api/settings/overall-config` | Read/save Overall Config overrides. |
 | `GET/POST` | `/api/settings` | Read/save active preset, prompt optimizer, R2 backup, proxy, and webhook settings. |
-| `POST` | `/api/settings/presets` | Create an API preset. |
-| `POST` | `/api/settings/presets/{preset_id}/activate` | Activate a saved API preset. |
-| `DELETE` | `/api/settings/presets/{preset_id}` | Delete an API preset. |
-| `POST` | `/api/settings/presets/{preset_id}/health` | Validate a saved upstream preset. |
-| `POST` | `/api/settings/r2/health` | Validate draft R2 backup settings. |
-| `GET/POST` | `/api/prompt-snippets` | List/create reusable prompt snippets. |
-| `POST` | `/api/prompt-snippets/search` | Search reusable prompt snippets. |
-| `PATCH/DELETE` | `/api/prompt-snippets/{snippet_id}` | Update/delete a prompt snippet. |
-| `GET/POST` | `/api/prompt/optimizer-system-prompt` | Read/save the prompt optimizer system prompt. |
-| `POST` | `/api/prompt/optimize`, `/api/prompt/optimizer-health` | Optimize a prompt or probe optimizer connectivity. |
-| `POST` | `/api/assistant/health` | Probe AI Assistant connectivity. |
-| `POST` | `/api/assistant/prompt/rewrite`, `/api/assistant/prompt/check`, `/api/assistant/prompt/variants` | Prompt Copilot rewrite, review, and variant tools. |
-| `POST` | `/api/assistant/generate/recommend-params` | Recommend only generation parameters supported by the selected API path. |
-| `POST` | `/api/assistant/jobs/{job_id}/diagnose`, `/api/assistant/edit/plan` | Diagnose a job or plan an edit without submitting it. |
-| `POST` | `/api/assistant/image/prompt` | Reverse-prompt one validated local raster image in memory; returns a generation prompt without creating a Gallery record. |
-| `POST` | `/api/assistant/image/prompt/optimize` | Optimize a reverse-prompt result together with its uploaded source image. |
-| `POST/GET` | `/api/assistant/gallery/*` | Describe, reverse-prompt, analyze, batch-analyze, and read AI metadata for local gallery images. |
-| `GET/POST` | `/api/agent/conversations` | List or create Agent conversations. |
-| `GET/PATCH/DELETE` | `/api/agent/conversations/{conversation_id}` | Read (messages, image references, active turn), rename, or delete a conversation; deleting keeps its gallery images. |
-| `POST` | `/api/agent/conversations/{conversation_id}/turns` | Send a message (`client_turn_id` makes retries idempotent); runs as a background turn and returns `202`. |
-| `PATCH` | `/api/agent/conversations/{conversation_id}/branch` | Select a persisted path using `selected_turn_id` (null starts an empty path) and `expected_revision`; stale tabs receive 409. Turns also accept `action: continue/edit/regenerate`, `source_turn_id` and `branch_revision`. |
-| `GET` | `/api/agent/turns/{turn_id}`, `/api/agent/turns/{turn_id}/events` | Read a turn or stream its replayable SSE events (`?after=` or `Last-Event-ID` resumes). |
-| `POST` | `/api/agent/turns/{turn_id}/cancel` | Stop a running turn and cancel its queued image jobs. |
-| `POST` | `/api/generate` | Start generation job. |
-| `POST` | `/api/edits` | Start edit job with uploaded source images, an optional PNG mask, and a paste-back preference. |
-| `POST` | `/api/edits/from-gallery/{image_id}` | Start edit job from an existing gallery image, with the same optional mask and paste-back preference. |
-| `GET` | `/api/generate/jobs` | List live jobs and optional persisted history. |
-| `GET` | `/api/generate/jobs/events` | SSE stream for job-list updates. |
-| `GET/DELETE` | `/api/generate/{job_id}` | Read or cancel one generation/edit job. |
-| `GET` | `/api/generate/{job_id}/events` | SSE stream for one job. |
-| `DELETE` | `/api/generate/jobs/history` | Clear terminal job history. |
-| `GET` | `/api/gallery` | List/search/filter gallery images, including a `mask_only` filter for masked edits. |
-| `POST` | `/api/gallery/search` | Search/filter gallery images with a JSON request body, including a `mask_only` filter for masked edits. |
-| `GET/DELETE` | `/api/gallery/{image_id}` | Read or delete a gallery image. |
-| `PATCH` | `/api/gallery/{image_id}/favorite` | Favorite/unfavorite one gallery image. |
-| `POST` | `/api/gallery/{image_id}/nodeimage-upload` | Upload one gallery image to NodeImage. |
-| `POST` | `/api/gallery/batch/nodeimage-upload` | Upload a selection-token gallery batch to NodeImage as an async job. |
-| `GET` | `/api/gallery/nodeimage-upload-jobs/{job_id}`, `/api/gallery/nodeimage-upload-jobs/{job_id}/events` | Read or stream a NodeImage batch upload job. |
-| `DELETE` | `/api/gallery/nodeimage-upload-jobs/{job_id}`, `POST` `/api/gallery/nodeimage-upload-jobs/{job_id}/cancel` | Delete or cancel a NodeImage batch upload job. |
-| `POST/PATCH` | `/api/gallery/batch/*` | Selection-token, favorite, delete, and download batch actions. |
-| `POST` | `/api/gallery/thumbnails/status` | Check thumbnail presence/status for a set of gallery images. |
-| `POST` | `/api/gallery/export-jobs`, `/api/gallery/direct-export-jobs` | Create async gallery export jobs. |
-| `GET` | `/api/gallery/export-jobs/{job_id}`, `/api/gallery/direct-export-jobs/{job_id}` | Read async gallery export job status. |
-| `GET` | `/api/gallery/export-jobs/{job_id}/events`, `/api/gallery/direct-export-jobs/{job_id}/events` | SSE streams for gallery export jobs. |
-| `GET` | `/api/gallery/export-jobs/{job_id}/download` | Download a completed tracked export archive. |
-| `POST` | `/api/gallery/sync-jobs` | Create an R2 backup sync job. |
-| `GET` | `/api/gallery/sync-jobs/{job_id}`, `/api/gallery/sync-jobs/{job_id}/events` | Read or stream R2 backup sync job status. |
-| `GET` | `/api/gallery/import-jobs/{job_id}` | Read async import job status. |
-| `GET` | `/api/gallery/import-jobs/{job_id}/events` | SSE stream for async import job status. |
-| `GET` | `/api/image/{filename}` | Serve authorized image bytes. |
-| `GET` | `/api/thumb/{filename}` | Serve generated gallery thumbnail. |
-| `GET` | `/api/download/{filename}` | Download one gallery image. |
-| `GET` | `/api/download-all?export_job_id=` | Stream gallery ZIP export via direct export job. |
+| `POST` | `/api/settings/presets` (+ `/{preset_id}/activate`, `/health`, `DELETE /api/settings/presets/{preset_id}`) | Create, activate, validate, or delete API presets. `POST /api/settings/r2/health` validates draft R2 backup settings. |
+| `GET/POST`, `PATCH/DELETE` | `/api/prompt-snippets` (+ `/search`, `/{snippet_id}`) | List/create, search, update/delete reusable prompt snippets. |
+| `GET/POST` | `/api/prompt/optimizer-system-prompt`; `POST /api/prompt/optimize`, `/api/prompt/optimizer-health` | Read/save the optimizer system prompt; optimize a prompt or probe optimizer connectivity. |
+| `POST` | `/api/assistant/health`, `/api/assistant/prompt/rewrite\|check\|variants`, `/api/assistant/generate/recommend-params`, `/api/assistant/jobs/{job_id}/diagnose`, `/api/assistant/edit/plan`, `/api/assistant/image/prompt`, `/api/assistant/image/prompt/optimize`; `POST/GET /api/assistant/gallery/*` | Probe Assistant connectivity; prompt rewrite/review/variants; parameter recommendations; job diagnosis and edit planning; reverse-prompt local images; gallery describe/analyze/batch operations. |
+| `GET/POST` | `/api/agent/conversations`; `GET/PATCH/DELETE /api/agent/conversations/{conversation_id}`; `POST .../turns`; `PATCH .../branch` | List/create, read/rename/delete conversations (deleting keeps gallery images); send a message (idempotent via `client_turn_id`, returns `202`); select a persisted path. |
+| `GET` | `/api/agent/turns/{turn_id}` (+ `/events`); `POST /api/agent/turns/{turn_id}/cancel` | Read a turn or stream its replayable SSE events; stop a running turn and cancel its queued image jobs. |
+| `POST` | `/api/generate`, `/api/edits`, `/api/edits/from-gallery/{image_id}` | Start generation or edit jobs (edits accept an optional PNG mask and paste-back preference). |
+| `GET`, `GET/DELETE` | `/api/generate/jobs` (+ `/events`), `/api/generate/{job_id}` (+ `/events`); `DELETE /api/generate/jobs/history` | List live jobs/history, stream job-list or single-job SSE, read/cancel one job, clear terminal history. |
+| `GET`, `POST` | `/api/gallery`, `/api/gallery/search`; `GET/DELETE /api/gallery/{image_id}`; `PATCH /api/gallery/{image_id}/favorite` | List/search/filter gallery images (incl. `mask_only`), read/delete/favorite an image. |
+| `POST/PATCH` | `/api/gallery/batch/*`; `POST /api/gallery/thumbnails/status` | Selection-token, favorite, delete, and download batch actions; thumbnail presence checks. |
+| `POST`, `GET` | `/api/gallery/nodeimage-upload-jobs`, `/api/gallery/export-jobs`, `/api/gallery/direct-export-jobs`, `/api/gallery/sync-jobs`, `/api/gallery/import-jobs` (each with `/{job_id}`, `/events`, plus `DELETE`/`cancel` or `/download` where applicable) | Async NodeImage uploads, gallery ZIP exports, R2 sync, and import jobs with status/SSE tracking. |
+| `GET` | `/api/image/{filename}`, `/api/thumb/{filename}`, `/api/download/{filename}`, `/api/download-all?export_job_id=` | Serve authorized image bytes, thumbnails, single downloads, and streamed ZIP export. |
 | `POST` | `/api/import` | Import gallery ZIP archive; `async_job=true` creates an import job. |
 | `GET` | `/api/metrics`, `/api/metrics/prometheus` | Optional metrics when `ENABLE_METRICS=true`. |
 
@@ -484,25 +371,10 @@ The public API surface is contract-tested; keep paths, methods, status codes, SS
 ## Contributor Boundaries
 
 - Keep browser calls same-origin through `/api/*`; do not add direct frontend calls to upstream model APIs, R2, webhook targets, or arbitrary image URLs.
-- Keep ownership boundaries intact:
-  - routers/request orchestration in `backend/app/api/routers/`
-  - DTOs in `backend/app/schemas/`
-  - persistence and SQLite coordination in `backend/app/repositories/`
-  - upstream integrations in `backend/app/integrations/`
-  - mirrored frontend API types in `frontend/src/lib/api/types.ts`
-- Keep public contracts stable unless a breaking change is intentional:
-  - API paths, methods, status codes, cookies, SSE event names, and response shapes
-  - generation/edit queue lifecycle, cancellation semantics, and multi-worker SQLite coordination
-  - file-system races are tolerated by UUID filenames, atomic replacement, and orphan GC; do not rely on process-local locks for cross-worker exclusion
-- Keep validation and safety centralized:
-  - image byte validation, safe paths, thumbnail/archive helpers
-  - SSRF-sensitive URL handling in validators, safe connector, and integration clients
-  - secrets exposed to the frontend only as masked values or env-ref metadata
-- Preserve current runtime constraints:
-  - edits accept up to 16 raster source images, plus an optional single PNG mask capped at 4 MB
-  - gallery ZIP import/export keeps existing safety limits
-  - SSE uses SQLite slot leases with global/per-IP caps and TTL
-  - R2 sync is backup-only; local SQLite rows and local image files remain the source of truth
+- Keep ownership boundaries intact: routers/request orchestration in `backend/app/api/routers/`, DTOs in `backend/app/schemas/`, persistence and SQLite coordination in `backend/app/repositories/`, upstream integrations in `backend/app/integrations/`, mirrored frontend API types in `frontend/src/lib/api/types.ts`.
+- Keep public contracts stable unless a breaking change is intentional: API paths, methods, status codes, cookies, SSE event names, response shapes; generation/edit queue lifecycle, cancellation semantics, and multi-worker SQLite coordination. File-system races are tolerated by UUID filenames, atomic replacement, and orphan GC; do not rely on process-local locks for cross-worker exclusion.
+- Keep validation and safety centralized: image byte validation, safe paths, thumbnail/archive helpers; SSRF-sensitive URL handling in validators, safe connector, and integration clients; secrets exposed to the frontend only as masked values or env-ref metadata.
+- Preserve current runtime constraints: edits accept up to 16 raster source images, plus an optional single PNG mask capped at 4 MB; gallery ZIP import/export keeps existing safety limits; SSE uses SQLite slot leases with global/per-IP caps and TTL; R2 sync is backup-only — local SQLite rows and local image files remain the source of truth.
 - When changing environment variables, update `backend/app/core/settings.py`, `backend/app/core/overall_config.py` when user-visible, `.env.example`, `docker-compose.yml` when configurable in Compose, and this README.
 - Do not commit runtime/generated artifacts such as `images/`, `data/`, `frontend/build/`, `.svelte-kit/`, Playwright reports, test results, dependency folders, local DB files, or logs.
 
