@@ -130,6 +130,7 @@ OVERALL_CONFIG_REGISTRY: tuple[OverallConfigSpec, ...] = (
     _spec("ACCESS_COOKIE_SECURE", "bool", "true", "Access / Security", "Set Secure on access cookie.", restart_required=True, exposed_in_overall_config=False),
     _spec("ACCESS_MAX_FAILURES", "int", "5", "Access / Security", "Failed access attempts before lockout.", min_value=1, restart_required=True, exposed_in_overall_config=False),
     _spec("ACCESS_LOCKOUT_SECONDS", "int", "300", "Access / Security", "Access lockout duration.", min_value=1, restart_required=True, exposed_in_overall_config=False),
+    _spec("ACCESS_GLOBAL_MAX_ATTEMPTS_PER_MINUTE", "int", "120", "Access / Security", "Process-wide ceiling on /api/access attempts per rolling minute; 0 disables.", min_value=0, restart_required=True, exposed_in_overall_config=False),
     _spec("IP_ALLOWLIST", "string", "", "Access / Security", "Client IP/CIDR allowlist.", validator="ip_list", restart_required=True, startup_only=True, exposed_in_overall_config=False),
     _spec("TRUST_PROXY_HEADERS", "bool", "false", "Access / Security", "Trust reverse-proxy headers.", restart_required=True, exposed_in_overall_config=False),
     _spec("TRUSTED_PROXY_IPS", "string", "", "Access / Security", "Trusted reverse proxy IP/CIDR list.", validator="ip_list", restart_required=True, startup_only=True, exposed_in_overall_config=False),

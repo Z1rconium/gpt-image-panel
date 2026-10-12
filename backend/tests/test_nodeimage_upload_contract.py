@@ -809,7 +809,7 @@ def test_nodeimage_settings_plaintext_path_is_opt_in_and_masked(client):
     nodeimage = accepted.json()["nodeimage"]
     assert nodeimage["has_api_key"] is True
     assert nodeimage["api_key_source"] == "stored"
-    assert nodeimage["api_key_masked"] == "plai***-key"
+    assert nodeimage["api_key_masked"] == "********"
     assert nodeimage["api_key_secret_id"] is None
     assert settings_repo.load_nodeimage_settings()["api_key"] == "plain-nodeimage-key"
 

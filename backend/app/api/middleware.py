@@ -110,11 +110,29 @@ class TextOnlyGZipMiddleware(GZipMiddleware):
         await responder(scope, receive, send)
 
 
-def apply_security_headers(response: Response) -> Response:
+# Disable powerful platform features this application never uses, as a
+# defense-in-depth complement to the CSP. Features the UI relies on (e.g.
+# clipboard, fullscreen, picture-in-picture) are intentionally left unlisted so
+# they keep their browser defaults.
+PERMISSIONS_POLICY = (
+    "accelerometer=(), camera=(), display-capture=(), geolocation=(), "
+    "gyroscope=(), magnetometer=(), microphone=(), midi=(), payment=(), usb=()"
+)
+# Application-level HSTS fallback for deployments whose reverse proxy does not
+# set it. Only sent over HTTPS (see _request_is_https); includeSubDomains is
+# deliberately omitted so a shared parent domain is not affected.
+STRICT_TRANSPORT_SECURITY = "max-age=31536000"
+
+
+def apply_security_headers(response: Response, *, hsts: bool = False) -> Response:
     if "Content-Security-Policy" not in response.headers:
         response.headers["Content-Security-Policy"] = CONTENT_SECURITY_POLICY
     response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "same-origin"
+    response.headers["Permissions-Policy"] = PERMISSIONS_POLICY
+    if hsts and "Strict-Transport-Security" not in response.headers:
+        response.headers["Strict-Transport-Security"] = STRICT_TRANSPORT_SECURITY
     return response
 
 
@@ -398,6 +416,17 @@ def get_request_origin(request: Request) -> str | None:
     return normalize_origin(f"{scheme}://{host}")
 
 
+def _request_is_https(request: Request) -> bool:
+    """Whether this request reached the browser over HTTPS.
+
+    Uses the same trusted-proxy-aware origin resolution as the CSRF check, so
+    HSTS is only emitted for genuine HTTPS (or a configured HTTPS
+    ``PUBLIC_ORIGIN``) and never over plain HTTP.
+    """
+    origin = get_request_origin(request)
+    return bool(origin and origin.startswith("https://"))
+
+
 def csrf_origin_allowed(request: Request) -> bool:
     if (
         not config.CSRF_ORIGIN_CHECK_ENABLED
@@ -528,7 +557,7 @@ def register_middleware(app):
 
         response.headers["X-Correlation-ID"] = correlation_id
 
-        return apply_security_headers(response)
+        return apply_security_headers(response, hsts=_request_is_https(request))
 
 
 def register_exception_handlers(app):
@@ -542,12 +571,17 @@ def register_exception_handlers(app):
             exc.detail,
             _correlation_id(request),
         )
-        return error_response(
+        response = error_response(
             request,
             exc.status_code,
             _error_code_for_status(exc.status_code),
             exc.detail,
         )
+        # Preserve control headers such as Retry-After that a handler set on the
+        # HTTPException; the JSON envelope is built here and would drop them.
+        for name, value in (exc.headers or {}).items():
+            response.headers.setdefault(name, value)
+        return response
 
     @app.exception_handler(DomainError)
     async def domain_error_handler(request: Request, exc: DomainError):

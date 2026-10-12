@@ -77,13 +77,16 @@ def test_api_key_response_fields_masks_plaintext_for_all_consumers(monkeypatch):
 
     fields = presets.api_key_response_fields("plain-secret-value")
     assert fields == {
-        "api_key_masked": "plai***alue",
+        "api_key_masked": "********",
         "has_api_key": True,
         "api_key_source": "stored",
         "api_key_env_var": None,
         "api_key_secret_id": None,
     }
     assert "plain-secret-value" not in str(fields)
+    # The fixed mask must not leak any prefix/suffix of the stored secret.
+    assert "plai" not in str(fields)
+    assert "alue" not in str(fields)
 
     assert presets.api_key_response_fields("${RESPONSE_ENV_KEY}")["api_key_source"] == "env"
     registry_fields = presets.api_key_response_fields("response-registry-key")

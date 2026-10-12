@@ -161,6 +161,7 @@ def _configure_runtime(tmp_path: Path, *, access_key: str = "", allow_unauthenti
     config.ACCESS_KEY_SESSION_MINUTES = 180
     config.ACCESS_MAX_FAILURES = 5
     config.ACCESS_LOCKOUT_SECONDS = 300
+    config.ACCESS_GLOBAL_MAX_ATTEMPTS_PER_MINUTE = 120
     config.TURNSTILE_ENABLED = False
     config.TURNSTILE_SITE_KEY = ""
     config.TURNSTILE_SECRET_KEY = ""

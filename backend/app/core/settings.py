@@ -139,6 +139,12 @@ ACCESS_KEY_COOKIE_NAME = os.getenv("ACCESS_KEY_COOKIE_NAME", "__Host-gpt_image_a
 ACCESS_COOKIE_SECURE = env_flag("ACCESS_COOKIE_SECURE", "true")
 ACCESS_MAX_FAILURES = int(os.getenv("ACCESS_MAX_FAILURES", "5"))
 ACCESS_LOCKOUT_SECONDS = int(os.getenv("ACCESS_LOCKOUT_SECONDS", "300"))
+# Process-wide ceiling on /api/access attempts per rolling minute, as a backstop
+# for the per-IP lockout; 0 disables it. Set 0 when a reverse proxy already
+# enforces a global rate limit for the unlock endpoint.
+ACCESS_GLOBAL_MAX_ATTEMPTS_PER_MINUTE = max(
+    0, int(os.getenv("ACCESS_GLOBAL_MAX_ATTEMPTS_PER_MINUTE", "120"))
+)
 TURNSTILE_ENABLED = env_flag("TURNSTILE_ENABLED")
 TURNSTILE_SITE_KEY = os.getenv("TURNSTILE_SITE_KEY", "").strip()
 TURNSTILE_SECRET_KEY = os.getenv("TURNSTILE_SECRET_KEY", "").strip()

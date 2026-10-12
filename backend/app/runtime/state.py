@@ -7,6 +7,7 @@ must observe live in SQLite (leases, versions) instead - see repositories/.
 
 import asyncio
 import os
+from collections import deque
 from datetime import datetime, timedelta, timezone
 
 from starlette.datastructures import State
@@ -71,6 +72,9 @@ def init_defaults() -> None:
     state.agent_turn_wakeups = {}
     state.agent_turn_cancel_events = {}
     state.agent_last_event_purge_at = 0.0
+    # Rolling window of recent /api/access attempt timestamps (see
+    # api/routers/access.py); bounded by ACCESS_GLOBAL_MAX_ATTEMPTS_PER_MINUTE.
+    state.access_attempt_times = deque()
 
 
 def reset() -> None:

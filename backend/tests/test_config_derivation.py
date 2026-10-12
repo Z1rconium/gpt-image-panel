@@ -101,6 +101,7 @@ def test_registry_defaults_match_the_runtime_defaults():
         "MAX_PENDING_EDIT_SOURCE_MB",
         "AI_ASSISTANT_MAX_CONCURRENCY",
         "IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS",
+        "ACCESS_GLOBAL_MAX_ATTEMPTS_PER_MINUTE",
     ):
         spec = overall_config.OVERALL_CONFIG_BY_NAME[name]
         assert spec.default == str(getattr(settings, name)), name

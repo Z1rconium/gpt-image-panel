@@ -68,9 +68,15 @@ def get_exception_message(error: Exception) -> str:
 
 
 def mask_key(key: str) -> str:
-    if not key or len(key) <= 8:
+    """Return a fixed mask that never reveals any character of a stored secret.
+
+    The previous first-4/last-4 form leaked eight characters of every stored
+    plaintext key to the settings console; the frontend already normalizes the
+    mask to this constant, so no round-trip behavior changes.
+    """
+    if not key:
         return "***"
-    return key[:4] + "***" + key[-4:]
+    return MASKED_API_KEY_VALUE
 
 
 def get_api_key_env_var(api_key: str) -> str | None:

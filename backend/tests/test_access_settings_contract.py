@@ -435,6 +435,65 @@ def test_access_lockout(tmp_path):
         assert "Too many failed attempts" in resp.json()["detail"]
 
 
+def test_non_ascii_access_key_is_rejected_and_counted_toward_lockout(tmp_path):
+    _configure_runtime(tmp_path, access_key="secret", allow_unauthenticated=False)
+    with _test_client(raise_server_exceptions=False) as client:
+        outcomes = [
+            client.post("/api/access", json={"access_key": "é"}).status_code
+            for _ in range(config.ACCESS_MAX_FAILURES + 1)
+        ]
+
+    # Non-ASCII input must be a normal rejection (401), never an unhandled 500,
+    # and it must still count toward the per-IP lockout.
+    assert 500 not in outcomes
+    assert outcomes[0] == 401
+    assert outcomes[-1] == 429
+
+
+def test_global_access_attempt_rate_limit(tmp_path, monkeypatch):
+    _configure_runtime(tmp_path, access_key="secret", allow_unauthenticated=False)
+    monkeypatch.setattr(config, "ACCESS_GLOBAL_MAX_ATTEMPTS_PER_MINUTE", 3)
+
+    with _test_client(raise_server_exceptions=False) as client:
+        codes = [
+            client.post("/api/access", json={"access_key": "wrong"}).status_code
+            for _ in range(4)
+        ]
+        limited = client.post("/api/access", json={"access_key": "wrong"})
+
+    assert codes == [401, 401, 401, 429]
+    assert limited.status_code == 429
+    assert limited.headers.get("retry-after")
+    assert "Too many access attempts" in limited.json()["detail"]
+
+
+def test_security_headers_include_permissions_policy_and_frame_deny(client):
+    resp = client.get("/api/version")
+
+    assert resp.status_code == 200
+    assert resp.headers["x-frame-options"] == "DENY"
+    assert resp.headers["x-content-type-options"] == "nosniff"
+    assert resp.headers["referrer-policy"] == "same-origin"
+    policy = resp.headers["permissions-policy"]
+    assert "camera=()" in policy
+    assert "microphone=()" in policy
+    # Plain-HTTP requests must not advertise HSTS.
+    assert "strict-transport-security" not in resp.headers
+
+
+def test_hsts_is_sent_over_https(tmp_path):
+    _configure_runtime(tmp_path, access_key="secret", allow_unauthenticated=False)
+
+    with _test_client() as client:
+        plain = client.get("/health")
+        config.PUBLIC_ORIGIN = "https://panel.example.com"
+        secure = client.get("/health", headers={"Host": "panel.example.com"})
+
+    assert "strict-transport-security" not in plain.headers
+    assert secure.status_code == 200
+    assert secure.headers["strict-transport-security"] == "max-age=31536000"
+
+
 def test_access_lockout_persists_across_app_state_reset(tmp_path):
     _configure_runtime(tmp_path, access_key="secret", allow_unauthenticated=False)
     with _test_client(raise_server_exceptions=False) as client:
