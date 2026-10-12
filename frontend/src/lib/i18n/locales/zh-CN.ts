@@ -222,7 +222,7 @@ const zh: Translation = {
     agentMode: 'Agent 对话模式',
     agentModeHint: '与模型多轮对话，由模型规划并通过你的图像预设生成图片。',
     agentEnabled: '启用',
-    agentRequiresAssistant: '请先启用上方的 AI 助手；Agent 模式使用它的端点。',
+    agentRequiresAssistant: '请先启用上方的 AI Assistant；Agent 模式使用它的端点。',
     agentModel: 'Agent 模型',
     agentModelPlaceholder: '默认使用提示词优化器的文本模型',
     agentMaxToolRounds: '每轮对话最多工具轮数',

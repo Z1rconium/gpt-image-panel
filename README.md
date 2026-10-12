@@ -40,12 +40,12 @@ This project is only a self-hosted control panel. It does not provide, proxy, re
 
 - Image generation through `/v1/images/generations`, `/v1/responses`, or OpenAI-compatible `/v1/chat/completions`.
 - Image editing through `/v1/images/edits`, using uploaded references or gallery images as sources, with a built-in mask editor (brush/eraser/shape/lasso, zoom, feathering, mask import, auto gap-fill/edge-smoothing). Masks persist and restore on retry; results paste back onto the untouched original behind a color-drift guard.
-- API presets with base URL/path/key, default model, response format, health checks, SOCKS5 proxy, webhook, and env-ref secret support.
+- API presets with base URL/path/key, default model, response format, health checks, SOCKS5 proxy, webhook, env-ref secret support, and capability flags: `supports_mask` (mask editing) and `prompt_guard` (ask upstream to use the prompt as-is).
 - Prompt helper tags, reusable prompt snippets, an optional server-side prompt optimizer, and an AI Assistant subsystem for prompt rewrites/checks/variants, parameter recommendations, job diagnosis, edit planning, and gallery image analysis.
 - Agent conversation mode: a multi-turn chat where the model plans and creates images through the existing job queue (batches of images, dependent follow-up rounds, edits of earlier images via `@` references), with server-side history, resumable streaming, and every image saved to the gallery. Requires an AI Assistant endpoint whose model supports function calling.
 - SQLite-backed job queue with SSE progress, cancellation, retry/reuse, persisted history, stage timing metadata, and shared generation/edit concurrency limits.
 - Optional streaming partial-image previews for `/v1/images/generations`, `/v1/images/edits`, and `/v1/responses` with 1–10 images, delivered over SSE as the upstream generates. Job history shows per-job token usage and an estimated USD cost whenever the upstream reports `usage` for a model with a configured rate.
-- Local gallery with cursor pagination, search/filtering, favorites, lightbox navigation, selection-token batch actions, ZIP import/export, thumbnails, byte-size metadata, and async export/import jobs.
+- Local gallery with cursor pagination, search/filtering, favorites, named collections with a cover overview, lightbox navigation, selection-token batch actions, ZIP import/export, thumbnails, byte-size metadata, and async export/import jobs.
 - Optional Cloudflare R2 gallery backup sync; local SQLite/images remain the source of truth.
 - Access-key gate, IP/Host allowlists, trusted proxy-header support, CSRF origin checks, CSP nonce injection, version checks, and optional JSON/Prometheus metrics.
 
@@ -175,7 +175,7 @@ Caddy automatic HTTPS requires the hostname to resolve to the server and inbound
 ### Deployment Troubleshooting
 
 1. **Container exits on startup with `SecretRegistryError: credentials require a non-empty startup host allowlist`** — `DEFAULT_API_KEY` is configured in `.env`, but `UPSTREAM_HOST_ALLOWLIST` is missing or empty. Add the raw hostname of `DEFAULT_API_URL` to `UPSTREAM_HOST_ALLOWLIST` in `.env` (e.g. `UPSTREAM_HOST_ALLOWLIST=api.openai.com` or `UPSTREAM_HOST_ALLOWLIST=cf.api.fan`).
-2. **Browser reports `400 Bad Request: Host is not allowed`** — the incoming `Host` header does not match `ALLOWED_HOSTS` or `PUBLIC_ORIGIN` in `.env` (often due to domain typos or failing to recreate the container after editing `.env`). Ensure both match the exact domain, and always run `docker compose up -d --force-recreate` after modifying `.env`.
+2. **Browser reports `400 Bad Request: Host is not allowed`** — the incoming `Host` header does not match `ALLOWED_HOSTS` or `PUBLIC_ORIGIN` in `.env` (often due to domain typos or failing to recreate the container after editing `.env`). Ensure both match the exact domain, and always run `docker-compose up -d --force-recreate` after modifying `.env`.
 3. **Cannot log in or login loop under direct plain HTTP (no reverse proxy/SSL)** — by default `ACCESS_COOKIE_SECURE=true` requires HTTPS; browsers reject storing or sending `Secure` cookies over plain HTTP. For direct HTTP testing, set `ACCESS_COOKIE_SECURE=false` in `.env`. Switch back to `true` once behind an HTTPS reverse proxy.
 4. **Clicking "Save Preset" in Web UI fails or drawer does not close** — saving literal plaintext API keys to SQLite via the UI is prohibited by default; set `ALLOW_PLAINTEXT_SECRETS=true` in `.env` and restart the container if you need to paste raw API keys directly into Web Settings. If the preset API URL was modified, ensure its domain is also included in `UPSTREAM_HOST_ALLOWLIST`.
 
@@ -242,7 +242,7 @@ With `ENABLE_METRICS=true`, `/api/metrics` exposes diagnostics for sizing SQLite
 
 ## Usage
 
-1. Open the panel.
+1. Open the panel; the header language button switches the UI between English and Simplified Chinese and remembers the choice per browser.
 2. Unlock with `ACCESS_KEY` if enabled.
 3. Open Settings and create or select an API preset.
 4. Set API base URL, API path, model, response format, and API key/env ref.
@@ -297,7 +297,7 @@ API rules checked on 2026-09-10: [image generation guide](https://developers.ope
 | `/v1/chat/completions` | Sends OpenAI-compatible chat completions requests; extracts image URLs/base64 data from messages or SSE chunks. |
 | `/v1/images/edits` | Used by the Edits flow; sends multipart source images and supported edit params. |
 
-For `/v1/responses` and `/v1/chat/completions`, size/quality/format/compression/quantity controls are disabled because those paths do not share the same parameter contract.
+For `/v1/responses` and `/v1/chat/completions`, size/quality/format/compression/quantity/background controls are disabled because those paths do not share the same parameter contract.
 
 ## Custom Async Providers
 
@@ -361,6 +361,7 @@ Key backend routes (grouped by area):
 | `GET`, `GET/DELETE` | `/api/generate/jobs` (+ `/events`), `/api/generate/{job_id}` (+ `/events`); `DELETE /api/generate/jobs/history` | List live jobs/history, stream job-list or single-job SSE, read/cancel one job, clear terminal history. |
 | `GET`, `POST` | `/api/gallery`, `/api/gallery/search`; `GET/DELETE /api/gallery/{image_id}`; `PATCH /api/gallery/{image_id}/favorite` | List/search/filter gallery images (incl. `mask_only`), read/delete/favorite an image. |
 | `POST/PATCH` | `/api/gallery/batch/*`; `POST /api/gallery/thumbnails/status` | Selection-token, favorite, delete, and download batch actions; thumbnail presence checks. |
+| `GET/POST`, `PUT/PATCH/DELETE` | `/api/gallery/collections` (+ `/order`, `/{collection_id}`, `/{collection_id}/items`, `/items/remove`); `GET /api/gallery/{image_id}/collections` | List/create, reorder, rename/set-default/delete collections, and add/remove or list their member images. |
 | `POST`, `GET` | `/api/gallery/nodeimage-upload-jobs`, `/api/gallery/export-jobs`, `/api/gallery/direct-export-jobs`, `/api/gallery/sync-jobs`, `/api/gallery/import-jobs` (each with `/{job_id}`, `/events`, plus `DELETE`/`cancel` or `/download` where applicable) | Async NodeImage uploads, gallery ZIP exports, R2 sync, and import jobs with status/SSE tracking. |
 | `GET` | `/api/image/{filename}`, `/api/thumb/{filename}`, `/api/download/{filename}`, `/api/download-all?export_job_id=` | Serve authorized image bytes, thumbnails, single downloads, and streamed ZIP export. |
 | `POST` | `/api/import` | Import gallery ZIP archive; `async_job=true` creates an import job. |
@@ -371,7 +372,7 @@ The public API surface is contract-tested; keep paths, methods, status codes, SS
 ## Contributor Boundaries
 
 - Keep browser calls same-origin through `/api/*`; do not add direct frontend calls to upstream model APIs, R2, webhook targets, or arbitrary image URLs.
-- Keep ownership boundaries intact: routers/request orchestration in `backend/app/api/routers/`, DTOs in `backend/app/schemas/`, persistence and SQLite coordination in `backend/app/repositories/`, upstream integrations in `backend/app/integrations/`, mirrored frontend API types in `frontend/src/lib/api/types.ts`.
+- Keep ownership boundaries intact: routers/request orchestration in `backend/app/api/routers/`, DTOs in `backend/app/schemas/`, persistence and SQLite coordination in `backend/app/repositories/`, upstream integrations in `backend/app/integrations/`, mirrored frontend API types in `frontend/src/lib/api/types/`.
 - Keep public contracts stable unless a breaking change is intentional: API paths, methods, status codes, cookies, SSE event names, response shapes; generation/edit queue lifecycle, cancellation semantics, and multi-worker SQLite coordination. File-system races are tolerated by UUID filenames, atomic replacement, and orphan GC; do not rely on process-local locks for cross-worker exclusion.
 - Keep validation and safety centralized: image byte validation, safe paths, thumbnail/archive helpers; SSRF-sensitive URL handling in validators, safe connector, and integration clients; secrets exposed to the frontend only as masked values or env-ref metadata.
 - Preserve current runtime constraints: edits accept up to 16 raster source images, plus an optional single PNG mask capped at 4 MB; gallery ZIP import/export keeps existing safety limits; SSE uses SQLite slot leases with global/per-IP caps and TTL; R2 sync is backup-only — local SQLite rows and local image files remain the source of truth.
@@ -384,13 +385,18 @@ Activate the project-local `.venv` before running backend or contract tests. The
 
 ```bash
 npm run frontend:check
+npm --prefix frontend run test:unit
 npm run frontend:build
+npm --prefix frontend run check:bundle
+npm --prefix frontend run check:worker-build
 .venv/bin/python -m pytest backend/tests -q
 npm run test:contract
 npm run test:e2e
 npm run test:perf
 npm run test:e2e:perf
 ```
+
+`frontend:check`, `test:unit`, and the backend suite run without a build. `check:bundle` and `check:worker-build` inspect the production bundle, so run `frontend:build` first.
 
 Run the focused subset relevant to your change. For release-bound or broad changes, run all of them.
 

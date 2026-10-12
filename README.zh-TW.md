@@ -36,12 +36,12 @@ GPT Image Panel 是一套輕量 Web UI，可用於圖片生成、圖片編輯、
 
 - 透過 `/v1/images/generations`、`/v1/responses` 或 OpenAI 相容的 `/v1/chat/completions` 生成圖片。
 - 透過 `/v1/images/edits` 編輯圖片，可使用上傳的參考圖或 Gallery 圖片作為來源；內建遮罩編輯器（畫筆/橡皮擦/形狀/套索、縮放、羽化、遮罩匯入、自動補洞/邊緣平滑）。遮罩隨工作持久化並可在重試時還原，結果預設貼回未編輯的原圖區域，並具備色彩漂移防護。
-- API 預設管理：base URL/path/key、預設模型、response format、健康檢查、SOCKS5 Proxy、webhook 與環境變數參照式密鑰。
+- API 預設管理：base URL/path/key、預設模型、response format、健康檢查、SOCKS5 Proxy、webhook、環境變數參照式密鑰，以及能力開關：`supports_mask`（遮罩編輯）與 `prompt_guard`（要求上游按原樣使用提示詞）。
 - 提示詞輔助標籤、可重複使用的提示詞片段、選用的伺服器端提示詞最佳化器，以及 AI Assistant 子系統（提示詞改寫/檢查/變體、參數建議、工作診斷、編輯規劃與 Gallery 圖片分析）。
 - Agent 對話模式：多輪對話中由模型規劃並透過既有工作佇列產生圖片（批次並行、有相依性的後續輪次、以 `@` 引用修改歷史圖片），對話歷史儲存在伺服器端，串流回覆可斷線續傳，所有圖片都會進入 Gallery。需要 AI Assistant 端點使用支援 function calling 的模型。
 - SQLite 工作佇列：SSE 進度、取消、重試/沿用、持久化歷史、階段耗時，以及生成/編輯共用的並行限制。
 - 選用的串流階段性圖片預覽，支援 `/v1/images/generations`、`/v1/images/edits`、`/v1/responses`（1–10 張），透過 SSE 在上游生成過程中推送。工作歷史顯示每個工作的 token 用量，並在上游回傳 usage 且該模型已設定費率時顯示估算美元費用。
-- 本機 Gallery：游標分頁、搜尋/篩選、收藏、燈箱導覽、selection token 批次操作、ZIP 匯入/匯出、縮圖、位元組大小資訊，以及非同步匯入/匯出工作。
+- 本機 Gallery：游標分頁、搜尋/篩選、收藏、命名收藏夾與封面概覽、燈箱導覽、selection token 批次操作、ZIP 匯入/匯出、縮圖、位元組大小資訊，以及非同步匯入/匯出工作。
 - 選用的 Cloudflare R2 Gallery 備份同步；本機 SQLite 與圖片檔案仍是唯一真實來源。
 - 存取密鑰、IP/Host 允許清單、可信任 Proxy Header、CSRF Origin 檢查、CSP nonce、版本檢查，以及選用的 JSON/Prometheus 指標。
 
@@ -171,7 +171,7 @@ Caddy 自動 HTTPS 要求網域解析至伺服器，且入站 `80`、`443` 連�
 ### 常見部署問題排查
 
 1. **容器啟動閃退並報錯 `SecretRegistryError: credentials require a non-empty startup host allowlist`** — 在 `.env` 中設定了 `DEFAULT_API_KEY`，但未設定 `UPSTREAM_HOST_ALLOWLIST`。在 `.env` 中將 `DEFAULT_API_URL` 對應的純網域填入 `UPSTREAM_HOST_ALLOWLIST`（例如 `UPSTREAM_HOST_ALLOWLIST=api.openai.com` 或 `UPSTREAM_HOST_ALLOWLIST=cf.api.fan`）。
-2. **瀏覽器存取顯示 `400 Bad Request: Host is not allowed`** — 請求的 `Host` 標頭未在 `.env` 的 `ALLOWED_HOSTS` 或 `PUBLIC_ORIGIN` 白名單中（常見於網域名稱拼寫錯誤，或修改 `.env` 後未重新建立容器）。確保兩者與網域完全一致，修改 `.env` 後必須執行 `docker compose up -d --force-recreate` 重新建立容器以套用新變數。
+2. **瀏覽器存取顯示 `400 Bad Request: Host is not allowed`** — 請求的 `Host` 標頭未在 `.env` 的 `ALLOWED_HOSTS` 或 `PUBLIC_ORIGIN` 白名單中（常見於網域名稱拼寫錯誤，或修改 `.env` 後未重新建立容器）。確保兩者與網域完全一致，修改 `.env` 後必須執行 `docker-compose up -d --force-recreate` 重新建立容器以套用新變數。
 3. **直連 HTTP（無反代/未設定 SSL）環境下無法登入或陷入登入循環** — 預設 `ACCESS_COOKIE_SECURE=true` 要求必須透過 HTTPS，在純 HTTP 下瀏覽器會拒絕儲存/攜帶 Secure Cookie。純 HTTP 直連測試時，在 `.env` 中設定 `ACCESS_COOKIE_SECURE=false`；部署 HTTPS 反代後再改回 `true`。
 4. **網頁端點擊「儲存預設」無法儲存、側邊欄不關閉** — 預設禁止直接在 Web 介面向資料庫持久化明文 API Key。若要在網頁端直接貼上明文 Key，需在 `.env` 中設定 `ALLOW_PLAINTEXT_SECRETS=true` 並重啟容器。若修改了預設中的 API URL，新網域必須同時加入 `.env` 的 `UPSTREAM_HOST_ALLOWLIST` 白名單。
 
@@ -238,7 +238,7 @@ ALLOW_UNAUTHENTICATED=true .venv/bin/granian --interface asgi backend.app.main:a
 
 ## 使用方式
 
-1. 開啟面板。
+1. 開啟面板；頁首的語言按鈕可在英文與簡體中文之間切換介面，並依瀏覽器記住選擇。
 2. 若已啟用存取密鑰，先使用 `ACCESS_KEY` 解鎖。
 3. 開啟 Settings，建立或選取 API 預設。
 4. 設定 API base URL、API path、模型、response format 與 API key/env ref。
@@ -293,7 +293,7 @@ ALLOW_UNAUTHENTICATED=true .venv/bin/granian --interface asgi backend.app.main:a
 | `/v1/chat/completions` | 傳送 OpenAI 相容的 Chat Completions 要求，從訊息或 SSE Chunk 擷取圖片 URL/Base64。 |
 | `/v1/images/edits` | 供 Edits 流程使用，傳送 Multipart 來源圖片與支援的編輯參數。 |
 
-使用 `/v1/responses` 與 `/v1/chat/completions` 時，尺寸、品質、格式、壓縮率與數量控制項會停用，因為這些路徑的參數契約不同。
+使用 `/v1/responses` 與 `/v1/chat/completions` 時，尺寸、品質、格式、壓縮率、數量與背景控制項會停用，因為這些路徑的參數契約不同。
 
 ## 自訂非同步供應商
 
@@ -357,6 +357,7 @@ ALLOW_UNAUTHENTICATED=true .venv/bin/granian --interface asgi backend.app.main:a
 | `GET`、`GET/DELETE` | `/api/generate/jobs`（+ `/events`）、`/api/generate/{job_id}`（+ `/events`）；`DELETE /api/generate/jobs/history` | 列出即時工作/歷史、工作清單或單一工作 SSE、讀取/取消單一工作、清除已終止的工作歷史。 |
 | `GET`、`POST` | `/api/gallery`、`/api/gallery/search`；`GET/DELETE /api/gallery/{image_id}`；`PATCH /api/gallery/{image_id}/favorite` | 列出/搜尋/篩選 Gallery（含 `mask_only`）、讀取/刪除/收藏圖片。 |
 | `POST/PATCH` | `/api/gallery/batch/*`；`POST /api/gallery/thumbnails/status` | Selection Token、收藏、刪除與下載等批次操作；縮圖存在/狀態檢查。 |
+| `GET/POST`、`PUT/PATCH/DELETE` | `/api/gallery/collections`（+ `/order`、`/{collection_id}`、`/{collection_id}/items`、`/items/remove`）；`GET /api/gallery/{image_id}/collections` | 列出/建立、排序、重新命名/設為預設/刪除收藏夾，以及加入/移除或列出其中的圖片。 |
 | `POST`、`GET` | `/api/gallery/nodeimage-upload-jobs`、`/api/gallery/export-jobs`、`/api/gallery/direct-export-jobs`、`/api/gallery/sync-jobs`、`/api/gallery/import-jobs`（各帶 `/{job_id}`、`/events`，以及適用的 `DELETE`/`cancel` 或 `/download`） | NodeImage 非同步上傳、Gallery ZIP 匯出、R2 同步、匯入工作的狀態/SSE 追蹤。 |
 | `GET` | `/api/image/{filename}`、`/api/thumb/{filename}`、`/api/download/{filename}`、`/api/download-all?export_job_id=` | 提供通過授權的圖片位元組、縮圖、單張下載與串流 ZIP 匯出。 |
 | `POST` | `/api/import` | 匯入 Gallery ZIP；`async_job=true` 會建立匯入工作。 |
@@ -367,7 +368,7 @@ ALLOW_UNAUTHENTICATED=true .venv/bin/granian --interface asgi backend.app.main:a
 ## 貢獻者界線
 
 - 瀏覽器要求應維持同源 `/api/*`；請勿從前端直接呼叫上游模型 API、R2、webhook 目標或任意圖片 URL。
-- 維持現有程式碼分層：路由與要求協調位於 `backend/app/api/routers/`，DTO 位於 `backend/app/schemas/`，持久化與 SQLite 協調位於 `backend/app/repositories/`，上游整合位於 `backend/app/integrations/`，前端鏡像 API 型別位於 `frontend/src/lib/api/types.ts`。
+- 維持現有程式碼分層：路由與要求協調位於 `backend/app/api/routers/`，DTO 位於 `backend/app/schemas/`，持久化與 SQLite 協調位於 `backend/app/repositories/`，上游整合位於 `backend/app/integrations/`，前端鏡像 API 型別位於 `frontend/src/lib/api/types/`。
 - 除非刻意進行破壞性變更，否則請維持下列公開契約：API 路徑、方法、狀態碼、Cookie、SSE 事件名稱與回應結構；生成/編輯佇列生命週期、取消語意與多 Worker SQLite 協調。檔案系統競爭透過 UUID 檔名、原子替換與孤兒檔案 GC 來容忍；請勿依賴程序內鎖實作跨 Worker 互斥。
 - 集中管理驗證與安全邏輯：圖片位元組驗證、安全路徑、縮圖/封存輔助函式；SSRF 敏感 URL 處理應位於 Validator、Safe Connector 與整合 Client；前端只能看到遮罩後的 Secret 或環境變數參照中繼資料。
 - 保留目前的執行期限制：編輯工作最多接受 16 張點陣來源圖片，外加最多 4 MB 的單張 PNG 遮罩；Gallery ZIP 匯入/匯出沿用既有安全限制；SSE 使用具有全域/單一 IP 上限與 TTL 的 SQLite Slot Lease；R2 同步僅作備份——本機 SQLite 記錄與本機圖片檔案仍是唯一真實來源。
@@ -380,13 +381,18 @@ ALLOW_UNAUTHENTICATED=true .venv/bin/granian --interface asgi backend.app.main:a
 
 ```bash
 npm run frontend:check
+npm --prefix frontend run test:unit
 npm run frontend:build
+npm --prefix frontend run check:bundle
+npm --prefix frontend run check:worker-build
 .venv/bin/python -m pytest backend/tests -q
 npm run test:contract
 npm run test:e2e
 npm run test:perf
 npm run test:e2e:perf
 ```
+
+`frontend:check`、`test:unit` 與後端測試不需先建置；`check:bundle` 與 `check:worker-build` 檢查正式建置產物，需先執行 `frontend:build`。
 
 一般變更只需執行相關子集；大範圍變更或發行前則應執行完整測試。
 

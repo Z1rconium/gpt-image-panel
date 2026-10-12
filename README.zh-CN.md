@@ -36,12 +36,12 @@ GPT Image Panel 是一个轻量级 Web UI，用于图像生成、图像编辑、
 
 - 支持 `/v1/images/generations`、`/v1/responses`、OpenAI 兼容 `/v1/chat/completions` 图像生成。
 - 支持 `/v1/images/edits` 图像编辑，可用上传参考图或 Gallery 图片作为源图；内置蒙版编辑器（画笔/橡皮擦/形状/套索、缩放、羽化、蒙版导入、自动补洞/边缘平滑）。蒙版随任务持久化并支持重试恢复，结果默认贴回未编辑的原图区域，并带颜色漂移防护。
-- API 预设管理：base URL/path/key、默认模型、response format、健康检查、SOCKS5 代理、webhook、环境变量引用式密钥。
+- API 预设管理：base URL/path/key、默认模型、response format、健康检查、SOCKS5 代理、webhook、环境变量引用式密钥，以及能力开关：`supports_mask`（蒙版编辑）与 `prompt_guard`（要求上游按原样使用提示词）。
 - 提示词助手标签、可复用提示词片段、可选服务端提示词优化器，以及 AI Assistant 子系统（提示词改写/检查/变体、参数推荐、任务诊断、编辑规划、Gallery 图片分析）。
 - Agent 对话模式：多轮对话中由模型规划并通过现有任务队列生成图片（批量并发、有依赖的后续轮次、用 `@` 引用修改历史图片），对话历史保存在服务端，流式回复可断线续传，所有图片进入 Gallery。需要 AI Assistant 端点使用支持 function calling 的模型。
 - SQLite 任务队列：SSE 进度、取消、重试/复用、持久化历史、阶段耗时，以及生成/编辑共享并发限制。
 - 可选流式阶段性图片预览，支持 `/v1/images/generations`、`/v1/images/edits`、`/v1/responses`（1–10 张），通过 SSE 在上游生成过程中推送。任务历史展示每个任务的 token 用量，并在上游返回 usage 且该模型已配置费率时显示估算美元费用。
-- 本地 Gallery：游标分页、搜索/筛选、收藏、Lightbox、selection token 批量操作、ZIP 导入导出、缩略图、大小统计、异步导出/导入任务。
+- 本地 Gallery：游标分页、搜索/筛选、收藏、命名收藏夹及封面概览、Lightbox、selection token 批量操作、ZIP 导入导出、缩略图、大小统计、异步导出/导入任务。
 - 可选 Cloudflare R2 Gallery 备份同步；本地 SQLite 和图片文件仍是唯一源数据。
 - 访问密钥、IP/Host 白名单、可信反向代理头、CSRF 检查、CSP nonce、版本检查、可选 JSON/Prometheus metrics。
 
@@ -171,7 +171,7 @@ Caddy 自动 HTTPS 要求域名解析到服务器，并且入站 `80`、`443` �
 ### 常见部署问题排查
 
 1. **容器启动闪退并报错 `SecretRegistryError: credentials require a non-empty startup host allowlist`** — 在 `.env` 中配置了 `DEFAULT_API_KEY`，但未配置 `UPSTREAM_HOST_ALLOWLIST`。在 `.env` 中将 `DEFAULT_API_URL` 对应的纯域名填入 `UPSTREAM_HOST_ALLOWLIST`（例如 `UPSTREAM_HOST_ALLOWLIST=api.openai.com` 或 `UPSTREAM_HOST_ALLOWLIST=cf.api.fan`）。
-2. **浏览器访问提示 `400 Bad Request: Host is not allowed`** — 请求的 `Host` 头未在 `.env` 的 `ALLOWED_HOSTS` 或 `PUBLIC_ORIGIN` 白名单中（常见于域名拼写错误，或修改 `.env` 后未重新创建容器）。确保两者与域名完全一致，修改 `.env` 后必须执行 `docker compose up -d --force-recreate` 重新创建容器生效。
+2. **浏览器访问提示 `400 Bad Request: Host is not allowed`** — 请求的 `Host` 头未在 `.env` 的 `ALLOWED_HOSTS` 或 `PUBLIC_ORIGIN` 白名单中（常见于域名拼写错误，或修改 `.env` 后未重新创建容器）。确保两者与域名完全一致，修改 `.env` 后必须执行 `docker-compose up -d --force-recreate` 重新创建容器生效。
 3. **直连 HTTP（无反代/未配 SSL）环境下无法登录或陷入登录循环** — 默认 `ACCESS_COOKIE_SECURE=true` 要求必须走 HTTPS，纯 HTTP 下浏览器会拒绝保存/携带 Secure Cookie。纯 HTTP 直连测试时，在 `.env` 中设置 `ACCESS_COOKIE_SECURE=false`；部署 HTTPS 反代后再改为 `true`。
 4. **网页端点击「保存预设」无法保存、侧边栏不关闭** — 默认禁止直接在 Web 界面向数据库持久化明文 API Key。若要在网页端直接粘贴明文 Key，需在 `.env` 中设置 `ALLOW_PLAINTEXT_SECRETS=true` 并重启容器。若修改了预设中的 API URL，新域名必须同时加入 `.env` 的 `UPSTREAM_HOST_ALLOWLIST` 白名单。
 
@@ -223,7 +223,7 @@ ALLOW_UNAUTHENTICATED=true .venv/bin/granian --interface asgi backend.app.main:a
 | `MAX_SSE_SUBSCRIBERS_GLOBAL` / `MAX_SSE_SUBSCRIBERS_PER_IP` / `SSE_CONNECTION_TTL_SECONDS` | SSE slot 限制和最大连接生命周期。 |
 | `PROMPT_OPTIMIZER_*` | 可选服务端提示词优化器配置。 |
 | `AI_ASSISTANT_*` | AI Assistant 默认启用（设置 `AI_ASSISTANT_ENABLED=false` 关闭）；API URL、密钥、模型、超时、allowlist 复用 `PROMPT_OPTIMIZER_*`。 |
-| `AGENT_*` | Agent 对话模式的各项上限；模式本身在“设置 → AI 助手”中开启，复用 `PROMPT_OPTIMIZER_*` 端点。 |
+| `AGENT_*` | Agent 对话模式的各项上限；模式本身在“设置 → AI Assistant”中开启，复用 `PROMPT_OPTIMIZER_*` 端点。 |
 | `R2_*` | 可选 Cloudflare R2 Gallery 备份同步；自定义 endpoint host 需要配置 `R2_ENDPOINT_HOST_ALLOWLIST`。 |
 | `NODEIMAGE_API_KEY` | 可选 NodeImage API key，用于服务端 Gallery 图片上传。 |
 | `IMAGE_COST_RATES_JSON` | 覆盖/新增费用估算使用的内置单模型美元费率。 |
@@ -238,7 +238,7 @@ ALLOW_UNAUTHENTICATED=true .venv/bin/granian --interface asgi backend.app.main:a
 
 ## 使用
 
-1. 打开面板。
+1. 打开面板；页眉的语言按钮可在英文与简体中文之间切换界面，并按浏览器记住所选语言。
 2. 如启用访问密钥，先用 `ACCESS_KEY` 解锁。
 3. 打开 Settings，创建或选择 API 预设。
 4. 设置 API base URL、API path、模型、response format 和 API key/env ref。
@@ -248,7 +248,7 @@ ALLOW_UNAUTHENTICATED=true .venv/bin/granian --interface asgi backend.app.main:a
 8. 在 Gallery 中复用参数、筛选、收藏、批量操作、导入导出、执行 R2 同步。
 9. 可以把 `/?apiUrl=https://api.example.com&apiModel=gpt-image-2` 存为书签。打开后会提示用该 URL 和模型新建预设；确认横幅会突出显示目标主机，并提醒仅为可信主机输入 API 密钥。确认前不会保存任何内容，API 密钥保持为空，并且这些参数会立即从地址栏移除。只接受 `https` URL，也不会从 URL 读取任何凭据。（`?model=` 已被 Gallery 筛选占用，所以参数名是 `apiModel`。）
 10. 用「导出」把所选预设下载为带版本号、不含密钥的 JSON 包；用「分享链接」复制 `?preset=` 链接；用「导入」先预览文件、剪贴板 JSON 或分享链接，再确认应用。预设可通过拖拽手柄或上下箭头排序，顺序保存在 SQLite 中。
-11. 按需在「设置 → AI 助手」中开启 Agent 模式（选择支持 function calling 的模型），然后在页眉切换到 **Agent**。描述需求，用 `@`（如 `@round-1-image-1`）引用之前的图片，也可从 Gallery 添加图片，按 Ctrl/Cmd+Enter 发送。运行中可点「停止」取消；生成的图片会出现在 Gallery。
+11. 按需在「设置 → AI Assistant」中开启 Agent 模式（选择支持 function calling 的模型），然后在页眉切换到 **Agent**。描述需求，用 `@`（如 `@round-1-image-1`）引用之前的图片，也可从 Gallery 添加图片，按 Ctrl/Cmd+Enter 发送。运行中可点「停止」取消；生成的图片会出现在 Gallery。
 
 ### Agent 分支、Markdown 与可选联网搜索
 
@@ -256,7 +256,7 @@ ALLOW_UNAUTHENTICATED=true .venv/bin/granian --interface asgi backend.app.main:a
 
 使用「编辑消息 → 发送为新分支」或「重新生成」创建历史回合的同级分支。「对话路径」可切换并在刷新后恢复原路径或新路径；切换不会发起模型请求，也不会停止运行中的任务。编辑或重新生成前需要先停止活动回合。模型历史只包含执行路径的祖先；图片 ID 和 `@round-N-image-M` 引用保持稳定，显示轮次及 `@第N轮图M` 按当前路径解释。跨分支复用图片时，请从 Gallery 显式添加附件。图库删除会使所有路径上的引用失效；删除对话仍保留图库图片。
 
-联网搜索**默认关闭**。在「设置 → AI 助手」中声明当前端点及模型支持 Responses 联网搜索，再开启「允许联网搜索」；继承的提示词优化接口必须采用 `/v1/responses` 且模型兼容，请先查阅供应商文档确认支持。搜索关闭时，chat/completions 继续使用既有函数工具；启用搜索但配置不兼容时会在提交前提示并阻止发送（API 返回 422）。搜索失败会显示错误，不会自动关闭搜索并重试。
+联网搜索**默认关闭**。在「设置 → AI Assistant」中声明当前端点及模型支持 Responses 联网搜索，再开启「允许联网搜索」；继承的提示词优化接口必须采用 `/v1/responses` 且模型兼容，请先查阅供应商文档确认支持。搜索关闭时，chat/completions 继续使用既有函数工具；启用搜索但配置不兼容时会在提交前提示并阻止发送（API 返回 422）。搜索失败会显示错误，不会自动关闭搜索并重试。
 
 搜索进度及上游 annotations 提供的来源会随回合保存，行内引用编号对应「来源」列表及引用片段，刷新、SSE 重放和切换路径后可恢复。普通 Markdown 链接不会变成来源。搜索遵守既有工具轮次、超时、取消及分支历史预算；缺少 usage 时不编造费用。数据库迁移 37/38 在启动时自动应用。
 
@@ -293,7 +293,7 @@ ALLOW_UNAUTHENTICATED=true .venv/bin/granian --interface asgi backend.app.main:a
 | `/v1/chat/completions` | 发送 OpenAI 兼容 chat completions 请求，从消息或 SSE chunk 中提取图片 URL/base64。 |
 | `/v1/images/edits` | Edits 流程使用，发送 multipart 源图和支持的编辑参数。 |
 
-使用 `/v1/responses` 和 `/v1/chat/completions` 时，尺寸、质量、格式、压缩率、数量控件会禁用，因为这些路径的参数契约不同。
+使用 `/v1/responses` 和 `/v1/chat/completions` 时，尺寸、质量、格式、压缩率、数量、背景控件会禁用，因为这些路径的参数契约不同。
 
 ## 自定义异步供应商
 
@@ -357,6 +357,7 @@ ALLOW_UNAUTHENTICATED=true .venv/bin/granian --interface asgi backend.app.main:a
 | `GET`、`GET/DELETE` | `/api/generate/jobs`（+ `/events`）、`/api/generate/{job_id}`（+ `/events`）；`DELETE /api/generate/jobs/history` | 查询实时任务/历史、任务列表或单任务 SSE、读取/取消单个任务、清理终态历史。 |
 | `GET`、`POST` | `/api/gallery`、`/api/gallery/search`；`GET/DELETE /api/gallery/{image_id}`；`PATCH /api/gallery/{image_id}/favorite` | 列出/搜索/筛选 Gallery（含 `mask_only`）、读取/删除/收藏图片。 |
 | `POST/PATCH` | `/api/gallery/batch/*`；`POST /api/gallery/thumbnails/status` | selection token、收藏、删除、下载等批量操作；缩略图存在/状态检查。 |
+| `GET/POST`、`PUT/PATCH/DELETE` | `/api/gallery/collections`（+ `/order`、`/{collection_id}`、`/{collection_id}/items`、`/items/remove`）；`GET /api/gallery/{image_id}/collections` | 列出/创建、排序、重命名/设为默认/删除收藏夹，以及添加/移除或列出其中的图片。 |
 | `POST`、`GET` | `/api/gallery/nodeimage-upload-jobs`、`/api/gallery/export-jobs`、`/api/gallery/direct-export-jobs`、`/api/gallery/sync-jobs`、`/api/gallery/import-jobs`（各带 `/{job_id}`、`/events`，以及适用的 `DELETE`/`cancel` 或 `/download`） | NodeImage 异步上传、Gallery ZIP 导出、R2 同步、导入任务的状态/SSE 跟踪。 |
 | `GET` | `/api/image/{filename}`、`/api/thumb/{filename}`、`/api/download/{filename}`、`/api/download-all?export_job_id=` | 返回鉴权图片字节、缩略图、单张下载与流式 ZIP 导出。 |
 | `POST` | `/api/import` | 导入 Gallery ZIP；`async_job=true` 会创建导入任务。 |
@@ -367,7 +368,7 @@ ALLOW_UNAUTHENTICATED=true .venv/bin/granian --interface asgi backend.app.main:a
 ## 贡献者边界
 
 - 浏览器请求保持同源 `/api/*`；不要在前端直接调用上游模型 API、R2、webhook 目标或任意图片 URL。
-- 保持现有代码分层：路由与请求编排在 `backend/app/api/routers/`，DTO 在 `backend/app/schemas/`，持久化与 SQLite 协调在 `backend/app/repositories/`，上游集成在 `backend/app/integrations/`，前端镜像 API 类型在 `frontend/src/lib/api/types.ts`。
+- 保持现有代码分层：路由与请求编排在 `backend/app/api/routers/`，DTO 在 `backend/app/schemas/`，持久化与 SQLite 协调在 `backend/app/repositories/`，上游集成在 `backend/app/integrations/`，前端镜像 API 类型在 `frontend/src/lib/api/types/`。
 - 除非明确要做 breaking change，否则保持这些公共契约稳定：API 路径、方法、状态码、cookie、SSE 事件名、响应结构；生成/编辑队列生命周期、取消语义、多 worker 下的 SQLite 协调。文件系统竞争通过 UUID 文件名、原子替换和孤儿文件 GC 来容忍；不要依赖进程内锁实现跨 worker 互斥。
 - 校验与安全逻辑保持集中：图片字节校验、安全路径、缩略图/归档 helper；SSRF 敏感 URL 处理继续放在 validators、safe connector、integration client 中；前端可见 secret 只能是打码值或 env-ref 元数据。
 - 保持现有运行时约束：编辑任务最多接受 16 张 raster 源图，外加最多 4 MB 的单张 PNG 蒙版；Gallery ZIP 导入导出继续沿用现有安全限制；SSE 使用 SQLite slot lease、全局/单 IP 限制和连接 TTL；R2 同步只是备份——本地 SQLite 记录和本地图片文件始终是源数据。
@@ -380,13 +381,18 @@ ALLOW_UNAUTHENTICATED=true .venv/bin/granian --interface asgi backend.app.main:a
 
 ```bash
 npm run frontend:check
+npm --prefix frontend run test:unit
 npm run frontend:build
+npm --prefix frontend run check:bundle
+npm --prefix frontend run check:worker-build
 .venv/bin/python -m pytest backend/tests -q
 npm run test:contract
 npm run test:e2e
 npm run test:perf
 npm run test:e2e:perf
 ```
+
+`frontend:check`、`test:unit` 和后端测试无需先构建；`check:bundle` 与 `check:worker-build` 检查生产构建产物，需先运行 `frontend:build`。
 
 普通改动跑相关子集即可；大范围或发布前改动跑全套。
 
