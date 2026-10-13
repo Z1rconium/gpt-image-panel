@@ -1,0 +1,28 @@
+{
+  "id": "database-runtime-refactor",
+  "name": "database-runtime-refactor",
+  "title": "Separate database execution from generic runtime",
+  "description": "Correct cancelled-task accounting and remove runtime-to-repository dependencies while preserving SQLite execution semantics",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "Z1rconium",
+  "assignee": "Z1rconium",
+  "createdAt": "2026-10-13",
+  "completedAt": "2026-10-13",
+  "branch": "refactor/architecture-legacy-modules",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": "da2f7dfa0e8b1af3dea8ce8e903ecf2b8d7ca114",
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": "10-13-architecture-legacy-refactor",
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {
+    "push_requested": true
+  }
+}
