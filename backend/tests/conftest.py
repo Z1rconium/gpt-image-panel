@@ -15,7 +15,12 @@ def example_host_dns(monkeypatch):
     resolve_hostname) explicitly to exercise private addresses and rebinding.
     """
     original = socket.getaddrinfo
-    fixture_hosts = {"example.com", "api.example.com", "account.r2.cloudflarestorage.com"}
+    fixture_hosts = {
+        "example.com",
+        "api.example.com",
+        "queue.example.com",
+        "account.r2.cloudflarestorage.com",
+    }
 
     def getaddrinfo(host, *args, **kwargs):
         return original("93.184.216.34" if host in fixture_hosts else host, *args, **kwargs)
