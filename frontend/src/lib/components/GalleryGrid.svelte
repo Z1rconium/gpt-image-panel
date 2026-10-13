@@ -186,7 +186,14 @@
   const busy = $derived(loading || Boolean(operationStatus));
   const selectedAllFiltered = $derived(selectionTokenCount > 0);
   const selectedCount = $derived(selectedAllFiltered ? selectionTokenCount : selectedIds.size);
-  const pageSelectedCount = $derived(selectedAllFiltered ? images.length : images.filter((image) => selectedIds.has(image.id)).length);
+  const pageSelectedCount = $derived.by(() => {
+    if (selectedAllFiltered) return images.length;
+    let count = 0;
+    for (const image of images) {
+      if (selectedIds.has(image.id)) count += 1;
+    }
+    return count;
+  });
   const hasSelection = $derived(selectedCount > 0);
   const selectionSummary = $derived(
     selectedAllFiltered
@@ -368,6 +375,9 @@
   }
 
   function pruneFailedThumbnailUrls(visibleImages: GalleryEntry[]) {
+    // Nothing to prune (and no need to build a Set over the page) until a
+    // thumbnail has actually failed.
+    if (failedThumbnailUrls.size === 0) return;
     const visibleIds = new Set(visibleImages.map((image) => image.id));
     if ([...failedThumbnailUrls.keys()].every((imageId) => visibleIds.has(imageId))) return;
     failedThumbnailUrls = new Map(
