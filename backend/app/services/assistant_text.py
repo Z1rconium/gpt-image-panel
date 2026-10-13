@@ -1,6 +1,4 @@
-import asyncio
 import contextvars
-import json
 import logging
 import os
 import re
@@ -11,6 +9,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 
+from ..runtime.blocking import run_db_operation
 from ..core.image_models import MAX_PROMPT_CHARS, image_qualities
 from . import presets
 from ..core.errors import (
@@ -20,7 +19,7 @@ from ..core.errors import (
 )
 from ..core import settings as config
 from ..core import validators as ssrf
-from ..core.utils import utc_now
+from ..core.utils import json_dumps_canonical, utc_now
 from ..integrations import assistant_client
 from ..repositories.coordination import (
     acquire_background_slot,
@@ -284,7 +283,7 @@ async def recommend_generate_params(req: AssistantRecommendParamsRequest):
             "You recommend only parameters supported by the selected image API path. "
             "For /v1/responses and /v1/chat/completions, do not recommend size, quality, output_format, or n."
         ),
-        user_prompt=json.dumps(req.model_dump(), ensure_ascii=False, sort_keys=True),
+        user_prompt=json_dumps_canonical(req.model_dump()),
         schema={
             "model_name": "string|null",
             "size": "string|null",
@@ -375,13 +374,13 @@ def _redact_diagnostic_value(key: str, value: Any) -> object:
 
 
 async def diagnose_job(job_id: str, req: AssistantJobDiagnoseRequest | None = None):
-    job = await asyncio.to_thread(get_generate_job, job_id)
+    job = await run_db_operation(get_generate_job, job_id)
     if not job:
         raise NotFoundError("Job not found")
     safe_job = _safe_job_snapshot(job, include_prompt=(req.include_prompt if req else False))
     data, model, duration_ms = await _assistant_json(
         system_prompt="You diagnose failed or slow image generation/edit jobs. Never mention or infer secrets.",
-        user_prompt=json.dumps(safe_job, ensure_ascii=False, sort_keys=True),
+        user_prompt=json_dumps_canonical(safe_job),
         schema={
             "summary": "string",
             "likely_causes": ["string"],
@@ -410,7 +409,7 @@ async def plan_edit(req: AssistantEditPlanRequest):
             "describe changes confined to that region and treat everything else as fixed. "
             "The plan is advisory only and should not assume submission."
         ),
-        user_prompt=json.dumps(req.model_dump(), ensure_ascii=False, sort_keys=True),
+        user_prompt=json_dumps_canonical(req.model_dump()),
         schema={
             "edit_prompt": "string",
             "source_requirements": ["string"],

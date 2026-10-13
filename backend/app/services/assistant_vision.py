@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 
+from ..runtime.blocking import run_db_operation
 from ..core.image_models import MAX_PROMPT_CHARS
 from . import presets, vision_previews
 from ..core.errors import (
@@ -26,7 +27,7 @@ from ..core.errors import (
 )
 from ..core import settings as config
 from ..core import validators as ssrf
-from ..core.utils import utc_now
+from ..core.utils import json_dumps_canonical, utc_now
 from ..integrations import assistant_client
 from ..integrations.upstream.errors import UpstreamApiError
 from ..integrations.upstream.generation import call_image_generation_preview_api
@@ -231,8 +232,7 @@ async def optimize_uploaded_image_prompt(
         raise UnprocessableRequestError("prompt must not be empty")
 
     runtime = await _resolve_runtime_async(vision=True)
-    api_url, api_key, model, response_format, socks5_proxy = await asyncio.to_thread(
-        _prompt_preview_generation_config
+    api_url, api_key, model, response_format, socks5_proxy = await run_db_operation(_prompt_preview_generation_config
     )
     try:
         target_preview = await vision_previews.prepare_preview(
@@ -350,7 +350,7 @@ async def optimize_uploaded_image_prompt(
 
 
 async def _gallery_entry_and_preview(image_id: str) -> tuple[Any, dict[str, Any]]:
-    entry = await asyncio.to_thread(get_gallery_entry, image_id)
+    entry = await run_db_operation(get_gallery_entry, image_id)
     if not entry:
         raise NotFoundError("Gallery entry not found")
     path = await asyncio.to_thread(safe_image_path, entry.filename)
@@ -421,7 +421,7 @@ def _gallery_vision_user_prompt(entry: Any, preview: dict[str, Any], *, include_
     }
     if include_stored_prompt:
         payload["stored_prompt"] = entry.prompt
-    return json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    return json_dumps_canonical(payload)
 
 
 def _normalize_gallery_analysis(value: Any) -> dict[str, object]:
@@ -491,8 +491,7 @@ async def _analyze_gallery_image(
     if not prompt:
         raise UpstreamError("AI Assistant returned an empty image prompt")
     if persist:
-        await asyncio.to_thread(
-            upsert_gallery_ai_metadata,
+        await run_db_operation(upsert_gallery_ai_metadata,
             image_id=image_id,
             description=description,
             prompt=prompt,
@@ -574,10 +573,10 @@ def _assistant_metadata_response(image_id: str, row: dict[str, Any] | None) -> A
 
 
 async def get_gallery_metadata(image_id: str):
-    entry = await asyncio.to_thread(get_gallery_entry, image_id)
+    entry = await run_db_operation(get_gallery_entry, image_id)
     if not entry:
         raise NotFoundError("Gallery entry not found")
-    row = await asyncio.to_thread(get_gallery_ai_metadata, image_id)
+    row = await run_db_operation(get_gallery_ai_metadata, image_id)
     return _assistant_metadata_response(image_id, row)
 
 

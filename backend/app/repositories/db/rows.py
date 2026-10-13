@@ -14,7 +14,7 @@ from urllib.parse import quote
 from ...core import settings as config
 from ...core.cdn import signed_media_url
 from ...core.constants import ACTIVE_GENERATE_JOB_STATUSES
-from ...core.utils import utc_now
+from ...core.utils import coerce_nonnegative_int, json_dumps_canonical, utc_now
 from ...schemas.gallery import GalleryEntry, GalleryFilterOptions
 from ...schemas.snippets import PromptSnippet
 from ...core.media import (
@@ -621,10 +621,7 @@ def _json_loads_list(value: str | None) -> list[Any]:
 
 
 def _coerce_nonnegative_int(value: Any, default: int = 0) -> int:
-    try:
-        return max(0, int(value))
-    except (TypeError, ValueError):
-        return default
+    return coerce_nonnegative_int(value, default=default, negative="zero")
 
 
 def _image_job_unit_from_row(row: sqlite3.Row) -> dict[str, Any]:
@@ -732,7 +729,7 @@ def _normalize_gallery_job(job: dict[str, Any]) -> dict[str, Any]:
                 normalized[column] = value
             else:
                 try:
-                    normalized[column] = json.dumps(value, ensure_ascii=False, sort_keys=True)
+                    normalized[column] = json_dumps_canonical(value)
                 except TypeError:
                     continue
             continue

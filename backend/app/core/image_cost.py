@@ -15,6 +15,7 @@ from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any, TypedDict
 
 from . import settings as config
+from .utils import coerce_nonnegative_int
 
 logger = logging.getLogger(__name__)
 
@@ -82,18 +83,13 @@ class CostEstimate(TypedDict):
 
 
 def _coerce_nonneg_int(value: Any) -> int | None:
-    if value is None or isinstance(value, bool):
-        return None
-    try:
-        number = int(value)
-    except (TypeError, ValueError):
-        try:
-            number = int(float(value))
-        except (TypeError, ValueError):
-            return None
-    if number < 0 or number > 10**12:
-        return None
-    return number
+    return coerce_nonnegative_int(
+        value,
+        default=None,
+        reject_bool=True,
+        coerce_numeric_strings=True,
+        max_value=10**12,
+    )
 
 
 def normalize_usage(raw_usage: Any) -> NormalizedUsage | None:

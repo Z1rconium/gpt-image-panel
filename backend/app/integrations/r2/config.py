@@ -145,16 +145,14 @@ def _resolve_secret(
     purpose: secrets.SecretPurpose,
     endpoint_url: str,
 ) -> str:
-    try:
-        return secrets.resolve_secret_reference(
-            value,
-            purpose=purpose,
-            target_url=endpoint_url,
-            host_allowlist=config.R2_ENDPOINT_HOST_ALLOWLIST,
-            field_name=field_name,
-        )
-    except secrets.SecretRegistryError as exc:
-        raise R2ConfigurationError(str(exc)) from exc
+    return secrets.resolve_secret_reference_or_raise(
+        value,
+        purpose=purpose,
+        target_url=endpoint_url,
+        host_allowlist=config.R2_ENDPOINT_HOST_ALLOWLIST,
+        field_name=field_name,
+        error_type=R2ConfigurationError,
+    )
 
 
 def resolve_r2_backup_settings(

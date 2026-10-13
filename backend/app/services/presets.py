@@ -4,6 +4,7 @@ from ..core.errors import UnprocessableRequestError
 from ..runtime.state import state
 from ..core import secrets
 from ..core import settings as config
+from ..core.utils import coerce_nonnegative_int
 from ..core.settings_defaults import (
     coerce_positive_int as _coerce_positive_int,
     default_ai_assistant_settings as _default_ai_assistant_settings,
@@ -106,6 +107,25 @@ def resolve_api_key(
     return resolve_env_var_ref(api_key)
 
 
+def _resolve_secret_or_unprocessable(
+    secret_id: str,
+    *,
+    purpose: secrets.SecretPurpose,
+    target_url: str,
+    host_allowlist: str,
+) -> str:
+    """Resolve a registry secret, normalizing registry errors into a 422 domain error."""
+    try:
+        return secrets.resolve_secret(
+            secret_id,
+            purpose=purpose,
+            target_url=target_url,
+            host_allowlist=host_allowlist,
+        )
+    except secrets.SecretRegistryError as exc:
+        raise UnprocessableRequestError(str(exc)) from exc
+
+
 def api_key_response_fields(api_key: str) -> dict:
     value = str(api_key or "").strip()
     env_var = get_api_key_env_var(value)
@@ -170,25 +190,16 @@ def get_effective_preset_api_key(preset: dict) -> str:
         if env_var:
             raise UnprocessableRequestError(f"API Key environment variable {env_var} is not set or empty. Set it in the server environment.")
         raise UnprocessableRequestError("API credential is not configured")
-    try:
-        return secrets.resolve_secret(
-            secret_id,
-            purpose="upstream_api",
-            target_url=str(preset.get("api_url") or ""),
-            host_allowlist=config.UPSTREAM_HOST_ALLOWLIST,
-        )
-    except secrets.SecretRegistryError as exc:
-        raise UnprocessableRequestError(str(exc)) from exc
+    return _resolve_secret_or_unprocessable(
+        secret_id,
+        purpose="upstream_api",
+        target_url=str(preset.get("api_url") or ""),
+        host_allowlist=config.UPSTREAM_HOST_ALLOWLIST,
+    )
 
 
 def _coerce_non_negative_int(value, default: int = 0) -> int:
-    if isinstance(value, float) and not value.is_integer():
-        return default
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        return default
-    return parsed if parsed >= 0 else default
+    return coerce_nonnegative_int(value, default=default)
 
 
 def normalize_prompt_optimizer_settings(raw: dict | None) -> dict:
@@ -393,16 +404,15 @@ def get_upstream_socks5_proxy(*, raw: bool = False) -> str:
         resolved = resolve_env_var_ref(value)
         return normalize_socks5_proxy_url(resolved) if resolved else ""
     try:
-        entry = secrets.secret_entry(value)
-        target = entry.resolve()
-        return secrets.resolve_secret(
-            value,
-            purpose="upstream_proxy",
-            target_url=target,
-            host_allowlist=config.UPSTREAM_PROXY_HOST_ALLOWLIST,
-        )
+        target = secrets.secret_entry(value).resolve()
     except secrets.SecretRegistryError as exc:
         raise UnprocessableRequestError(str(exc)) from exc
+    return _resolve_secret_or_unprocessable(
+        value,
+        purpose="upstream_proxy",
+        target_url=target,
+        host_allowlist=config.UPSTREAM_PROXY_HOST_ALLOWLIST,
+    )
 
 
 def apply_upstream_socks5_proxy(value: str | None):
@@ -423,16 +433,15 @@ def get_webhook_url(*, raw: bool = False) -> str:
         resolved = resolve_env_var_ref(value)
         return normalize_webhook_url(resolved) if resolved else ""
     try:
-        entry = secrets.secret_entry(value)
-        target = entry.resolve()
-        return secrets.resolve_secret(
-            value,
-            purpose="webhook_url",
-            target_url=target,
-            host_allowlist=config.WEBHOOK_HOST_ALLOWLIST,
-        )
+        target = secrets.secret_entry(value).resolve()
     except secrets.SecretRegistryError as exc:
         raise UnprocessableRequestError(str(exc)) from exc
+    return _resolve_secret_or_unprocessable(
+        value,
+        purpose="webhook_url",
+        target_url=target,
+        host_allowlist=config.WEBHOOK_HOST_ALLOWLIST,
+    )
 
 
 def apply_webhook_url(value: str | None):
@@ -685,15 +694,12 @@ def resolve_prompt_optimizer_api_key(raw: dict | None) -> str:
         if env_var:
             raise UnprocessableRequestError(f"Prompt optimizer API Key environment variable {env_var} is not set or empty. Set it in the server environment.")
         return secret_id
-    try:
-        return secrets.resolve_secret(
-            secret_id,
-            purpose="prompt_optimizer",
-            target_url=str(settings.get("api_url") or ""),
-            host_allowlist=config.PROMPT_OPTIMIZER_HOST_ALLOWLIST,
-        )
-    except secrets.SecretRegistryError as exc:
-        raise UnprocessableRequestError(str(exc)) from exc
+    return _resolve_secret_or_unprocessable(
+        secret_id,
+        purpose="prompt_optimizer",
+        target_url=str(settings.get("api_url") or ""),
+        host_allowlist=config.PROMPT_OPTIMIZER_HOST_ALLOWLIST,
+    )
 
 
 def resolve_ai_assistant_api_key(raw: dict | None) -> str:
@@ -714,15 +720,12 @@ def resolve_ai_assistant_api_key(raw: dict | None) -> str:
         if env_var:
             raise UnprocessableRequestError(f"Prompt Optimizer API Key environment variable {env_var} is not set or empty for AI Assistant. Set it in the server environment.")
         return secret_id
-    try:
-        return secrets.resolve_secret(
-            secret_id,
-            purpose="prompt_optimizer",
-            target_url=str(settings.get("api_url") or ""),
-            host_allowlist=config.PROMPT_OPTIMIZER_HOST_ALLOWLIST,
-        )
-    except secrets.SecretRegistryError as exc:
-        raise UnprocessableRequestError(str(exc)) from exc
+    return _resolve_secret_or_unprocessable(
+        secret_id,
+        purpose="prompt_optimizer",
+        target_url=str(settings.get("api_url") or ""),
+        host_allowlist=config.PROMPT_OPTIMIZER_HOST_ALLOWLIST,
+    )
 
 
 def get_prompt_optimizer_settings() -> dict:

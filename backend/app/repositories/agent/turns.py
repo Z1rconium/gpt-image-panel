@@ -4,7 +4,7 @@ import json
 from typing import Any, Sequence
 
 from ...core import settings as config
-from ...core.utils import utc_now
+from ...core.utils import json_dumps_canonical, utc_now
 from ..db import _connect, _ensure_database, _transaction
 from ._common import AgentAttachmentError, AgentConversationLimitError, AgentTurnConflictError, TERMINAL_TURN_STATUSES, _MESSAGE_STATUS_FOR_TURN, _new_id, _require_owner, _title_from_text, _turn_from_row
 from .branches import _branch_text, _path_ids
@@ -122,14 +122,14 @@ def create_turn(
                     round_no,
                     client_turn_id,
                     model,
-                    json.dumps(image_params, ensure_ascii=False, sort_keys=True),
+                    json_dumps_canonical(image_params),
                     lease_expires_at,
                     user_message_id,
                     assistant_message_id,
                     now,
                     parent_id,
                     int(web_search_enabled),
-                    json.dumps(execution_snapshot or {}, ensure_ascii=False, sort_keys=True),
+                    json_dumps_canonical(execution_snapshot or {}),
                 ),
             )
             conn.execute(

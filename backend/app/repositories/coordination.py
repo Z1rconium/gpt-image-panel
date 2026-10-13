@@ -3,7 +3,7 @@
 import ipaddress
 import time
 
-from ..core.utils import utc_now
+from ..core.utils import json_dumps_canonical, utc_now
 from .db import (
     GALLERY_JOB_COLUMNS,
     WORKER_METRIC_SNAPSHOT_TTL_SECONDS,
@@ -255,7 +255,7 @@ def _normalize_gallery_job_updates(updates: dict[str, Any]) -> dict[str, Any]:
                 normalized[key] = (
                     value
                     if isinstance(value, str)
-                    else json.dumps(value or {}, ensure_ascii=False, sort_keys=True)
+                    else json_dumps_canonical(value or {})
                 )
             except TypeError:
                 continue
@@ -463,7 +463,7 @@ def request_gallery_job_cancellation(kind: str, job_id: str) -> dict[str, Any] |
                         failed_count,
                         now,
                         now,
-                        json.dumps(payload, ensure_ascii=False, sort_keys=True),
+                        json_dumps_canonical(payload),
                         normalized_kind,
                         normalized_job_id,
                     ),
@@ -482,7 +482,7 @@ def request_gallery_job_cancellation(kind: str, job_id: str) -> dict[str, Any] |
                     """,
                     (
                         now,
-                        json.dumps(payload, ensure_ascii=False, sort_keys=True),
+                        json_dumps_canonical(payload),
                         normalized_kind,
                         normalized_job_id,
                     ),

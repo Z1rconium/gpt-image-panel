@@ -1,7 +1,6 @@
 import asyncio
 import hashlib
 import hmac
-import json
 import logging
 import time
 from pathlib import Path
@@ -20,6 +19,7 @@ from ...services.job_events import (
     resolve_generate_job_view,
     serialize_sse_event,
 )
+from ...core.utils import json_dumps_canonical
 from ...runtime.blocking import run_db_operation, run_image_operation
 from ...services.job_cancel import cancel_image_job
 from ...services.job_queue import queue_image_job
@@ -87,7 +87,7 @@ def _unit_diagnostics_entry(unit: dict) -> dict:
 
 
 def json_payload_key(payload: dict | list) -> str:
-    return json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return json_dumps_canonical(payload, compact=True)
 
 
 def _start_generate_sse_poller() -> None:

@@ -436,6 +436,32 @@ def resolve_secret_reference(
     return raw
 
 
+def resolve_secret_reference_or_raise(
+    value: object,
+    *,
+    purpose: SecretPurpose,
+    target_url: str,
+    host_allowlist: str,
+    field_name: str,
+    error_type: type[Exception],
+) -> str:
+    """Resolve a settings secret reference, mapping registry errors to ``error_type``.
+
+    Callers use this to translate ``SecretRegistryError`` into their own
+    configuration-domain error without re-implementing the try/except each time.
+    """
+    try:
+        return resolve_secret_reference(
+            value,
+            purpose=purpose,
+            target_url=target_url,
+            host_allowlist=host_allowlist,
+            field_name=field_name,
+        )
+    except SecretRegistryError as exc:
+        raise error_type(str(exc)) from exc
+
+
 def active_secret_values() -> tuple[str, ...]:
     global _active_secret_values_cache
 

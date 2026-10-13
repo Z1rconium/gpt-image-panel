@@ -13,6 +13,7 @@ from typing import Any
 
 from ..core import settings as config
 from ..core import validators as ssrf
+from ..core.utils import json_dumps_canonical
 from ..core.api_paths import (
     CHAT_COMPLETIONS_API_PATH,
     RESPONSES_API_PATH,
@@ -69,7 +70,7 @@ async def validate_assistant_endpoint_async(api_url: str, api_path: str) -> str:
 def _json_schema_instruction(schema: dict[str, Any]) -> str:
     return (
         "Return only valid JSON matching this shape. Do not wrap in markdown.\n"
-        f"{json.dumps(schema, ensure_ascii=False, sort_keys=True)}"
+        f"{json_dumps_canonical(schema)}"
     )
 
 

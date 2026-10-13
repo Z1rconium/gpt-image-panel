@@ -63,16 +63,14 @@ class NodeImageUploadResult:
 
 
 def _resolve_secret(value: Any) -> str:
-    try:
-        return secrets.resolve_secret_reference(
-            value,
-            purpose="nodeimage_api_key",
-            target_url=NODEIMAGE_API_URL,
-            host_allowlist=NODEIMAGE_HOST_ALLOWLIST,
-            field_name="NodeImage API key",
-        )
-    except secrets.SecretRegistryError as exc:
-        raise NodeImageConfigurationError(str(exc)) from exc
+    return secrets.resolve_secret_reference_or_raise(
+        value,
+        purpose="nodeimage_api_key",
+        target_url=NODEIMAGE_API_URL,
+        host_allowlist=NODEIMAGE_HOST_ALLOWLIST,
+        field_name="NodeImage API key",
+        error_type=NodeImageConfigurationError,
+    )
 
 
 def resolve_nodeimage_settings(

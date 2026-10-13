@@ -21,7 +21,7 @@ from ...core.settings_defaults import (
     default_prompt_optimizer_settings as _default_prompt_optimizer_settings,
     default_secret_reference as _default_secret_reference,
 )
-from ...core.utils import utc_now
+from ...core.utils import coerce_nonnegative_int, utc_now
 from ...core.validators import (
     get_env_var_ref_name,
     is_malformed_env_var_ref,
@@ -211,15 +211,13 @@ def _default_nodeimage_settings() -> dict:
 
 
 def _coerce_non_negative_int(value, default: int) -> int:
-    if value is None:
-        return default
-    if isinstance(value, float) and not value.is_integer():
-        return 0
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        return 0
-    return parsed if parsed >= 0 else 0
+    return coerce_nonnegative_int(
+        value,
+        default=default,
+        non_integral_float="zero",
+        negative="zero",
+        invalid="zero",
+    )
 
 
 def _coerce_iso_datetime(value: str | None) -> datetime | None:

@@ -6,7 +6,7 @@ from collections.abc import Callable
 from ..core import settings as config
 from ..core.constants import ACTIVE_GENERATE_JOB_STATUSES, IMAGE_JOB_UNIT_MAX_RECOVERIES
 from ..core.observability import metrics
-from ..core.utils import utc_now
+from ..core.utils import json_dumps_canonical, utc_now
 from .image_files import delete_mask_file
 from .db import (
     EditSourceQueueFullError,
@@ -27,7 +27,6 @@ from .db import (
 )
 
 from typing import Any
-import json
 import sqlite3
 import uuid
 from ..core import image_cost
@@ -93,6 +92,27 @@ def _get_generate_job_on_conn(
     if not row:
         return None
     return _generate_job_from_row(row)
+
+
+def get_generate_jobs_by_ids(job_ids: set[str] | list[str]) -> dict[str, dict[str, Any]]:
+    """Fetch several jobs over one connection with chunked ``IN`` lookups."""
+    unique_job_ids = _unique_sqlite_values(job_ids)
+    if not unique_job_ids:
+        return {}
+    columns = ", ".join(GENERATE_JOB_COLUMNS)
+    jobs: dict[str, dict[str, Any]] = {}
+    _ensure_database()
+    with _connect() as conn:
+        for chunk in _iter_sqlite_in_chunks(unique_job_ids):
+            placeholders = ", ".join("?" for _ in chunk)
+            rows = conn.execute(
+                f"SELECT {columns} FROM generate_jobs WHERE job_id IN ({placeholders})",
+                chunk,
+            ).fetchall()
+            for row in rows:
+                job = _generate_job_from_row(row)
+                jobs[str(job["job_id"])] = job
+    return jobs
 
 
 def pop_generate_job_webhook(job_id: str) -> str:
@@ -660,7 +680,7 @@ def write_image_job_unit_remote(
                 WHERE unit_id = ? AND status = 'running' AND claim_token = ?
                 """,
                 (
-                    json.dumps(remote, ensure_ascii=False, sort_keys=True)
+                    json_dumps_canonical(remote)
                     if remote is not None
                     else None,
                     1 if checkpointed else 0,
@@ -812,10 +832,10 @@ def complete_image_job_unit(
                 WHERE unit_id = ? AND status = 'running' AND claim_token = ?
                 """,
                 (
-                    json.dumps(result, ensure_ascii=False, sort_keys=True),
-                    json.dumps(stage_timings, ensure_ascii=False, sort_keys=True),
-                    json.dumps(usage, ensure_ascii=False, sort_keys=True) if usage is not None else None,
-                    json.dumps(cost, ensure_ascii=False, sort_keys=True) if cost is not None else None,
+                    json_dumps_canonical(result),
+                    json_dumps_canonical(stage_timings),
+                    json_dumps_canonical(usage) if usage is not None else None,
+                    json_dumps_canonical(cost) if cost is not None else None,
                     duration,
                     completed_at,
                     now,
@@ -879,10 +899,10 @@ def fail_image_job_unit(
                     stage,
                     _sanitize_persisted_job_text(message),
                     _sanitize_persisted_job_text(error),
-                    json.dumps(stage_timings or {}, ensure_ascii=False, sort_keys=True),
-                    json.dumps(usage, ensure_ascii=False, sort_keys=True) if usage is not None else None,
-                    json.dumps(cost, ensure_ascii=False, sort_keys=True) if cost is not None else None,
-                    json.dumps(diagnostics, ensure_ascii=False, sort_keys=True)
+                    json_dumps_canonical(stage_timings or {}),
+                    json_dumps_canonical(usage) if usage is not None else None,
+                    json_dumps_canonical(cost) if cost is not None else None,
+                    json_dumps_canonical(diagnostics)
                     if diagnostics is not None
                     else None,
                     duration,
