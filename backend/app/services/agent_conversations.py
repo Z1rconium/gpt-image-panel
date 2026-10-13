@@ -25,7 +25,7 @@ from ..schemas.agent import (
     AgentTurnStatus,
 )
 from . import agent_turns, assistant_runtime, presets
-from .job_events import resolve_generate_job_view
+from .job_events import resolve_generate_job_views
 from .image_preset_snapshot import image_preset_snapshot
 from ..core.constants import ACTIVE_GENERATE_JOB_STATUSES
 
@@ -245,57 +245,65 @@ def _turn_status(turn: dict[str, Any]) -> AgentTurnStatus:
 
 
 async def _reconcile_images(conversation_id: str) -> None:
-    """Settle image rows left pending by an interrupted turn from the real job state."""
-    turns = await run_db_operation(
-        agent_repo.list_turns_needing_reconcile, conversation_id, metric_name="agent_reconcile_turns"
+    """Settle image rows left pending by an interrupted turn from the real job state.
+
+    Reads every reconcilable row in one query and resolves the referenced jobs
+    in one chunked read, so reconnect storms no longer issue one query per turn
+    and one job lookup per image.
+    """
+    pending = await run_db_operation(
+        agent_repo.list_reconcilable_images_for_conversation,
+        conversation_id,
+        metric_name="agent_pending_images",
     )
-    for turn in turns:
-        pending = await run_db_operation(
-            agent_repo.list_reconcilable_images_for_turn, turn["id"], metric_name="agent_pending_images"
-        )
-        for row in pending:
-            if not row.get("job_id"):
-                await run_db_operation(
-                    agent_repo.settle_image,
-                    row["id"],
-                    status="failed",
-                    error="The turn was interrupted before this image was queued.",
-                    metric_name="agent_settle_image",
-                )
-                continue
-            view = await resolve_generate_job_view(row["job_id"])
-            if view is None:
-                await run_db_operation(
-                    agent_repo.settle_image,
-                    row["id"],
-                    status="failed",
-                    error="The image job is no longer available.",
-                    metric_name="agent_settle_image",
-                )
-                continue
-            status = str(view.get("status") or "")
-            if status in ACTIVE_GENERATE_JOB_STATUSES:
-                continue
-            images = view.get("images") or []
-            first = images[0] if images and isinstance(images[0], dict) else {}
-            image_id = first.get("image_id") or view.get("image_id")
-            if status in {"success", "partial_failure"} and image_id:
-                await run_db_operation(
-                    agent_repo.settle_image, row["id"], status="succeeded", image_id=str(image_id),
-                    metric_name="agent_settle_image",
-                )
-            elif status == "cancelled":
-                await run_db_operation(
-                    agent_repo.settle_image, row["id"], status="cancelled", metric_name="agent_settle_image"
-                )
-            else:
-                await run_db_operation(
-                    agent_repo.settle_image,
-                    row["id"],
-                    status="failed",
-                    error=str(view.get("error") or view.get("message") or f"The image job ended with status {status}."),
-                    metric_name="agent_settle_image",
-                )
+    if not pending:
+        return
+    job_ids = {str(row["job_id"]) for row in pending if row.get("job_id")}
+    views = await resolve_generate_job_views(job_ids) if job_ids else {}
+    for row in pending:
+        job_id = row.get("job_id")
+        if not job_id:
+            await run_db_operation(
+                agent_repo.settle_image,
+                row["id"],
+                status="failed",
+                error="The turn was interrupted before this image was queued.",
+                metric_name="agent_settle_image",
+            )
+            continue
+        view = views.get(str(job_id))
+        if view is None:
+            await run_db_operation(
+                agent_repo.settle_image,
+                row["id"],
+                status="failed",
+                error="The image job is no longer available.",
+                metric_name="agent_settle_image",
+            )
+            continue
+        status = str(view.get("status") or "")
+        if status in ACTIVE_GENERATE_JOB_STATUSES:
+            continue
+        images = view.get("images") or []
+        first = images[0] if images and isinstance(images[0], dict) else {}
+        image_id = first.get("image_id") or view.get("image_id")
+        if status in {"success", "partial_failure"} and image_id:
+            await run_db_operation(
+                agent_repo.settle_image, row["id"], status="succeeded", image_id=str(image_id),
+                metric_name="agent_settle_image",
+            )
+        elif status == "cancelled":
+            await run_db_operation(
+                agent_repo.settle_image, row["id"], status="cancelled", metric_name="agent_settle_image"
+            )
+        else:
+            await run_db_operation(
+                agent_repo.settle_image,
+                row["id"],
+                status="failed",
+                error=str(view.get("error") or view.get("message") or f"The image job ended with status {status}."),
+                metric_name="agent_settle_image",
+            )
 
 
 def _image_ref(row: dict[str, Any]) -> AgentImageRef:

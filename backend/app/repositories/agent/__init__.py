@@ -58,6 +58,7 @@ from .messages import (
     list_conversation_images,
     list_messages,
     list_pending_images_for_turn,
+    list_reconcilable_images_for_conversation,
     list_reconcilable_images_for_turn,
     set_image_job,
     settle_image,

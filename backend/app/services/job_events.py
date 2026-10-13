@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import time
+from collections.abc import Iterable
 
 
 from ..runtime.state import (
@@ -19,6 +20,7 @@ from ..core.observability import metrics
 from ..core.utils import utc_now
 from ..repositories.image_jobs import (
     get_generate_job,
+    get_generate_jobs_by_ids,
     list_generate_jobs,
     pop_generate_job_webhook,
     transition_generate_job_to_terminal,
@@ -566,19 +568,14 @@ async def store_generate_job_async(
     return job
 
 
-async def resolve_generate_job_view(job_id: str) -> dict | None:
-    """Resolve a job for decision-making reads (GET, SSE first frame, cancel).
+def _overlay_generate_job_view(job_id: str, db_job: dict | None) -> dict | None:
+    """Merge the in-memory copy over a storage row without masking terminal state.
 
-    SQLite is authoritative. The in-memory copy is only overlaid while both
-    the memory and storage copies are active and the memory copy is at least as
-    fresh, so an executing worker keeps publishing high-frequency stage/message
-    without a stale copy ever masking a terminal row (defect D4).
+    SQLite stays authoritative; the memory copy is only overlaid while both
+    copies are active and memory is at least as fresh (defect D4). A storage-only
+    job never seeds the cache, otherwise a non-executing worker would leak a copy
+    per read (defect R2).
     """
-    db_job = await run_db_operation(
-        get_generate_job,
-        job_id,
-        metric_name="resolve_generate_job_view",
-    )
     memory = state.generate_jobs.get(job_id)
     if db_job is None:
         return memory
@@ -592,9 +589,32 @@ async def resolve_generate_job_view(job_id: str) -> dict | None:
         and str(memory.get("updated_at") or "") >= str(db_job.get("updated_at") or "")
     ):
         return {**db_job, **memory}
-    # Only correct an existing cache entry; never create one for a storage-only
-    # job, otherwise a non-executing worker would leak a copy per GET/SSE that
-    # is never popped once another worker finishes the job (defect R2).
     if memory is not None:
         remember_generate_job_memory(job_id, {**memory, **db_job})
     return db_job
+
+
+async def resolve_generate_job_view(job_id: str) -> dict | None:
+    """Resolve a job for decision-making reads (GET, SSE first frame, cancel)."""
+    db_job = await run_db_operation(
+        get_generate_job,
+        job_id,
+        metric_name="resolve_generate_job_view",
+    )
+    return _overlay_generate_job_view(job_id, db_job)
+
+
+async def resolve_generate_job_views(job_ids: Iterable[str]) -> dict[str, dict | None]:
+    """Resolve many jobs with a single chunked read instead of one query per job."""
+    unique_ids = {str(job_id) for job_id in job_ids if job_id}
+    if not unique_ids:
+        return {}
+    db_jobs = await run_db_operation(
+        get_generate_jobs_by_ids,
+        unique_ids,
+        metric_name="resolve_generate_job_views",
+    )
+    return {
+        job_id: _overlay_generate_job_view(job_id, db_jobs.get(job_id))
+        for job_id in unique_ids
+    }

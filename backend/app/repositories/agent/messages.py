@@ -204,6 +204,26 @@ def list_reconcilable_images_for_turn(turn_id: str) -> list[dict[str, Any]]:
     return [_image_from_row(row) for row in rows]
 
 
+def list_reconcilable_images_for_conversation(conversation_id: str) -> list[dict[str, Any]]:
+    """Reconcilable rows across every terminal turn of a conversation in one query.
+
+    Replaces a per-turn ``list_reconcilable_images_for_turn`` loop with a single
+    statement so reconciliation no longer issues one query per turn.
+    """
+    _ensure_database()
+    with _connect() as conn:
+        rows = conn.execute(
+            f"""{_IMAGE_SELECT_SQL}
+            JOIN agent_turns AS t ON t.id = i.turn_id
+            WHERE t.conversation_id = ?
+              AND t.status IN ('completed', 'failed', 'cancelled', 'interrupted')
+              AND (i.status = 'pending'
+                   OR (i.status = 'failed' AND i.job_id IS NOT NULL AND i.error = ?))""",
+            (conversation_id, LEGACY_IMAGE_WAIT_TIMEOUT_ERROR),
+        ).fetchall()
+    return [_image_from_row(row) for row in rows]
+
+
 def list_pending_images_for_turn(turn_id: str) -> list[dict[str, Any]]:
     _ensure_database()
     with _connect() as conn:

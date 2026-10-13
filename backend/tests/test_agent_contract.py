@@ -726,8 +726,11 @@ def test_agent_image_wait_timeout_keeps_row_pending_and_reconciles(client, monke
     async def active(job_id):
         return {"status": "queued", "stage": "queued"}
 
+    async def active_many(job_ids):
+        return {job_id: await active(job_id) for job_id in job_ids}
+
     monkeypatch.setattr(agent_tool_executor, "resolve_generate_job_view", active)
-    monkeypatch.setattr(agent_conversations, "resolve_generate_job_view", active)
+    monkeypatch.setattr(agent_conversations, "resolve_generate_job_views", active_many)
     install_model(monkeypatch, [batch_call("c1", ("a", "slow cat")), text_round("Still rendering.")])
     conversation_id = new_conversation(client)
     _accepted, status = run_turn(client, conversation_id, "draw")
@@ -738,7 +741,10 @@ def test_agent_image_wait_timeout_keeps_row_pending_and_reconciles(client, monke
     async def failed(job_id):
         return {"status": "failed", "error": "upstream boom"}
 
-    monkeypatch.setattr(agent_conversations, "resolve_generate_job_view", failed)
+    async def failed_many(job_ids):
+        return {job_id: await failed(job_id) for job_id in job_ids}
+
+    monkeypatch.setattr(agent_conversations, "resolve_generate_job_views", failed_many)
     task = next(b for b in assistant_blocks(detail(client, conversation_id), 1) if b["type"] == "image_task")
     assert task["status"] == "failed" and task["error"] == "upstream boom"
 
@@ -756,7 +762,10 @@ def test_agent_legacy_wait_timeout_failures_are_reconciled_once(client, monkeypa
     async def cancelled(job_id):
         return {"status": "cancelled"}
 
-    monkeypatch.setattr(agent_conversations, "resolve_generate_job_view", cancelled)
+    async def cancelled_many(job_ids):
+        return {job_id: await cancelled(job_id) for job_id in job_ids}
+
+    monkeypatch.setattr(agent_conversations, "resolve_generate_job_views", cancelled_many)
     task = next(b for b in assistant_blocks(detail(client, conversation_id), 1) if b["type"] == "image_task")
     assert task["status"] == "cancelled"
     # A genuine failure is never resurrected.
