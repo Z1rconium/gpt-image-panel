@@ -4,7 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 
 from backend.app.repositories import agent as repo
-from backend.app.repositories.db import schema
+from backend.app.repositories.db import migrations as schema
 from backend.tests.support.contract import _configure_runtime, _fake_gallery_entry, db_repo
 from backend.tests.test_agent_repository import _turn
 from backend.tests.test_agent_contract import detail, enable_agent, install_model, new_conversation, run_turn, start_turn, text_round, wait_turn

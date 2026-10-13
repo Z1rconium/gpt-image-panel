@@ -96,9 +96,8 @@ from .rows import (
     _upsert_generate_job_on_conn,
     image_url_for_filename,
 )
-from .schema import (
+from .migrations import (
     SCHEMA_MIGRATIONS,
-    _ensure_database,
     _migration_access_failures,
     _migration_background_column,
     _migration_gallery_page_anchors,
@@ -106,6 +105,9 @@ from .schema import (
     _migration_generate_job_streaming_columns,
     _migration_generate_job_usage_cost_columns,
     _migration_image_job_unit_lease_fencing,
+)
+from .schema import (
+    _ensure_database,
     optimize_database_if_due,
     verify_storage_writable,
 )

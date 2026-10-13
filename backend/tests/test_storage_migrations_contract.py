@@ -2,7 +2,7 @@ from backend.tests.support.contract import *  # noqa: F403
 
 
 def test_preview_context_migration_preserves_legacy_jobs():
-    from backend.app.repositories.db import schema
+    from backend.app.repositories.db import migrations as schema
 
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
