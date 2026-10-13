@@ -2,7 +2,7 @@ import logging
 
 from fastapi import APIRouter, Body, HTTPException
 
-from ...runtime.blocking import run_db_operation
+from ...repositories.db.execution import run_db_operation
 from ...core.errors import DomainError
 from ...services.presets import (
     get_prompt_optimizer_settings,

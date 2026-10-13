@@ -1,15 +1,7 @@
-"""Bounded executors and memory admission for blocking backend work.
-
-repositories.gallery.mutations imports run_db_operation from here at module
-level, so the repository helpers this module needs for connection scoping stay
-function-local imports to keep the pair importable in either order.
-"""
+"""Bounded executors and memory admission for blocking backend work."""
 
 import asyncio
-import logging
 import contextvars
-import random
-import sqlite3
 import threading
 import time
 from collections.abc import Callable
@@ -22,8 +14,6 @@ from typing import Any, TypeVar
 from ..core import settings as config
 from ..core.observability import metrics
 
-
-logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
@@ -56,10 +46,20 @@ class _BoundedExecutor:
         context = contextvars.copy_context()
         with self._lock:
             self._pending += 1
+        queued = True
+
+        def clear_queued() -> None:
+            nonlocal queued
+            with self._lock:
+                if queued:
+                    queued = False
+                    self._pending -= 1
 
         def invoke() -> T:
+            nonlocal queued
             started_at = time.perf_counter()
             with self._lock:
+                queued = False
                 self._pending -= 1
                 self._running += 1
             metrics.observe_ms(
@@ -76,12 +76,20 @@ class _BoundedExecutor:
                 with self._lock:
                     self._running -= 1
 
-        loop = asyncio.get_running_loop()
         try:
-            return await loop.run_in_executor(self._get_executor(), invoke)
-        except asyncio.CancelledError:
-            # The worker may still be finishing; counters are finalized there.
+            future = self._get_executor().submit(invoke)
+        except BaseException:
+            clear_queued()
             raise
+
+        def settled(completed) -> None:
+            # Only cancellation before invoke starts leaves queued accounting.
+            # A running callback keeps its counters until invoke's finally.
+            if completed.cancelled():
+                clear_queued()
+
+        future.add_done_callback(settled)
+        return await asyncio.wrap_future(future)
 
     def gauges(self) -> dict[str, int]:
         with self._lock:
@@ -150,101 +158,14 @@ _image_executor = _BoundedExecutor("image_cpu", lambda: config.IMAGE_CPU_CONCURR
 _file_executor = _BoundedExecutor("file_io", lambda: config.FILE_IO_CONCURRENCY)
 
 
-def _is_sqlite_busy(error: BaseException) -> bool:
-    return isinstance(error, sqlite3.OperationalError) and any(
-        marker in str(error).lower() for marker in ("locked", "busy")
-    )
+async def run_db_callback(callback: Callable[[], T], *, metric_name: str) -> T:
+    """Schedule a database-pool callback without applying storage policy."""
+    return await _db_executor.run(callback, metric_name=metric_name)
 
 
-async def run_db_operation(
-    callback: Callable[..., T],
-    *args: Any,
-    metric_name: str | None = None,
-    retry_busy: bool = True,
-    critical: bool = False,
-    **kwargs: Any,
-) -> T:
-    """Run one repository operation with a short lock timeout and jittered retry.
-
-    ``critical`` selects the larger critical busy budget used by claim, lease
-    renewal, terminal unit writes, parent finalization and cancellation. Those
-    paths must not silently lose a write to a transient lock; polling reads keep
-    the short budget because timing out just skips a cycle.
-    """
-
-    from ..repositories import db as db_repo
-
-    label = metric_name or getattr(callback, "__name__", "operation")
-    if critical:
-        busy_timeout_ms = config.SQLITE_CRITICAL_BUSY_TIMEOUT_MS
-        attempts = (
-            config.SQLITE_CRITICAL_BUSY_RETRY_ATTEMPTS if retry_busy else 0
-        )
-    else:
-        busy_timeout_ms = config.SQLITE_BUSY_TIMEOUT_MS
-        attempts = config.SQLITE_BUSY_RETRY_ATTEMPTS if retry_busy else 0
-
-    def invoke() -> T:
-        with db_repo.metric_name_scope(label):
-            with db_repo.persistent_connection_scope(busy_timeout_ms):
-                return callback(*args, **kwargs)
-
-    for attempt in range(attempts + 1):
-        try:
-            return await _db_executor.run(invoke, metric_name=f"db.{label}")
-        except BaseException as error:
-            if not _is_sqlite_busy(error) or attempt >= attempts:
-                raise
-            metrics.increment("sqlite.busy_retries")
-            base = config.SQLITE_BUSY_RETRY_BASE_MS / 1000
-            await asyncio.sleep(base * (2**attempt) * random.uniform(0.75, 1.25))
-    raise RuntimeError("unreachable")
-
-
-def run_db_operation_in_current_thread(
-    callback: Callable[..., T],
-    *args: Any,
-    metric_name: str | None = None,
-    retry_busy: bool = True,
-    critical: bool = False,
-    **kwargs: Any,
-) -> T:
-    """Run one repository operation in the current worker thread.
-
-    This mirrors run_db_operation's short SQLite busy timeout and jittered retry
-    policy for callbacks that are already executing off the event loop.
-    """
-
-    from ..repositories import db as db_repo
-
-    label = metric_name or getattr(callback, "__name__", "operation")
-    if critical:
-        busy_timeout_ms = config.SQLITE_CRITICAL_BUSY_TIMEOUT_MS
-        attempts = (
-            config.SQLITE_CRITICAL_BUSY_RETRY_ATTEMPTS if retry_busy else 0
-        )
-    else:
-        busy_timeout_ms = config.SQLITE_BUSY_TIMEOUT_MS
-        attempts = config.SQLITE_BUSY_RETRY_ATTEMPTS if retry_busy else 0
-    for attempt in range(attempts + 1):
-        started_at = time.perf_counter()
-        try:
-            with db_repo.metric_name_scope(label):
-                with db_repo.busy_timeout_scope(busy_timeout_ms):
-                    return callback(*args, **kwargs)
-        except BaseException as error:
-            if not _is_sqlite_busy(error) or attempt >= attempts:
-                raise
-            metrics.increment("sqlite.busy_retries")
-            base = config.SQLITE_BUSY_RETRY_BASE_MS / 1000
-            time.sleep(base * (2**attempt) * random.uniform(0.75, 1.25))
-        finally:
-            metrics.observe_ms(
-                f"db.{label}",
-                (time.perf_counter() - started_at) * 1000,
-            )
-
-    raise RuntimeError("unreachable")
+def run_on_db_workers(callback: Callable[[], None]) -> int:
+    """Run a cleanup callback on available database workers with a deadline."""
+    return _db_executor.run_on_each_worker(callback)
 
 
 async def run_image_operation(
@@ -338,20 +259,6 @@ async def upstream_memory_lease(expected_bytes: int):
 
 
 async def close_blocking_executors() -> None:
-    from ..repositories import db as db_repo
-
-    closed_workers = await asyncio.to_thread(
-        _db_executor.run_on_each_worker,
-        db_repo._close_thread_connection,
-    )
-    expected_workers = max(1, int(config.DB_EXECUTOR_WORKERS))
-    if closed_workers < expected_workers:
-        logger.warning(
-            "Closed %s of %s database worker connections at shutdown; the rest "
-            "close when their threads exit",
-            closed_workers,
-            expected_workers,
-        )
     for executor in (_file_executor, _image_executor, _db_executor):
         await asyncio.to_thread(executor.shutdown)
 
@@ -359,8 +266,8 @@ async def close_blocking_executors() -> None:
 __all__ = [
     "close_blocking_executors",
     "executor_gauges",
-    "run_db_operation",
-    "run_db_operation_in_current_thread",
+    "run_db_callback",
+    "run_on_db_workers",
     "run_file_operation",
     "run_image_operation",
     "upstream_memory_lease",

@@ -1,7 +1,7 @@
 
 from fastapi import APIRouter, HTTPException, Query
 
-from ...runtime.blocking import run_db_operation
+from ...repositories.db.execution import run_db_operation
 from ...repositories.settings import (
     create_prompt_snippet as create_persisted_prompt_snippet,
     delete_prompt_snippet as delete_persisted_prompt_snippet,

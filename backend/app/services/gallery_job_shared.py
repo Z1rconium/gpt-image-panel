@@ -10,7 +10,7 @@ from .gallery_job_sse import (
 )
 
 
-from ..runtime.blocking import run_db_operation, run_db_operation_in_current_thread
+from ..repositories.db.execution import run_db_operation, run_db_operation_in_current_thread
 from ..runtime.state import utc_lease_expires_at
 from ..repositories.coordination import (
     acquire_background_lease,

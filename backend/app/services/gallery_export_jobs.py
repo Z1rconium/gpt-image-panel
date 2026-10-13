@@ -31,7 +31,7 @@ from .gallery_archive_export import (
     write_gallery_zip_file,
 )
 from .gallery_archive_shared import GalleryZipFileResult
-from ..runtime.blocking import run_db_operation
+from ..repositories.db.execution import run_db_operation
 from ..core import settings as config
 from ..core.streaming import StreamedBody
 from ..core.utils import utc_now

@@ -9,7 +9,7 @@ import logging
 
 from ..integrations.session_pool import close_pool
 from ..repositories.db import close_database_connections
-from ..runtime.blocking import close_blocking_executors
+from ..repositories.db.execution import close_blocking_executors
 from ..runtime.state import state
 from .vision_previews import drain_preview_tasks
 from . import (

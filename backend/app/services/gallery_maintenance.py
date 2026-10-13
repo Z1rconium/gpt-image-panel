@@ -3,7 +3,7 @@ import logging
 import uuid
 from pathlib import Path
 
-from ..runtime.blocking import run_db_operation
+from ..repositories.db.execution import run_db_operation
 from ..runtime.state import state, utc_lease_expires_at
 from ..core import settings as config
 from ..core.observability import metrics

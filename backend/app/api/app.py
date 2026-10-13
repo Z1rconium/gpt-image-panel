@@ -6,7 +6,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 
-from ..runtime.blocking import run_db_operation
+from ..repositories.db.execution import run_db_operation
 from ..core import overall_config
 from ..core import secrets
 from ..core import security as auth

@@ -22,7 +22,7 @@ from .job_executor import (
 )
 from .image_unit_session import image_unit_lease_expires_at
 from .job_queue import get_image_unit_dispatcher_kick_event
-from ..runtime.blocking import run_db_operation
+from ..repositories.db.execution import run_db_operation
 
 logger = logging.getLogger(__name__)
 

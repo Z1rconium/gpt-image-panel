@@ -19,7 +19,7 @@ from .gallery_job_sse import (
 )
 
 
-from ..runtime.blocking import run_db_operation
+from ..repositories.db.execution import run_db_operation
 from ..core.errors import RateLimitedError
 from ..core import settings as config
 from ..core.utils import utc_now

@@ -7,7 +7,7 @@ import asyncio
 import time
 
 
-from ..runtime.blocking import run_db_operation
+from ..repositories.db.execution import run_db_operation
 from .gallery_job_payloads import (
     _gallery_job_event_name,
     _gallery_job_payload,

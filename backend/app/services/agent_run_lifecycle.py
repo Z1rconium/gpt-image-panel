@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Callable
 
 from ..core import settings as config
 from ..repositories import agent as agent_repo
-from ..runtime.blocking import run_db_operation
+from ..repositories.db.execution import run_db_operation
 from ..runtime.state import state, utc_lease_expires_at
 from . import assistant_runtime
 from .agent_turn_errors import TurnCancelled, describe_failure

@@ -27,7 +27,7 @@ from ..repositories.image_jobs import (
     upsert_generate_job_guarded,
 )
 from . import webhook_service as webhooks
-from ..runtime.blocking import run_db_operation
+from ..repositories.db.execution import run_db_operation
 
 
 logger = logging.getLogger(__name__)
