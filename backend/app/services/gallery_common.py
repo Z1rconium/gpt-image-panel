@@ -1,4 +1,3 @@
-import asyncio
 import hashlib
 import logging
 import re
@@ -7,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote
 
+from ..runtime.blocking import run_db_operation
 from ..core import settings as config
 from ..core.errors import (
     NotFoundError,
@@ -297,8 +297,7 @@ def _gallery_selection_token_expires_at() -> str:
 
 
 async def _cleanup_gallery_selection_tokens() -> None:
-    await asyncio.to_thread(
-        cleanup_stale_gallery_jobs,
+    await run_db_operation(cleanup_stale_gallery_jobs,
         GALLERY_SELECTION_TOKEN_KIND,
         GALLERY_SELECTION_TOKEN_TTL_SECONDS,
     )
@@ -309,8 +308,7 @@ async def _gallery_filters_from_selection_token(selection_token: str | None) -> 
     if not token:
         raise UnprocessableRequestError("selection_token is required")
 
-    job = await asyncio.to_thread(
-        get_gallery_job,
+    job = await run_db_operation(get_gallery_job,
         GALLERY_SELECTION_TOKEN_KIND,
         token,
     )
@@ -320,12 +318,12 @@ async def _gallery_filters_from_selection_token(selection_token: str | None) -> 
     payload = job.get("payload") or {}
     expires_at = _parse_gallery_token_timestamp(payload.get("expires_at"))
     if not expires_at or expires_at <= datetime.now(timezone.utc):
-        await asyncio.to_thread(delete_gallery_job, GALLERY_SELECTION_TOKEN_KIND, token)
+        await run_db_operation(delete_gallery_job, GALLERY_SELECTION_TOKEN_KIND, token)
         raise NotFoundError("Gallery selection token expired")
 
     filters = payload.get("filters")
     if not isinstance(filters, dict):
-        await asyncio.to_thread(delete_gallery_job, GALLERY_SELECTION_TOKEN_KIND, token)
+        await run_db_operation(delete_gallery_job, GALLERY_SELECTION_TOKEN_KIND, token)
         raise NotFoundError("Gallery selection token not found")
     return filters
 
@@ -340,15 +338,15 @@ def _missing_gallery_ids(
 
 async def _resolve_gallery_batch_ids(req: GalleryBatchRequest) -> tuple[list[str], list[GalleryEntry], int, list[str]]:
     if req.ids:
-        entries = await asyncio.to_thread(get_gallery_entries_by_ids, req.ids)
+        entries = await run_db_operation(get_gallery_entries_by_ids, req.ids)
         missing_ids = _missing_gallery_ids(req.ids, entries)
         return req.ids, entries, len(req.ids), missing_ids
 
     filters = await _gallery_filters_from_selection_token(req.selection_token)
-    ids = await asyncio.to_thread(get_gallery_ids, filters)
+    ids = await run_db_operation(get_gallery_ids, filters)
     if not ids:
         return [], [], 0, []
-    entries = await asyncio.to_thread(get_gallery_entries_by_ids, ids)
+    entries = await run_db_operation(get_gallery_entries_by_ids, ids)
     missing_ids = _missing_gallery_ids(ids, entries)
     return ids, entries, len(ids), missing_ids
 

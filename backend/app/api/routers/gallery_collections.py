@@ -23,6 +23,7 @@ from ...repositories.gallery.collections import (
     update_gallery_collection,
 )
 from ...repositories.gallery.queries import get_gallery_entry
+from ...runtime.blocking import run_db_operation
 from ...schemas.gallery import (
     GalleryBatchRequest,
     GalleryCollection,
@@ -38,7 +39,7 @@ router = APIRouter()
 
 
 async def _require_collection(collection_id: str) -> dict:
-    collection = await asyncio.to_thread(get_gallery_collection, collection_id)
+    collection = await run_db_operation(get_gallery_collection, collection_id)
     if collection is None:
         raise HTTPException(status_code=404, detail="Collection not found")
     return collection
@@ -46,20 +47,20 @@ async def _require_collection(collection_id: str) -> dict:
 
 @router.get("/api/gallery/collections", response_model=list[GalleryCollection])
 async def list_collections():
-    return await asyncio.to_thread(list_gallery_collections)
+    return await run_db_operation(list_gallery_collections)
 
 
 @router.post("/api/gallery/collections", response_model=GalleryCollection, status_code=201)
 async def create_collection(req: GalleryCollectionCreateRequest):
     try:
-        return await asyncio.to_thread(create_gallery_collection, req.name)
+        return await run_db_operation(create_gallery_collection, req.name)
     except GalleryCollectionNameConflictError as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
 
 
 @router.put("/api/gallery/collections/order", response_model=list[GalleryCollection])
 async def reorder_collections(req: GalleryCollectionOrderRequest):
-    collections = await asyncio.to_thread(reorder_gallery_collections, req.ids)
+    collections = await run_db_operation(reorder_gallery_collections, req.ids)
     if collections is None:
         raise HTTPException(status_code=422, detail="ids must list every collection exactly once")
     return collections
@@ -68,8 +69,7 @@ async def reorder_collections(req: GalleryCollectionOrderRequest):
 @router.patch("/api/gallery/collections/{collection_id}", response_model=GalleryCollection)
 async def update_collection(collection_id: str, req: GalleryCollectionUpdateRequest):
     try:
-        collection = await asyncio.to_thread(
-            update_gallery_collection,
+        collection = await run_db_operation(update_gallery_collection,
             collection_id,
             name=req.name,
             is_default=req.is_default,
@@ -83,7 +83,7 @@ async def update_collection(collection_id: str, req: GalleryCollectionUpdateRequ
 
 @router.delete("/api/gallery/collections/{collection_id}", status_code=204)
 async def delete_collection(collection_id: str):
-    deleted = await asyncio.to_thread(delete_gallery_collection, collection_id)
+    deleted = await run_db_operation(delete_gallery_collection, collection_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Collection not found")
     return Response(status_code=204)
@@ -116,8 +116,8 @@ async def remove_collection_items(collection_id: str, req: GalleryBatchRequest):
 
 @router.get("/api/gallery/{image_id}/collections", response_model=GalleryImageCollectionsResponse)
 async def get_image_collections(image_id: str):
-    entry = await asyncio.to_thread(get_gallery_entry, image_id)
+    entry = await run_db_operation(get_gallery_entry, image_id)
     if entry is None:
         raise HTTPException(status_code=404, detail="Image not found")
-    collection_ids = await asyncio.to_thread(get_gallery_image_collection_ids, image_id)
+    collection_ids = await run_db_operation(get_gallery_image_collection_ids, image_id)
     return {"image_id": image_id, "collection_ids": collection_ids}

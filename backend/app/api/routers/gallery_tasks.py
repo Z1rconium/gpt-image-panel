@@ -1,4 +1,3 @@
-import asyncio
 import hashlib
 import inspect
 import logging
@@ -13,6 +12,7 @@ from fastapi import APIRouter, Body, File, HTTPException, Query, Request, Upload
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from starlette.background import BackgroundTask
 
+from ...runtime.blocking import run_db_operation
 from ...services.gallery_archive_export import (
     iter_gallery_zip_chunks,
     prepare_gallery_zip_chunks,
@@ -154,7 +154,7 @@ router = APIRouter()
 
 @router.post("/api/gallery/direct-export-jobs", response_model=GalleryExportJobStatus, status_code=202)
 async def create_gallery_direct_export_job():
-    gallery_count = await asyncio.to_thread(get_gallery_count)
+    gallery_count = await run_db_operation(get_gallery_count)
     if gallery_count == 0:
         raise HTTPException(status_code=404, detail="No images in gallery")
 
@@ -170,7 +170,7 @@ async def create_gallery_direct_export_job():
 
 @router.get("/api/gallery/direct-export-jobs/{job_id}", response_model=GalleryExportJobStatus)
 async def get_gallery_direct_export_job(job_id: str):
-    job = await asyncio.to_thread(get_gallery_job, "export_direct", job_id)
+    job = await run_db_operation(get_gallery_job, "export_direct", job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Direct gallery export job not found")
     return GalleryExportJobStatus(**_gallery_export_payload(job))
@@ -182,11 +182,11 @@ async def create_gallery_export_job(req: GalleryExportRequest | None = Body(defa
     selection_token = req.selection_token if req else None
     collection_id = req.collection_id if req else None
     if collection_id:
-        collection = await asyncio.to_thread(get_gallery_collection, collection_id)
+        collection = await run_db_operation(get_gallery_collection, collection_id)
         if collection is None:
             raise HTTPException(status_code=404, detail="Collection not found")
         filters = {"collection_id": collection_id}
-        requested_count = await asyncio.to_thread(get_gallery_count, filters)
+        requested_count = await run_db_operation(get_gallery_count, filters)
         if requested_count <= 0:
             raise HTTPException(status_code=404, detail="Collection is empty")
         filename_prefix = f"gpt-images-{collection_filename_slug(collection['name'])}"
@@ -198,7 +198,7 @@ async def create_gallery_export_job(req: GalleryExportRequest | None = Body(defa
         }
     elif selection_token:
         filters = await _gallery_filters_from_selection_token(selection_token)
-        requested_count = await asyncio.to_thread(get_gallery_count, filters)
+        requested_count = await run_db_operation(get_gallery_count, filters)
         if requested_count <= 0:
             raise HTTPException(status_code=404, detail="Gallery entries not found")
         filename_prefix = "gpt-images-selected"
@@ -209,14 +209,14 @@ async def create_gallery_export_job(req: GalleryExportRequest | None = Body(defa
             "filename_prefix": filename_prefix,
         }
     elif ids:
-        entries = await asyncio.to_thread(get_gallery_entries_by_ids, ids)
+        entries = await run_db_operation(get_gallery_entries_by_ids, ids)
         if not entries:
             raise HTTPException(status_code=404, detail="Gallery entries not found")
         requested_count = len(ids)
         filename_prefix = "gpt-images-selected"
         payload = {"ids": ids, "filename_prefix": filename_prefix}
     else:
-        gallery_count = await asyncio.to_thread(get_gallery_count)
+        gallery_count = await run_db_operation(get_gallery_count)
         if gallery_count == 0:
             raise HTTPException(status_code=404, detail="No images in gallery")
         requested_count = gallery_count
@@ -230,7 +230,7 @@ async def create_gallery_export_job(req: GalleryExportRequest | None = Body(defa
 
 @router.get("/api/gallery/export-jobs/{job_id}", response_model=GalleryExportJobStatus)
 async def get_gallery_export_job(job_id: str):
-    job = await asyncio.to_thread(get_gallery_job, "export", job_id)
+    job = await run_db_operation(get_gallery_job, "export", job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Gallery export job not found")
     return GalleryExportJobStatus(**_gallery_export_payload(job))
@@ -294,7 +294,7 @@ def _iter_tracked_export_file(path: Path, job_id: str) -> Iterator[bytes]:
 
 @router.get("/api/gallery/export-jobs/{job_id}/download")
 async def download_gallery_export_job(job_id: str):
-    job = await asyncio.to_thread(get_gallery_job, "export", job_id)
+    job = await run_db_operation(get_gallery_job, "export", job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Gallery export job not found")
     if job.get("status") != "success":
@@ -332,14 +332,13 @@ async def download_gallery_export_job(job_id: str):
 
 @router.post("/api/gallery/sync-jobs", response_model=GallerySyncJobStatus, status_code=202)
 async def create_gallery_sync_job(req: GallerySyncRequest | None = Body(default=None)):
-    gallery_count = await asyncio.to_thread(get_gallery_count)
+    gallery_count = await run_db_operation(get_gallery_count)
     if gallery_count == 0:
         raise HTTPException(status_code=404, detail="No images in gallery")
 
-    r2_settings = await asyncio.to_thread(load_r2_backup_settings)
+    r2_settings = await run_db_operation(load_r2_backup_settings)
     try:
-        effective = await asyncio.to_thread(
-            r2_config.resolve_r2_backup_settings,
+        effective = await run_db_operation(r2_config.resolve_r2_backup_settings,
             r2_settings,
             require_enabled=True,
         )
@@ -348,8 +347,7 @@ async def create_gallery_sync_job(req: GallerySyncRequest | None = Body(default=
 
     full_reconcile = bool(req.full_reconcile) if req else False
     dry_run = bool(req.dry_run) if req else False
-    total_count = await asyncio.to_thread(
-        count_gallery_r2_sync_rows,
+    total_count = await run_db_operation(count_gallery_r2_sync_rows,
         key_prefix=effective.key_prefix,
         full_reconcile=full_reconcile,
     )
@@ -363,7 +361,7 @@ async def create_gallery_sync_job(req: GallerySyncRequest | None = Body(default=
 
 @router.get("/api/gallery/sync-jobs/{job_id}", response_model=GallerySyncJobStatus)
 async def get_gallery_sync_job(job_id: str):
-    job = await asyncio.to_thread(get_gallery_job, "sync", job_id)
+    job = await run_db_operation(get_gallery_job, "sync", job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Gallery sync job not found")
     return GallerySyncJobStatus(**_gallery_sync_payload(job))
@@ -386,7 +384,7 @@ async def stream_gallery_sync_job(job_id: str, request: Request):
 
 @router.get("/api/gallery/import-jobs/{job_id}", response_model=GalleryImportJobStatus)
 async def get_gallery_import_job(job_id: str):
-    job = await asyncio.to_thread(get_gallery_job, "import", job_id)
+    job = await run_db_operation(get_gallery_job, "import", job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Gallery import job not found")
     return GalleryImportJobStatus(**_gallery_import_payload(job))
@@ -409,7 +407,7 @@ async def stream_gallery_import_job(job_id: str, request: Request):
 
 @router.get("/api/gallery/nodeimage-upload-jobs/{job_id}", response_model=NodeImageUploadJobStatus)
 async def get_gallery_nodeimage_upload_job(job_id: str):
-    job = await asyncio.to_thread(get_gallery_job, NODEIMAGE_UPLOAD_JOB_KIND, job_id)
+    job = await run_db_operation(get_gallery_job, NODEIMAGE_UPLOAD_JOB_KIND, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="NodeImage upload job not found")
     return NodeImageUploadJobStatus(**_nodeimage_upload_payload(job))
@@ -431,8 +429,7 @@ async def stream_gallery_nodeimage_upload_job(job_id: str, request: Request):
 
 
 async def _cancel_gallery_nodeimage_upload_job(job_id: str):
-    job = await asyncio.to_thread(
-        request_gallery_job_cancellation,
+    job = await run_db_operation(request_gallery_job_cancellation,
         NODEIMAGE_UPLOAD_JOB_KIND,
         job_id,
     )
@@ -454,9 +451,8 @@ async def request_gallery_nodeimage_upload_cancellation(job_id: str):
 
 @router.get("/api/download-all")
 async def download_all_images(export_job_id: str = Query(...)):
-    gallery_count = await asyncio.to_thread(get_gallery_count)
-    direct_job = await asyncio.to_thread(
-        get_gallery_job,
+    gallery_count = await run_db_operation(get_gallery_count)
+    direct_job = await run_db_operation(get_gallery_job,
         "export_direct",
         export_job_id,
     )
@@ -466,8 +462,7 @@ async def download_all_images(export_job_id: str = Query(...)):
         raise HTTPException(status_code=409, detail="Direct gallery export job is already active or finished")
 
     if gallery_count == 0:
-        await asyncio.to_thread(
-            update_gallery_job,
+        await run_db_operation(update_gallery_job,
             export_job_id,
             {
                 "status": "error",
@@ -481,8 +476,7 @@ async def download_all_images(export_job_id: str = Query(...)):
         )
         raise HTTPException(status_code=404, detail="No images in gallery")
 
-    updated_direct_job = await asyncio.to_thread(
-        update_gallery_job,
+    updated_direct_job = await run_db_operation(update_gallery_job,
         export_job_id,
         {
             "status": "running",
@@ -520,8 +514,7 @@ async def import_gallery_archive(
         datetime.now(timezone.utc)
         + timedelta(seconds=config.IMPORT_UPLOAD_RESERVATION_TTL_SECONDS)
     ).isoformat()
-    reserved, reason = await asyncio.to_thread(
-        reserve_import_upload_capacity,
+    reserved, reason = await run_db_operation(reserve_import_upload_capacity,
         reservation_id=reservation_id,
         client_ip=auth.get_client_ip(request),
         byte_count=reservation_bytes,
@@ -543,14 +536,13 @@ async def import_gallery_archive(
             directory=import_dir,
         )
         try:
-            await asyncio.to_thread(
-                resize_import_upload_reservation,
+            await run_db_operation(resize_import_upload_reservation,
                 reservation_id,
                 temp_path.stat().st_size,
             )
         except OSError:
             pass
-        total_count = await asyncio.to_thread(count_import_gallery_entries, temp_path)
+        total_count = await run_db_operation(count_import_gallery_entries, temp_path)
         if total_count <= 0:
             raise HTTPException(status_code=400, detail="No importable images found")
         job = await _create_reserved_gallery_import_job(
@@ -562,7 +554,7 @@ async def import_gallery_archive(
             },
         )
     except BaseException:
-        await asyncio.to_thread(release_import_upload_reservation, reservation_id)
+        await run_db_operation(release_import_upload_reservation, reservation_id)
         if temp_path:
             temp_path.unlink(missing_ok=True)
         raise

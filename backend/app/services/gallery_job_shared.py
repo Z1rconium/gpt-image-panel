@@ -58,8 +58,7 @@ async def _sleep_while_renewing_background_lease(
         if remaining <= 0:
             return True
         await asyncio.sleep(min(remaining, max(1.0, BACKGROUND_TASK_LEASE_SECONDS / 2)))
-        renewed = await asyncio.to_thread(
-            acquire_background_lease,
+        renewed = await run_db_operation(acquire_background_lease,
             name=name,
             owner=owner,
             lease_expires_at=_background_task_lease_expires_at(),

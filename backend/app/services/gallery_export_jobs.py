@@ -149,8 +149,7 @@ async def _gallery_zip_response(
                         "error": None,
                     }
                 )
-            prepared_chunks, prepared_result = await asyncio.to_thread(
-                prepare_gallery_zip_chunks,
+            prepared_chunks, prepared_result = await run_db_operation(prepare_gallery_zip_chunks,
                 entries,
                 skipped=skipped,
                 requested_count=requested_count,
@@ -321,8 +320,7 @@ async def _reserve_gallery_export_direct_slot(
     payload: dict | None = None,
 ) -> dict:
     async with _gallery_export_lock():
-        slot = await asyncio.to_thread(
-            reserve_gallery_job_capacity,
+        slot = await run_db_operation(reserve_gallery_job_capacity,
             job=_create_gallery_export_direct_slot(
                 filename_prefix=filename_prefix,
                 requested_count=requested_count,
@@ -334,9 +332,8 @@ async def _reserve_gallery_export_direct_slot(
             max_active=MAX_ACTIVE_EXPORT_JOBS,
         )
         if not slot:
-            active_count = await asyncio.to_thread(count_active_gallery_jobs, "export")
-            active_count += await asyncio.to_thread(
-                count_active_gallery_jobs,
+            active_count = await run_db_operation(count_active_gallery_jobs, "export")
+            active_count += await run_db_operation(count_active_gallery_jobs,
                 "export_direct",
             )
             raise RateLimitedError(f"Too many active export jobs ({active_count}). Please wait for existing exports to complete.")
@@ -404,16 +401,14 @@ async def _create_reserved_gallery_export_job(
     payload: dict,
 ) -> dict:
     async with _gallery_export_lock():
-        job = await asyncio.to_thread(
-            reserve_gallery_job_capacity,
+        job = await run_db_operation(reserve_gallery_job_capacity,
             job=_build_gallery_export_job(filename_prefix, requested_count, payload),
             counted_kinds=("export", "export_direct"),
             max_active=MAX_ACTIVE_EXPORT_JOBS,
         )
         if not job:
-            active_count = await asyncio.to_thread(count_active_gallery_jobs, "export")
-            active_count += await asyncio.to_thread(
-                count_active_gallery_jobs,
+            active_count = await run_db_operation(count_active_gallery_jobs, "export")
+            active_count += await run_db_operation(count_active_gallery_jobs,
                 "export_direct",
             )
             raise RateLimitedError(f"Too many active export jobs ({active_count}). Please wait for existing exports to complete.")
@@ -436,7 +431,7 @@ async def _run_gallery_export_job(job: dict) -> None:
     try:
         if not export_path:
             raise ValueError("Export archive path is invalid")
-        entries, requested_count, skipped = await asyncio.to_thread(_build_export_job_entries, job)
+        entries, requested_count, skipped = await run_db_operation(_build_export_job_entries, job)
         await _publish_gallery_job(
             job_id,
             {

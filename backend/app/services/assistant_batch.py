@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 
+from ..runtime.blocking import run_db_operation
 from . import presets
 from ..core.errors import (
     DomainError,
@@ -133,7 +134,7 @@ async def _analyze_gallery_image_with_lease_renewal(
 async def batch_analyze_gallery(req: AssistantGalleryBatchRequest):
     if req.selection_token:
         filters = await _gallery_filters_from_selection_token(req.selection_token)
-        snapshot = await asyncio.to_thread(get_gallery_selection_snapshot, filters)
+        snapshot = await run_db_operation(get_gallery_selection_snapshot, filters)
         requested_count = int(snapshot.get("count") or 0)
         if requested_count <= 0:
             raise NotFoundError("Gallery entries not found")
@@ -151,7 +152,7 @@ async def batch_analyze_gallery(req: AssistantGalleryBatchRequest):
         ids = req.ids or []
         if len(ids) > config.AI_ASSISTANT_BATCH_MAX_IMAGES:
             raise DomainError(f"Gallery AI analysis is limited to {config.AI_ASSISTANT_BATCH_MAX_IMAGES} images per batch", status_code=413)
-        entries = await asyncio.to_thread(get_gallery_entries_by_ids, ids)
+        entries = await run_db_operation(get_gallery_entries_by_ids, ids)
         found_ids = {entry.id for entry in entries}
         requested_ids = [image_id for image_id in ids if image_id in found_ids]
         if not requested_ids:
@@ -160,8 +161,7 @@ async def batch_analyze_gallery(req: AssistantGalleryBatchRequest):
         job_requested_count = len(ids)
         missing_count = max(0, len(ids) - len(requested_ids))
     await _resolve_runtime_async(vision=True)
-    job = await asyncio.to_thread(
-        reserve_gallery_job_capacity,
+    job = await run_db_operation(reserve_gallery_job_capacity,
         job=_build_ai_analyze_job(
             payload=payload,
             requested_count=job_requested_count,
@@ -177,7 +177,7 @@ async def batch_analyze_gallery(req: AssistantGalleryBatchRequest):
 
 
 async def get_batch_analyze_job(job_id: str):
-    job = await asyncio.to_thread(get_gallery_job, AI_ANALYZE_JOB_KIND, job_id)
+    job = await run_db_operation(get_gallery_job, AI_ANALYZE_JOB_KIND, job_id)
     if not job:
         raise NotFoundError("Gallery AI analysis job not found")
     return AssistantGalleryBatchJobStatus(**_ai_analyze_payload(job))
@@ -256,8 +256,7 @@ async def _renew_ai_analyze_job_lease(job_id: str, lease_owner: str, stop_event:
             return
         except asyncio.TimeoutError:
             try:
-                renewed = await asyncio.to_thread(
-                    renew_gallery_job_lease,
+                renewed = await run_db_operation(renew_gallery_job_lease,
                     job_id=job_id,
                     lease_owner=lease_owner,
                     lease_expires_at=_gallery_job_lease_expires_at(),
@@ -325,8 +324,7 @@ async def _next_ai_analyze_id_batch(
     after_id = str(raw_id or "").strip() or None
     before_or_at_sort_seq, before_or_at_id = _ai_analyze_snapshot_boundary(payload)
     batch_limit = min(AI_ANALYZE_JOB_BATCH_SIZE, remaining) if remaining else AI_ANALYZE_JOB_BATCH_SIZE
-    rows = await asyncio.to_thread(
-        get_gallery_id_batch,
+    rows = await run_db_operation(get_gallery_id_batch,
         filters,
         after_sort_seq=after_sort_seq,
         after_id=after_id,
@@ -344,8 +342,7 @@ async def _update_ai_analyze_job(
     lease_owner: str,
     updates: dict[str, Any],
 ) -> dict[str, Any]:
-    updated = await asyncio.to_thread(
-        update_gallery_job,
+    updated = await run_db_operation(update_gallery_job,
         job_id,
         updates,
         lease_owner=lease_owner,
@@ -360,8 +357,7 @@ async def _update_ai_analyze_progress(
     lease_owner: str,
     updates: dict[str, Any],
 ) -> None:
-    updated = await asyncio.to_thread(
-        update_gallery_job_progress,
+    updated = await run_db_operation(update_gallery_job_progress,
         job_id,
         updates,
         lease_owner=lease_owner,
@@ -372,8 +368,7 @@ async def _update_ai_analyze_progress(
 
 async def _wait_for_ai_analyze_backpressure(job_id: str, lease_owner: str) -> None:
     if lease_owner:
-        renewed = await asyncio.to_thread(
-            renew_gallery_job_lease,
+        renewed = await run_db_operation(renew_gallery_job_lease,
             job_id=job_id,
             lease_owner=lease_owner,
             lease_expires_at=_gallery_job_lease_expires_at(),
@@ -504,8 +499,7 @@ async def _run_ai_analyze_job(job: dict[str, Any]) -> None:
 
 async def run_ai_analyze_dispatcher(worker_id: str) -> None:
     async def claim_ai_analyze_job():
-        return await asyncio.to_thread(
-            claim_next_gallery_job,
+        return await run_db_operation(claim_next_gallery_job,
             kind=AI_ANALYZE_JOB_KIND,
             worker_id=worker_id,
             lease_expires_at=_gallery_job_lease_expires_at(),
@@ -518,8 +512,7 @@ async def run_ai_analyze_dispatcher(worker_id: str) -> None:
         await _run_ai_analyze_job(job)
 
     async def has_claimable() -> bool:
-        return await asyncio.to_thread(
-            has_claimable_gallery_job,
+        return await run_db_operation(has_claimable_gallery_job,
             kind=AI_ANALYZE_JOB_KIND,
             now=utc_now(),
         )

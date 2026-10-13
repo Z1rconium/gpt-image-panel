@@ -1,7 +1,7 @@
-import asyncio
 
 from fastapi import APIRouter, HTTPException, Query
 
+from ...runtime.blocking import run_db_operation
 from ...repositories.settings import (
     create_prompt_snippet as create_persisted_prompt_snippet,
     delete_prompt_snippet as delete_persisted_prompt_snippet,
@@ -30,20 +30,19 @@ async def list_prompt_snippets(
             status_code=422,
             detail="Prompt snippet search must use POST /api/prompt-snippets/search",
         )
-    snippets = await asyncio.to_thread(list_persisted_prompt_snippets, query or "")
+    snippets = await run_db_operation(list_persisted_prompt_snippets, query or "")
     return PromptSnippetListResponse(snippets=snippets)
 
 
 @router.post("/api/prompt-snippets/search", response_model=PromptSnippetListResponse)
 async def search_prompt_snippets(req: PromptSnippetSearchRequest):
-    snippets = await asyncio.to_thread(list_persisted_prompt_snippets, req.query)
+    snippets = await run_db_operation(list_persisted_prompt_snippets, req.query)
     return PromptSnippetListResponse(snippets=snippets)
 
 
 @router.post("/api/prompt-snippets", response_model=PromptSnippet)
 async def create_prompt_snippet(req: PromptSnippetCreateRequest):
-    return await asyncio.to_thread(
-        create_persisted_prompt_snippet,
+    return await run_db_operation(create_persisted_prompt_snippet,
         title=req.title,
         prompt=req.prompt,
         favorite=req.favorite,
@@ -55,8 +54,7 @@ async def update_prompt_snippet(
     snippet_id: str,
     req: PromptSnippetUpdateRequest,
 ):
-    snippet = await asyncio.to_thread(
-        update_persisted_prompt_snippet,
+    snippet = await run_db_operation(update_persisted_prompt_snippet,
         snippet_id,
         req.model_dump(exclude_unset=True),
     )
@@ -67,7 +65,7 @@ async def update_prompt_snippet(
 
 @router.delete("/api/prompt-snippets/{snippet_id}", response_model=MessageResponse)
 async def delete_prompt_snippet(snippet_id: str):
-    deleted = await asyncio.to_thread(delete_persisted_prompt_snippet, snippet_id)
+    deleted = await run_db_operation(delete_persisted_prompt_snippet, snippet_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Prompt snippet not found")
     return MessageResponse(status="ok", message="Deleted prompt snippet")

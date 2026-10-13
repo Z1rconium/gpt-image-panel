@@ -1,12 +1,12 @@
 """FastAPI application object and the per-process startup/shutdown sequence."""
 
-import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
 
+from ..runtime.blocking import run_db_operation
 from ..core import overall_config
 from ..core import secrets
 from ..core import security as auth
@@ -75,7 +75,7 @@ async def lifespan(app: FastAPI):
     presets.validate_configured_secret_bindings()
     presets.warn_undeclared_env_refs()
     dispatchers.start()
-    await asyncio.to_thread(job_events.reconcile_active_generate_jobs_from_storage)
+    await run_db_operation(job_events.reconcile_active_generate_jobs_from_storage)
     try:
         yield
     finally:

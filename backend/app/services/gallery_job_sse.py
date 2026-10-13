@@ -7,6 +7,7 @@ import asyncio
 import time
 
 
+from ..runtime.blocking import run_db_operation
 from .gallery_job_payloads import (
     _gallery_job_event_name,
     _gallery_job_payload,
@@ -92,15 +93,14 @@ async def _poll_gallery_job_sse(kind: str) -> None:
             if not subscribers_by_job:
                 break
 
-            current_edges = await asyncio.to_thread(
-                get_gallery_jobs_updated_at_edges,
+            current_edges = await run_db_operation(get_gallery_jobs_updated_at_edges,
                 kind,
                 set(subscribers_by_job),
             )
             metrics.increment(f"sse.poll_queries.gallery_{kind}")
 
             async def read_event(job_id: str) -> dict:
-                job = await asyncio.to_thread(get_gallery_job, kind, job_id)
+                job = await run_db_operation(get_gallery_job, kind, job_id)
                 return (
                     {
                         "event": _gallery_job_event_name(kind),
@@ -147,7 +147,7 @@ async def stream_gallery_job(
     payload_builder,
     not_found_detail: str,
 ):
-    job = await asyncio.to_thread(get_gallery_job, kind, job_id)
+    job = await run_db_operation(get_gallery_job, kind, job_id)
     if not job:
         raise NotFoundError(not_found_detail)
 
@@ -165,7 +165,7 @@ async def stream_gallery_job(
         subscribers.add(queue)
         _start_gallery_job_sse_poller(kind)
         try:
-            current_job = await asyncio.to_thread(get_gallery_job, kind, job_id)
+            current_job = await run_db_operation(get_gallery_job, kind, job_id)
             if not current_job:
                 return
             payload = payload_builder(current_job)

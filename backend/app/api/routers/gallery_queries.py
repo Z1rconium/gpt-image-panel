@@ -290,7 +290,7 @@ async def search_gallery_handler(req: GallerySearchRequest):
 
 @router.post("/api/gallery/thumbnails/status", response_model=list[GalleryThumbnailState])
 async def get_gallery_thumbnail_statuses(req: GalleryThumbnailStatusRequest):
-    entries = await asyncio.to_thread(get_gallery_entries_by_ids, req.ids)
+    entries = await run_db_operation(get_gallery_entries_by_ids, req.ids)
     return [
         GalleryThumbnailState(
             id=entry.id,
@@ -307,7 +307,7 @@ async def update_gallery_favorite(
     image_id: str,
     req: GalleryFavoriteRequest,
 ):
-    entry = await asyncio.to_thread(update_gallery_entry, image_id, {"favorite": req.favorite})
+    entry = await run_db_operation(update_gallery_entry, image_id, {"favorite": req.favorite})
     if not entry:
         raise HTTPException(status_code=404, detail="Gallery entry not found")
     return entry
@@ -318,7 +318,7 @@ async def update_gallery_favorite(
     response_model=NodeImageUploadResponse,
 )
 async def upload_gallery_item_to_nodeimage(image_id: str):
-    entry = await asyncio.to_thread(get_gallery_entry, image_id)
+    entry = await run_db_operation(get_gallery_entry, image_id)
     if not entry:
         raise HTTPException(status_code=404, detail="Gallery entry not found")
 
@@ -328,7 +328,7 @@ async def upload_gallery_item_to_nodeimage(image_id: str):
 
     try:
         effective = resolve_nodeimage_settings(
-            await asyncio.to_thread(load_nodeimage_settings)
+            await run_db_operation(load_nodeimage_settings)
         )
         result = await upload_image_file(path, path.name, effective)
     except NodeImageConfigurationError as exc:
@@ -347,7 +347,7 @@ async def upload_gallery_item_to_nodeimage(image_id: str):
 
 @router.get("/api/gallery/{image_id}", response_model=GalleryEntry)
 async def get_gallery_item(image_id: str):
-    entry = await asyncio.to_thread(get_gallery_entry, image_id)
+    entry = await run_db_operation(get_gallery_entry, image_id)
     if not entry:
         raise HTTPException(status_code=404, detail="Gallery entry not found")
     return entry

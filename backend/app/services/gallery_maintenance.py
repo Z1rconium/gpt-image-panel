@@ -3,6 +3,7 @@ import logging
 import uuid
 from pathlib import Path
 
+from ..runtime.blocking import run_db_operation
 from ..runtime.state import state, utc_lease_expires_at
 from ..core import settings as config
 from ..core.observability import metrics
@@ -88,8 +89,7 @@ async def run_thumbnail_dispatcher(worker_id: str) -> None:
     logger.info("Thumbnail dispatcher started: worker_id=%s", worker_id)
     async def claim_thumbnail_job():
         owner = f"thumbnail:{worker_id}:{uuid.uuid4()}"
-        job = await asyncio.to_thread(
-            claim_next_thumbnail_job,
+        job = await run_db_operation(claim_next_thumbnail_job,
             owner=owner,
             lease_expires_at=_thumbnail_job_lease_expires_at(),
             now=utc_now(),
@@ -106,21 +106,19 @@ async def run_thumbnail_dispatcher(worker_id: str) -> None:
             filename,
         )
         if thumbnail_filename:
-            await asyncio.to_thread(
-                complete_thumbnail_job,
+            await run_db_operation(complete_thumbnail_job,
                 filename,
                 owner=owner,
             )
         else:
-            await asyncio.to_thread(
-                fail_thumbnail_job,
+            await run_db_operation(fail_thumbnail_job,
                 filename,
                 owner=owner,
                 error="thumbnail generation returned no file",
             )
 
     async def has_claimable() -> bool:
-        return await asyncio.to_thread(has_claimable_thumbnail_job, now=utc_now())
+        return await run_db_operation(has_claimable_thumbnail_job, now=utc_now())
 
     await run_claim_loop(
         claim_fn=claim_thumbnail_job,
@@ -194,7 +192,7 @@ def _r2_sync_interval_hours(r2_settings: dict | None) -> int:
 
 async def _scheduled_gallery_r2_sync_delay_seconds() -> int:
     try:
-        r2_settings = await asyncio.to_thread(load_r2_backup_settings)
+        r2_settings = await run_db_operation(load_r2_backup_settings)
     except Exception:
         logger.warning("Failed to load R2 settings for scheduled sync", exc_info=True)
         return SCHEDULED_R2_SYNC_DISABLED_POLL_SECONDS
@@ -207,14 +205,13 @@ async def _scheduled_gallery_r2_sync_delay_seconds() -> int:
 
 
 async def _run_scheduled_gallery_r2_sync_once() -> dict[str, object]:
-    r2_settings = await asyncio.to_thread(load_r2_backup_settings)
+    r2_settings = await run_db_operation(load_r2_backup_settings)
     interval_hours = _r2_sync_interval_hours(r2_settings)
     if not r2_settings.get("enabled") or interval_hours <= 0:
         return {"started": False, "reason": "disabled"}
 
     try:
-        effective = await asyncio.to_thread(
-            r2_config.resolve_r2_backup_settings,
+        effective = await run_db_operation(r2_config.resolve_r2_backup_settings,
             r2_settings,
             require_enabled=True,
         )
@@ -222,19 +219,17 @@ async def _run_scheduled_gallery_r2_sync_once() -> dict[str, object]:
         logger.info("Skipping scheduled R2 gallery sync: %s", e)
         return {"started": False, "reason": "invalid_config"}
 
-    gallery_count = await asyncio.to_thread(get_gallery_count)
+    gallery_count = await run_db_operation(get_gallery_count)
     if gallery_count <= 0:
         return {"started": False, "reason": "empty_gallery"}
-    total_count = await asyncio.to_thread(
-        count_gallery_r2_sync_rows,
+    total_count = await run_db_operation(count_gallery_r2_sync_rows,
         key_prefix=effective.key_prefix,
         full_reconcile=False,
     )
     if total_count <= 0:
         return {"started": False, "reason": "no_changes"}
 
-    job = await asyncio.to_thread(
-        _reserve_gallery_sync_job,
+    job = await run_db_operation(_reserve_gallery_sync_job,
         total_count,
         {"full_reconcile": False, "dry_run": False},
     )
@@ -250,8 +245,7 @@ async def run_gallery_r2_scheduled_sync(worker_id: str) -> None:
     error_backoff_seconds = 0.0
     while True:
         try:
-            acquired = await asyncio.to_thread(
-                acquire_background_lease,
+            acquired = await run_db_operation(acquire_background_lease,
                 name=lease_name,
                 owner=worker_id,
                 lease_expires_at=_background_task_lease_expires_at(),
@@ -272,8 +266,7 @@ async def run_gallery_r2_scheduled_sync(worker_id: str) -> None:
                     continue
                 await _run_scheduled_gallery_r2_sync_once()
             finally:
-                await asyncio.to_thread(
-                    release_background_lease,
+                await run_db_operation(release_background_lease,
                     name=lease_name,
                     owner=worker_id,
                 )
@@ -300,8 +293,7 @@ async def run_gallery_file_gc(
     while True:
         try:
             await _wait_for_gallery_file_gc_wakeup(delay)
-            acquired = await asyncio.to_thread(
-                acquire_background_lease,
+            acquired = await run_db_operation(acquire_background_lease,
                 name=lease_name,
                 owner=worker_id,
                 lease_expires_at=_background_task_lease_expires_at(),
@@ -310,12 +302,11 @@ async def run_gallery_file_gc(
                 delay = GALLERY_FILE_GC_INTERVAL_SECONDS
                 continue
             try:
-                result = await asyncio.to_thread(cleanup_orphan_gallery_files)
+                result = await run_db_operation(cleanup_orphan_gallery_files)
                 if result.get("removed_images") or result.get("removed_thumbnails") or result.get("failed"):
                     metrics.increment("gallery.file_gc_runs")
             finally:
-                await asyncio.to_thread(
-                    release_background_lease,
+                await run_db_operation(release_background_lease,
                     name=lease_name,
                     owner=worker_id,
                 )
@@ -333,8 +324,7 @@ async def gc_gallery_export_jobs(worker_id: str) -> None:
     error_backoff_seconds = 0.0
     while True:
         try:
-            acquired = await asyncio.to_thread(
-                acquire_background_lease,
+            acquired = await run_db_operation(acquire_background_lease,
                 name=lease_name,
                 owner=worker_id,
                 lease_expires_at=_background_task_lease_expires_at(),
@@ -352,39 +342,32 @@ async def gc_gallery_export_jobs(worker_id: str) -> None:
                 if not still_leader:
                     error_backoff_seconds = 0.0
                     continue
-                stale_exports = await asyncio.to_thread(
-                    cleanup_stale_gallery_jobs,
+                stale_exports = await run_db_operation(cleanup_stale_gallery_jobs,
                     "export",
                     EXPORT_JOB_TTL_SECONDS,
                 )
-                stale_syncs = await asyncio.to_thread(
-                    cleanup_stale_gallery_jobs,
+                stale_syncs = await run_db_operation(cleanup_stale_gallery_jobs,
                     "sync",
                     SYNC_JOB_TTL_SECONDS,
                 )
-                stale_imports = await asyncio.to_thread(
-                    cleanup_stale_gallery_jobs,
+                stale_imports = await run_db_operation(cleanup_stale_gallery_jobs,
                     "import",
                     IMPORT_JOB_TTL_SECONDS,
                 )
-                stale_direct_exports = await asyncio.to_thread(
-                    cleanup_stale_gallery_jobs,
+                stale_direct_exports = await run_db_operation(cleanup_stale_gallery_jobs,
                     "export_direct",
                     EXPORT_JOB_TTL_SECONDS,
                 )
-                stale_ai_analyze_jobs = await asyncio.to_thread(
-                    cleanup_stale_gallery_jobs,
+                stale_ai_analyze_jobs = await run_db_operation(cleanup_stale_gallery_jobs,
                     AI_ANALYZE_JOB_KIND,
                     AI_ANALYZE_JOB_TTL_SECONDS,
                 )
-                stale_nodeimage_upload_jobs = await asyncio.to_thread(
-                    cleanup_stale_gallery_jobs,
+                stale_nodeimage_upload_jobs = await run_db_operation(cleanup_stale_gallery_jobs,
                     NODEIMAGE_UPLOAD_JOB_KIND,
                     NODEIMAGE_UPLOAD_JOB_TTL_SECONDS,
                     NODEIMAGE_UPLOAD_TERMINAL_STATUSES,
                 )
-                expired_direct_slots = await asyncio.to_thread(
-                    cleanup_expired_gallery_jobs,
+                expired_direct_slots = await run_db_operation(cleanup_expired_gallery_jobs,
                     "export_direct",
                 )
                 for job in stale_exports:
@@ -424,14 +407,13 @@ async def gc_gallery_export_jobs(worker_id: str) -> None:
                     )
                 exports_dir = Path(config.DATA_DIR) / "exports"
                 if exports_dir.exists():
-                    known_ids = await asyncio.to_thread(list_gallery_job_ids_with_files, "export")
+                    known_ids = await run_db_operation(list_gallery_job_ids_with_files, "export")
                     for zip_path in exports_dir.glob("*.zip"):
                         if zip_path.stem not in known_ids:
                             zip_path.unlink(missing_ok=True)
                             logger.info("GC removed orphan export file: %s", zip_path.name)
             finally:
-                await asyncio.to_thread(
-                    release_background_lease,
+                await run_db_operation(release_background_lease,
                     name=lease_name,
                     owner=worker_id,
                 )

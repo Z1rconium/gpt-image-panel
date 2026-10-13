@@ -1,6 +1,6 @@
-import asyncio
 import logging
 
+from ..runtime.blocking import run_db_operation
 from .gallery_export_jobs import (
     _run_gallery_export_job,
 )
@@ -49,8 +49,7 @@ async def _run_gallery_job_dispatcher(kind: str, worker_id: str, running_limit: 
     runner = runner_by_kind[kind]
 
     async def claim_gallery_job():
-        return await asyncio.to_thread(
-            claim_next_gallery_job,
+        return await run_db_operation(claim_next_gallery_job,
             kind=kind,
             worker_id=worker_id,
             lease_expires_at=_gallery_job_lease_expires_at(),
@@ -63,8 +62,7 @@ async def _run_gallery_job_dispatcher(kind: str, worker_id: str, running_limit: 
         await runner(job)
 
     async def has_claimable_gallery() -> bool:
-        return await asyncio.to_thread(
-            has_claimable_gallery_job,
+        return await run_db_operation(has_claimable_gallery_job,
             kind=kind,
             now=utc_now(),
         )

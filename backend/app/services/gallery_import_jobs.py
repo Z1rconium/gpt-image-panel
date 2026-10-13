@@ -1,5 +1,6 @@
 """Gallery import jobs: ingesting an uploaded archive and its metadata."""
 
+from ..runtime.blocking import run_db_operation
 from .gallery_job_shared import (
     _gallery_job_lease_expires_at,
     _gallery_job_progress_throttler,
@@ -65,8 +66,7 @@ async def _create_reserved_gallery_import_job(
     total_count: int,
     payload: dict | None = None,
 ) -> dict:
-    job = await asyncio.to_thread(
-        reserve_gallery_job_capacity,
+    job = await run_db_operation(reserve_gallery_job_capacity,
         job=_build_gallery_import_job(zip_path, total_count, payload),
         counted_kinds=("import",),
         max_active=MAX_ACTIVE_IMPORT_JOBS,
@@ -136,7 +136,7 @@ async def _run_gallery_import_job(job: dict) -> None:
                 iter_import_gallery_entries(zip_path, progress=progress)
             )
 
-        imported_count = await asyncio.to_thread(run_import)
+        imported_count = await run_db_operation(run_import)
         if imported_count == 0:
             raise ValueError("No importable images found")
 
@@ -196,4 +196,4 @@ async def _run_gallery_import_job(job: dict) -> None:
     finally:
         _unlink_trusted_gallery_job_path(job.get("path"), kind="import", job_id=job_id)
         if reservation_id:
-            await asyncio.to_thread(release_import_upload_reservation, reservation_id)
+            await run_db_operation(release_import_upload_reservation, reservation_id)

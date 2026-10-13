@@ -14,6 +14,7 @@ from fastapi import APIRouter, Body, File, HTTPException, Query, Request, Upload
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from starlette.background import BackgroundTask
 
+from ...runtime.blocking import run_db_operation
 from ...services.gallery_archive_export import (
     iter_gallery_zip_chunks,
     prepare_gallery_zip_chunks,
@@ -151,15 +152,15 @@ async def _resolve_nodeimage_batch_ids(
 ) -> tuple[list[str], list[GalleryEntry], int, list[str]]:
     if req.selection_token:
         filters = await _gallery_filters_from_selection_token(req.selection_token)
-        requested_count = await asyncio.to_thread(get_gallery_count, filters)
+        requested_count = await run_db_operation(get_gallery_count, filters)
         if requested_count > NODEIMAGE_BATCH_MAX:
             _raise_nodeimage_batch_too_large(requested_count)
         if requested_count <= 0:
             return [], [], 0, []
-        ids = await asyncio.to_thread(get_gallery_ids, filters)
+        ids = await run_db_operation(get_gallery_ids, filters)
         if len(ids) > NODEIMAGE_BATCH_MAX:
             _raise_nodeimage_batch_too_large(len(ids))
-        entries = await asyncio.to_thread(get_gallery_entries_by_ids, ids)
+        entries = await run_db_operation(get_gallery_entries_by_ids, ids)
         missing_ids = _missing_gallery_ids(ids, entries)
         return ids, entries, len(ids), missing_ids
 
@@ -171,15 +172,14 @@ async def _resolve_nodeimage_batch_ids(
 @router.post("/api/gallery/batch/selection-tokens", response_model=GallerySelectionTokenResponse, status_code=201)
 async def create_gallery_batch_selection_token(req: GallerySelectionTokenRequest):
     filters = build_gallery_filters_from_selection_request(req)
-    count = await asyncio.to_thread(get_gallery_count, filters)
+    count = await run_db_operation(get_gallery_count, filters)
     if count <= 0:
         raise HTTPException(status_code=404, detail="No images match selection")
 
     await _cleanup_gallery_selection_tokens()
     token = f"sel-{os.urandom(16).hex()}"
     expires_at = _gallery_selection_token_expires_at()
-    await asyncio.to_thread(
-        create_gallery_job,
+    await run_db_operation(create_gallery_job,
         job_id=token,
         kind=GALLERY_SELECTION_TOKEN_KIND,
         status="success",
@@ -201,15 +201,14 @@ async def create_gallery_batch_selection_token(req: GallerySelectionTokenRequest
 async def delete_gallery_batch(req: GalleryBatchRequest):
     if req.selection_token:
         filters = await _gallery_filters_from_selection_token(req.selection_token)
-        deleted_entries, deleted_files = await asyncio.to_thread(
-            delete_gallery_images_by_filters,
+        deleted_entries, deleted_files = await run_db_operation(delete_gallery_images_by_filters,
             filters,
         )
         requested_count = deleted_entries
         missing_ids: list[str] = []
     else:
         ids, entries, requested_count, missing_ids = await _resolve_gallery_batch_ids(req)
-        deleted_entries, deleted_files = await asyncio.to_thread(delete_gallery_images, ids)
+        deleted_entries, deleted_files = await run_db_operation(delete_gallery_images, ids)
     if deleted_entries == 0:
         raise HTTPException(status_code=404, detail="Gallery entries not found")
     kick_gallery_file_gc()
@@ -228,8 +227,7 @@ async def delete_gallery_batch(req: GalleryBatchRequest):
 async def update_gallery_batch_favorite(req: GalleryBatchFavoriteRequest):
     if req.selection_token:
         filters = await _gallery_filters_from_selection_token(req.selection_token)
-        updated_entries = await asyncio.to_thread(
-            update_gallery_entries_favorite_by_filters,
+        updated_entries = await run_db_operation(update_gallery_entries_favorite_by_filters,
             filters,
             req.favorite,
         )
@@ -237,7 +235,7 @@ async def update_gallery_batch_favorite(req: GalleryBatchFavoriteRequest):
         missing_ids: list[str] = []
     else:
         ids, entries, requested_count, missing_ids = await _resolve_gallery_batch_ids(req)
-        updated_entries = await asyncio.to_thread(update_gallery_entries_favorite, ids, req.favorite)
+        updated_entries = await run_db_operation(update_gallery_entries_favorite, ids, req.favorite)
     if updated_entries == 0:
         raise HTTPException(status_code=404, detail="Gallery entries not found")
     return GalleryBatchResponse(
@@ -254,7 +252,7 @@ async def update_gallery_batch_favorite(req: GalleryBatchFavoriteRequest):
 async def download_gallery_batch(req: GalleryBatchRequest):
     if req.selection_token:
         filters = await _gallery_filters_from_selection_token(req.selection_token)
-        requested_count = await asyncio.to_thread(get_gallery_count, filters)
+        requested_count = await run_db_operation(get_gallery_count, filters)
         if requested_count <= 0:
             raise HTTPException(status_code=404, detail="Gallery entries not found")
         body = await _gallery_zip_response(
@@ -311,7 +309,7 @@ async def upload_gallery_batch_to_nodeimage(req: GalleryBatchRequest):
 
     try:
         resolve_nodeimage_settings(
-            await asyncio.to_thread(load_nodeimage_settings)
+            await run_db_operation(load_nodeimage_settings)
         )
     except NodeImageConfigurationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -327,7 +325,7 @@ async def upload_gallery_batch_to_nodeimage(req: GalleryBatchRequest):
 
 @router.delete("/api/gallery", response_model=MessageResponse)
 async def delete_all_gallery_handler():
-    total, deleted_count = await asyncio.to_thread(delete_all_gallery_images)
+    total, deleted_count = await run_db_operation(delete_all_gallery_images)
     kick_gallery_file_gc()
     return MessageResponse(
         status="ok",
@@ -337,7 +335,7 @@ async def delete_all_gallery_handler():
 
 @router.delete("/api/gallery/{image_id}", response_model=MessageResponse)
 async def delete_gallery_item(image_id: str):
-    deleted_entry, deleted_file_count = await asyncio.to_thread(delete_gallery_image, image_id)
+    deleted_entry, deleted_file_count = await run_db_operation(delete_gallery_image, image_id)
 
     if not deleted_entry:
         raise HTTPException(status_code=404, detail="Gallery entry not found")

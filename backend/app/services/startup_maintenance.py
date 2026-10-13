@@ -19,6 +19,7 @@ from ..repositories.gallery.mutations import (
 )
 from ..repositories.image_jobs import list_persisted_mask_job_ids
 from ..repositories.thumbnail_jobs import cleanup_auxiliary_state
+from ..runtime.blocking import run_db_operation
 from ..runtime.state import (
     STARTUP_MAINTENANCE_COMPLETED_TTL_SECONDS,
     STARTUP_MAINTENANCE_LEASE_SECONDS,
@@ -109,7 +110,7 @@ def cleanup_orphan_mask_files() -> None:
 async def _backfill_gallery_bytes(owner: str) -> None:
     await asyncio.sleep(1.0)
     try:
-        updated = await asyncio.to_thread(backfill_missing_gallery_bytes)
+        updated = await run_db_operation(backfill_missing_gallery_bytes)
         if updated:
             logger.info(
                 "Backfilled byte sizes for %s legacy gallery entry record(s)",
@@ -120,8 +121,7 @@ async def _backfill_gallery_bytes(owner: str) -> None:
     except Exception:
         logger.warning("Failed to backfill legacy gallery byte sizes", exc_info=True)
     finally:
-        await asyncio.to_thread(
-            complete_background_lease,
+        await run_db_operation(complete_background_lease,
             name="startup_maintenance",
             owner=owner,
         )
@@ -135,8 +135,7 @@ async def run() -> asyncio.Task | None:
     for the workers that are already serving traffic.
     """
     owner = f"startup-maintenance:{state.worker_id}"
-    acquired = await asyncio.to_thread(
-        acquire_background_lease,
+    acquired = await run_db_operation(acquire_background_lease,
         name="startup_maintenance",
         owner=owner,
         lease_expires_at=utc_lease_expires_at(STARTUP_MAINTENANCE_LEASE_SECONDS),
@@ -148,17 +147,17 @@ async def run() -> asyncio.Task | None:
         return None
 
     try:
-        await asyncio.to_thread(cleanup_stale_edit_source_files)
-        await asyncio.to_thread(cleanup_stale_gallery_export_files)
-        await asyncio.to_thread(cleanup_orphan_mask_files)
+        await run_db_operation(cleanup_stale_edit_source_files)
+        await run_db_operation(cleanup_stale_gallery_export_files)
+        await run_db_operation(cleanup_orphan_mask_files)
         await asyncio.to_thread(verify_storage_writable)
     except Exception:
-        await asyncio.to_thread(release_background_lease, name="startup_maintenance", owner=owner)
+        await run_db_operation(release_background_lease, name="startup_maintenance", owner=owner)
         raise
 
     try:
-        removed_gallery_entries = await asyncio.to_thread(sync_gallery_with_image_files)
-        cleaned_auxiliary = await asyncio.to_thread(cleanup_auxiliary_state)
+        removed_gallery_entries = await run_db_operation(sync_gallery_with_image_files)
+        cleaned_auxiliary = await run_db_operation(cleanup_auxiliary_state)
         if removed_gallery_entries:
             logger.info(
                 "Removed %s stale gallery entries for missing image files",
@@ -167,7 +166,7 @@ async def run() -> asyncio.Task | None:
         if any(cleaned_auxiliary.values()):
             logger.info("Cleaned stale auxiliary rows: %s", cleaned_auxiliary)
     except Exception:
-        await asyncio.to_thread(release_background_lease, name="startup_maintenance", owner=owner)
+        await run_db_operation(release_background_lease, name="startup_maintenance", owner=owner)
         raise
 
     return asyncio.create_task(_backfill_gallery_bytes(owner))

@@ -1,8 +1,8 @@
-import asyncio
 import logging
 
 from fastapi import APIRouter, Body, HTTPException
 
+from ...runtime.blocking import run_db_operation
 from ...core.errors import DomainError
 from ...services.presets import (
     get_prompt_optimizer_settings,
@@ -72,7 +72,7 @@ def _system_prompt_response(system_prompt: str) -> PromptOptimizerSystemPromptRe
     response_model=PromptOptimizerSystemPromptResponse,
 )
 async def get_prompt_optimizer_system_prompt():
-    system_prompt = await asyncio.to_thread(load_prompt_optimizer_system_prompt)
+    system_prompt = await run_db_operation(load_prompt_optimizer_system_prompt)
     return _system_prompt_response(system_prompt)
 
 
@@ -84,8 +84,7 @@ async def update_prompt_optimizer_system_prompt(
     req: PromptOptimizerSystemPromptRequest,
 ):
     try:
-        system_prompt = await asyncio.to_thread(
-            save_prompt_optimizer_system_prompt,
+        system_prompt = await run_db_operation(save_prompt_optimizer_system_prompt,
             req.system_prompt,
         )
     except ValueError as e:
@@ -97,8 +96,7 @@ async def update_prompt_optimizer_system_prompt(
 async def optimize_prompt_endpoint(req: PromptOptimizeRequest):
     settings = get_prompt_optimizer_settings()
     try:
-        api_url, model, timeout_seconds, api_key = await asyncio.to_thread(
-            _resolve_prompt_optimizer_runtime,
+        api_url, model, timeout_seconds, api_key = await run_db_operation(_resolve_prompt_optimizer_runtime,
             settings
         )
     except HTTPException as e:
@@ -116,7 +114,7 @@ async def optimize_prompt_endpoint(req: PromptOptimizeRequest):
             image_model=req.model,
             size=req.size,
             quality=req.quality,
-            system_prompt=await asyncio.to_thread(load_prompt_optimizer_system_prompt),
+            system_prompt=await run_db_operation(load_prompt_optimizer_system_prompt),
             timeout_seconds=timeout_seconds,
         )
     except OptimizerTimeoutError as e:
@@ -142,8 +140,7 @@ async def prompt_optimizer_health(
     normalized = normalize_prompt_optimizer_settings(settings)
     model = str(normalized.get("model", "")).strip() or "gpt-4o-mini"
     try:
-        api_url, model, timeout_seconds, api_key = await asyncio.to_thread(
-            _resolve_prompt_optimizer_runtime,
+        api_url, model, timeout_seconds, api_key = await run_db_operation(_resolve_prompt_optimizer_runtime,
             settings,
             include_credentials=bool(req and req.use_credentials),
         )

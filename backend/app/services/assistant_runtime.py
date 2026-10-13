@@ -235,8 +235,7 @@ async def _acquire_assistant_slot(timeout_seconds: int) -> tuple[str, str]:
 
 async def _release_assistant_slot(slot_name: str, owner: str) -> None:
     try:
-        await asyncio.to_thread(
-            release_background_slot,
+        await run_db_operation(release_background_slot,
             name=slot_name,
             owner=owner,
             now=utc_now(),
@@ -415,7 +414,7 @@ def _resolve_runtime(
 
 
 async def _resolve_runtime_async(*, vision: bool = False, settings: dict | None = None) -> AssistantRuntime:
-    return await asyncio.to_thread(_resolve_runtime, vision=vision, settings=settings)
+    return await run_db_operation(_resolve_runtime, vision=vision, settings=settings)
 
 
 @dataclass(frozen=True)
@@ -501,7 +500,7 @@ def resolve_agent_runtime(settings: dict | None = None, snapshot: dict | None = 
 async def resolve_agent_runtime_async(
     settings: dict | None = None, snapshot: dict | None = None
 ) -> AgentRuntime:
-    return await asyncio.to_thread(resolve_agent_runtime, settings, snapshot)
+    return await run_db_operation(resolve_agent_runtime, settings, snapshot)
 
 
 assistant_request_limit = _assistant_request_limit

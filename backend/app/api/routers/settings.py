@@ -3,6 +3,7 @@ import uuid
 
 from fastapi import APIRouter, Body, HTTPException
 
+from ...runtime.blocking import run_db_operation
 from ...runtime.state import state
 from ...services.preset_package import apply_preset_import, build_preset_export, build_preset_import_preview
 from ...services.presets import (
@@ -86,34 +87,48 @@ from backend.app.integrations.upstream import transport as transport_client
 router = APIRouter()
 
 
-def _validate_preset_secret_binding(preset: dict) -> None:
-    secret_id = str(preset.get("api_key") or "").strip()
+def _validate_secret_binding_or_422(
+    secret_id: str,
+    *,
+    purpose: secrets.SecretPurpose,
+    target_url: str,
+    host_allowlist: str,
+) -> None:
+    """Validate a registry secret's binding, raising HTTP 422 on a registry error.
+
+    Empty values and non-registry references are ignored: only predeclared
+    secret_ids carry a purpose/origin binding that can fail validation.
+    """
+    secret_id = str(secret_id or "").strip()
     if not secret_id or secret_id not in secrets.configured_secret_ids():
         return
     try:
         secrets.validate_secret_binding(
             secret_id,
-            purpose="upstream_api",
-            target_url=str(preset.get("api_url") or ""),
-            host_allowlist=config.UPSTREAM_HOST_ALLOWLIST,
+            purpose=purpose,
+            target_url=target_url,
+            host_allowlist=host_allowlist,
         )
     except secrets.SecretRegistryError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+def _validate_preset_secret_binding(preset: dict) -> None:
+    _validate_secret_binding_or_422(
+        preset.get("api_key"),
+        purpose="upstream_api",
+        target_url=str(preset.get("api_url") or ""),
+        host_allowlist=config.UPSTREAM_HOST_ALLOWLIST,
+    )
 
 
 def _validate_optimizer_secret_binding(settings: dict) -> None:
-    secret_id = str(settings.get("api_key") or "").strip()
-    if not secret_id or secret_id not in secrets.configured_secret_ids():
-        return
-    try:
-        secrets.validate_secret_binding(
-            secret_id,
-            purpose="prompt_optimizer",
-            target_url=str(settings.get("api_url") or ""),
-            host_allowlist=config.PROMPT_OPTIMIZER_HOST_ALLOWLIST,
-        )
-    except secrets.SecretRegistryError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    _validate_secret_binding_or_422(
+        settings.get("api_key"),
+        purpose="prompt_optimizer",
+        target_url=str(settings.get("api_url") or ""),
+        host_allowlist=config.PROMPT_OPTIMIZER_HOST_ALLOWLIST,
+    )
 
 
 def _validate_r2_secret_bindings(settings: dict) -> None:
@@ -122,33 +137,21 @@ def _validate_r2_secret_bindings(settings: dict) -> None:
         ("access_key_id", "r2_access_key_id"),
         ("secret_access_key", "r2_secret_access_key"),
     ):
-        secret_id = str(settings.get(field) or "").strip()
-        if not secret_id or secret_id not in secrets.configured_secret_ids():
-            continue
-        try:
-            secrets.validate_secret_binding(
-                secret_id,
-                purpose=purpose,
-                target_url=endpoint_url,
-                host_allowlist=config.R2_ENDPOINT_HOST_ALLOWLIST,
-            )
-        except secrets.SecretRegistryError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        _validate_secret_binding_or_422(
+            settings.get(field),
+            purpose=purpose,
+            target_url=endpoint_url,
+            host_allowlist=config.R2_ENDPOINT_HOST_ALLOWLIST,
+        )
 
 
 def _validate_nodeimage_secret_binding(settings: dict) -> None:
-    secret_id = str(settings.get("api_key") or "").strip()
-    if not secret_id or secret_id not in secrets.configured_secret_ids():
-        return
-    try:
-        secrets.validate_secret_binding(
-            secret_id,
-            purpose="nodeimage_api_key",
-            target_url="https://api.nodeimage.com",
-            host_allowlist="api.nodeimage.com",
-        )
-    except secrets.SecretRegistryError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    _validate_secret_binding_or_422(
+        settings.get("api_key"),
+        purpose="nodeimage_api_key",
+        target_url="https://api.nodeimage.com",
+        host_allowlist="api.nodeimage.com",
+    )
 
 
 def _validate_webhook_security() -> None:
@@ -214,13 +217,13 @@ def _serialize_overall_config(
 
 @router.get("/api/settings/overall-config", response_model=OverallConfigResponse)
 async def get_overall_config():
-    rows = await asyncio.to_thread(list_overall_config_values)
+    rows = await run_db_operation(list_overall_config_values)
     return _serialize_overall_config(rows)
 
 
 @router.put("/api/settings/overall-config", response_model=OverallConfigResponse)
 async def update_overall_config(req: OverallConfigUpdateRequest):
-    current_rows = await asyncio.to_thread(list_overall_config_values)
+    current_rows = await run_db_operation(list_overall_config_values)
     updates: dict[str, str | None] = {}
     seen_names: set[str] = set()
     for item in req.updates:
@@ -272,7 +275,7 @@ async def update_overall_config(req: OverallConfigUpdateRequest):
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
 
-    rows = await asyncio.to_thread(save_overall_config_overrides, updates)
+    rows = await run_db_operation(save_overall_config_overrides, updates)
     overall_config.apply_rows_to_config(rows)
     restart_required_names = [
         name
@@ -287,7 +290,7 @@ async def update_overall_config(req: OverallConfigUpdateRequest):
 
 @router.post("/api/settings", response_model=SettingsResponse)
 async def update_settings(req: SettingsRequest):
-    await asyncio.to_thread(load_api_settings)
+    await run_db_operation(load_api_settings)
     preset = (
         get_preset_by_id(req.active_preset_id)
         if req.active_preset_id
@@ -338,7 +341,7 @@ async def update_settings(req: SettingsRequest):
             _validate_webhook_security()
         _validate_preset_secret_binding(preset)
         apply_api_preset(preset)
-        await asyncio.to_thread(persist_api_settings)
+        await run_db_operation(persist_api_settings)
     finally:
         end_api_settings_write()
     if req.prompt_optimizer is not None:
@@ -349,12 +352,12 @@ async def update_settings(req: SettingsRequest):
         current_optimizer = get_prompt_optimizer_settings()
         updated_optimizer = apply_prompt_optimizer_settings(current_optimizer, req.prompt_optimizer)
         _validate_optimizer_secret_binding(updated_optimizer)
-        await asyncio.to_thread(save_prompt_optimizer_settings, updated_optimizer)
+        await run_db_operation(save_prompt_optimizer_settings, updated_optimizer)
     if req.ai_assistant is not None:
         from ...services.presets import get_ai_assistant_settings
         current_assistant = get_ai_assistant_settings()
         updated_assistant = apply_ai_assistant_settings(current_assistant, req.ai_assistant)
-        await asyncio.to_thread(save_ai_assistant_settings, updated_assistant)
+        await run_db_operation(save_ai_assistant_settings, updated_assistant)
     if req.r2_backup is not None:
         from ...services.presets import get_r2_backup_settings
         current_r2 = get_r2_backup_settings()
@@ -368,7 +371,7 @@ async def update_settings(req: SettingsRequest):
             except ValueError as e:
                 raise HTTPException(status_code=422, detail=str(e)) from e
         _validate_r2_secret_bindings(updated_r2)
-        await asyncio.to_thread(save_r2_backup_settings, updated_r2)
+        await run_db_operation(save_r2_backup_settings, updated_r2)
     if req.nodeimage is not None:
         current_nodeimage = get_nodeimage_settings()
         updated_nodeimage = apply_nodeimage_settings(
@@ -376,21 +379,21 @@ async def update_settings(req: SettingsRequest):
             req.nodeimage,
         )
         _validate_nodeimage_secret_binding(updated_nodeimage)
-        await asyncio.to_thread(save_nodeimage_settings, updated_nodeimage)
-    return await asyncio.to_thread(build_settings_response)
+        await run_db_operation(save_nodeimage_settings, updated_nodeimage)
+    return await run_db_operation(build_settings_response)
 
 
 @router.get("/api/settings", response_model=SettingsResponse)
 async def get_settings():
-    await asyncio.to_thread(load_api_settings)
-    return await asyncio.to_thread(build_settings_response)
+    await run_db_operation(load_api_settings)
+    return await run_db_operation(build_settings_response)
 
 
 @router.post("/api/settings/r2/health", response_model=R2HealthResponse)
 async def check_r2_settings_health(req: R2BackupSettingsRequest):
     from ...services.presets import get_r2_backup_settings
 
-    current = await asyncio.to_thread(get_r2_backup_settings)
+    current = await run_db_operation(get_r2_backup_settings)
     draft = apply_r2_backup_settings(current, req)
     if draft.get("endpoint_url"):
         try:
@@ -426,7 +429,7 @@ async def check_r2_settings_health(req: R2BackupSettingsRequest):
     response_model=ProviderMappingPromptResponse,
 )
 async def get_settings_provider_mapping_prompt():
-    prompt = await asyncio.to_thread(build_mapping_prompt)
+    prompt = await run_db_operation(build_mapping_prompt)
     return ProviderMappingPromptResponse(prompt=prompt)
 
 
@@ -435,8 +438,7 @@ async def get_settings_provider_mapping_prompt():
     response_model=ProviderMappingValidateResponse,
 )
 async def validate_settings_provider_mapping(req: ProviderMappingValidateRequest):
-    return await asyncio.to_thread(
-        validate_provider_mapping_request,
+    return await run_db_operation(validate_provider_mapping_request,
         req.provider_config,
         req.sample_submit,
         req.sample_poll,
@@ -446,7 +448,7 @@ async def validate_settings_provider_mapping(req: ProviderMappingValidateRequest
 
 @router.post("/api/settings/presets", response_model=SettingsResponse)
 async def create_settings_preset(req: PresetCreateRequest):
-    await asyncio.to_thread(load_api_settings)
+    await run_db_operation(load_api_settings)
     source = get_preset_by_id(req.source_preset_id) if req.source_preset_id else None
     source = source or get_active_preset()
     presets = get_api_presets()
@@ -499,47 +501,46 @@ async def create_settings_preset(req: PresetCreateRequest):
     try:
         presets.append(preset)
         apply_api_preset(preset)
-        await asyncio.to_thread(persist_api_settings)
+        await run_db_operation(persist_api_settings)
     finally:
         end_api_settings_write()
-    return await asyncio.to_thread(build_settings_response)
+    return await run_db_operation(build_settings_response)
 
 
 @router.post("/api/settings/presets/export", response_model=PresetExportPackage)
 async def export_settings_preset(req: PresetExportRequest):
-    await asyncio.to_thread(load_api_settings)
-    return await asyncio.to_thread(build_preset_export, req.preset_id)
+    await run_db_operation(load_api_settings)
+    return await run_db_operation(build_preset_export, req.preset_id)
 
 
 @router.post(
     "/api/settings/presets/import/preview", response_model=PresetImportPreviewResponse
 )
 async def preview_settings_presets_import(req: PresetImportPreviewRequest):
-    await asyncio.to_thread(load_api_settings)
-    return await asyncio.to_thread(build_preset_import_preview, req.package)
+    await run_db_operation(load_api_settings)
+    return await run_db_operation(build_preset_import_preview, req.package)
 
 
 @router.post("/api/settings/presets/import", response_model=SettingsResponse)
 async def import_settings_presets(req: PresetImportApplyRequest):
-    await asyncio.to_thread(load_api_settings)
-    await asyncio.to_thread(
-        apply_preset_import,
+    await run_db_operation(load_api_settings)
+    await run_db_operation(apply_preset_import,
         req.package,
         [item.model_dump(mode="json") for item in req.items],
     )
-    return await asyncio.to_thread(build_settings_response)
+    return await run_db_operation(build_settings_response)
 
 
 @router.put("/api/settings/presets/order", response_model=SettingsResponse)
 async def update_settings_preset_order(req: PresetOrderRequest):
-    await asyncio.to_thread(load_api_settings)
-    await asyncio.to_thread(reorder_api_presets, req.preset_ids)
-    return await asyncio.to_thread(build_settings_response)
+    await run_db_operation(load_api_settings)
+    await run_db_operation(reorder_api_presets, req.preset_ids)
+    return await run_db_operation(build_settings_response)
 
 
 @router.post("/api/settings/presets/{preset_id}/activate", response_model=SettingsResponse)
 async def activate_settings_preset(preset_id: str):
-    await asyncio.to_thread(load_api_settings)
+    await run_db_operation(load_api_settings)
     preset = get_preset_by_id(preset_id)
     if not preset:
         raise HTTPException(status_code=404, detail="Preset not found")
@@ -547,15 +548,15 @@ async def activate_settings_preset(preset_id: str):
     begin_api_settings_write()
     try:
         apply_api_preset(preset)
-        await asyncio.to_thread(persist_api_settings)
+        await run_db_operation(persist_api_settings)
     finally:
         end_api_settings_write()
-    return await asyncio.to_thread(build_settings_response)
+    return await run_db_operation(build_settings_response)
 
 
 @router.delete("/api/settings/presets/{preset_id}", response_model=SettingsResponse)
 async def delete_settings_preset(preset_id: str):
-    await asyncio.to_thread(load_api_settings)
+    await run_db_operation(load_api_settings)
     presets = get_api_presets()
     if len(presets) <= 1:
         raise HTTPException(status_code=400, detail="At least one preset is required")
@@ -578,11 +579,11 @@ async def delete_settings_preset(preset_id: str):
         else:
             state.active_preset_id = active_preset_id
 
-        await asyncio.to_thread(persist_api_settings)
+        await run_db_operation(persist_api_settings)
     finally:
         end_api_settings_write()
 
-    return await asyncio.to_thread(build_settings_response)
+    return await run_db_operation(build_settings_response)
 
 
 HEALTH_STATUS_RANK = {"ok": 0, "warning": 1, "error": 2}

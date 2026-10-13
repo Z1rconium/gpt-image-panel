@@ -127,15 +127,13 @@ async def _create_reserved_nodeimage_upload_job(
     requested_count: int,
     missing_ids: list[str],
 ) -> dict:
-    job = await asyncio.to_thread(
-        reserve_gallery_job_capacity,
+    job = await run_db_operation(reserve_gallery_job_capacity,
         job=_build_nodeimage_upload_job(ids, requested_count, missing_ids),
         counted_kinds=(NODEIMAGE_UPLOAD_JOB_KIND,),
         max_active=MAX_ACTIVE_NODEIMAGE_UPLOAD_JOBS,
     )
     if not job:
-        active_count = await asyncio.to_thread(
-            count_active_gallery_jobs,
+        active_count = await run_db_operation(count_active_gallery_jobs,
             NODEIMAGE_UPLOAD_JOB_KIND,
         )
         raise RateLimitedError(f"Too many active NodeImage upload jobs ({active_count}). Please wait for the existing upload to complete.")
@@ -205,7 +203,7 @@ def _inspect_nodeimage_file(entry: GalleryEntry) -> NodeImageFileInspection:
 
 
 async def _nodeimage_job_cancel_requested(job_id: str) -> bool:
-    current = await asyncio.to_thread(get_gallery_job, NODEIMAGE_UPLOAD_JOB_KIND, job_id)
+    current = await run_db_operation(get_gallery_job, NODEIMAGE_UPLOAD_JOB_KIND, job_id)
     if not current:
         return True
     return bool((current.get("payload") or {}).get("cancel_requested"))
@@ -351,8 +349,7 @@ async def _run_nodeimage_upload_job(job: dict) -> None:
                     return
                 except asyncio.TimeoutError:
                     pass
-                renewed = await asyncio.to_thread(
-                    renew_gallery_job_lease,
+                renewed = await run_db_operation(renew_gallery_job_lease,
                     job_id=job_id,
                     lease_owner=lease_owner,
                     lease_expires_at=_gallery_job_lease_expires_at(),
@@ -400,9 +397,9 @@ async def _run_nodeimage_upload_job(job: dict) -> None:
 
     try:
         effective = resolve_nodeimage_settings(
-            await asyncio.to_thread(load_nodeimage_settings)
+            await run_db_operation(load_nodeimage_settings)
         )
-        entries = await asyncio.to_thread(get_gallery_entries_by_ids, ids)
+        entries = await run_db_operation(get_gallery_entries_by_ids, ids)
         entries_by_id = {entry.id: entry for entry in entries}
         for image_id in ids:
             if image_id in results_by_id or image_id in entries_by_id:
@@ -506,7 +503,7 @@ async def _run_nodeimage_upload_job(job: dict) -> None:
         try:
             results = ordered_results()
             remaining_error = "NodeImage upload job failed"
-            entries = await asyncio.to_thread(get_gallery_entries_by_ids, ids)
+            entries = await run_db_operation(get_gallery_entries_by_ids, ids)
             for entry in entries:
                 if entry.id not in results_by_id:
                     results_by_id[entry.id] = _nodeimage_result_item(

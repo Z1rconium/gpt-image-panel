@@ -1,5 +1,6 @@
 """Gallery sync jobs: reconciling SQLite rows with Cloudflare R2."""
 
+from ..runtime.blocking import run_db_operation
 from .gallery_job_shared import (
     _gallery_job_lease_expires_at,
     _gallery_job_progress_throttler,
@@ -107,7 +108,7 @@ async def _create_reserved_gallery_sync_job(
     total_count: int,
     payload: dict | None = None,
 ) -> dict:
-    job = await asyncio.to_thread(_reserve_gallery_sync_job, total_count, payload)
+    job = await run_db_operation(_reserve_gallery_sync_job, total_count, payload)
     if not job:
         raise RateLimitedError("A gallery R2 sync job is already queued or running.")
     return job
@@ -131,14 +132,12 @@ async def _run_gallery_sync_job(job: dict) -> None:
         throttler.emit(updates, force=force)
 
     try:
-        r2_settings = await asyncio.to_thread(load_r2_backup_settings)
-        effective = await asyncio.to_thread(
-            r2_config.resolve_r2_backup_settings,
+        r2_settings = await run_db_operation(load_r2_backup_settings)
+        effective = await run_db_operation(r2_config.resolve_r2_backup_settings,
             r2_settings,
             require_enabled=True,
         )
-        total_count = await asyncio.to_thread(
-            count_gallery_r2_sync_rows,
+        total_count = await run_db_operation(count_gallery_r2_sync_rows,
             key_prefix=effective.key_prefix,
             full_reconcile=full_reconcile,
             start_after_filename=start_after_filename,
@@ -154,8 +153,7 @@ async def _run_gallery_sync_job(job: dict) -> None:
                 "lease_expires_at": _gallery_job_lease_expires_at(),
             },
         )
-        result = await asyncio.to_thread(
-            _call_gallery_r2_sync,
+        result = await run_db_operation(_call_gallery_r2_sync,
             r2_settings,
             iter_gallery_r2_sync_rows(
                 key_prefix=effective.key_prefix,
