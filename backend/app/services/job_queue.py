@@ -9,10 +9,10 @@ from typing import Literal
 
 
 from ..runtime.state import MAX_GENERATE_JOBS, state
+from .preset_credentials import get_effective_preset_api_key
 from .presets import (
     get_active_preset,
     get_api_presets,
-    get_effective_preset_api_key,
     get_upstream_socks5_proxy,
     get_webhook_url,
     load_api_settings,

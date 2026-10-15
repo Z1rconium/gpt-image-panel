@@ -6,8 +6,8 @@ import logging
 import time
 import traceback
 
+from .preset_credentials import get_effective_preset_api_key
 from .presets import (
-    get_effective_preset_api_key,
     get_exception_message,
     get_upstream_socks5_proxy,
 )

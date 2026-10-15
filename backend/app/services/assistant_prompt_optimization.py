@@ -15,7 +15,7 @@ from typing import Literal
 
 from ..repositories.db.execution import run_db_operation
 from ..core.image_models import MAX_PROMPT_CHARS
-from . import presets, vision_previews
+from . import preset_credentials, presets, vision_previews
 from ..core.errors import (
     DomainError,
     InvalidRequestError,
@@ -142,7 +142,7 @@ def _prompt_preview_generation_config() -> tuple[str, str, str, str | None, str 
     api_url = str(active_preset.get("api_url") or "").strip()
     if not api_url:
         raise InvalidRequestError("Active image generation preset API URL is not configured")
-    api_key = presets.get_effective_preset_api_key(active_preset)
+    api_key = preset_credentials.get_effective_preset_api_key(active_preset)
     model = str(active_preset.get("default_model") or "").strip()
     if not model:
         raise InvalidRequestError("Active image generation preset model is not configured")
