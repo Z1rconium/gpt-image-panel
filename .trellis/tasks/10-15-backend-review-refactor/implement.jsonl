@@ -1,0 +1,9 @@
+{"file": ".trellis/tasks/archive/2026-10/10-13-architecture-legacy-refactor/research/audit.md", "reason": "Predecessor module/dependency audit: fixed findings F1-F4 and deferred items F5-F8 that must not be re-reported as new findings; also records baseline test counts (945 passed / 22 skipped)"}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend spec entry point: layer matrix references and which guides are documented vs stubs"}
+{"file": ".trellis/spec/backend/db-execution.md", "reason": "Documented executor accounting and SQLite policy ownership contracts (post 10-13 refactor); needed to judge convention drift in runtime/db modules"}
+{"file": ".trellis/spec/backend/coordination.md", "reason": "Documented coordination domain ownership contracts (post 10-13 refactor); needed to verify coordination facades stayed clean"}
+{"file": ".trellis/spec/backend/http-compression.md", "reason": "Documented ASGI compression ordering contract; needed when reviewing api/middleware.py"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Duplication dimension of the review rubric"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Layering dimension of the review rubric"}
+{"file": ".trellis/spec/frontend/jobs-lifecycle.md", "reason": "Frontend jobs feed lifecycle contract; needed for the frontend quick-scan group"}
+{"file": ".trellis/spec/frontend/forms-and-api.md", "reason": "Frontend apiFetch convention; needed for the frontend quick-scan group"}

@@ -1,0 +1,4 @@
+{"file": ".trellis/tasks/archive/2026-10/10-13-architecture-legacy-refactor/research/audit.md", "reason": "Predecessor audit evidence standard (file:line anchors, defect vs improvement labels) and deferred items F5-F8 that the report must cross-reference rather than duplicate"}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend spec entry point for verifying report claims align with documented contracts"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Verify duplication findings follow the reuse thinking guide"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Verify layering findings follow the cross-layer thinking guide"}
