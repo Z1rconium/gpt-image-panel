@@ -11,7 +11,8 @@ from ..core.media import safe_image_path
 from ..integrations import assistant_client
 from ..integrations.agent_client import AgentItem, AssistantTextItem, UserItem
 from ..repositories.gallery.queries import get_gallery_entry
-from ..runtime.blocking import run_db_operation, run_file_operation
+from ..repositories.db.execution import run_db_operation
+from ..runtime.blocking import run_file_operation
 from . import vision_previews
 from .agent_refs import (
     parse_user_mentions,

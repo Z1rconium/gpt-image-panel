@@ -67,9 +67,6 @@ ALLOWED_DEFERRED_IMPORTS: frozenset[str] = frozenset(
         "backend/app/core/validators.py:normalize_secret_env_ref_or_plaintext -> backend.app.core.secrets",
         "backend/app/repositories/db/settings_store.py:save_overall_config_overrides -> backend.app.core.overall_config",
         "backend/app/repositories/db/settings_store.py:sync_overall_config_env_values -> backend.app.core.overall_config",
-        "backend/app/runtime/blocking.py:close_blocking_executors -> backend.app.repositories",
-        "backend/app/runtime/blocking.py:run_db_operation -> backend.app.repositories",
-        "backend/app/runtime/blocking.py:run_db_operation_in_current_thread -> backend.app.repositories",
         "backend/app/services/presets.py:get_exception_message -> backend.app.core.redaction",
         "backend/app/services/runtime_metrics.py:refresh_runtime_metrics_once -> backend.app.services.job_events",
     }
@@ -155,9 +152,13 @@ def _scan() -> tuple[list[str], list[str]]:
                 continue
             violations.append(f"{relative_path}:{lineno} -> {target}")
         for scope, target in collector.deferred_imports:
-            if _layer_of(target) is None:
+            target_layer = _layer_of(target)
+            if target_layer is None:
                 continue
-            deferred.append(f"{relative_path}:{scope} -> {target}")
+            entry = f"{relative_path}:{scope} -> {target}"
+            deferred.append(entry)
+            if target_layer not in ALLOWED_TARGET_LAYERS[source_layer]:
+                violations.append(entry)
     return violations, deferred
 
 
@@ -169,6 +170,22 @@ def scan_result() -> tuple[list[str], list[str]]:
 def _report(title: str, entries: list[str]) -> str:
     listed = "\n".join(f'    "{entry}",' for entry in entries)
     return f"{title}:\n{listed}"
+
+
+def test_deferred_imports_cannot_bypass_the_layer_matrix(tmp_path, monkeypatch):
+    app_dir = tmp_path / "backend" / "app"
+    runtime_dir = app_dir / "runtime"
+    runtime_dir.mkdir(parents=True)
+    (runtime_dir / "probe.py").write_text(
+        "async def operation():\n    from ..repositories import db\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(f"{__name__}.APP_DIR", app_dir)
+    monkeypatch.setattr(f"{__name__}.REPO_ROOT", tmp_path)
+    violations, deferred = _scan()
+    entry = "backend/app/runtime/probe.py:operation -> backend.app.repositories"
+    assert entry in deferred
+    assert entry in violations
 
 
 def test_layer_imports_follow_the_dependency_matrix(scan_result):

@@ -23,7 +23,7 @@ from ...repositories.gallery.collections import (
     update_gallery_collection,
 )
 from ...repositories.gallery.queries import get_gallery_entry
-from ...runtime.blocking import run_db_operation
+from ...repositories.db.execution import run_db_operation
 from ...schemas.gallery import (
     GalleryBatchRequest,
     GalleryCollection,

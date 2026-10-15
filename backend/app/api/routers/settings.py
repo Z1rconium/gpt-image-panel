@@ -3,7 +3,7 @@ import uuid
 
 from fastapi import APIRouter, Body, HTTPException
 
-from ...runtime.blocking import run_db_operation
+from ...repositories.db.execution import run_db_operation
 from ...runtime.state import state
 from ...services.preset_package import apply_preset_import, build_preset_export, build_preset_import_preview
 from ...services.presets import (

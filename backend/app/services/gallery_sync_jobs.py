@@ -1,6 +1,6 @@
 """Gallery sync jobs: reconciling SQLite rows with Cloudflare R2."""
 
-from ..runtime.blocking import run_db_operation
+from ..repositories.db.execution import run_db_operation
 from .gallery_job_shared import (
     _gallery_job_lease_expires_at,
     _gallery_job_progress_throttler,

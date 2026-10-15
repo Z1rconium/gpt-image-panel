@@ -1,5 +1,6 @@
 """Bounded-executor fan-out and shutdown behaviour."""
 
+import asyncio
 import threading
 import time
 from pathlib import Path
@@ -13,6 +14,82 @@ def _executor(workers: int) -> blocking._BoundedExecutor:
     executor = blocking._BoundedExecutor("test", lambda: workers)
     executor._get_executor()
     return executor
+
+
+def test_cancelled_queued_callback_balances_accounting_without_running():
+    executor = _executor(1)
+    started = threading.Event()
+    released = threading.Event()
+    queued_calls: list[str] = []
+
+    def occupy_worker():
+        started.set()
+        assert released.wait(timeout=5)
+
+    async def scenario():
+        running = asyncio.create_task(executor.run(occupy_worker, metric_name="test"))
+        assert await asyncio.to_thread(started.wait, 2)
+        queued = asyncio.create_task(
+            executor.run(lambda: queued_calls.append("ran"), metric_name="test")
+        )
+        await asyncio.sleep(0)
+        assert executor.gauges()["executor.test.queued"] == 1
+        queued.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await queued
+        released.set()
+        await running
+        assert queued_calls == []
+        assert executor.gauges()["executor.test.queued"] == 0
+        assert executor.gauges()["executor.test.running"] == 0
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        released.set()
+        executor.shutdown()
+
+
+def test_cancelled_running_awaiter_keeps_worker_accounted_until_completion():
+    executor = _executor(1)
+    started = threading.Event()
+    released = threading.Event()
+
+    def occupy_worker():
+        started.set()
+        assert released.wait(timeout=5)
+
+    async def scenario():
+        running = asyncio.create_task(executor.run(occupy_worker, metric_name="test"))
+        assert await asyncio.to_thread(started.wait, 2)
+        running.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await running
+        assert executor.gauges()["executor.test.running"] == 1
+        assert executor.gauges()["executor.test.queued"] == 0
+        released.set()
+        # A succeeding callback in the one-worker pool proves the first ended.
+        await executor.run(lambda: None, metric_name="test")
+        assert executor.gauges()["executor.test.running"] == 0
+        assert executor.gauges()["executor.test.queued"] == 0
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        released.set()
+        executor.shutdown()
+
+
+def test_rejected_submission_balances_accounting():
+    executor = _executor(1)
+    executor._get_executor().shutdown()
+    try:
+        with pytest.raises(RuntimeError, match="cannot schedule new futures"):
+            asyncio.run(executor.run(lambda: None, metric_name="test"))
+        assert executor.gauges()["executor.test.queued"] == 0
+        assert executor.gauges()["executor.test.running"] == 0
+    finally:
+        executor.shutdown()
 
 
 def test_worker_fanout_returns_within_its_deadline_while_a_worker_is_busy():

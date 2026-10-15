@@ -36,7 +36,7 @@ from ..repositories.coordination import (
     update_gallery_job,
     update_gallery_job_progress,
 )
-from ..runtime.blocking import run_db_operation
+from ..repositories.db.execution import run_db_operation
 from ..repositories.gallery.mutations import is_gallery_filename_referenced
 from ..repositories.gallery.queries import (
     get_gallery_entries_by_ids,

@@ -20,7 +20,8 @@ from ...services.job_events import (
     serialize_sse_event,
 )
 from ...core.utils import json_dumps_canonical
-from ...runtime.blocking import run_db_operation, run_image_operation
+from ...repositories.db.execution import run_db_operation
+from ...runtime.blocking import run_image_operation
 from ...services.job_cancel import cancel_image_job
 from ...services.job_queue import queue_image_job
 from ...services.poll_backoff import next_poll_delay

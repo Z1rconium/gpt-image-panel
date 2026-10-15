@@ -1,0 +1,28 @@
+{
+  "id": "generation-jobs-lifecycle-refactor",
+  "name": "generation-jobs-lifecycle-refactor",
+  "title": "Refactor generation jobs lifecycle",
+  "description": "Separate generation job state and feed lifecycle and reject stale callbacks and responses after replacement or cleanup",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "Z1rconium",
+  "assignee": "Z1rconium",
+  "createdAt": "2026-10-13",
+  "completedAt": "2026-10-13",
+  "branch": "refactor/architecture-legacy-modules",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": "913f7ba7da7320e2e56af27e7420d38f16c7f1d1",
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": "10-13-architecture-legacy-refactor",
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {
+    "push_requested": true
+  }
+}

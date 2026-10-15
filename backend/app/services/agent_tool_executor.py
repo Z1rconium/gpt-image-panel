@@ -18,7 +18,7 @@ from ..core.errors import DomainError, UnprocessableRequestError
 from ..core.redaction import redact_sensitive_text
 from ..integrations.agent_client import ToolCallComplete
 from ..repositories import agent as agent_repo
-from ..runtime.blocking import run_db_operation
+from ..repositories.db.execution import run_db_operation
 from ..schemas.generation import EditRequest, GenerateRequest
 from . import agent_prompt, agent_refs, agent_tools, edit_sources, job_cancel, job_queue
 from .agent_turn_errors import TurnCancelled, TurnFailed

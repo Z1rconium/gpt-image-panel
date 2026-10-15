@@ -13,7 +13,7 @@ from ...repositories.coordination import (
     record_access_failure,
 )
 from ...schemas.access import AccessRequest, AccessStatusResponse
-from ...runtime.blocking import run_db_operation
+from ...repositories.db.execution import run_db_operation
 from ...runtime.state import state
 
 

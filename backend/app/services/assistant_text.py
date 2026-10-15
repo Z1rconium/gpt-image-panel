@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 
-from ..runtime.blocking import run_db_operation
+from ..repositories.db.execution import run_db_operation
 from ..core.image_models import MAX_PROMPT_CHARS, image_qualities
 from . import presets
 from ..core.errors import (

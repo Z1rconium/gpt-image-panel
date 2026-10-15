@@ -557,7 +557,7 @@ def test_access_failures_normalize_ipv6_and_lockout_reads_without_write_transact
         now=101,
     )
     monkeypatch.setattr(
-        coordination_repo,
+        coordination_repo.access,
         "_transaction",
         lambda conn: (_ for _ in ()).throw(AssertionError("unexpected write transaction")),
     )

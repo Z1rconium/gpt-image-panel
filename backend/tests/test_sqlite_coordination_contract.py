@@ -8,7 +8,7 @@ from backend.tests.support.contract import *  # noqa: F403
 
 from backend.app.core.utils import utc_now
 from backend.app.repositories import db as db_repo
-from backend.app.runtime import blocking
+from backend.app.repositories.db import execution
 from backend.app.services.claim_loop import run_claim_loop
 
 
@@ -68,22 +68,22 @@ def test_idle_claim_loop_skips_claim_without_write_lock(tmp_path):
 def test_run_db_operation_critical_uses_larger_busy_budget(tmp_path, monkeypatch):
     _configure_runtime(tmp_path)
     seen: dict[str, object] = {}
-    original_scope = db_repo.persistent_connection_scope
+    original_scope = execution.persistent_connection_scope
 
     def capture_scope(busy_timeout_ms: int):
         seen["timeout"] = busy_timeout_ms
         return original_scope(busy_timeout_ms)
 
-    monkeypatch.setattr(db_repo, "persistent_connection_scope", capture_scope)
+    monkeypatch.setattr(execution, "persistent_connection_scope", capture_scope)
 
     def probe() -> None:
         seen["metric"] = db_repo.current_db_metric()
 
-    asyncio.run(blocking.run_db_operation(probe, metric_name="probe", critical=True))
+    asyncio.run(execution.run_db_operation(probe, metric_name="probe", critical=True))
     assert seen["timeout"] == config.SQLITE_CRITICAL_BUSY_TIMEOUT_MS
     assert seen["metric"] == "probe"
 
-    asyncio.run(blocking.run_db_operation(probe, metric_name="poll"))
+    asyncio.run(execution.run_db_operation(probe, metric_name="poll"))
     assert seen["timeout"] == config.SQLITE_BUSY_TIMEOUT_MS
 
 

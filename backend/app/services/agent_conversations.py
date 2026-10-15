@@ -8,7 +8,7 @@ from typing import Any
 from ..core import settings as config
 from ..core.errors import DomainError, NotFoundError, RateLimitedError, UnprocessableRequestError
 from ..repositories import agent as agent_repo
-from ..runtime.blocking import run_db_operation
+from ..repositories.db.execution import run_db_operation
 from ..runtime.state import state, utc_lease_expires_at
 from ..schemas.agent import (
     AgentActiveTurn,

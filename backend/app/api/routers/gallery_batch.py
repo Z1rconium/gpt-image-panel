@@ -14,7 +14,7 @@ from fastapi import APIRouter, Body, File, HTTPException, Query, Request, Upload
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from starlette.background import BackgroundTask
 
-from ...runtime.blocking import run_db_operation
+from ...repositories.db.execution import run_db_operation
 from ...services.gallery_archive_export import (
     iter_gallery_zip_chunks,
     prepare_gallery_zip_chunks,

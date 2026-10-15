@@ -1,0 +1,32 @@
+{
+  "id": "architecture-legacy-refactor",
+  "name": "architecture-legacy-refactor",
+  "title": "Architecture audit and legacy module refactoring",
+  "description": "Audit repository architecture and design, identify legacy module issues, and plan behavior-preserving refactoring",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "Z1rconium",
+  "assignee": "Z1rconium",
+  "createdAt": "2026-10-13",
+  "completedAt": "2026-10-13",
+  "branch": "refactor/architecture-legacy-modules",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": "57cdfd1475430624aeed5376ea907ac59bf83517",
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "10-13-database-runtime-refactor",
+    "10-13-coordination-modules-refactor",
+    "10-13-generation-jobs-lifecycle-refactor"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {
+    "push_requested": true
+  }
+}

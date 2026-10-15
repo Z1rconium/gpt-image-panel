@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote
 
-from ..runtime.blocking import run_db_operation
+from ..repositories.db.execution import run_db_operation
 from ..core import settings as config
 from ..core.errors import (
     NotFoundError,

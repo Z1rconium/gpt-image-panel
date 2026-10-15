@@ -72,6 +72,8 @@ def _is_gzip_text_content_type(value: str) -> bool:
 
 
 class _TextGZipResponder(GZipResponder):
+    _passthrough = False
+
     async def send_with_compression(self, message: Message) -> None:
         if message["type"] == "http.response.start":
             self.initial_message = message
@@ -80,6 +82,18 @@ class _TextGZipResponder(GZipResponder):
             self.content_type_is_excluded = not _is_gzip_text_content_type(
                 headers.get("content-type", "")
             )
+            self._passthrough = (
+                self.content_encoding_set
+                or self.content_type_is_excluded
+                or message["status"] == 206
+            )
+            # Own the entire bypass path: Starlette versions differ on whether
+            # excluded response headers are sent here or with the first body.
+            if self._passthrough:
+                await self.send(message)
+            return
+        if self._passthrough:
+            await self.send(message)
             return
         await super().send_with_compression(message)
 

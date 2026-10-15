@@ -76,7 +76,8 @@ from typing import (
 import hashlib
 import sqlite3
 import time
-from ...runtime.blocking import run_db_operation, run_image_operation
+from ...repositories.db.execution import run_db_operation
+from ...runtime.blocking import run_image_operation
 from ..db import state as db_state
 
 

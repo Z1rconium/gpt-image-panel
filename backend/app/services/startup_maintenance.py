@@ -19,7 +19,7 @@ from ..repositories.gallery.mutations import (
 )
 from ..repositories.image_jobs import list_persisted_mask_job_ids
 from ..repositories.thumbnail_jobs import cleanup_auxiliary_state
-from ..runtime.blocking import run_db_operation
+from ..repositories.db.execution import run_db_operation
 from ..runtime.state import (
     STARTUP_MAINTENANCE_COMPLETED_TTL_SECONDS,
     STARTUP_MAINTENANCE_LEASE_SECONDS,

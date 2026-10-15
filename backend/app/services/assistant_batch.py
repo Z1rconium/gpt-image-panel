@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 
-from ..runtime.blocking import run_db_operation
+from ..repositories.db.execution import run_db_operation
 from . import presets
 from ..core.errors import (
     DomainError,

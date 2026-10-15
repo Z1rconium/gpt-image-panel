@@ -4,7 +4,7 @@ import asyncio
 from typing import Any
 
 from ..repositories import agent as agent_repo
-from ..runtime.blocking import run_db_operation
+from ..repositories.db.execution import run_db_operation
 from ..runtime.state import state
 from . import agent_search, assistant_runtime
 from .agent_event_writer import AgentEventWriter

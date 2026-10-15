@@ -1,0 +1,28 @@
+{
+  "id": "coordination-modules-refactor",
+  "name": "coordination-modules-refactor",
+  "title": "Split coordination persistence by responsibility",
+  "description": "Extract access, gallery jobs, SSE slots, leases and worker metrics behind the existing coordination facade",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "Z1rconium",
+  "assignee": "Z1rconium",
+  "createdAt": "2026-10-13",
+  "completedAt": "2026-10-13",
+  "branch": "refactor/architecture-legacy-modules",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": "ee804df5a26a6a743a2c72452c1fc94b00fb198c",
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": "10-13-architecture-legacy-refactor",
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {
+    "push_requested": true
+  }
+}

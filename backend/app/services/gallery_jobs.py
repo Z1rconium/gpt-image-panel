@@ -1,6 +1,6 @@
 import logging
 
-from ..runtime.blocking import run_db_operation
+from ..repositories.db.execution import run_db_operation
 from .gallery_export_jobs import (
     _run_gallery_export_job,
 )

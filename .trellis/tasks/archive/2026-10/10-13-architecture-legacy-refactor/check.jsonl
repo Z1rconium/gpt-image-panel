@@ -1,0 +1,8 @@
+{"file": ".trellis/tasks/archive/2026-10/10-13-architecture-legacy-refactor/research/audit.md", "reason": "Confirmed findings, source anchors, reproduced failures, baseline and preservation boundaries."}
+{"file": ".trellis/spec/backend/testing.md", "reason": "Existing regression/contract conventions and architecture checks."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Preserve data and lifecycle contracts across extraction boundaries."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Reuse existing extraction and facade patterns; avoid unnecessary abstraction or duplicated policy."}
+{"file": ".trellis/spec/backend/db-execution.md", "reason": "Scoped executable contract for implementation and final review"}
+{"file": ".trellis/spec/backend/coordination.md", "reason": "Scoped executable contract for implementation and final review"}
+{"file": ".trellis/spec/frontend/jobs-lifecycle.md", "reason": "Scoped executable contract for implementation and final review"}
+{"file": ".trellis/spec/frontend/forms-and-api.md", "reason": "Scoped executable contract for implementation and final review"}

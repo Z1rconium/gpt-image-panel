@@ -16,7 +16,7 @@ from datetime import datetime, timedelta, timezone
 from ..core import settings as config
 from ..core.observability import metrics
 from ..repositories.image_jobs import renew_image_job_unit_lease, update_image_job_unit_progress
-from ..runtime.blocking import run_db_operation
+from ..repositories.db.execution import run_db_operation
 from .image_job_aggregate import aggregate_parent_image_job, set_generate_job_progress
 
 logger = logging.getLogger(__name__)

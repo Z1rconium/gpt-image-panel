@@ -18,6 +18,7 @@ from backend.app.repositories import image_jobs as image_jobs_repo
 from backend.app.repositories.gallery import mutations as gallery_mutations
 from backend.app.repositories.gallery import queries as gallery_queries
 from backend.app.runtime import blocking
+from backend.app.repositories.db.execution import run_db_operation
 from backend.app.services.edit_paste_back import paste_back_image
 
 
@@ -364,7 +365,7 @@ def _multiprocess_dispatch_worker(
 
     async def dispatch_loop() -> None:
         while True:
-            unit = await blocking.run_db_operation(
+            unit = await run_db_operation(
                 image_jobs_repo.claim_next_image_job_unit,
                 worker_id=worker_id,
                 claim_token=f"{worker_id}:{utc_now()}",
@@ -379,7 +380,7 @@ def _multiprocess_dispatch_worker(
                 break
             unit_id = str(unit["unit_id"])
             result_queue.put(("claim", unit_id))
-            await blocking.run_db_operation(
+            await run_db_operation(
                 image_jobs_repo.complete_image_job_unit,
                 unit_id,
                 claim_token=str(unit["claim_token"]),
