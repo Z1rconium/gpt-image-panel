@@ -1,5 +1,6 @@
 from backend.tests.support.contract import *  # noqa: F403
 from backend.app.core.errors import RateLimitedError
+from backend.app.services import assistant_slots
 
 def test_ai_assistant_health_reports_success_and_config_errors(client, monkeypatch):
     settings = client.get("/api/settings").json()
@@ -309,8 +310,8 @@ def test_ai_assistant_request_concurrency_limit_returns_429(client, monkeypatch)
     async def fake_request_assistant_json(**kwargs):
         return ({"rewritten_prompt": "limited prompt", "warnings": []}, "assistant-model", 10)
 
-    monkeypatch.setattr(assistant_runtime, "acquire_background_slot", fake_acquire_background_slot)
-    monkeypatch.setattr(assistant_runtime, "release_background_slot", lambda **kwargs: True)
+    monkeypatch.setattr(assistant_slots, "acquire_background_slot", fake_acquire_background_slot)
+    monkeypatch.setattr(assistant_slots, "release_background_slot", lambda **kwargs: True)
     monkeypatch.setattr(assistant_router.assistant_client, "request_assistant_json", fake_request_assistant_json)
 
     ok = client.post("/api/assistant/prompt/rewrite", json={"prompt": "tiny robot", "target_language": "en"})

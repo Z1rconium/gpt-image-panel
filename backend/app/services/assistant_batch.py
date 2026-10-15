@@ -79,7 +79,6 @@ from .assistant_runtime import (
     AI_ANALYZE_JOB_KIND,
     AI_ANALYZE_JOB_LEASE_RENEW_SECONDS,
     AI_ANALYZE_JOB_LEASE_SECONDS,
-    AI_ASSISTANT_SLOT_RETRY_SECONDS,
     MAX_ACTIVE_AI_ANALYZE_JOBS,
     AssistantRuntime,
     AssistantRuntimeHolder,
@@ -87,6 +86,7 @@ from .assistant_runtime import (
     _batch_target_language,
     _resolve_runtime_async,
 )
+from .assistant_slots import AI_ASSISTANT_SLOT_RETRY_SECONDS
 from .assistant_vision import _analyze_gallery_image
 from .gallery_common import _gallery_filters_from_selection_token
 from .gallery_job_sse import stream_gallery_job

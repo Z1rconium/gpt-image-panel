@@ -12,7 +12,7 @@ from backend.app.core.errors import DomainError
 from backend.app.repositories import agent as repo
 from backend.app.runtime.state import state
 from backend.app.schemas.agent import AgentTurnRequest
-from backend.app.services import agent_conversations as conversations, agent_tool_executor as executor, agent_turns as turns, assistant_runtime as assistant
+from backend.app.services import agent_conversations as conversations, agent_tool_executor as executor, agent_turns as turns, assistant_slots as assistant
 from backend.app.services import agent_run_context as context, agent_run_lifecycle as lifecycle
 from backend.app.services.agent_tools import BatchImage
 

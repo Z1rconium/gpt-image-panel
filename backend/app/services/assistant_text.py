@@ -71,17 +71,16 @@ from ..schemas.assistant import (
 from ..schemas.settings import AIAssistantSettingsRequest
 
 logger = logging.getLogger(__name__)
-from .assistant_runtime import (
+from .assistant_json import (
     BEARER_VALUE_RE,
     SECRET_VALUE_RE,
     SENSITIVE_FIELD_NAMES,
     _assistant_json,
-    _assistant_settings,
     _clamp_text,
-    _resolve_runtime_async,
     _string_list,
     _warnings,
 )
+from .assistant_runtime import _assistant_settings, _resolve_runtime_async
 
 async def assistant_health(req: AIAssistantSettingsRequest | None = None):
     settings = presets.effective_ai_assistant_settings(_assistant_settings(req))

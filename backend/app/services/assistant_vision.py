@@ -32,18 +32,20 @@ from ..schemas.assistant import (
     AssistantGalleryImageResponse,
     AssistantGalleryMetadataResponse,
 )
-from .assistant_runtime import (
-    AssistantRuntime,
-    _assistant_request_limit,
-    _batch_assistant_runtime,
-    _batch_target_language,
+from .assistant_json import (
     _clamp_text,
     _image_prompt_system_prompt,
-    _resolve_runtime_async,
     _string_list,
     _truncate_assistant_data,
     _warnings,
 )
+from .assistant_runtime import (
+    AssistantRuntime,
+    _batch_assistant_runtime,
+    _batch_target_language,
+    _resolve_runtime_async,
+)
+from .assistant_slots import _assistant_request_limit
 
 logger = logging.getLogger(__name__)
 

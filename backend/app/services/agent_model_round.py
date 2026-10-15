@@ -9,7 +9,7 @@ from ..integrations import agent_client
 from ..integrations.agent_client import AssistantTextItem, Finish, TextDelta, ToolCallComplete, ToolCallItem, ToolCallStarted, ToolResultItem
 from ..integrations.agent_search import SearchStatus, SourceCitation
 from ..repositories import agent as agent_repo
-from . import agent_context, agent_prompt, agent_refs, agent_search, assistant_runtime
+from . import agent_context, agent_prompt, agent_refs, agent_search, assistant_slots
 from .agent_turn_errors import TurnFailed
 
 if TYPE_CHECKING:
@@ -163,7 +163,7 @@ class AgentModelRound:
         visible_parts: list[str] = []
         calls: list[ToolCallComplete] = []
         finish: Finish | None = None
-        async with assistant_runtime.assistant_request_limit(
+        async with assistant_slots.assistant_request_limit(
             runtime.timeout_seconds, wait_for_slot=True, max_wait_seconds=AGENT_SLOT_WAIT_SECONDS
         ):
             stream = agent_client.stream_agent_response(

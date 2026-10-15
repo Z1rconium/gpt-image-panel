@@ -33,13 +33,13 @@ from ..schemas.assistant import (
     AssistantImagePromptOptimizeResponse,
     AssistantTemporaryImage,
 )
-from .assistant_runtime import (
+from .assistant_json import (
     _assistant_json,
     _clamp_text,
     _image_prompt_system_prompt,
-    _resolve_runtime_async,
     _warnings,
 )
+from .assistant_runtime import _resolve_runtime_async
 
 
 logger = logging.getLogger(__name__)
