@@ -14,6 +14,7 @@ from starlette.types import Message, Receive, Scope, Send
 from .csp import CONTENT_SECURITY_POLICY
 from ..core.errors import DomainError
 from ..core.redaction import redact_sensitive_text
+from ..core.validators import split_allowlist
 from ..core import security as auth
 from ..core import settings as config
 from ..core.observability import metrics
@@ -309,10 +310,7 @@ def _has_invalid_public_origin() -> bool:
 
 
 def _allowed_hosts_configured() -> bool:
-    return any(
-        raw_host.strip()
-        for raw_host in str(getattr(config, "ALLOWED_HOSTS", "") or "").split(",")
-    )
+    return bool(split_allowlist(getattr(config, "ALLOWED_HOSTS", ""), separators=","))
 
 
 def _host_has_port(host: str) -> bool:
@@ -336,10 +334,7 @@ def _add_allowed_host(allowed: set[str], host: str | None, scheme: str | None = 
 
 def _configured_allowed_hosts() -> set[str]:
     allowed: set[str] = set()
-    for raw_host in str(getattr(config, "ALLOWED_HOSTS", "") or "").split(","):
-        value = raw_host.strip()
-        if not value:
-            continue
+    for value in split_allowlist(getattr(config, "ALLOWED_HOSTS", ""), separators=","):
         if "://" in value:
             origin = normalize_origin(value)
             if origin:

@@ -6,6 +6,8 @@ from threading import RLock
 from typing import Literal
 from urllib.parse import urlsplit
 
+from .validators import normalize_host_entry, split_allowlist
+
 
 SecretPurpose = Literal[
     "upstream_api",
@@ -351,14 +353,10 @@ def _check_entry_binding(
     if entry.origin != canonical_origin(target_url):
         raise SecretRegistryError("secret_id is not bound to the target origin")
 
-    allowed_hosts = {
-        item.strip().lower().rstrip(".")
-        for item in str(host_allowlist or "").replace(";", ",").split(",")
-        if item.strip()
-    }
+    allowed_hosts = {normalize_host_entry(item) for item in split_allowlist(host_allowlist)}
     if not allowed_hosts:
         raise SecretRegistryError("credentials require a non-empty startup host allowlist")
-    target_host = (urlsplit(target_url).hostname or "").lower().rstrip(".")
+    target_host = normalize_host_entry(urlsplit(target_url).hostname or "")
     if target_host not in allowed_hosts:
         raise SecretRegistryError("credential target is not in the startup host allowlist")
     return entry

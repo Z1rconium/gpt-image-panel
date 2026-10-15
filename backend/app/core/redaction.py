@@ -37,28 +37,58 @@ _REDACTION_HINTS = (
 )
 
 
+def mask_url(
+    url: str | None,
+    *,
+    token: str,
+    invalid: str,
+    require_scheme: bool = True,
+    hide_path: bool = False,
+) -> str:
+    """Mask credentials, query and fragment in a URL, preserving scheme and host.
+
+    This is the single URL-masking primitive. The logging scrub
+    (``_redact_url``) and the API/display masking (``validators.redact_url``)
+    differ only in token/invalid/require_scheme/hide_path, so they delegate
+    here instead of re-implementing the parsing/bracketing logic.
+    """
+    value = str(url or "").strip()
+    if not value:
+        return ""
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except ValueError:
+        return invalid
+    if not parsed.hostname or (require_scheme and not parsed.scheme):
+        return invalid
+    hostname = parsed.hostname
+    host = f"[{hostname}]" if ":" in hostname and not hostname.startswith("[") else hostname
+    if port is not None:
+        host = f"{host}:{port}"
+    if parsed.username is not None or parsed.password is not None:
+        host = f"{token}@{host}"
+    path = parsed.path
+    if hide_path and path and path != "/":
+        path = f"/{token}"
+    query = token if parsed.query else ""
+    fragment = token if parsed.fragment else ""
+    return urlunsplit((parsed.scheme, host, path, query, fragment))
+
+
 def _redact_url(match: re.Match[str]) -> str:
     raw = match.group(0)
     trailing = ""
     while raw and raw[-1] in ".,)":
         trailing = raw[-1] + trailing
         raw = raw[:-1]
-    try:
-        parsed = urlsplit(raw)
-        port = parsed.port
-    except ValueError:
-        return "[REDACTED_URL]" + trailing
-    if not parsed.hostname:
-        return "[REDACTED_URL]" + trailing
-    hostname = parsed.hostname
-    host = f"[{hostname}]" if ":" in hostname else hostname
-    if port is not None:
-        host = f"{host}:{port}"
-    if parsed.username is not None or parsed.password is not None:
-        host = f"[REDACTED]@{host}"
-    query = "[REDACTED]" if parsed.query else ""
-    fragment = "[REDACTED]" if parsed.fragment else ""
-    return urlunsplit((parsed.scheme, host, parsed.path, query, fragment)) + trailing
+    redacted = mask_url(
+        raw,
+        token="[REDACTED]",
+        invalid="[REDACTED_URL]",
+        require_scheme=False,
+    )
+    return redacted + trailing
 
 
 def _active_secrets() -> tuple[str, ...]:
