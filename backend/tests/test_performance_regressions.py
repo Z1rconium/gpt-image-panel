@@ -21,7 +21,7 @@ from backend.app.core.media import validate_image_bytes
 from backend.app.repositories import thumbnail_jobs as thumbnail_jobs_repo
 from backend.app.repositories.db.execution import close_blocking_executors, run_db_operation, run_db_operation_in_current_thread
 from backend.app.runtime.blocking import run_image_operation, upstream_memory_lease
-from backend.app.services import gallery_jobs, job_events
+from backend.app.services import gallery_jobs, webhook_service
 from backend.app.services import gallery_job_shared
 
 
@@ -314,18 +314,18 @@ def test_webhook_delivery_tasks_are_strongly_tracked(monkeypatch):
             started.set()
             await asyncio.Event().wait()
 
-        monkeypatch.setattr(job_events.webhooks, "deliver_webhook", fake_deliver_webhook)
+        monkeypatch.setattr(webhook_service, "deliver_webhook", fake_deliver_webhook)
 
-        task = job_events._create_webhook_delivery_task(
+        task = webhook_service._create_webhook_delivery_task(
             "https://hooks.example.com/job",
             {"job_id": "job-1", "status": "success", "webhook_url": "secret"},
         )
         await started.wait()
-        assert task in job_events.get_webhook_delivery_tasks()
+        assert task in webhook_service.get_webhook_delivery_tasks()
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
         await asyncio.sleep(0)
-        assert task not in job_events.get_webhook_delivery_tasks()
+        assert task not in webhook_service.get_webhook_delivery_tasks()
 
     asyncio.run(scenario())
 

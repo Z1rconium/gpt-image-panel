@@ -41,11 +41,8 @@ from ..repositories.image_jobs import (
 )
 from ..schemas.provider import resolve_provider_config
 from ..core import image_cost
-from .job_events import (
-    publish_generate_job_preview,
-    publish_generate_job_row_async,
-    store_generate_job_async,
-)
+from .job_events import publish_generate_job_preview
+from .job_persistence import publish_generate_job_row_async, store_generate_job_async
 from ..repositories.db.execution import run_db_operation
 from .image_job_aggregate import aggregate_parent_image_job
 from .image_unit_session import (

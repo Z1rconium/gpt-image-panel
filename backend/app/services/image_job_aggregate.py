@@ -8,7 +8,8 @@ from ..core.utils import beijing_now, utc_now
 from ..repositories.image_jobs import finalize_parent_job_from_units, get_generate_job_with_unit_aggregate
 from ..repositories.db.execution import run_db_operation
 from ..runtime.state import state
-from .job_events import clear_generate_job_unit_previews, publish_generate_job, publish_generate_job_row_async, store_generate_job_async
+from .job_events import clear_generate_job_unit_previews, publish_generate_job
+from .job_persistence import publish_generate_job_row_async, store_generate_job_async
 from .job_queue import cleanup_parent_edit_sources, summarize_unit_failures, trim_generate_jobs
 
 logger = logging.getLogger(__name__)

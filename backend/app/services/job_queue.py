@@ -58,9 +58,9 @@ from .job_events import (
     get_jobs_subscribers,
     publish_generate_job,
     remember_generate_job_memory,
-    store_generate_job,
-    validate_job_webhook_url,
 )
+from .job_persistence import store_generate_job
+from .webhook_service import validate_job_webhook_url
 
 
 def kick_thumbnail_dispatcher() -> None:

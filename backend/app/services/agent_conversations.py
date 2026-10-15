@@ -25,7 +25,7 @@ from ..schemas.agent import (
     AgentTurnStatus,
 )
 from . import agent_turns, assistant_runtime, presets
-from .job_events import resolve_generate_job_views
+from .job_persistence import resolve_generate_job_views
 from .image_preset_snapshot import image_preset_snapshot
 from ..core.constants import ACTIVE_GENERATE_JOB_STATUSES
 

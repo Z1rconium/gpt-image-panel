@@ -2,6 +2,7 @@ from datetime import datetime
 
 from backend.app.core.observability import record_upstream_usage
 from backend.app.core.utils import utc_now
+from backend.app.services import job_persistence
 from backend.tests.support.contract import *  # noqa: F403
 
 def test_generate_and_sse_contract(client):
@@ -1538,7 +1539,7 @@ def test_running_progress_persists_only_terminal_states(tmp_path, monkeypatch):
         return [entry]
 
     monkeypatch.setattr(job_queue, "enqueue_image_job", tracking_enqueue)
-    monkeypatch.setattr(job_events, "upsert_generate_job_guarded", tracking_upsert)
+    monkeypatch.setattr(job_persistence, "upsert_generate_job_guarded", tracking_upsert)
     monkeypatch.setattr(backend_main.proxy, "call_image_generation_api", noisy_generation_api)
 
     with _test_client() as client:
@@ -1573,7 +1574,7 @@ def test_generate_jobs_list_broadcast_debounces_without_db_reads(client, monkeyp
         subscribers.add(queue)
         try:
             for index in range(3):
-                job_events.store_generate_job(
+                job_persistence.store_generate_job(
                     "job-memory-broadcast",
                     {
                         "status": "running",
@@ -2187,7 +2188,7 @@ def test_multi_unit_concurrent_completion_keeps_success(tmp_path, monkeypatch):
     async def tracking_dispatch(job):
         dispatch_calls.append(job["job_id"])
 
-    monkeypatch.setattr(job_events, "dispatch_job_webhook_async", tracking_dispatch)
+    monkeypatch.setattr(job_persistence, "dispatch_job_webhook_async", tracking_dispatch)
 
     barrier = threading.Barrier(2, timeout=5)
 

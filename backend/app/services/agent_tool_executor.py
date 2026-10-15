@@ -22,7 +22,7 @@ from ..repositories.db.execution import run_db_operation
 from ..schemas.generation import EditRequest, GenerateRequest
 from . import agent_prompt, agent_refs, agent_tools, edit_sources, job_cancel, job_queue
 from .agent_turn_errors import TurnCancelled, TurnFailed
-from .job_events import resolve_generate_job_view
+from .job_persistence import resolve_generate_job_view
 
 logger = logging.getLogger(__name__)
 
