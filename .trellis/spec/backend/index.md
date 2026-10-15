@@ -18,6 +18,7 @@ This directory contains guidelines for backend development. Fill in each file wi
 | [Database Guidelines](./database-guidelines.md) | ORM patterns, queries, migrations | To fill |
 | [DB Execution](./db-execution.md) | Executor accounting, SQLite policy owner and shutdown contracts | Documented |
 | [Coordination Persistence](./coordination.md) | Access, gallery jobs, SSE slots, leases and worker ownership | Documented |
+| [HTTP Compression](./http-compression.md) | ASGI ordering, passthrough and Starlette compatibility | Documented |
 | [Error Handling](./error-handling.md) | Error types, handling strategies | To fill |
 | [Quality Guidelines](./quality-guidelines.md) | Code standards, forbidden patterns | To fill |
 | [Logging Guidelines](./logging-guidelines.md) | Structured logging, log levels | To fill |
