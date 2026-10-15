@@ -46,3 +46,25 @@ Completed and independently verified SQLite execution separation, coordination-d
 ### Next Steps
 
 - Review the pushed refactor/architecture-legacy-modules branch. Existing historyLoading cleanup defect and gallery/workspace improvements remain separately scoped follow-ups.
+
+
+## Session 2: Fix Starlette gzip compatibility for refactor merge
+<!-- trellis-session: v=2 fp=d2852af0113c5b94 -->
+
+**Date**: 2026-10-15
+**Task**: Fix Starlette gzip compatibility for refactor merge
+**Branch**: `refactor/architecture-legacy-modules`
+
+### Summary
+
+Fixed excluded response ASGI ordering across Starlette 1.3.1 and 1.8.0; 31 regressions pass on both; backend suite covered with sandbox socket tests rerun successfully; Ruff and dependency checks pass.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `bb2dde9` | fix: preserve gzip bypass response ordering across Starlette versions |
+
+### Status
+
+[OK] **Completed**
