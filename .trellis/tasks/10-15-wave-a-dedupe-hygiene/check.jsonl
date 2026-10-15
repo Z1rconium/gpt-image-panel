@@ -1,0 +1,4 @@
+{"file": ".trellis/tasks/10-15-backend-review-refactor/refactor-checklist.md", "reason": "Acceptance criteria the check pass verifies each Wave A item against"}
+{"file": ".trellis/spec/backend/index.md", "reason": "Layer matrix; confirm no layering regression from the schemas split and extractions"}
+{"file": ".trellis/spec/frontend/forms-and-api.md", "reason": "Verify the raw-fetch sites were routed through the client and conventions preserved"}
+{"file": ".trellis/spec/backend/db-execution.md", "reason": "Verify execution.py still honors the documented db policy contract after the retry-policy extraction"}
