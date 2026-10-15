@@ -12,6 +12,7 @@ from typing import Any, Literal
 
 from ..core.image_models import MAX_PROMPT_CHARS
 from . import presets
+from .lease_renewal import renew_lease_until_lost
 from ..core.errors import (
     DomainError,
     InvalidRequestError,
@@ -249,25 +250,32 @@ async def _renew_assistant_slot_loop(
 ) -> None:
     lease_seconds = _assistant_slot_lease_seconds(timeout_seconds)
     interval = max(1.0, lease_seconds / 3)
-    while True:
-        await asyncio.sleep(interval)
-        try:
-            renewed = await run_db_operation(
+
+    async def renew() -> bool:
+        return bool(
+            await run_db_operation(
                 renew_background_slot,
                 name=slot_name,
                 owner=owner,
                 lease_expires_at=utc_lease_expires_at(lease_seconds),
                 now=utc_now(),
             )
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.warning("Assistant slot renewal failed for %s", slot_name, exc_info=True)
-            continue
-        if not renewed:
-            logger.warning("Assistant slot %s was lost; aborting the request", slot_name)
-            on_lost()
-            return
+        )
+
+    def on_transient_error(exc: Exception, remaining: float) -> None:
+        logger.warning("Assistant slot renewal failed for %s", slot_name, exc_info=True)
+
+    def on_lost_and_log() -> None:
+        logger.warning("Assistant slot %s was lost; aborting the request", slot_name)
+        on_lost()
+
+    await renew_lease_until_lost(
+        renew,
+        interval_seconds=interval,
+        retry_interval_seconds=interval,
+        on_lost=on_lost_and_log,
+        on_transient_error=on_transient_error,
+    )
 
 
 @asynccontextmanager

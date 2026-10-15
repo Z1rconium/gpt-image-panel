@@ -34,6 +34,7 @@ from ..repositories.gallery.queries import get_gallery_entries_by_ids
 from ..core.media import safe_image_path
 from ..repositories.settings import load_nodeimage_settings
 from ..schemas.gallery import GalleryEntry
+from .lease_renewal import renew_lease_until_lost
 from ..integrations.nodeimage.client import (
     NodeImageAuthError,
     NodeImageUploadError,
@@ -339,27 +340,18 @@ async def _run_nodeimage_upload_job(job: dict) -> None:
     stop_lease_renewal = asyncio.Event()
 
     async def renew_lease() -> None:
-        try:
-            while True:
-                try:
-                    await asyncio.wait_for(
-                        stop_lease_renewal.wait(),
-                        timeout=max(1.0, GALLERY_JOB_LEASE_SECONDS / 3),
-                    )
-                    return
-                except asyncio.TimeoutError:
-                    pass
-                renewed = await run_db_operation(renew_gallery_job_lease,
-                    job_id=job_id,
-                    lease_owner=lease_owner,
-                    lease_expires_at=_gallery_job_lease_expires_at(),
-                    now=utc_now(),
-                )
-                if not renewed:
-                    lease_lost.set()
-                    return
-        except asyncio.CancelledError:
-            raise
+        await renew_lease_until_lost(
+            lambda: run_db_operation(
+                renew_gallery_job_lease,
+                job_id=job_id,
+                lease_owner=lease_owner,
+                lease_expires_at=_gallery_job_lease_expires_at(),
+                now=utc_now(),
+            ),
+            interval_seconds=max(1.0, GALLERY_JOB_LEASE_SECONDS / 3),
+            stop_event=stop_lease_renewal,
+            on_lost=lease_lost.set,
+        )
 
     renew_task = asyncio.create_task(renew_lease())
 
