@@ -68,3 +68,20 @@ Actionable subset of `research/report.md`. Each row is independently verifiable 
 
 - Rewriting `image_jobs.py` or `maskDocument.ts`/`MaskEditorDialog.svelte` for size alone — no mixed responsibility or defect demonstrated.
 - Dependency upgrades, schema/data migrations, or feature work — outside review scope.
+
+---
+
+## Progress — Wave B/C landing (`refactor/wave-b-c`, stacked on Wave A / PR #10)
+
+| # | Commit | Landed | Still open |
+|---|---|---|---|
+| B1 | `b3aa446` | `services/lease_renewal.py` shared by image units, agent runs, assistant slots, nodeimage uploads | bounded `_sleep_while_renewing_background_lease` and the gallery background lease intentionally left unshared (different shape) |
+| C2 | `5752e4d` | persistence → `services/job_persistence.py`; webhook → `webhook_service.py`; `job_events.py` keeps state + SSE | — |
+| C3 | `18ce7b2` | settings router → `settings` / `settings_presets` / `settings_health` + shared `settings_bindings` | — |
+| C4 | `8f8ec5f` | `middleware.py` → `compression` / `security_headers` / `errors` / `host_validation` | — |
+| C5 | `1d58835` | secret-ref helpers → `core/secrets.py`; masking → `core/redaction.py`; `validators.py` keeps SSRF/URL only | — |
+| C6 | `3c745f7` | `assistant_runtime.py` → resolution (kept) / `assistant_slots.py` / `assistant_json.py` | — |
+| C7 | `0b42644` | `assistant_vision.py` keeps read-only gallery analysis; generation/preview → `assistant_prompt_optimization.py` | — |
+| C1 | `2d8c83a` | credential/secrets view → `preset_credentials.py` (core-only deps) | preset CRUD, per-feature settings domains and env-ref inventory remain in `presets.py` — follow-up extraction |
+
+Verification per item: backend suite `990 passed / 22 skipped`; OpenAPI dump byte-identical to `main`; `ruff check --select F401,F841,F811` on touched files with no new findings; `test_architecture_boundaries.py` frozen-deferred allowlist only ever shrinks. **Nothing pushed yet**; PR base can switch from the Wave A branch to `main` now that #10 merged.
