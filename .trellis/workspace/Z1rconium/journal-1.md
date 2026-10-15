@@ -68,3 +68,30 @@ Fixed excluded response ASGI ordering across Starlette 1.3.1 and 1.8.0; 31 regre
 ### Status
 
 [OK] **Completed**
+
+
+## Session 3: Wave A: low-risk dedupe and hygiene refactors
+<!-- trellis-session: v=2 fp=7c1de4ddf569332a -->
+
+**Date**: 2026-10-15
+**Task**: Wave A: low-risk dedupe and hygiene refactors
+**Branch**: `refactor/wave-a-dedupe-hygiene`
+
+### Summary
+
+Implemented refactor-checklist Wave A: collapsed six _normalize_stored_* helpers and factored _resolve_busy_policy (db); shared redaction.mask_url and validators.split_allowlist/normalize_host_entry across redaction/validators/middleware/secrets/overall_config (output and accept-reject behavior unchanged); split schemas/settings.py into presets/provider_mapping/overall_config (37 DTOs JSON-schema identical); added apiFetchRaw and routed the 3 raw fetch sites; translated a Chinese docstring. Backend 990 passed/22 skipped, frontend check+vitest(206)+build green, ruff clean.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `19e9615` | refactor(db): dedupe stored-secret normalization and busy policy |
+| `55b8d0d` | refactor(core): share url-masking and allowlist primitives |
+| `2ce294a` | refactor(schemas): split settings DTOs by domain |
+| `a12301f` | refactor(frontend): route raw fetch sites through apiFetchRaw |
+| `48a7458` | chore(task): record Wave A refactor plan and results |
+| `4314d93` | docs(spec): document apiFetchRaw for raw and streaming responses |
+
+### Status
+
+[OK] **Completed**
