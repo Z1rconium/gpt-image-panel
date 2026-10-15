@@ -1,5 +1,5 @@
 import { get } from 'svelte/store';
-import { apiFetch } from '$lib/api/client';
+import { apiFetch, apiFetchRaw } from '$lib/api/client';
 import { t } from '$lib/i18n';
 import { confirmStore } from '$lib/stores/confirm';
 import type { ToastOptions, ToastVariant } from '$lib/stores/ui';
@@ -753,9 +753,8 @@ export function createDeferredGalleryActions(deps: GalleryActionDeps) {
       return;
     }
 
-    const response = await fetch(downloadUrl, {
+    const response = await apiFetchRaw(downloadUrl, {
       method: 'GET',
-      credentials: 'same-origin',
       headers: { Accept: 'application/zip' }
     });
     if (!response.ok) throw new Error(get(t).messages.requestFailed);
@@ -807,9 +806,8 @@ export function createDeferredGalleryActions(deps: GalleryActionDeps) {
     });
     try {
       if (!state.selectionToken && selectedBytes >= STREAMING_ZIP_DOWNLOAD_BYTES_THRESHOLD && canUseFileSystemAccess()) {
-        const response = await fetch('/api/gallery/batch/download', {
+        const response = await apiFetchRaw('/api/gallery/batch/download', {
           method: 'POST',
-          credentials: 'same-origin',
           headers: { 'Content-Type': 'application/json', Accept: 'application/zip' },
           body: JSON.stringify(batchRequestBody(state))
         });
