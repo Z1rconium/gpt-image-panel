@@ -53,8 +53,6 @@ ALLOWED_VIOLATIONS: frozenset[str] = frozenset(
 # Python requires; new entries need a documented reason to be added.
 ALLOWED_DEFERRED_IMPORTS: frozenset[str] = frozenset(
     {
-        "backend/app/api/routers/settings.py:check_r2_settings_health -> backend.app.services.presets",
-        "backend/app/api/routers/settings.py:update_settings -> backend.app.services.presets",
         "backend/app/core/overall_config.py:apply_rows_to_config -> backend.app.core.secrets",
         "backend/app/core/overall_config.py:apply_rows_to_config -> backend.app.core.security",
         "backend/app/repositories/db/settings_store.py:save_overall_config_overrides -> backend.app.core.overall_config",
