@@ -4,7 +4,7 @@ import gzip
 
 import pytest
 
-from backend.app.api.middleware import TextOnlyGZipMiddleware
+from backend.app.api.compression import TextOnlyGZipMiddleware
 
 
 def _run_response(messages, *, path="/response", accept_encoding="gzip", passthrough=False):

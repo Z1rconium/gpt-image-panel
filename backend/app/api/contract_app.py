@@ -1,6 +1,7 @@
 from .app import app
 from .body_limit import BodyLimitMiddleware
-from .middleware import TextOnlyGZipMiddleware, register_exception_handlers, register_middleware
+from .compression import TextOnlyGZipMiddleware
+from .middleware import register_exception_handlers, register_middleware
 from .routers import routers
 from ..integrations.upstream import generation as proxy
 

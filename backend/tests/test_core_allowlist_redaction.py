@@ -8,7 +8,7 @@ apart again.
 
 import pytest
 
-from backend.app.api import middleware
+from backend.app.api import host_validation
 from backend.app.core import overall_config, redaction, validators
 from backend.app.core import settings as config
 
@@ -79,7 +79,7 @@ def test_configured_allowed_hosts_expands_origins_and_ports(monkeypatch):
     monkeypatch.setattr(config, "ALLOWED_HOSTS", "example.com, https://api.test", raising=False)
     monkeypatch.setattr(config, "PUBLIC_ORIGIN", "", raising=False)
 
-    hosts = middleware._configured_allowed_hosts()
+    hosts = host_validation._configured_allowed_hosts()
     assert "example.com" in hosts
     assert "api.test" in hosts
     assert "api.test:443" in hosts
@@ -88,11 +88,11 @@ def test_configured_allowed_hosts_expands_origins_and_ports(monkeypatch):
 def test_host_allowed_rejects_unknown_hosts(monkeypatch):
     monkeypatch.setattr(config, "ALLOWED_HOSTS", "example.com", raising=False)
     monkeypatch.setattr(config, "PUBLIC_ORIGIN", "", raising=False)
-    assert middleware._host_allowed("example.com") is True
-    assert middleware._host_allowed("evil.test") is False
+    assert host_validation._host_allowed("example.com") is True
+    assert host_validation._host_allowed("evil.test") is False
 
 
 def test_host_allowed_is_permissive_when_unconfigured(monkeypatch):
     monkeypatch.setattr(config, "ALLOWED_HOSTS", "", raising=False)
     monkeypatch.setattr(config, "PUBLIC_ORIGIN", "", raising=False)
-    assert middleware._host_allowed("anything.test") is True
+    assert host_validation._host_allowed("anything.test") is True
