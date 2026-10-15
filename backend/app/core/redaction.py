@@ -3,6 +3,8 @@ import re
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
+from . import secrets as _secrets
+
 
 logger = logging.getLogger(__name__)
 _secret_lookup_failure_logged = False
@@ -48,7 +50,7 @@ def mask_url(
     """Mask credentials, query and fragment in a URL, preserving scheme and host.
 
     This is the single URL-masking primitive. The logging scrub
-    (``_redact_url``) and the API/display masking (``validators.redact_url``)
+    (``_redact_url``) and the API/display masking (``redaction.redact_url``)
     differ only in token/invalid/require_scheme/hide_path, so they delegate
     here instead of re-implementing the parsing/bracketing logic.
     """
@@ -94,9 +96,7 @@ def _redact_url(match: re.Match[str]) -> str:
 def _active_secrets() -> tuple[str, ...]:
     global _secret_lookup_failure_logged
     try:
-        from .secrets import active_secret_values
-
-        return active_secret_values()
+        return _secrets.active_secret_values()
     except Exception as exc:  # noqa: BLE001 - redaction must never raise
         if not _secret_lookup_failure_logged:
             _secret_lookup_failure_logged = True
@@ -125,3 +125,68 @@ def redact_sensitive_text(value: Any, *, secret_values: tuple[str | None, ...] =
     text = _AUTH_RE.sub(r"\1[REDACTED]", text)
     text = _BEARER_RE.sub("Bearer [REDACTED]", text)
     return _CREDENTIAL_RE.sub(r"\1[REDACTED]", text)
+
+
+def redact_url(url: str | None) -> str:
+    """Mask credentials, path, query and fragment of a URL for display.
+
+    Delegates to the shared :func:`mask_url` primitive so the display masking and
+    the log scrub can never drift apart.
+    """
+    return mask_url(url, token="***", invalid="***", hide_path=True)
+
+
+def mask_webhook_url(url: str | None) -> str:
+    value = str(url or "").strip()
+    if not value:
+        return ""
+
+    if value in _secrets.configured_secret_ids() or _secrets.get_env_var_ref_name(value):
+        return value
+
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except ValueError:
+        return "***"
+
+    if parsed.scheme.lower() != "https" or not parsed.hostname:
+        return "***"
+
+    hostname = parsed.hostname
+    host = f"[{hostname}]" if ":" in hostname and not hostname.startswith("[") else hostname
+    port_part = f":{port}" if port is not None else ""
+    user_info = "***@" if parsed.username is not None else ""
+    path = "/***" if parsed.path and parsed.path != "/" else parsed.path
+    query = "***" if parsed.query else ""
+    fragment = "***" if parsed.fragment else ""
+    return urlunsplit((parsed.scheme, f"{user_info}{host}{port_part}", path, query, fragment))
+
+
+def mask_socks5_proxy_url(url: str | None) -> str:
+    value = str(url or "").strip()
+    if not value:
+        return ""
+
+    if value in _secrets.configured_secret_ids() or _secrets.get_env_var_ref_name(value):
+        return value
+
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except ValueError:
+        return value
+
+    if parsed.scheme.lower() != "socks5" or not parsed.hostname or port is None:
+        return value
+
+    hostname = parsed.hostname
+    host = f"[{hostname}]" if ":" in hostname and not hostname.startswith("[") else hostname
+    user_info = ""
+    if parsed.username is not None:
+        user_info = parsed.username
+        if parsed.password is not None:
+            user_info += ":***"
+        user_info += "@"
+
+    return f"socks5://{user_info}{host}:{port}"

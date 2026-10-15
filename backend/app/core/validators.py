@@ -1,70 +1,9 @@
 import asyncio
 import ipaddress
-import os
-import re
 import socket
 from urllib.parse import urlparse, urlsplit, urlunsplit
 
 from . import settings as config
-from .redaction import mask_url
-
-
-ENV_VAR_REF_RE = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
-
-
-def get_env_var_ref_name(value: str | None) -> str | None:
-    match = ENV_VAR_REF_RE.match(str(value or "").strip())
-    return match.group(1) if match else None
-
-
-def is_malformed_env_var_ref(value: str | None) -> bool:
-    normalized = str(value or "").strip()
-    return bool(normalized) and ("${" in normalized or "}" in normalized) and not get_env_var_ref_name(normalized)
-
-
-def resolve_env_var_ref(value: str | None) -> str:
-    normalized = str(value or "").strip()
-    env_var = get_env_var_ref_name(normalized)
-    if env_var:
-        return os.getenv(env_var, "").strip()
-    return normalized
-
-
-def normalize_secret_env_ref_or_plaintext(
-    value: str | None,
-    *,
-    field_name: str,
-    normalizer=None,
-) -> str:
-    from .secrets import configured_secret_ids, declared_env_names, normalize_secret_id
-
-    normalized = str(value or "").strip()
-    if not normalized:
-        return ""
-    if is_malformed_env_var_ref(normalized):
-        raise ValueError(
-            f"{field_name} env ref must be formatted as ${{ENV_VAR_NAME}}."
-        )
-
-    env_var = get_env_var_ref_name(normalized)
-    if env_var:
-        if not config.ALLOW_LEGACY_ENV_REFS and env_var not in declared_env_names():
-            raise ValueError(
-                f"{field_name} references environment variable {env_var}, which is not declared "
-                "in SECRET_REGISTRY_JSON. Declare it with a purpose and origin and use its secret_id."
-            )
-        return f"${{{env_var}}}"
-
-    if normalized in configured_secret_ids():
-        return normalize_secret_id(normalized, field_name=field_name)
-
-    if not config.ALLOW_PLAINTEXT_SECRETS:
-        raise ValueError(
-            f"{field_name} must use ${{ENV_VAR_NAME}} unless "
-            "ALLOW_PLAINTEXT_SECRETS=true."
-        )
-
-    return normalizer(normalized) if normalizer is not None else normalized
 
 
 def _get_private_ip_ranges() -> tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...]:
@@ -382,15 +321,6 @@ def normalize_r2_endpoint_url(url: str | None) -> str:
     return normalized
 
 
-def redact_url(url: str | None) -> str:
-    """Mask credentials, path, query and fragment of a URL for display.
-
-    Delegates to the shared :func:`app.core.redaction.mask_url` primitive so the
-    display masking and the log scrub can never drift apart.
-    """
-    return mask_url(url, token="***", invalid="***", hide_path=True)
-
-
 def validate_image_url(url: str) -> None:
     _validate_url_base(
         url,
@@ -447,34 +377,6 @@ def normalize_webhook_url(url: str | None) -> str:
     return urlunsplit(("https", parsed.netloc, parsed.path, parsed.query, parsed.fragment))
 
 
-def mask_webhook_url(url: str | None) -> str:
-    value = str(url or "").strip()
-    if not value:
-        return ""
-    from .secrets import configured_secret_ids
-
-    if value in configured_secret_ids() or get_env_var_ref_name(value):
-        return value
-
-    try:
-        parsed = urlsplit(value)
-        port = parsed.port
-    except ValueError:
-        return "***"
-
-    if parsed.scheme.lower() != "https" or not parsed.hostname:
-        return "***"
-
-    hostname = parsed.hostname
-    host = f"[{hostname}]" if ":" in hostname and not hostname.startswith("[") else hostname
-    port_part = f":{port}" if port is not None else ""
-    user_info = "***@" if parsed.username is not None else ""
-    path = "/***" if parsed.path and parsed.path != "/" else parsed.path
-    query = "***" if parsed.query else ""
-    fragment = "***" if parsed.fragment else ""
-    return urlunsplit((parsed.scheme, f"{user_info}{host}{port_part}", path, query, fragment))
-
-
 def normalize_socks5_proxy_url(url: str | None) -> str:
     value = str(url or "").strip()
     if not value:
@@ -499,33 +401,3 @@ def normalize_socks5_proxy_url(url: str | None) -> str:
         raise ValueError("SOCKS5 proxy URL must not include a path")
 
     return urlunsplit(("socks5", parsed.netloc, "", "", ""))
-
-
-def mask_socks5_proxy_url(url: str | None) -> str:
-    value = str(url or "").strip()
-    if not value:
-        return ""
-    from .secrets import configured_secret_ids
-
-    if value in configured_secret_ids() or get_env_var_ref_name(value):
-        return value
-
-    try:
-        parsed = urlsplit(value)
-        port = parsed.port
-    except ValueError:
-        return value
-
-    if parsed.scheme.lower() != "socks5" or not parsed.hostname or port is None:
-        return value
-
-    hostname = parsed.hostname
-    host = f"[{hostname}]" if ":" in hostname and not hostname.startswith("[") else hostname
-    user_info = ""
-    if parsed.username is not None:
-        user_info = parsed.username
-        if parsed.password is not None:
-            user_info += ":***"
-        user_info += "@"
-
-    return f"socks5://{user_info}{host}:{port}"

@@ -18,7 +18,7 @@ from ..core.errors import (
     UpstreamError,
 )
 from ..core import settings as config
-from ..core import validators as ssrf
+from ..core.redaction import redact_url
 from ..core.utils import json_dumps_canonical, utc_now
 from ..integrations import assistant_client
 from ..repositories.coordination import (
@@ -351,7 +351,7 @@ def _redact_text(value: Any) -> str:
     for part in re.split(r"(\s+)", text):
         lower = part.lower()
         if "://" in part:
-            redacted_parts.append(ssrf.redact_url(part))
+            redacted_parts.append(redact_url(part))
         elif any(marker in lower for marker in ("api_key=", "apikey=", "token=", "secret=", "password=", "authorization=")):
             redacted_parts.append("[REDACTED]")
         else:

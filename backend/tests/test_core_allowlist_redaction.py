@@ -28,7 +28,7 @@ from backend.app.core import settings as config
     ],
 )
 def test_redact_url_masks_credentials_path_and_query(url, expected):
-    assert validators.redact_url(url) == expected
+    assert redaction.redact_url(url) == expected
 
 
 def test_log_scrub_and_display_mask_share_one_primitive():

@@ -22,10 +22,12 @@ from ...core.settings_defaults import (
     default_secret_reference as _default_secret_reference,
 )
 from ...core.utils import coerce_nonnegative_int, utc_now
-from ...core.validators import (
+from ...core.secrets import (
     get_env_var_ref_name,
     is_malformed_env_var_ref,
     normalize_secret_env_ref_or_plaintext,
+)
+from ...core.validators import (
     normalize_r2_endpoint_url,
 )
 from .connection import (

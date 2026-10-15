@@ -2,7 +2,7 @@
 
 from . import secrets
 from . import settings as config
-from .validators import get_env_var_ref_name
+from .secrets import get_env_var_ref_name
 
 
 def default_secret_reference(secret_id: str, value: str | None) -> str:

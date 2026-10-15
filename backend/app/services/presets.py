@@ -29,14 +29,18 @@ from ..schemas.provider import (
     parse_provider_config,
     provider_capabilities,
 )
-from ..core.validators import (
-    get_env_var_ref_name,
+from ..core.redaction import (
     mask_socks5_proxy_url,
     mask_webhook_url,
+)
+from ..core.secrets import (
+    get_env_var_ref_name,
     normalize_secret_env_ref_or_plaintext,
+    resolve_env_var_ref,
+)
+from ..core.validators import (
     normalize_socks5_proxy_url,
     normalize_webhook_url,
-    resolve_env_var_ref,
 )
 from ..integrations.nodeimage.client import (
     NodeImageConfigurationError,

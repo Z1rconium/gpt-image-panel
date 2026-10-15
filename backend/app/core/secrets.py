@@ -6,6 +6,7 @@ from threading import RLock
 from typing import Literal
 from urllib.parse import urlsplit
 
+from . import settings as config
 from .validators import normalize_host_entry, split_allowlist
 
 
@@ -32,6 +33,60 @@ ALLOWED_SECRET_PURPOSES: frozenset[str] = frozenset(
 )
 SECRET_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$")
 ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+ENV_VAR_REF_RE = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
+
+
+def get_env_var_ref_name(value: str | None) -> str | None:
+    match = ENV_VAR_REF_RE.match(str(value or "").strip())
+    return match.group(1) if match else None
+
+
+def is_malformed_env_var_ref(value: str | None) -> bool:
+    normalized = str(value or "").strip()
+    return bool(normalized) and ("${" in normalized or "}" in normalized) and not get_env_var_ref_name(normalized)
+
+
+def resolve_env_var_ref(value: str | None) -> str:
+    normalized = str(value or "").strip()
+    env_var = get_env_var_ref_name(normalized)
+    if env_var:
+        return os.getenv(env_var, "").strip()
+    return normalized
+
+
+def normalize_secret_env_ref_or_plaintext(
+    value: str | None,
+    *,
+    field_name: str,
+    normalizer=None,
+) -> str:
+    normalized = str(value or "").strip()
+    if not normalized:
+        return ""
+    if is_malformed_env_var_ref(normalized):
+        raise ValueError(
+            f"{field_name} env ref must be formatted as ${{ENV_VAR_NAME}}."
+        )
+
+    env_var = get_env_var_ref_name(normalized)
+    if env_var:
+        if not config.ALLOW_LEGACY_ENV_REFS and env_var not in declared_env_names():
+            raise ValueError(
+                f"{field_name} references environment variable {env_var}, which is not declared "
+                "in SECRET_REGISTRY_JSON. Declare it with a purpose and origin and use its secret_id."
+            )
+        return f"${{{env_var}}}"
+
+    if normalized in configured_secret_ids():
+        return normalize_secret_id(normalized, field_name=field_name)
+
+    if not config.ALLOW_PLAINTEXT_SECRETS:
+        raise ValueError(
+            f"{field_name} must use ${{ENV_VAR_NAME}} unless "
+            "ALLOW_PLAINTEXT_SECRETS=true."
+        )
+
+    return normalizer(normalized) if normalizer is not None else normalized
 
 
 class SecretRegistryError(ValueError):
@@ -139,8 +194,6 @@ _ENV_REF_RE = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
 
 
 def _builtin_candidates() -> tuple[tuple[str, str, str, str], ...]:
-    from . import settings as config
-
     return (
         (
             "builtin-default-api-key",
@@ -272,8 +325,6 @@ def resolve_env_ref(
 
     Unknown names are rejected before the process environment is read.
     """
-    from . import settings as config
-
     if config.ALLOW_LEGACY_ENV_REFS:
         value = os.getenv(env_name, "").strip()
         if not value:
@@ -401,10 +452,6 @@ def resolve_secret_reference(
     if not raw:
         return ""
 
-    # Keep the parser local to avoid making the validators module import the
-    # secrets registry during application startup.
-    from .validators import get_env_var_ref_name
-
     env_var = get_env_var_ref_name(raw)
     if env_var:
         return resolve_env_ref(
@@ -462,8 +509,6 @@ def resolve_secret_reference_or_raise(
 
 def active_secret_values() -> tuple[str, ...]:
     global _active_secret_values_cache
-
-    from . import settings as config
 
     config_key = tuple(
         str(getattr(config, name, "") or "").strip()
