@@ -19,7 +19,10 @@
   "pr_url": null,
   "subtasks": [],
   "children": [
-    "10-15-wave-a-dedupe-hygiene"
+    "10-15-wave-a-dedupe-hygiene",
+    "10-15-wave-b-lease-renewal",
+    "10-15-wave-c-core-api-splits",
+    "10-15-wave-c-services-splits"
   ],
   "parent": null,
   "relatedFiles": [],
