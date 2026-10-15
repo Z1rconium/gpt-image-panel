@@ -19,7 +19,7 @@ from ..core.errors import NotFoundError, UnprocessableRequestError
 from ..core.utils import utc_now
 from ..runtime.state import state
 from ..schemas.provider import provider_capabilities
-from ..schemas.settings import MAX_PRESET_IMPORT_BYTES, PresetExportPackage
+from ..schemas.presets import MAX_PRESET_IMPORT_BYTES, PresetExportPackage
 from .presets import (
     _stored_provider_config,
     apply_api_preset,

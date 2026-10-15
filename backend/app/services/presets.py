@@ -50,9 +50,9 @@ from ..repositories.settings import (
     load_settings,
     save_settings,
 )
+from ..schemas.presets import ApiPresetResponse
 from ..schemas.settings import (
     AIAssistantSettingsResponse,
-    ApiPresetResponse,
     PromptOptimizerSettingsResponse,
     R2BackupSettingsResponse,
     NodeImageSettingsResponse,
