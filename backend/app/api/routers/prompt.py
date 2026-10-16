@@ -26,7 +26,8 @@ from ...schemas.assistant import (
     PromptOptimizerSystemPromptRequest,
     PromptOptimizerSystemPromptResponse,
 )
-from ...schemas.settings import CredentialProbeRequest, PromptOptimizerHealthResponse
+from ...schemas.presets import CredentialProbeRequest
+from ...schemas.settings import PromptOptimizerHealthResponse
 
 logger = logging.getLogger(__name__)
 

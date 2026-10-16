@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from . import settings as config
+from .validators import split_allowlist
 
 
 OverallConfigType = Literal["string", "secret", "bool", "int", "float"]
@@ -268,7 +269,7 @@ def validate_named_value(spec: OverallConfigSpec, value: str) -> None:
 
 
 def _split_list(value: str) -> list[str]:
-    return [part.strip() for part in value.replace(";", ",").split(",") if part.strip()]
+    return split_allowlist(value)
 
 
 def _validate_ip_list(value: str) -> None:

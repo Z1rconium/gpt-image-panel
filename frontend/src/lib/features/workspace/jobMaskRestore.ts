@@ -1,5 +1,5 @@
 import { get } from 'svelte/store';
-import { ApiError, DEFAULT_API_TIMEOUT_MS } from '$lib/api/client';
+import { ApiError, DEFAULT_API_TIMEOUT_MS, apiFetchRaw } from '$lib/api/client';
 import { t } from '$lib/i18n';
 
 export type JobMaskFetch = {
@@ -19,12 +19,11 @@ export async function fetchJobMaskBlob(jobId: string, source: { file: File } | {
   }
   let response: Response;
   try {
-    response = await fetch(`/api/generate/${encodeURIComponent(jobId)}/mask/restore`, {
+    response = await apiFetchRaw(`/api/generate/${encodeURIComponent(jobId)}/mask/restore`, {
       method: 'POST',
-      credentials: 'same-origin',
       headers: { Accept: 'image/png' },
       body: form,
-      signal: AbortSignal.timeout(DEFAULT_API_TIMEOUT_MS)
+      timeoutMs: DEFAULT_API_TIMEOUT_MS
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : get(t).messages.failedToFetch;

@@ -36,6 +36,23 @@ def _is_sqlite_busy(error: BaseException) -> bool:
     )
 
 
+def _resolve_busy_policy(critical: bool, retry_busy: bool) -> tuple[int, int]:
+    """Return ``(busy_timeout_ms, attempts)`` for one repository operation.
+
+    ``critical`` selects the larger critical busy budget used by claim, lease
+    renewal, terminal unit writes, parent finalization and cancellation. Those
+    paths must not silently lose a write to a transient lock; polling reads keep
+    the short budget because timing out just skips a cycle.
+    """
+    if critical:
+        busy_timeout_ms = config.SQLITE_CRITICAL_BUSY_TIMEOUT_MS
+        attempts = config.SQLITE_CRITICAL_BUSY_RETRY_ATTEMPTS if retry_busy else 0
+    else:
+        busy_timeout_ms = config.SQLITE_BUSY_TIMEOUT_MS
+        attempts = config.SQLITE_BUSY_RETRY_ATTEMPTS if retry_busy else 0
+    return busy_timeout_ms, attempts
+
+
 async def run_db_operation(
     callback: Callable[..., T],
     *args: Any,
@@ -44,23 +61,10 @@ async def run_db_operation(
     critical: bool = False,
     **kwargs: Any,
 ) -> T:
-    """Run one repository operation with a short lock timeout and jittered retry.
-
-    ``critical`` selects the larger critical busy budget used by claim, lease
-    renewal, terminal unit writes, parent finalization and cancellation. Those
-    paths must not silently lose a write to a transient lock; polling reads keep
-    the short budget because timing out just skips a cycle.
-    """
+    """Run one repository operation with a short lock timeout and jittered retry."""
 
     label = metric_name or getattr(callback, "__name__", "operation")
-    if critical:
-        busy_timeout_ms = config.SQLITE_CRITICAL_BUSY_TIMEOUT_MS
-        attempts = (
-            config.SQLITE_CRITICAL_BUSY_RETRY_ATTEMPTS if retry_busy else 0
-        )
-    else:
-        busy_timeout_ms = config.SQLITE_BUSY_TIMEOUT_MS
-        attempts = config.SQLITE_BUSY_RETRY_ATTEMPTS if retry_busy else 0
+    busy_timeout_ms, attempts = _resolve_busy_policy(critical, retry_busy)
 
     def invoke() -> T:
         with metric_name_scope(label):
@@ -94,14 +98,7 @@ def run_db_operation_in_current_thread(
     """
 
     label = metric_name or getattr(callback, "__name__", "operation")
-    if critical:
-        busy_timeout_ms = config.SQLITE_CRITICAL_BUSY_TIMEOUT_MS
-        attempts = (
-            config.SQLITE_CRITICAL_BUSY_RETRY_ATTEMPTS if retry_busy else 0
-        )
-    else:
-        busy_timeout_ms = config.SQLITE_BUSY_TIMEOUT_MS
-        attempts = config.SQLITE_BUSY_RETRY_ATTEMPTS if retry_busy else 0
+    busy_timeout_ms, attempts = _resolve_busy_policy(critical, retry_busy)
     for attempt in range(attempts + 1):
         started_at = time.perf_counter()
         try:

@@ -52,65 +52,18 @@ from .constants import (
 logger = logging.getLogger(__name__)
 
 
-def _normalize_stored_api_key(value: str | None) -> str:
+def _normalize_stored_secret(value: str | None, field_name: str) -> str:
+    """Normalize one stored credential field, tolerating malformed env-ref input.
+
+    Keeps declared ``${ENV_VAR}`` references verbatim; otherwise normalizes
+    plaintext (or returns it unchanged when validation fails, so a legacy stored
+    value never breaks a read).
+    """
     normalized = str(value or "").strip()
     if get_env_var_ref_name(normalized):
         return normalized
     try:
-        return normalize_secret_env_ref_or_plaintext(normalized, field_name="API key")
-    except ValueError:
-        return normalized
-
-
-def _normalize_stored_socks5_proxy(value: str | None) -> str:
-    normalized = str(value or "").strip()
-    if get_env_var_ref_name(normalized):
-        return normalized
-    try:
-        return normalize_secret_env_ref_or_plaintext(normalized, field_name="SOCKS5 proxy URL")
-    except ValueError:
-        return normalized
-
-
-def _normalize_stored_webhook_url(value: str | None) -> str:
-    normalized = str(value or "").strip()
-    if get_env_var_ref_name(normalized):
-        return normalized
-    try:
-        return normalize_secret_env_ref_or_plaintext(normalized, field_name="Webhook URL")
-    except ValueError:
-        return normalized
-
-
-def _normalize_stored_r2_access_key_id(value: str | None) -> str:
-    normalized = str(value or "").strip()
-    if get_env_var_ref_name(normalized):
-        return normalized
-    try:
-        return normalize_secret_env_ref_or_plaintext(normalized, field_name="R2 access key ID")
-    except ValueError:
-        return normalized
-
-
-def _normalize_stored_r2_secret_access_key(value: str | None) -> str:
-    normalized = str(value or "").strip()
-    if get_env_var_ref_name(normalized):
-        return normalized
-    try:
-        return normalize_secret_env_ref_or_plaintext(normalized, field_name="R2 secret access key")
-    except ValueError:
-        return normalized
-
-
-def _normalize_stored_nodeimage_api_key(value: str | None) -> str:
-    normalized = str(value or "").strip()
-    if get_env_var_ref_name(normalized):
-        return normalized
-    try:
-        return normalize_secret_env_ref_or_plaintext(
-            normalized,
-            field_name="NodeImage API key",
-        )
+        return normalize_secret_env_ref_or_plaintext(normalized, field_name=field_name)
     except ValueError:
         return normalized
 
@@ -239,7 +192,7 @@ def _normalize_prompt_optimizer_settings(settings: dict | None) -> dict:
     return {
         "enabled": _coerce_bool(settings.get("enabled"), default["enabled"]),
         "api_url": str(settings.get("api_url") or "").strip(),
-        "api_key": _normalize_stored_api_key(settings.get("api_key")),
+        "api_key": _normalize_stored_secret(settings.get("api_key"), "API key"),
         "model": str(settings.get("model") or default["model"]).strip()
         or default["model"],
         "timeout_seconds": _coerce_positive_int(
@@ -284,9 +237,11 @@ def _normalize_r2_backup_settings(settings: dict | None) -> dict:
         return default
     endpoint_url = normalize_r2_endpoint_url(settings.get("endpoint_url") or "")
     bucket_name = str(settings.get("bucket_name") or "").strip()
-    access_key_id = _normalize_stored_r2_access_key_id(settings.get("access_key_id"))
-    secret_access_key = _normalize_stored_r2_secret_access_key(
-        settings.get("secret_access_key")
+    access_key_id = _normalize_stored_secret(
+        settings.get("access_key_id"), "R2 access key ID"
+    )
+    secret_access_key = _normalize_stored_secret(
+        settings.get("secret_access_key"), "R2 secret access key"
     )
     return {
         "enabled": default["enabled"]
@@ -368,7 +323,7 @@ def _normalize_nodeimage_settings(settings: dict | None) -> dict:
     default = _default_nodeimage_settings()
     if not isinstance(settings, dict):
         return default
-    api_key = _normalize_stored_nodeimage_api_key(settings.get("api_key"))
+    api_key = _normalize_stored_secret(settings.get("api_key"), "NodeImage API key")
     return {
         "enabled": _coerce_bool(settings.get("enabled"), default["enabled"]),
         "api_key": api_key or default["api_key"],
@@ -565,12 +520,16 @@ def _normalize_settings(settings: dict | None) -> dict:
         return _default_settings()
 
     upstream_socks5_proxy = (
-        _normalize_stored_socks5_proxy(settings.get("upstream_socks5_proxy"))
+        _normalize_stored_secret(
+            settings.get("upstream_socks5_proxy"), "SOCKS5 proxy URL"
+        )
         if settings.get("upstream_socks5_proxy") is not None
-        else _normalize_stored_socks5_proxy(config.DEFAULT_UPSTREAM_SOCKS5_PROXY)
+        else _normalize_stored_secret(
+            config.DEFAULT_UPSTREAM_SOCKS5_PROXY, "SOCKS5 proxy URL"
+        )
     )
     webhook_url = (
-        _normalize_stored_webhook_url(settings.get("webhook_url"))
+        _normalize_stored_secret(settings.get("webhook_url"), "Webhook URL")
         if settings.get("webhook_url") is not None
         else ""
     )
@@ -607,8 +566,8 @@ def _normalize_settings(settings: dict | None) -> dict:
             continue
 
         normalized_preset = normalize_api_preset(preset, f"preset-{index + 1}")
-        normalized_preset["api_key"] = _normalize_stored_api_key(
-            normalized_preset.get("api_key")
+        normalized_preset["api_key"] = _normalize_stored_secret(
+            normalized_preset.get("api_key"), "API key"
         )
         # supports_mask for async presets follows what the mapping can carry,
         # so a preset saved before the capability contract reads correctly.

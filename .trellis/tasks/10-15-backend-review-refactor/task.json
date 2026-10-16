@@ -18,7 +18,9 @@
   "commit": null,
   "pr_url": null,
   "subtasks": [],
-  "children": [],
+  "children": [
+    "10-15-wave-a-dedupe-hygiene"
+  ],
   "parent": null,
   "relatedFiles": [],
   "notes": "",

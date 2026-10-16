@@ -56,10 +56,12 @@ from ...repositories.db import (
     list_overall_config_values,
     save_overall_config_overrides,
 )
-from ...schemas.settings import (
+from ...schemas.overall_config import (
     OverallConfigItem,
     OverallConfigResponse,
     OverallConfigUpdateRequest,
+)
+from ...schemas.presets import (
     CredentialProbeRequest,
     PresetCreateRequest,
     PresetExportPackage,
@@ -69,9 +71,13 @@ from ...schemas.settings import (
     PresetImportPreviewRequest,
     PresetImportPreviewResponse,
     PresetOrderRequest,
+)
+from ...schemas.provider_mapping import (
     ProviderMappingPromptResponse,
     ProviderMappingValidateRequest,
     ProviderMappingValidateResponse,
+)
+from ...schemas.settings import (
     R2BackupSettingsRequest,
     R2HealthResponse,
     SettingsRequest,

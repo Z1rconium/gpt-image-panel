@@ -6,6 +6,7 @@ import socket
 from urllib.parse import urlparse, urlsplit, urlunsplit
 
 from . import settings as config
+from .redaction import mask_url
 
 
 ENV_VAR_REF_RE = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
@@ -100,12 +101,27 @@ BLOCKED_HOSTNAMES = {
 }
 
 
+def split_allowlist(value: str | None, *, separators: str = ",;") -> list[str]:
+    """Split an allowlist into stripped, non-empty entries.
+
+    The single allowlist splitter. ``separators`` selects which characters
+    separate entries; callers that historically treated a character as part of an
+    entry (e.g. the upstream host allowlist is comma-only) pass a narrower set so
+    accept/reject behavior is unchanged.
+    """
+    text = str(value or "")
+    if ";" in separators:
+        text = text.replace(";", ",")
+    return [part.strip() for part in text.split(",") if part.strip()]
+
+
+def normalize_host_entry(entry: str) -> str:
+    """Normalize one host allowlist entry (lowercase, no trailing root dot)."""
+    return entry.strip().lower().rstrip(".")
+
+
 def _parse_host_allowlist(allowlist: str | None) -> list[str]:
-    return [
-        h.strip().lower().rstrip(".")
-        for h in str(allowlist or "").split(",")
-        if h.strip()
-    ]
+    return [normalize_host_entry(host) for host in split_allowlist(allowlist, separators=",")]
 
 
 def _ip_literal(hostname: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
@@ -367,27 +383,12 @@ def normalize_r2_endpoint_url(url: str | None) -> str:
 
 
 def redact_url(url: str | None) -> str:
-    value = str(url or "").strip()
-    if not value:
-        return ""
+    """Mask credentials, path, query and fragment of a URL for display.
 
-    try:
-        parsed = urlsplit(value)
-        port = parsed.port
-    except ValueError:
-        return "***"
-
-    if not parsed.scheme or not parsed.hostname:
-        return "***"
-
-    hostname = parsed.hostname
-    host = f"[{hostname}]" if ":" in hostname and not hostname.startswith("[") else hostname
-    port_part = f":{port}" if port is not None else ""
-    userinfo = "***@" if parsed.username is not None or parsed.password is not None else ""
-    path = "/***" if parsed.path and parsed.path != "/" else parsed.path
-    query = "***" if parsed.query else ""
-    fragment = "***" if parsed.fragment else ""
-    return urlunsplit((parsed.scheme, f"{userinfo}{host}{port_part}", path, query, fragment))
+    Delegates to the shared :func:`app.core.redaction.mask_url` primitive so the
+    display masking and the log scrub can never drift apart.
+    """
+    return mask_url(url, token="***", invalid="***", hide_path=True)
 
 
 def validate_image_url(url: str) -> None:

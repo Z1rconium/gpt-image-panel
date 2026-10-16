@@ -1,0 +1,6 @@
+{"file": ".trellis/tasks/10-15-backend-review-refactor/refactor-checklist.md", "reason": "Source requirements: the Wave A table with per-item change descriptions and verifiable acceptance criteria"}
+{"file": ".trellis/tasks/10-15-backend-review-refactor/research/report.md", "reason": "Finding evidence (F-G4-2, F-G4-3, F-G9-2, F-G9-3, F-G3-3, F-G11-1, F-G10-1) with file:line anchors and verified-clean context"}
+{"file": ".trellis/spec/backend/db-execution.md", "reason": "Executor accounting and SQLite policy contract for the R2 execution.py change"}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend layering and documented-vs-stub guide status"}
+{"file": ".trellis/spec/frontend/forms-and-api.md", "reason": "apiFetch convention that R6 must preserve while adding a binary/raw variant"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Duplication-reduction conventions for the extraction items"}

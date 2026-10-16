@@ -6,6 +6,8 @@ let unauthorizedHandler: UnauthorizedHandler | null = null;
 
 export const DEFAULT_API_TIMEOUT_MS = 30_000;
 
+export type RawFetchOptions = RequestInit & { timeoutMs?: number };
+
 export class ApiError extends Error {
   status: number;
   body: unknown;
@@ -95,4 +97,29 @@ export async function apiFetch<T>(url: string, options: RequestInit = {}, action
   }
 
   return (await response.text()) as T;
+}
+
+/**
+ * Fetch a binary or streaming response through the shared client.
+ *
+ * `apiFetch` cannot serve responses the caller must read raw: it parses
+ * JSON/text and forces a JSON `Accept` header. `apiFetchRaw` instead returns the
+ * `Response` so callers can read headers and stream the body (blob downloads,
+ * progress reporting, file-system saves via the Save File Picker). It applies the
+ * same `credentials: 'same-origin'` default as `apiFetch`, and `timeoutMs` maps
+ * to an `AbortSignal.timeout` (a caller-provided `signal` wins; with neither, no
+ * timeout is applied because large downloads may legitimately run long).
+ *
+ * Error mapping and 401 handling stay with the caller: a raw response's body is
+ * needed by the consumer, so the client must not consume it to build an
+ * `ApiError`.
+ */
+export async function apiFetchRaw(url: string, options: RawFetchOptions = {}): Promise<Response> {
+  const { timeoutMs, ...init } = options;
+  const signal = init.signal ?? (timeoutMs !== undefined ? AbortSignal.timeout(timeoutMs) : undefined);
+  return fetch(url, {
+    credentials: 'same-origin',
+    ...init,
+    signal
+  });
 }
