@@ -26,6 +26,7 @@ async def renew_lease_until_lost(
     on_lost: Callable[[], None],
     stop_event: asyncio.Event | None = None,
     retry_interval_seconds: float | None = None,
+    minimum_retry_budget_seconds: float | None = None,
     deadline: Callable[[], float] | None = None,
     renew_timeout: Callable[[], float] | None = None,
     on_renewed: Callable[[float], None] | None = None,
@@ -42,9 +43,10 @@ async def renew_lease_until_lost(
       than sleeping, so the owner can stop renewal without cancelling the task.
     - ``retry_interval_seconds``: retry transient exceptions on this cadence
       instead of letting them escape. ``None`` re-raises.
-    - ``deadline``: monotonic expiry; a transient error once the remaining time
-      no longer covers ``retry_interval_seconds`` calls ``on_lost`` (the next
-      retry could not land before expiry).
+    - ``deadline``: monotonic expiry used to bound sleeps and error handling.
+    - ``minimum_retry_budget_seconds``: abandon after a transient error when
+      remaining lease time is at most this budget. Defaults to the retry
+      cadence; use zero to retain ownership until actual expiry.
     - ``renew_timeout``: wrap each ``renew`` in ``asyncio.wait_for`` with this
       timeout, for deadline-anchored renewals.
     """
@@ -81,7 +83,12 @@ async def renew_lease_until_lost(
             remaining = 0.0
             if deadline is not None:
                 remaining = deadline() - time.monotonic()
-                if remaining <= retry_interval_seconds:
+                minimum_budget = (
+                    retry_interval_seconds
+                    if minimum_retry_budget_seconds is None
+                    else minimum_retry_budget_seconds
+                )
+                if remaining <= minimum_budget:
                     if on_transient_error is not None:
                         on_transient_error(exc, remaining)
                     on_lost()

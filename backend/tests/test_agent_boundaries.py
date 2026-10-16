@@ -3,6 +3,7 @@
 import asyncio
 import json
 import time
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -12,7 +13,7 @@ from backend.app.core.errors import DomainError
 from backend.app.repositories import agent as repo
 from backend.app.runtime.state import state
 from backend.app.schemas.agent import AgentTurnRequest
-from backend.app.services import agent_conversations as conversations, agent_tool_executor as executor, agent_turns as turns, assistant_slots as assistant
+from backend.app.services import agent_conversations as conversations, agent_tool_executor as executor, assistant_slots as assistant
 from backend.app.services import agent_run_context as context, agent_run_lifecycle as lifecycle
 from backend.app.services.agent_tools import BatchImage
 
@@ -268,6 +269,65 @@ async def test_modification_during_snapshot_stays_dirty(monkeypatch):
     await run.events.maybe_persist()
     assert snapshots[-1]["text"] == "first second"
     assert run.events._saved_revision == run.events._revision
+
+
+@pytest.mark.anyio
+async def test_transient_renewal_error_allows_main_to_finish_before_expiry(monkeypatch):
+    from backend.app.services import lease_renewal
+
+    wall_now = datetime.now(timezone.utc)
+    now = [0.0]
+    first_error = asyncio.Event()
+    waiting_to_retry = asyncio.Event()
+    run = context.AgentRunContext({
+        **turn_row(), "lease_expires_at": (wall_now + timedelta(seconds=15)).isoformat(),
+    })
+    monkeypatch.setattr(config, "AGENT_TURN_LEASE_SECONDS", 30)
+    clock = SimpleNamespace(monotonic=lambda: now[0])
+    monkeypatch.setattr(lifecycle, "time", clock)
+    monkeypatch.setattr(lease_renewal, "time", clock)
+
+    class FrozenDatetime:
+        fromisoformat = staticmethod(datetime.fromisoformat)
+
+        @staticmethod
+        def now(tz):
+            return wall_now
+
+    monkeypatch.setattr(lifecycle, "datetime", FrozenDatetime)
+
+    async def sleep(delay):
+        if now[0] == 0:
+            assert delay == 10
+            now[0] = 10.0
+        else:
+            assert delay == 5
+            waiting_to_retry.set()
+            await asyncio.Event().wait()
+
+    monkeypatch.setattr(lease_renewal, "asyncio", SimpleNamespace(
+        sleep=sleep, wait_for=asyncio.wait_for, CancelledError=asyncio.CancelledError,
+    ))
+
+    async def renew(*args, **kwargs):
+        first_error.set()
+        raise RuntimeError("temporary database outage")
+
+    async def work():
+        await first_error.wait()
+        await waiting_to_retry.wait()
+        now[0] = 12.0
+        return "completed while lease valid"
+
+    monkeypatch.setattr(context, "run_db_operation", renew)
+    main = asyncio.create_task(work())
+    renewal = asyncio.create_task(lifecycle._renew_lease_loop(run, "owner", main))
+    try:
+        assert await main == "completed while lease valid"
+        assert not run._lease_lost
+        await waiting_to_retry.wait()
+    finally:
+        await lifecycle._stop_task(renewal)
 
 
 @pytest.mark.anyio

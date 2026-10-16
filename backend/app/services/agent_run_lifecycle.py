@@ -77,6 +77,7 @@ async def _renew_lease_loop(run: "AgentRunContext", owner: str, main: asyncio.Ta
         renew,
         interval_seconds=interval,
         retry_interval_seconds=interval,
+        minimum_retry_budget_seconds=0.0,
         deadline=lambda: expires[0],
         renew_timeout=lambda: max(0.0, expires[0] - time.monotonic()),
         on_lost=on_lost,
