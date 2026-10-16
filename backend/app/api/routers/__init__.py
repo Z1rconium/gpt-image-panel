@@ -9,6 +9,8 @@ from . import (
     prompt,
     prompt_snippets,
     settings,
+    settings_health,
+    settings_presets,
     static,
 )
 
@@ -18,6 +20,8 @@ routers = (
     agent.router,
     assistant.router,
     settings.router,
+    settings_presets.router,
+    settings_health.router,
     generate.router,
     edits.router,
     gallery.router,

@@ -9,10 +9,10 @@ from typing import Literal
 
 
 from ..runtime.state import MAX_GENERATE_JOBS, state
+from .preset_credentials import get_effective_preset_api_key
 from .presets import (
     get_active_preset,
     get_api_presets,
-    get_effective_preset_api_key,
     get_upstream_socks5_proxy,
     get_webhook_url,
     load_api_settings,
@@ -58,9 +58,9 @@ from .job_events import (
     get_jobs_subscribers,
     publish_generate_job,
     remember_generate_job_memory,
-    store_generate_job,
-    validate_job_webhook_url,
 )
+from .job_persistence import store_generate_job
+from .webhook_service import validate_job_webhook_url
 
 
 def kick_thumbnail_dispatcher() -> None:

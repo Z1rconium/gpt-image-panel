@@ -7,7 +7,7 @@ from ..repositories.image_jobs import (
     release_edit_source_reservation,
 )
 from ..repositories.db.execution import run_db_operation
-from .job_events import publish_generate_job_row_async, resolve_generate_job_view
+from .job_persistence import publish_generate_job_row_async, resolve_generate_job_view
 from .job_queue import cleanup_parent_edit_sources, trim_generate_jobs
 
 

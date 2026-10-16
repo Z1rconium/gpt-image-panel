@@ -1,27 +1,25 @@
 import asyncio
-import uuid
 
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import APIRouter, HTTPException
 
 from ...repositories.db.execution import run_db_operation
 from ...runtime.state import state
-from ...services.preset_package import apply_preset_import, build_preset_export, build_preset_import_preview
 from ...services.presets import (
     apply_api_preset,
     apply_ai_assistant_settings,
     apply_preset_provider,
+    apply_prompt_optimizer_settings,
     apply_r2_backup_settings,
     apply_nodeimage_settings,
     apply_upstream_socks5_proxy,
     apply_webhook_url,
     begin_api_settings_write,
     build_settings_response,
-    reorder_api_presets,
     end_api_settings_write,
     get_active_preset,
-    get_api_presets,
-    get_effective_preset_api_key,
-    get_exception_message,
+    get_ai_assistant_settings,
+    get_prompt_optimizer_settings,
+    get_r2_backup_settings,
     get_nodeimage_settings,
     get_preset_by_id,
     get_upstream_socks5_proxy,
@@ -36,15 +34,10 @@ from ...core import secrets
 from ...core import overall_config
 from ...core import validators as ssrf
 from ...core.api_paths import (
-    ALLOWED_API_PATHS,
-    PROVIDER_KIND_ASYNC_JSON,
-    build_upstream_url,
     normalize_api_path,
     normalize_default_model,
     normalize_default_response_format,
-    normalize_provider_kind,
 )
-from ...integrations.upstream import async_provider, generation as proxy
 from ...integrations.r2.client import probe_r2_settings
 from ...repositories.settings import (
     save_ai_assistant_settings,
@@ -61,17 +54,6 @@ from ...schemas.overall_config import (
     OverallConfigResponse,
     OverallConfigUpdateRequest,
 )
-from ...schemas.presets import (
-    CredentialProbeRequest,
-    PresetCreateRequest,
-    PresetExportPackage,
-    PresetExportRequest,
-    PresetHealthResponse,
-    PresetImportApplyRequest,
-    PresetImportPreviewRequest,
-    PresetImportPreviewResponse,
-    PresetOrderRequest,
-)
 from ...schemas.provider_mapping import (
     ProviderMappingPromptResponse,
     ProviderMappingValidateRequest,
@@ -87,77 +69,15 @@ from ...services.provider_mapping_assist import (
     build_mapping_prompt,
     validate_provider_mapping_request,
 )
-from backend.app.integrations.upstream import transport as transport_client
+from .settings_bindings import (
+    validate_nodeimage_secret_binding,
+    validate_optimizer_secret_binding,
+    validate_preset_secret_binding,
+    validate_r2_secret_bindings,
+)
 
 
 router = APIRouter()
-
-
-def _validate_secret_binding_or_422(
-    secret_id: str,
-    *,
-    purpose: secrets.SecretPurpose,
-    target_url: str,
-    host_allowlist: str,
-) -> None:
-    """Validate a registry secret's binding, raising HTTP 422 on a registry error.
-
-    Empty values and non-registry references are ignored: only predeclared
-    secret_ids carry a purpose/origin binding that can fail validation.
-    """
-    secret_id = str(secret_id or "").strip()
-    if not secret_id or secret_id not in secrets.configured_secret_ids():
-        return
-    try:
-        secrets.validate_secret_binding(
-            secret_id,
-            purpose=purpose,
-            target_url=target_url,
-            host_allowlist=host_allowlist,
-        )
-    except secrets.SecretRegistryError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-
-def _validate_preset_secret_binding(preset: dict) -> None:
-    _validate_secret_binding_or_422(
-        preset.get("api_key"),
-        purpose="upstream_api",
-        target_url=str(preset.get("api_url") or ""),
-        host_allowlist=config.UPSTREAM_HOST_ALLOWLIST,
-    )
-
-
-def _validate_optimizer_secret_binding(settings: dict) -> None:
-    _validate_secret_binding_or_422(
-        settings.get("api_key"),
-        purpose="prompt_optimizer",
-        target_url=str(settings.get("api_url") or ""),
-        host_allowlist=config.PROMPT_OPTIMIZER_HOST_ALLOWLIST,
-    )
-
-
-def _validate_r2_secret_bindings(settings: dict) -> None:
-    endpoint_url = str(settings.get("endpoint_url") or "")
-    for field, purpose in (
-        ("access_key_id", "r2_access_key_id"),
-        ("secret_access_key", "r2_secret_access_key"),
-    ):
-        _validate_secret_binding_or_422(
-            settings.get(field),
-            purpose=purpose,
-            target_url=endpoint_url,
-            host_allowlist=config.R2_ENDPOINT_HOST_ALLOWLIST,
-        )
-
-
-def _validate_nodeimage_secret_binding(settings: dict) -> None:
-    _validate_secret_binding_or_422(
-        settings.get("api_key"),
-        purpose="nodeimage_api_key",
-        target_url="https://api.nodeimage.com",
-        host_allowlist="api.nodeimage.com",
-    )
 
 
 def _validate_webhook_security() -> None:
@@ -345,27 +265,21 @@ async def update_settings(req: SettingsRequest):
             else:
                 apply_webhook_url(requested_webhook_url)
             _validate_webhook_security()
-        _validate_preset_secret_binding(preset)
+        validate_preset_secret_binding(preset)
         apply_api_preset(preset)
         await run_db_operation(persist_api_settings)
     finally:
         end_api_settings_write()
     if req.prompt_optimizer is not None:
-        from ...services.presets import (
-            apply_prompt_optimizer_settings,
-            get_prompt_optimizer_settings,
-        )
         current_optimizer = get_prompt_optimizer_settings()
         updated_optimizer = apply_prompt_optimizer_settings(current_optimizer, req.prompt_optimizer)
-        _validate_optimizer_secret_binding(updated_optimizer)
+        validate_optimizer_secret_binding(updated_optimizer)
         await run_db_operation(save_prompt_optimizer_settings, updated_optimizer)
     if req.ai_assistant is not None:
-        from ...services.presets import get_ai_assistant_settings
         current_assistant = get_ai_assistant_settings()
         updated_assistant = apply_ai_assistant_settings(current_assistant, req.ai_assistant)
         await run_db_operation(save_ai_assistant_settings, updated_assistant)
     if req.r2_backup is not None:
-        from ...services.presets import get_r2_backup_settings
         current_r2 = get_r2_backup_settings()
         updated_r2 = apply_r2_backup_settings(current_r2, req.r2_backup)
         if updated_r2.get("endpoint_url"):
@@ -376,7 +290,7 @@ async def update_settings(req: SettingsRequest):
                 )
             except ValueError as e:
                 raise HTTPException(status_code=422, detail=str(e)) from e
-        _validate_r2_secret_bindings(updated_r2)
+        validate_r2_secret_bindings(updated_r2)
         await run_db_operation(save_r2_backup_settings, updated_r2)
     if req.nodeimage is not None:
         current_nodeimage = get_nodeimage_settings()
@@ -384,7 +298,7 @@ async def update_settings(req: SettingsRequest):
             current_nodeimage,
             req.nodeimage,
         )
-        _validate_nodeimage_secret_binding(updated_nodeimage)
+        validate_nodeimage_secret_binding(updated_nodeimage)
         await run_db_operation(save_nodeimage_settings, updated_nodeimage)
     return await run_db_operation(build_settings_response)
 
@@ -397,8 +311,6 @@ async def get_settings():
 
 @router.post("/api/settings/r2/health", response_model=R2HealthResponse)
 async def check_r2_settings_health(req: R2BackupSettingsRequest):
-    from ...services.presets import get_r2_backup_settings
-
     current = await run_db_operation(get_r2_backup_settings)
     draft = apply_r2_backup_settings(current, req)
     if draft.get("endpoint_url"):
@@ -409,7 +321,7 @@ async def check_r2_settings_health(req: R2BackupSettingsRequest):
             )
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e)) from e
-    _validate_r2_secret_bindings(draft)
+    validate_r2_secret_bindings(draft)
     if not req.use_credentials:
         return R2HealthResponse(
             status="warning",
@@ -450,306 +362,3 @@ async def validate_settings_provider_mapping(req: ProviderMappingValidateRequest
         req.sample_poll,
         req.sample_result,
     )
-
-
-@router.post("/api/settings/presets", response_model=SettingsResponse)
-async def create_settings_preset(req: PresetCreateRequest):
-    await run_db_operation(load_api_settings)
-    source = get_preset_by_id(req.source_preset_id) if req.source_preset_id else None
-    source = source or get_active_preset()
-    presets = get_api_presets()
-    next_number = len(presets) + 1
-    preset = {
-        "id": uuid.uuid4().hex,
-        "name": (req.name or f"Preset {next_number}").strip() or f"Preset {next_number}",
-        "api_url": (
-            req.api_url if req.api_url is not None else source.get("api_url", "")
-        ).rstrip("/"),
-        "api_key": (
-            req.api_key.strip()
-            if req.api_key is not None
-            else source.get("api_key", "")
-        ),
-        "api_path": normalize_api_path(
-            req.api_path or source.get("api_path", "/v1/images/generations")
-        ),
-    }
-    if (
-        req.api_key is None
-        and source.get("api_key")
-        and not secrets.same_origin(source.get("api_url"), preset["api_url"])
-    ):
-        preset["api_key"] = ""
-    _validate_preset_secret_binding(preset)
-    preset["default_model"] = normalize_default_model(
-        req.default_model if req.default_model is not None else source.get("default_model"),
-        preset["api_path"],
-    )
-    preset["default_response_format"] = normalize_default_response_format(
-        req.default_response_format
-        if req.default_response_format is not None
-        else source.get("default_response_format")
-    )
-    preset["supports_mask"] = (
-        bool(req.supports_mask)
-        if req.supports_mask is not None
-        else bool(source.get("supports_mask", True))
-    )
-    preset["prompt_guard"] = (
-        bool(req.prompt_guard)
-        if req.prompt_guard is not None
-        else bool(source.get("prompt_guard", False))
-    )
-    preset["provider_kind"] = source.get("provider_kind", "openai")
-    preset["provider_config"] = source.get("provider_config")
-    apply_preset_provider(preset, req.provider_kind, req.provider_config)
-    begin_api_settings_write()
-    try:
-        presets.append(preset)
-        apply_api_preset(preset)
-        await run_db_operation(persist_api_settings)
-    finally:
-        end_api_settings_write()
-    return await run_db_operation(build_settings_response)
-
-
-@router.post("/api/settings/presets/export", response_model=PresetExportPackage)
-async def export_settings_preset(req: PresetExportRequest):
-    await run_db_operation(load_api_settings)
-    return await run_db_operation(build_preset_export, req.preset_id)
-
-
-@router.post(
-    "/api/settings/presets/import/preview", response_model=PresetImportPreviewResponse
-)
-async def preview_settings_presets_import(req: PresetImportPreviewRequest):
-    await run_db_operation(load_api_settings)
-    return await run_db_operation(build_preset_import_preview, req.package)
-
-
-@router.post("/api/settings/presets/import", response_model=SettingsResponse)
-async def import_settings_presets(req: PresetImportApplyRequest):
-    await run_db_operation(load_api_settings)
-    await run_db_operation(apply_preset_import,
-        req.package,
-        [item.model_dump(mode="json") for item in req.items],
-    )
-    return await run_db_operation(build_settings_response)
-
-
-@router.put("/api/settings/presets/order", response_model=SettingsResponse)
-async def update_settings_preset_order(req: PresetOrderRequest):
-    await run_db_operation(load_api_settings)
-    await run_db_operation(reorder_api_presets, req.preset_ids)
-    return await run_db_operation(build_settings_response)
-
-
-@router.post("/api/settings/presets/{preset_id}/activate", response_model=SettingsResponse)
-async def activate_settings_preset(preset_id: str):
-    await run_db_operation(load_api_settings)
-    preset = get_preset_by_id(preset_id)
-    if not preset:
-        raise HTTPException(status_code=404, detail="Preset not found")
-
-    begin_api_settings_write()
-    try:
-        apply_api_preset(preset)
-        await run_db_operation(persist_api_settings)
-    finally:
-        end_api_settings_write()
-    return await run_db_operation(build_settings_response)
-
-
-@router.delete("/api/settings/presets/{preset_id}", response_model=SettingsResponse)
-async def delete_settings_preset(preset_id: str):
-    await run_db_operation(load_api_settings)
-    presets = get_api_presets()
-    if len(presets) <= 1:
-        raise HTTPException(status_code=400, detail="At least one preset is required")
-
-    delete_index = next(
-        (index for index, preset in enumerate(presets) if preset["id"] == preset_id),
-        None,
-    )
-    if delete_index is None:
-        raise HTTPException(status_code=404, detail="Preset not found")
-
-    begin_api_settings_write()
-    try:
-        active_preset_id = getattr(state, "active_preset_id", presets[0]["id"])
-        presets.pop(delete_index)
-        state.api_presets = presets
-        if not any(preset["id"] == active_preset_id for preset in presets):
-            fallback = presets[min(delete_index, len(presets) - 1)]
-            apply_api_preset(fallback)
-        else:
-            state.active_preset_id = active_preset_id
-
-        await run_db_operation(persist_api_settings)
-    finally:
-        end_api_settings_write()
-
-    return await run_db_operation(build_settings_response)
-
-
-HEALTH_STATUS_RANK = {"ok": 0, "warning": 1, "error": 2}
-
-
-def add_health_check(checks: list[dict], name: str, status: str, message: str):
-    checks.append({"name": name, "status": status, "message": message})
-
-
-def health_status(checks: list[dict]) -> str:
-    if not checks:
-        return "error"
-    return max(
-        (check["status"] for check in checks),
-        key=lambda status: HEALTH_STATUS_RANK[status],
-    )
-
-
-def preset_health_status(checks: list[dict]) -> str:
-    blocking_checks = [check for check in checks if check["name"] != "upstream_probe"]
-    if not blocking_checks:
-        return "ok"
-    return health_status(blocking_checks)
-
-
-async def validate_health_api_url(
-    api_url: str,
-    api_path: str,
-    checks: list[dict],
-) -> bool:
-    if not api_url:
-        add_health_check(checks, "api_url", "error", "API URL is not configured")
-        return False
-
-    try:
-        normalized_api_url = ssrf.normalize_upstream_base_url(api_url)
-    except ValueError as e:
-        add_health_check(checks, "api_url", "error", str(e))
-        return False
-
-    try:
-        await ssrf.validate_upstream_url_async(
-            build_upstream_url(normalized_api_url, api_path),
-            config.UPSTREAM_HOST_ALLOWLIST,
-        )
-    except ValueError as e:
-        add_health_check(checks, "ssrf", "error", str(e))
-        return False
-
-    add_health_check(
-        checks,
-        "ssrf",
-        "ok",
-        "API URL passed scheme, host allowlist, DNS, and private-IP checks",
-    )
-    return True
-
-
-def validate_health_api_path(api_path: str, checks: list[dict]) -> bool:
-    if api_path not in ALLOWED_API_PATHS:
-        add_health_check(
-            checks,
-            "api_path",
-            "error",
-            (
-                "API path is not supported. Allowed paths: "
-                + ", ".join(sorted(ALLOWED_API_PATHS))
-            ),
-        )
-        return False
-
-    add_health_check(checks, "api_path", "ok", f"API path {api_path} is supported")
-    return True
-
-
-def validate_health_provider(preset: dict, checks: list[dict]) -> str | None:
-    """Check an async_json mapping; returns the submit path to probe, or None."""
-    try:
-        provider = async_provider.load_provider_config(preset.get("provider_config"))
-        submit_path = async_provider.render_submit_path(
-            provider.submit.path,
-            str(preset.get("default_model") or ""),
-        )
-    except proxy.UpstreamApiError as e:
-        add_health_check(checks, "provider_config", "error", str(e))
-        return None
-
-    add_health_check(
-        checks,
-        "provider_config",
-        "ok",
-        "Async provider mapping is valid; no task was submitted",
-    )
-    return submit_path
-
-
-def validate_health_api_key(api_key: str, checks: list[dict]) -> str:
-    raw_key = str(api_key or "").strip()
-    if raw_key:
-        add_health_check(checks, "api_key", "ok", "A Secret Registry credential is configured")
-        return raw_key
-
-    add_health_check(checks, "api_key", "error", "API key is not configured")
-    return ""
-
-
-@router.post(
-    "/api/settings/presets/{preset_id}/health",
-    response_model=PresetHealthResponse,
-)
-async def check_settings_preset_health(
-    preset_id: str,
-    req: CredentialProbeRequest | None = Body(default=None),
-):
-    preset = get_preset_by_id(preset_id)
-    if not preset:
-        raise HTTPException(status_code=404, detail="Preset not found")
-
-    checks: list[dict] = []
-    api_url = str(preset.get("api_url") or "").rstrip("/")
-    api_path = str(preset.get("api_path") or "")
-
-    if normalize_provider_kind(preset.get("provider_kind")) == PROVIDER_KIND_ASYNC_JSON:
-        provider_path = validate_health_provider(preset, checks)
-        api_path_ok = provider_path is not None
-        api_path = provider_path or ""
-    else:
-        api_path_ok = validate_health_api_path(api_path, checks)
-    url_ok = (
-        await validate_health_api_url(api_url, api_path, checks)
-        if api_path_ok
-        else False
-    )
-    validate_health_api_key(preset.get("api_key", ""), checks)
-    effective_api_key = get_effective_preset_api_key(preset) if req and req.use_credentials else ""
-
-    if api_path_ok and url_ok:
-        try:
-            probe_result = await transport_client.probe_upstream_endpoint(
-                api_url,
-                api_path,
-                effective_api_key,
-            )
-        except Exception as e:
-            probe_result = {
-                "status": "error",
-                "message": f"Upstream probe failed: {get_exception_message(e)}",
-            }
-        add_health_check(
-            checks,
-            "upstream_probe",
-            str(probe_result["status"]),
-            str(probe_result["message"]),
-        )
-    else:
-        add_health_check(
-            checks,
-            "upstream_probe",
-            "warning",
-            "Skipped upstream probe because local URL/path validation failed",
-        )
-
-    return PresetHealthResponse(status=preset_health_status(checks), checks=checks)

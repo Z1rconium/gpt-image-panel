@@ -25,7 +25,12 @@ from ...schemas.assistant import (
     AssistantPromptVariantsResponse,
     AssistantRecommendParamsResponse,
 )
-from ...services import assistant_batch, assistant_text, assistant_vision
+from ...services import (
+    assistant_batch,
+    assistant_prompt_optimization,
+    assistant_text,
+    assistant_vision,
+)
 
 router = APIRouter()
 
@@ -54,7 +59,7 @@ async def assistant_image_prompt(
     target_language: Literal["en", "zh-CN"] = Form("en"),
 ):
     image_bytes = await read_image_upload(image)
-    return await assistant_vision.prompt_from_uploaded_image(
+    return await assistant_prompt_optimization.prompt_from_uploaded_image(
         image_bytes=image_bytes,
         filename=image.filename or "image",
         content_type=resolve_upload_content_type(image),
@@ -72,7 +77,7 @@ async def assistant_optimize_image_prompt(
     target_language: Literal["en", "zh-CN"] = Form("en"),
 ):
     image_bytes = await read_image_upload(image)
-    return await assistant_vision.optimize_uploaded_image_prompt(
+    return await assistant_prompt_optimization.optimize_uploaded_image_prompt(
         image_bytes=image_bytes,
         filename=image.filename or "image",
         content_type=resolve_upload_content_type(image),

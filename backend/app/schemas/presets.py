@@ -2,10 +2,8 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
-from ..core.validators import (
-    normalize_secret_env_ref_or_plaintext,
-    normalize_upstream_base_url,
-)
+from ..core.secrets import normalize_secret_env_ref_or_plaintext
+from ..core.validators import normalize_upstream_base_url
 from .provider import ProviderConfigPayload
 from .common import (
     ApiKeySource,

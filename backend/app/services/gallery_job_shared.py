@@ -52,6 +52,13 @@ async def _sleep_while_renewing_background_lease(
     owner: str,
     delay_seconds: float,
 ) -> bool:
+    """Sleep for ``delay_seconds`` while keeping a background lease alive.
+
+    Unlike :func:`app.services.lease_renewal.renew_lease_until_lost`, this is a
+    bounded wait that *returns* whether the lease survived rather than a
+    renewal loop that abandons work on lease loss, so it does not use the shared
+    holder (see F-G5-3).
+    """
     deadline = time.monotonic() + max(0.0, float(delay_seconds or 0))
     while True:
         remaining = deadline - time.monotonic()

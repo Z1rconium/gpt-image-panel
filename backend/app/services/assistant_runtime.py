@@ -1,92 +1,26 @@
-import asyncio
+"""AI Assistant and Agent runtime endpoint resolution (F-G6-1).
+
+JSON transport/response shaping lives in
+:mod:`app.services.assistant_json`; global request-slot leasing lives in
+:mod:`app.services.assistant_slots`. This module resolves the configured
+endpoint (and the Agent-specific knobs) into an immutable runtime snapshot.
+"""
+
 import contextvars
 import logging
-import os
-import re
-import time
-from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, Literal
 
-
-from ..core.image_models import MAX_PROMPT_CHARS
-from . import presets
-from ..core.errors import (
-    DomainError,
-    InvalidRequestError,
-    RateLimitedError,
-    UpstreamTimeoutError,
-)
-from ..runtime.state import state, utc_lease_expires_at
 from ..core import secrets
-from ..core import settings as config
-from ..core import validators as ssrf
-from ..core.utils import utc_now
-from ..integrations import agent_client, assistant_client
-from ..repositories.coordination import (
-    acquire_background_slot,
-    claim_next_gallery_job,
-    delete_gallery_job,
-    get_gallery_job,
-    release_background_slot,
-    renew_background_slot,
-    renew_gallery_job_lease,
-    reserve_gallery_job_capacity,
-    update_gallery_job,
-    update_gallery_job_progress,
-)
+from ..core.errors import InvalidRequestError
+from ..integrations import assistant_client
 from ..repositories.db.execution import run_db_operation
-from ..repositories.gallery.mutations import is_gallery_filename_referenced
-from ..repositories.gallery.queries import (
-    get_gallery_entries_by_ids,
-    get_gallery_entry,
-    get_gallery_id_batch,
-    get_gallery_selection_snapshot,
-)
-from ..core.media import safe_image_path
-from ..repositories.image_jobs import get_generate_job
-from ..repositories.settings import (
-    get_gallery_ai_metadata,
-    upsert_gallery_ai_metadata,
-)
-from ..schemas.common import ApiPath
-from ..schemas.assistant import (
-    AssistantEditPlanRequest,
-    AssistantEditPlanResponse,
-    AssistantGalleryBatchJobStatus,
-    AssistantGalleryBatchRequest,
-    AssistantGalleryImageResponse,
-    AssistantGalleryMetadataResponse,
-    AssistantHealthResponse,
-    AssistantImagePromptResponse,
-    AssistantJobDiagnoseRequest,
-    AssistantJobDiagnoseResponse,
-    AssistantPromptCheckRequest,
-    AssistantPromptCheckResponse,
-    AssistantPromptIssue,
-    AssistantPromptRewriteRequest,
-    AssistantPromptRewriteResponse,
-    AssistantPromptVariant,
-    AssistantPromptVariantsRequest,
-    AssistantPromptVariantsResponse,
-    AssistantRecommendParamsRequest,
-    AssistantRecommendParamsResponse,
-)
 from ..schemas.settings import AIAssistantSettingsRequest
+from . import presets
 
 logger = logging.getLogger(__name__)
 
 ASSISTANT_IMAGE_UPLOAD_CHUNK_BYTES = 1024 * 1024
-IMAGE_PROMPT_SYSTEM_PROMPT = """You reconstruct one directly usable image-generation prompt from visible pixels.
-Organize the prompt in this order when the information is present: subject identity and action; overall color palette and color relationships; artistic medium and rendering style; environment; composition and viewpoint; lighting; materials and surface qualities; reasonably inferable lens and depth of field; clearly legible text.
-Give particular attention to the image's overall color language and artistic style. Describe dominant and accent colors, temperature, saturation, value range, contrast, color harmony, and how colors are distributed across the image. Characterize style through visible evidence such as medium, rendering technique, line quality, shape language, shading, texture, and level of detail, without attributing the work to an artist.
-When a widely recognizable named character, mascot, or public figure is clearly supported by distinctive visible evidence, including characters from anime, manga, comics, games, film, or television, explicitly name the identity and, for fictional characters, the source work or franchise. Treat this grounded identification as part of the subject description, not as attribution of the input image's source. If the identity is uncertain, do not guess; describe the visible identifying features neutrally instead.
-Use high information density. Faithfully preserve spatial relationships, scale, pose, framing, and visual emphasis.
-The prompt field must contain only the single prompt in the requested language. Do not put analysis, reasoning, a title, Markdown, source attribution, or meta-language such as \"this image\" in that field.
-Do not invent unseen brands, artist names, exact camera or lens settings, or background stories. Use neutral descriptions for details that cannot be determined confidently.
-When preview metadata says source_has_alpha is true, preserve transparency in the reconstruction and do not infer an opaque matte background.
-Do not create a separate negative prompt. Keep safety warnings out of the prompt and return them only in the warnings field."""
 
 
 @dataclass(frozen=True)
@@ -117,266 +51,13 @@ MAX_ACTIVE_AI_ANALYZE_JOBS = 1
 AI_ANALYZE_JOB_LEASE_SECONDS = 300
 AI_ANALYZE_JOB_LEASE_RENEW_SECONDS = 60
 AI_ANALYZE_JOB_BATCH_SIZE = 25
-AI_ASSISTANT_SLOT_RETRY_SECONDS = 1.0
-AI_ASSISTANT_TEXT_FIELD_LIMITS = {
-    "summary": 1200,
-    "rationale": 1200,
-    "message": 1200,
-    "suggestion": 1200,
-    "angle": 1200,
-    "title": 120,
-    "description": 2000,
-    "prompt": MAX_PROMPT_CHARS,
-    "rewritten_prompt": MAX_PROMPT_CHARS,
-    "edit_prompt": MAX_PROMPT_CHARS,
-    "style": 500,
-    "composition": 800,
-    "lighting": 500,
-}
-AI_ASSISTANT_STRING_LIST_FIELD_LIMITS = {
-    "warnings": (10, 500),
-    "likely_causes": (8, 800),
-    "recommended_actions": (8, 800),
-    "source_requirements": (8, 800),
-    "subjects": (12, 200),
-    "colors": (12, 100),
-}
-SENSITIVE_FIELD_NAMES = {
-    "api_key",
-    "apikey",
-    "authorization",
-    "cookie",
-    "secret",
-    "token",
-    "password",
-    "credential",
-}
-SECRET_VALUE_RE = re.compile(
-    r"(?i)\b(api[-_ ]?key|authorization|bearer|token|secret|password|cookie)\b"
-    r"([^\n\r]{0,24})([:=]\s*| +)([^\s,;]+)"
-)
-BEARER_VALUE_RE = re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]{8,}")
 
 
 class AIAnalyzeJobLeaseLost(RuntimeError):
     pass
 
 
-def _clamp_text(value: Any, max_chars: int) -> str:
-    text = str(value or "").strip()
-    if max_chars <= 0 or len(text) <= max_chars:
-        return text
-    return text[:max_chars].rstrip()
-
-
-def _truncate_assistant_data(value: Any, *, key: str = "") -> Any:
-    if isinstance(value, dict):
-        return {
-            str(child_key): _truncate_assistant_data(child_value, key=str(child_key))
-            for child_key, child_value in value.items()
-        }
-    if isinstance(value, list):
-        item_limit, char_limit = AI_ASSISTANT_STRING_LIST_FIELD_LIMITS.get(key, (20, 1000))
-        return [
-            _truncate_assistant_data(item, key=key if isinstance(item, str) else "")
-            for item in value[:item_limit]
-        ][:item_limit] if not all(isinstance(item, str) for item in value) else [
-            _clamp_text(item, char_limit) for item in value if _clamp_text(item, char_limit)
-        ][:item_limit]
-    if isinstance(value, str):
-        return _clamp_text(value, AI_ASSISTANT_TEXT_FIELD_LIMITS.get(key, 2000))
-    return value
-
-
-def _assistant_request_semaphore() -> asyncio.Semaphore:
-    limit = max(1, int(config.AI_ASSISTANT_MAX_CONCURRENCY or 1))
-    cached = getattr(state, "assistant_request_semaphore_state", None)
-    if not cached or cached[0] != limit:
-        semaphore = asyncio.Semaphore(limit)
-        state.assistant_request_semaphore_state = (limit, semaphore)
-        return semaphore
-    return cached[1]
-
-
-ASSISTANT_SLOT_CLEANUP_MARGIN_SECONDS = 30
 AGENT_SNAPSHOT_VERSION = 1
-
-
-def _assistant_slot_lease_seconds(timeout_seconds: int) -> int:
-    """Lease covers the whole request deadline plus cleanup; renewal extends it further."""
-    timeout = int(timeout_seconds or config.PROMPT_OPTIMIZER_TIMEOUT_SECONDS)
-    total = agent_client.request_total_timeout_seconds(timeout)
-    return int(total) + ASSISTANT_SLOT_CLEANUP_MARGIN_SECONDS
-
-
-def _assistant_slot_expires_at(timeout_seconds: int) -> str:
-    return utc_lease_expires_at(_assistant_slot_lease_seconds(timeout_seconds))
-
-
-def _assistant_slot_owner() -> str:
-    worker_id = state.worker_id
-    return f"{worker_id}-{os.urandom(8).hex()}"
-
-
-async def _acquire_assistant_slot(timeout_seconds: int) -> tuple[str, str]:
-    owner = _assistant_slot_owner()
-    slot_name = await run_db_operation(
-        acquire_background_slot,
-        name_prefix="ai_assistant_request",
-        owner=owner,
-        slot_count=config.AI_ASSISTANT_MAX_CONCURRENCY,
-        lease_expires_at=_assistant_slot_expires_at(timeout_seconds),
-        now=utc_now(),
-    )
-    if not slot_name:
-        raise RateLimitedError("AI Assistant is at its concurrency limit")
-    return slot_name, owner
-
-
-async def _release_assistant_slot(slot_name: str, owner: str) -> None:
-    try:
-        await run_db_operation(release_background_slot,
-            name=slot_name,
-            owner=owner,
-            now=utc_now(),
-        )
-    except Exception:
-        logger.warning("Failed to release AI Assistant concurrency slot %s", slot_name, exc_info=True)
-
-
-async def _renew_assistant_slot_loop(
-    slot_name: str, owner: str, timeout_seconds: int, on_lost
-) -> None:
-    lease_seconds = _assistant_slot_lease_seconds(timeout_seconds)
-    interval = max(1.0, lease_seconds / 3)
-    while True:
-        await asyncio.sleep(interval)
-        try:
-            renewed = await run_db_operation(
-                renew_background_slot,
-                name=slot_name,
-                owner=owner,
-                lease_expires_at=utc_lease_expires_at(lease_seconds),
-                now=utc_now(),
-            )
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.warning("Assistant slot renewal failed for %s", slot_name, exc_info=True)
-            continue
-        if not renewed:
-            logger.warning("Assistant slot %s was lost; aborting the request", slot_name)
-            on_lost()
-            return
-
-
-@asynccontextmanager
-async def _assistant_request_limit(
-    timeout_seconds: int,
-    *,
-    wait_for_slot: bool = False,
-    max_wait_seconds: float | None = None,
-):
-    """Hold one global assistant request slot.
-
-    ``wait_for_slot`` retries a saturated slot pool instead of failing; callers
-    that must not wait forever (Agent turns) pass ``max_wait_seconds`` so the
-    retry loop ends with a 429 instead of holding their own capacity indefinitely.
-    """
-    wait_deadline = (
-        time.monotonic() + max_wait_seconds
-        if wait_for_slot and max_wait_seconds is not None
-        else None
-    )
-    async def before_deadline(awaitable):
-        if wait_deadline is None:
-            return await awaitable
-        return await asyncio.wait_for(awaitable, max(0, wait_deadline - time.monotonic()))
-
-    while True:
-        semaphore = _assistant_request_semaphore()
-        try:
-            await before_deadline(semaphore.acquire())
-        except asyncio.TimeoutError as error:
-            raise DomainError("AI Assistant is busy. Try again shortly.", status_code=429) from error
-        acquisition = asyncio.create_task(_acquire_assistant_slot(timeout_seconds))
-        slot = None
-        retry = False
-        try:
-            try:
-                slot = await before_deadline(asyncio.shield(acquisition))
-            except (asyncio.CancelledError, asyncio.TimeoutError) as error:
-                # Leave the worker operation alive and release any late lease.
-                async def release_late():
-                    try:
-                        late = await acquisition
-                        await _release_assistant_slot(*late)
-                    except Exception:
-                        logger.warning("Assistant late slot acquisition failed", exc_info=True)
-                cleanup = asyncio.create_task(release_late())
-                cleanups = state.assistant_slot_cleanup_tasks
-                cleanups.add(cleanup)
-                cleanup.add_done_callback(cleanups.discard)
-                cleanup.add_done_callback(lambda task: task.exception() if not task.cancelled() else None)
-                if isinstance(error, asyncio.TimeoutError):
-                    raise DomainError("AI Assistant is busy. Try again shortly.", status_code=429) from error
-                raise
-            except DomainError as error:
-                if not wait_for_slot or error.status_code != 429:
-                    raise
-                retry = True
-            if not retry:
-                lost = False
-                host = asyncio.current_task()
-
-                def on_lost() -> None:
-                    nonlocal lost
-                    lost = True
-                    if host is not None:
-                        host.cancel()
-
-                renewer = asyncio.create_task(_renew_assistant_slot_loop(*slot, timeout_seconds, on_lost))
-                try:
-                    yield
-                except asyncio.CancelledError:
-                    if lost:
-                        raise DomainError("AI Assistant concurrency slot was lost.", status_code=503) from None
-                    raise
-                finally:
-                    renewer.cancel()
-                return
-        finally:
-            try:
-                if slot is not None:
-                    await asyncio.shield(_release_assistant_slot(*slot))
-            finally:
-                semaphore.release()
-        try:
-            await before_deadline(asyncio.sleep(AI_ASSISTANT_SLOT_RETRY_SECONDS))
-        except asyncio.TimeoutError as error:
-            raise DomainError("AI Assistant is busy. Try again shortly.", status_code=429) from error
-
-
-def _warnings(value: Any) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    return [_clamp_text(item, 500) for item in value if _clamp_text(item, 500)][:10]
-
-
-def _image_prompt_system_prompt(target_language: Literal["en", "zh-CN"] | None = None) -> str:
-    if target_language == "zh-CN":
-        language_instruction = "Write the prompt in Simplified Chinese."
-    elif target_language == "en":
-        language_instruction = "Write the prompt in English."
-    else:
-        language_instruction = "Use the language you would normally use for this API."
-    return f"{IMAGE_PROMPT_SYSTEM_PROMPT}\n{language_instruction}"
-
-
-def _string_list(value: Any, *, max_items: int = 8) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    return [_clamp_text(item, 800) for item in value if _clamp_text(item, 800)][:max_items]
 
 
 def _assistant_settings(draft: AIAssistantSettingsRequest | None = None) -> dict:
@@ -501,50 +182,6 @@ async def resolve_agent_runtime_async(
     settings: dict | None = None, snapshot: dict | None = None
 ) -> AgentRuntime:
     return await run_db_operation(resolve_agent_runtime, settings, snapshot)
-
-
-assistant_request_limit = _assistant_request_limit
-
-
-async def _assistant_json(
-    *,
-    system_prompt: str,
-    user_prompt: str,
-    schema: dict[str, Any],
-    vision: bool = False,
-    image: dict[str, str | int | bool] | None = None,
-    images: list[dict[str, str | int | bool]] | None = None,
-    max_tokens: int = 900,
-    temperature: float = 0.2,
-    runtime: AssistantRuntime | None = None,
-) -> tuple[dict[str, Any], str, int]:
-    runtime = runtime or await _resolve_runtime_async(vision=vision)
-    try:
-        async with _assistant_request_limit(runtime.timeout_seconds):
-            data, model_used, duration_ms = await assistant_client.request_assistant_json(
-                api_url=runtime.api_url,
-                api_key=runtime.api_key,
-                api_path=runtime.api_path,
-                model=runtime.model,
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                schema=schema,
-                image=image,
-                images=images,
-                timeout_seconds=runtime.timeout_seconds,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                prevalidated_endpoint=runtime.endpoint,
-            )
-            return _truncate_assistant_data(data), model_used, duration_ms
-    except assistant_client.AssistantTimeoutError as e:
-        raise UpstreamTimeoutError(str(e)) from e
-    except assistant_client.AssistantError as e:
-        status_code = 400 if e.status == 400 else 502
-        raise DomainError(str(e), status_code=status_code) from e
-    except ValueError as e:
-        raise InvalidRequestError(str(e)) from e
-
 
 
 __all__ = [name for name in globals() if not name.startswith("__")]

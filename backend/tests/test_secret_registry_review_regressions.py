@@ -4,7 +4,7 @@ import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
-from backend.app.services import presets
+from backend.app.services import preset_credentials, presets
 from backend.app.api.middleware import register_exception_handlers
 from backend.app.core import secrets
 from backend.app.core import settings as config
@@ -75,7 +75,7 @@ def test_api_key_response_fields_masks_plaintext_for_all_consumers(monkeypatch):
         )
     )
 
-    fields = presets.api_key_response_fields("plain-secret-value")
+    fields = preset_credentials.api_key_response_fields("plain-secret-value")
     assert fields == {
         "api_key_masked": "********",
         "has_api_key": True,
@@ -88,8 +88,8 @@ def test_api_key_response_fields_masks_plaintext_for_all_consumers(monkeypatch):
     assert "plai" not in str(fields)
     assert "alue" not in str(fields)
 
-    assert presets.api_key_response_fields("${RESPONSE_ENV_KEY}")["api_key_source"] == "env"
-    registry_fields = presets.api_key_response_fields("response-registry-key")
+    assert preset_credentials.api_key_response_fields("${RESPONSE_ENV_KEY}")["api_key_source"] == "env"
+    registry_fields = preset_credentials.api_key_response_fields("response-registry-key")
     assert registry_fields["api_key_source"] == "registry"
     assert registry_fields["api_key_secret_id"] == "response-registry-key"
 

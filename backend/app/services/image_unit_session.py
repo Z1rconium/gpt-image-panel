@@ -18,6 +18,7 @@ from ..core.observability import metrics
 from ..repositories.image_jobs import renew_image_job_unit_lease, update_image_job_unit_progress
 from ..repositories.db.execution import run_db_operation
 from .image_job_aggregate import aggregate_parent_image_job, set_generate_job_progress
+from .lease_renewal import renew_lease_until_lost
 
 logger = logging.getLogger(__name__)
 # Cadence for retrying a lease renewal that failed with a DB error, while the
@@ -157,14 +158,10 @@ class ImageUnitSession:
         """
         renew_interval = image_unit_lease_renew_interval()
         retry_interval = min(renew_interval, IMAGE_UNIT_LEASE_RENEW_RETRY_SECONDS)
-        delay = renew_interval
-        while True:
-            await asyncio.sleep(delay)
-            if self.lease_lost.is_set():
-                return
-            renew_started_at = time.monotonic()
-            try:
-                renewed = await run_db_operation(
+
+        async def renew() -> bool:
+            return bool(
+                await run_db_operation(
                     renew_image_job_unit_lease,
                     self.unit_id,
                     claim_token=self.claim_token,
@@ -172,40 +169,37 @@ class ImageUnitSession:
                     metric_name="renew_image_job_unit_lease",
                     critical=True,
                 )
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                remaining = self._lease_deadline - time.monotonic()
-                if remaining <= retry_interval:
-                    logger.exception(
-                        "Image unit lease renewal failed and the lease is about "
-                        "to expire, abandoning unit: unit_id=%s parent_job_id=%s "
-                        "worker_id=%s remaining=%.1fs",
-                        self.unit_id,
-                        self.parent_job_id,
-                        self.worker_id,
-                        remaining,
-                    )
-                    self.mark_lease_lost()
-                    return
-                logger.warning(
-                    "Image unit lease renewal failed, retrying in %.1fs "
-                    "(lease valid for %.1fs): unit_id=%s parent_job_id=%s worker_id=%s",
-                    retry_interval,
-                    remaining,
+            )
+
+        def on_transient_error(exc: Exception, remaining: float) -> None:
+            if remaining <= retry_interval:
+                logger.exception(
+                    "Image unit lease renewal failed and the lease is about "
+                    "to expire, abandoning unit: unit_id=%s parent_job_id=%s "
+                    "worker_id=%s remaining=%.1fs",
                     self.unit_id,
                     self.parent_job_id,
                     self.worker_id,
-                    exc_info=True,
+                    remaining,
                 )
-                metrics.increment("image_jobs.lease_renew_retry")
-                delay = retry_interval
-                continue
-            if renewed:
-                self.note_lease_extended(renew_started_at)
-                metrics.increment("image_jobs.lease_renewed")
-                delay = renew_interval
-                continue
+                return
+            logger.warning(
+                "Image unit lease renewal failed, retrying in %.1fs "
+                "(lease valid for %.1fs): unit_id=%s parent_job_id=%s worker_id=%s",
+                retry_interval,
+                remaining,
+                self.unit_id,
+                self.parent_job_id,
+                self.worker_id,
+                exc_info=True,
+            )
+            metrics.increment("image_jobs.lease_renew_retry")
+
+        def on_renewed(started: float) -> None:
+            self.note_lease_extended(started)
+            metrics.increment("image_jobs.lease_renewed")
+
+        def on_lost() -> None:
             logger.warning(
                 "Image unit lease lost: unit_id=%s parent_job_id=%s worker_id=%s",
                 self.unit_id,
@@ -213,7 +207,17 @@ class ImageUnitSession:
                 self.worker_id,
             )
             self.mark_lease_lost()
-            return
+
+        await renew_lease_until_lost(
+            renew,
+            interval_seconds=renew_interval,
+            retry_interval_seconds=retry_interval,
+            deadline=lambda: self._lease_deadline,
+            on_lost=on_lost,
+            on_renewed=on_renewed,
+            on_transient_error=on_transient_error,
+            keep_going=lambda: not self.lease_lost.is_set(),
+        )
 
     # ── progress ───────────────────────────────────────────────
 

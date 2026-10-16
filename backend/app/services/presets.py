@@ -29,14 +29,18 @@ from ..schemas.provider import (
     parse_provider_config,
     provider_capabilities,
 )
-from ..core.validators import (
-    get_env_var_ref_name,
+from ..core.redaction import (
     mask_socks5_proxy_url,
     mask_webhook_url,
+)
+from ..core.secrets import (
+    get_env_var_ref_name,
     normalize_secret_env_ref_or_plaintext,
+    resolve_env_var_ref,
+)
+from ..core.validators import (
     normalize_socks5_proxy_url,
     normalize_webhook_url,
-    resolve_env_var_ref,
 )
 from ..integrations.nodeimage.client import (
     NodeImageConfigurationError,
@@ -58,8 +62,15 @@ from ..schemas.settings import (
     NodeImageSettingsResponse,
     SettingsResponse,
 )
+from .preset_credentials import (
+    MASKED_API_KEY_VALUE,
+    _resolve_secret_or_unprocessable,
+    api_key_response_fields,
+    get_api_key_env_var,
+    resolve_api_key,
+    secret_response_fields,
+)
 
-MASKED_API_KEY_VALUE = "********"
 
 
 def get_exception_message(error: Exception) -> str:
@@ -68,134 +79,6 @@ def get_exception_message(error: Exception) -> str:
     return redact_sensitive_text(str(error) or repr(error) or error.__class__.__name__)
 
 
-def mask_key(key: str) -> str:
-    """Return a fixed mask that never reveals any character of a stored secret.
-
-    The previous first-4/last-4 form leaked eight characters of every stored
-    plaintext key to the settings console; the frontend already normalizes the
-    mask to this constant, so no round-trip behavior changes.
-    """
-    if not key:
-        return "***"
-    return MASKED_API_KEY_VALUE
-
-
-def get_api_key_env_var(api_key: str) -> str | None:
-    return get_env_var_ref_name(api_key)
-
-
-def is_malformed_api_key_env_ref(api_key: str) -> bool:
-    return "${" in str(api_key or "") or "}" in str(api_key or "")
-
-
-def resolve_api_key(
-    api_key: str,
-    *,
-    purpose: secrets.SecretPurpose,
-    target_url: str,
-    host_allowlist: str,
-) -> str:
-    """Resolve an API key reference; ${ENV} is only read through a declared purpose/origin binding."""
-    env_var = get_env_var_ref_name(api_key)
-    if env_var:
-        try:
-            return secrets.resolve_env_ref(
-                env_var, purpose=purpose, target_url=target_url, host_allowlist=host_allowlist, field_name="API Key"
-            )
-        except secrets.SecretRegistryError as exc:
-            raise UnprocessableRequestError(str(exc)) from exc
-    return resolve_env_var_ref(api_key)
-
-
-def _resolve_secret_or_unprocessable(
-    secret_id: str,
-    *,
-    purpose: secrets.SecretPurpose,
-    target_url: str,
-    host_allowlist: str,
-) -> str:
-    """Resolve a registry secret, normalizing registry errors into a 422 domain error."""
-    try:
-        return secrets.resolve_secret(
-            secret_id,
-            purpose=purpose,
-            target_url=target_url,
-            host_allowlist=host_allowlist,
-        )
-    except secrets.SecretRegistryError as exc:
-        raise UnprocessableRequestError(str(exc)) from exc
-
-
-def api_key_response_fields(api_key: str) -> dict:
-    value = str(api_key or "").strip()
-    env_var = get_api_key_env_var(value)
-    if env_var:
-        return {
-            "api_key_masked": value,
-            "has_api_key": True,
-            "api_key_source": "env",
-            "api_key_env_var": env_var,
-            "api_key_secret_id": None,
-        }
-    if value in secrets.configured_secret_ids():
-        return {
-            "api_key_masked": value,
-            "has_api_key": True,
-            "api_key_source": "registry",
-            "api_key_env_var": None,
-            "api_key_secret_id": value,
-        }
-    if value:
-        return {
-            "api_key_masked": mask_key(value),
-            "has_api_key": True,
-            "api_key_source": "stored",
-            "api_key_env_var": None,
-            "api_key_secret_id": None,
-        }
-    return {
-        "api_key_masked": "***",
-        "has_api_key": False,
-        "api_key_source": "empty",
-        "api_key_env_var": None,
-        "api_key_secret_id": None,
-    }
-
-
-def secret_response_fields(value: str, prefix: str) -> dict:
-    fields = api_key_response_fields(value)
-    return {
-        f"{prefix}_masked": fields["api_key_masked"],
-        f"has_{prefix}": fields["has_api_key"],
-        f"{prefix}_source": fields["api_key_source"],
-        f"{prefix}_env_var": fields["api_key_env_var"],
-        f"{prefix}_secret_id": fields["api_key_secret_id"],
-    }
-
-
-def get_effective_preset_api_key(preset: dict) -> str:
-    secret_id = str(preset.get("api_key") or "").strip()
-    if not secret_id:
-        raise UnprocessableRequestError("API credential is not configured")
-    env_var = get_api_key_env_var(secret_id)
-    if secret_id not in secrets.configured_secret_ids():
-        resolved_key = resolve_api_key(
-            secret_id,
-            purpose="upstream_api",
-            target_url=str(preset.get("api_url") or ""),
-            host_allowlist=config.UPSTREAM_HOST_ALLOWLIST,
-        )
-        if resolved_key:
-            return resolved_key
-        if env_var:
-            raise UnprocessableRequestError(f"API Key environment variable {env_var} is not set or empty. Set it in the server environment.")
-        raise UnprocessableRequestError("API credential is not configured")
-    return _resolve_secret_or_unprocessable(
-        secret_id,
-        purpose="upstream_api",
-        target_url=str(preset.get("api_url") or ""),
-        host_allowlist=config.UPSTREAM_HOST_ALLOWLIST,
-    )
 
 
 def _coerce_non_negative_int(value, default: int = 0) -> int:

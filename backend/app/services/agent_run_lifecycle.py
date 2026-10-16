@@ -14,6 +14,7 @@ from ..repositories.db.execution import run_db_operation
 from ..runtime.state import state, utc_lease_expires_at
 from . import assistant_runtime
 from .agent_turn_errors import TurnCancelled, describe_failure
+from .lease_renewal import renew_lease_until_lost
 
 if TYPE_CHECKING:
     from .agent_run_context import AgentRunContext
@@ -48,29 +49,41 @@ async def _renew_lease_loop(run: "AgentRunContext", owner: str, main: asyncio.Ta
         remaining = (
             datetime.fromisoformat(run.turn["lease_expires_at"]) - datetime.now(timezone.utc)
         ).total_seconds()
-    expires = time.monotonic() + max(0, remaining)
-    while True:
-        await asyncio.sleep(min(interval, max(0, expires - time.monotonic())))
-        try:
-            started = time.monotonic()
-            renewed = await asyncio.wait_for(run._db(
+    expires = [time.monotonic() + max(0, remaining)]
+
+    async def renew() -> bool:
+        return bool(
+            await run._db(
                 agent_repo.renew_turn_lease,
                 turn_id,
                 owner=owner,
                 lease_expires_at=utc_lease_expires_at(config.AGENT_TURN_LEASE_SECONDS),
                 metric_name="agent_renew_lease",
                 critical=True,
-            ), timeout=max(0, expires - time.monotonic()))
-        except Exception:
-            logger.warning("Agent turn %s lease renewal failed", turn_id, exc_info=True)
-            if time.monotonic() < expires:
-                continue
-            renewed = False
-        if not renewed:
-            run._lease_lost = True
-            main.cancel()
-            return
-        expires = started + config.AGENT_TURN_LEASE_SECONDS
+            )
+        )
+
+    def on_transient_error(exc: Exception, remaining_seconds: float) -> None:
+        logger.warning("Agent turn %s lease renewal failed", turn_id, exc_info=True)
+
+    def on_renewed(started: float) -> None:
+        expires[0] = started + config.AGENT_TURN_LEASE_SECONDS
+
+    def on_lost() -> None:
+        run._lease_lost = True
+        main.cancel()
+
+    await renew_lease_until_lost(
+        renew,
+        interval_seconds=interval,
+        retry_interval_seconds=interval,
+        minimum_retry_budget_seconds=0.0,
+        deadline=lambda: expires[0],
+        renew_timeout=lambda: max(0.0, expires[0] - time.monotonic()),
+        on_lost=on_lost,
+        on_renewed=on_renewed,
+        on_transient_error=on_transient_error,
+    )
 
 
 async def _cancel_watcher(run: "AgentRunContext", main: asyncio.Task) -> None:

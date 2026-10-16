@@ -1,7 +1,7 @@
 # HTTP Compression
 
 ## Scope and owner
-`TextOnlyGZipMiddleware` and `_TextGZipResponder` in `backend/app/api/middleware.py` own selective response compression. Preserve the existing download-path bypasses and text content-type allowlist.
+`TextOnlyGZipMiddleware` and `_TextGZipResponder` in `backend/app/api/compression.py` own selective response compression. Preserve the existing download-path bypasses and text content-type allowlist.
 
 ## ASGI contract
 For each HTTP response, send exactly one `http.response.start` before any `http.response.body` or `http.response.pathsend`. SSE (`text/event-stream`), excluded binary types, existing `Content-Encoding`, and status 206 must pass through unchanged. Eligible text remains delegated to Starlette for compression and header updates. Empty and multi-chunk bodies follow the same ordering contract.

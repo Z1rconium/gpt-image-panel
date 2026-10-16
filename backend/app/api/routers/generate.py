@@ -16,9 +16,9 @@ from ...services.job_events import (
     get_jobs_subscribers,
     publish_queue,
     reconcile_active_generate_jobs,
-    resolve_generate_job_view,
     serialize_sse_event,
 )
+from ...services.job_persistence import resolve_generate_job_view
 from ...core.utils import json_dumps_canonical
 from ...repositories.db.execution import run_db_operation
 from ...runtime.blocking import run_image_operation

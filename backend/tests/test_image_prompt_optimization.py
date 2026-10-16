@@ -9,7 +9,7 @@ from backend.app.integrations import assistant_client
 from backend.app.integrations.upstream.errors import UpstreamApiError
 from backend.app.repositories.gallery import queries as gallery_queries
 from backend.app.repositories.image_jobs import list_generate_jobs
-from backend.app.services import assistant_vision
+from backend.app.services import assistant_prompt_optimization
 from backend.tests.support.contract import PNG_BYTES, _assistant_runtime_payload
 
 
@@ -23,7 +23,7 @@ from backend.tests.support.contract import PNG_BYTES, _assistant_runtime_payload
     ],
 )
 def test_prompt_preview_size_is_near_point_eight_megapixels_and_aligned(source, expected):
-    width, height = assistant_vision.calculate_prompt_preview_size(*source)
+    width, height = assistant_prompt_optimization.calculate_prompt_preview_size(*source)
     assert (width, height) == expected
     assert width % 16 == 0
     assert height % 16 == 0
@@ -33,7 +33,7 @@ def test_prompt_preview_size_is_near_point_eight_megapixels_and_aligned(source, 
 @pytest.mark.parametrize("source", [(3001, 1000), (1000, 3001), (0, 100)])
 def test_prompt_preview_size_rejects_invalid_or_extreme_aspect_ratios(source):
     with pytest.raises(ValueError):
-        assistant_vision.calculate_prompt_preview_size(*source)
+        assistant_prompt_optimization.calculate_prompt_preview_size(*source)
 
 
 def _vision_image(marker: str) -> dict[str, str | int | bool]:
@@ -112,7 +112,7 @@ def test_multi_image_responses_payload_labels_images_in_order_and_keeps_single_i
 
 
 def test_generated_image_mime_type_uses_original_bytes():
-    assert assistant_vision._generated_image_mime_type(PNG_BYTES) == "image/png"
+    assert assistant_prompt_optimization._generated_image_mime_type(PNG_BYTES) == "image/png"
 
 
 def test_image_prompt_optimization_contract_uses_active_preset_and_does_not_persist(client, monkeypatch):
@@ -142,8 +142,8 @@ def test_image_prompt_optimization_contract_uses_active_preset_and_does_not_pers
             37,
         )
 
-    monkeypatch.setattr(assistant_vision, "call_image_generation_preview_api", fake_generate)
-    monkeypatch.setattr(assistant_vision.assistant_client, "request_assistant_json", fake_assistant)
+    monkeypatch.setattr(assistant_prompt_optimization, "call_image_generation_preview_api", fake_generate)
+    monkeypatch.setattr(assistant_prompt_optimization.assistant_client, "request_assistant_json", fake_assistant)
     gallery_count = gallery_queries.get_gallery_count()
     job_count = len(list_generate_jobs())
 
@@ -246,7 +246,7 @@ def test_image_prompt_optimization_rejects_extreme_ratio_and_maps_upstream_error
     async def failing_generate(*args, **kwargs):
         raise UpstreamApiError("custom size unsupported")
 
-    monkeypatch.setattr(assistant_vision, "call_image_generation_preview_api", failing_generate)
+    monkeypatch.setattr(assistant_prompt_optimization, "call_image_generation_preview_api", failing_generate)
     failed = client.post(
         "/api/assistant/image/prompt/optimize",
         data={"prompt": "current"},
@@ -266,8 +266,8 @@ def test_image_prompt_optimization_maps_assistant_timeout_without_persisting(cli
     async def timed_out_assistant(**kwargs):
         raise assistant_client.AssistantTimeoutError("AI Assistant request timed out")
 
-    monkeypatch.setattr(assistant_vision, "call_image_generation_preview_api", fake_generate)
-    monkeypatch.setattr(assistant_vision.assistant_client, "request_assistant_json", timed_out_assistant)
+    monkeypatch.setattr(assistant_prompt_optimization, "call_image_generation_preview_api", fake_generate)
+    monkeypatch.setattr(assistant_prompt_optimization.assistant_client, "request_assistant_json", timed_out_assistant)
     gallery_count = gallery_queries.get_gallery_count()
     job_count = len(list_generate_jobs())
 

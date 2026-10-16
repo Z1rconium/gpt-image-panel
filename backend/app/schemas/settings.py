@@ -2,9 +2,9 @@ from typing import Annotated, Any, Literal, Optional
 
 from pydantic import BaseModel, Field, StrictInt, field_validator
 
+from ..core.secrets import normalize_secret_env_ref_or_plaintext
 from ..core.validators import (
     normalize_r2_endpoint_url,
-    normalize_secret_env_ref_or_plaintext,
     normalize_socks5_proxy_url,
     normalize_upstream_base_url,
     normalize_webhook_url,

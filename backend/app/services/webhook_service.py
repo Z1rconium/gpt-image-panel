@@ -10,10 +10,14 @@ from typing import Any
 import aiohttp
 
 from ..core import settings as config
+from ..core.errors import UnprocessableRequestError
 from ..core.redaction import redact_sensitive_text
 from ..core import validators as ssrf
 from ..core.safe_connector import create_safe_connector
 from ..core.utils import utc_now
+from ..repositories.db.execution import run_db_operation
+from ..repositories.image_jobs import pop_generate_job_webhook
+from ..runtime.state import state
 
 logger = logging.getLogger(__name__)
 
@@ -144,3 +148,75 @@ async def deliver_webhook(webhook_url: str, job: dict[str, Any]):
         attempts,
         last_error,
     )
+
+
+# ── dispatch / delivery-task tracking ───────────────────────────
+# Moved out of job_events (F-G5-2): delivery is unrelated to job state/SSE.
+
+
+def validate_job_webhook_url(webhook_url: str | None) -> str | None:
+    normalized_url = str(webhook_url or "").strip()
+    if not normalized_url:
+        return None
+    try:
+        ssrf.validate_webhook_url(normalized_url, config.WEBHOOK_HOST_ALLOWLIST)
+    except ValueError as e:
+        raise UnprocessableRequestError(str(e)) from e
+    if len(config.WEBHOOK_SIGNING_SECRET.encode("utf-8")) < 32:
+        raise UnprocessableRequestError("WEBHOOK_SIGNING_SECRET must contain at least 32 bytes")
+    return normalized_url
+
+
+def get_webhook_delivery_tasks() -> set[asyncio.Task]:
+    tasks = getattr(state, "webhook_delivery_tasks", None)
+    if not isinstance(tasks, set):
+        tasks = set()
+        state.webhook_delivery_tasks = tasks
+    return tasks
+
+
+def _track_webhook_delivery_task(task: asyncio.Task) -> asyncio.Task:
+    tasks = get_webhook_delivery_tasks()
+    tasks.add(task)
+
+    def discard(completed: asyncio.Task) -> None:
+        tasks.discard(completed)
+        if completed.cancelled():
+            return
+        try:
+            completed.result()
+        except Exception:
+            logger.warning("Webhook delivery task failed", exc_info=True)
+
+    task.add_done_callback(discard)
+    return task
+
+
+def _webhook_job_view(job: dict[str, Any]) -> dict[str, Any]:
+    """Copy of the job without the (secret) delivery URL echoed back."""
+    result = job.copy()
+    result.pop("webhook_url", None)
+    return result
+
+
+def _create_webhook_delivery_task(webhook_url: str, job: dict) -> asyncio.Task:
+    return _track_webhook_delivery_task(
+        asyncio.create_task(deliver_webhook(webhook_url, _webhook_job_view(job)))
+    )
+
+
+def dispatch_job_webhook(job: dict):
+    webhook_url = pop_generate_job_webhook(job["job_id"])
+    if not webhook_url:
+        return
+    _create_webhook_delivery_task(webhook_url, job)
+
+
+async def dispatch_job_webhook_async(job: dict):
+    webhook_url = await run_db_operation(
+        pop_generate_job_webhook,
+        job["job_id"],
+        metric_name="pop_generate_job_webhook",
+    )
+    if webhook_url:
+        _create_webhook_delivery_task(webhook_url, job)
