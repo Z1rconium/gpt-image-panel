@@ -18,6 +18,7 @@ from ..core.observability import metrics
 from ..repositories.image_jobs import renew_image_job_unit_lease, update_image_job_unit_progress
 from ..repositories.db.execution import run_db_operation
 from .image_job_aggregate import aggregate_parent_image_job, set_generate_job_progress
+from .lease_holder import LeaseHolder, LeaseLostError
 from .lease_renewal import renew_lease_until_lost
 
 logger = logging.getLogger(__name__)
@@ -26,7 +27,7 @@ logger = logging.getLogger(__name__)
 IMAGE_UNIT_LEASE_RENEW_RETRY_SECONDS = 5.0
 
 
-class UnitLeaseLostError(Exception):
+class UnitLeaseLostError(LeaseLostError):
     """Raised when this worker's claim token no longer owns the image unit.
 
     Ownership has moved to a newer claim (or the session was interrupted), so
@@ -71,18 +72,16 @@ class ImageUnitSession:
         self.operation = operation
         self.claim_token = claim_token
         self.worker_id = worker_id
-        self.lease_lost = asyncio.Event()
+        self.holder = LeaseHolder(
+            lease_seconds=float(config.IMAGE_JOB_UNIT_LEASE_SECONDS)
+        )
+        self.lease_lost = self.holder.lease_lost
         self.lease_task: asyncio.Task | None = None
         self.upstream_task: asyncio.Task | None = None
         self._progress_pending: tuple[str, str] | None = None
         self._progress_task: asyncio.Task | None = None
         self._last_progress_persist_at = 0.0
         self._last_aggregate_at = 0.0
-        # Local view of when the SQLite lease expires. Every successful write that
-        # sets `claim_expires_at` (start progress, coalesced progress, renewal)
-        # pushes it forward; the renewal loop uses it to decide how long a failing
-        # renewal may keep retrying before the unit must be abandoned.
-        self._lease_deadline = time.monotonic() + float(config.IMAGE_JOB_UNIT_LEASE_SECONDS)
 
     # ── lease ──────────────────────────────────────────────────
 
@@ -90,18 +89,14 @@ class ImageUnitSession:
         """Record a lease extension, anchored at the time the new expiry was
         computed (before the DB write) so the local deadline never runs ahead
         of the value actually stored in SQLite."""
-        anchored_at = time.monotonic() if anchor is None else anchor
-        self._lease_deadline = anchored_at + float(config.IMAGE_JOB_UNIT_LEASE_SECONDS)
+        self.holder.note_lease_extended(anchor)
 
     def raise_if_lease_lost(self) -> None:
-        if self.lease_lost.is_set():
-            raise UnitLeaseLostError()
+        self.holder.raise_if_lease_lost(UnitLeaseLostError)
 
     def mark_lease_lost(self) -> None:
-        if self.lease_lost.is_set():
-            return
-        self.lease_lost.set()
-        metrics.increment("image_jobs.lease_lost")
+        if self.holder.mark_lease_lost():
+            metrics.increment("image_jobs.lease_lost")
 
     async def abort_upstream(self) -> None:
         """Cancel the in-flight upstream call and wait for it to unwind.
@@ -151,7 +146,7 @@ class ImageUnitSession:
 
         A `False` return (or a fencing check failure from any other write
         path) means ownership moved elsewhere, so signal lease loss right away.
-        A DB error is different: the lease is still ours until `_lease_deadline`,
+        A DB error is different: the lease is still ours until the holder deadline,
         so retry on a short cadence and only give up once another retry could
         no longer land before expiry. Aborting an expensive upstream call over
         one transient SQLite stall would burn an attempt for nothing.
@@ -212,7 +207,7 @@ class ImageUnitSession:
             renew,
             interval_seconds=renew_interval,
             retry_interval_seconds=retry_interval,
-            deadline=lambda: self._lease_deadline,
+            deadline=lambda: self.holder.deadline,
             on_lost=on_lost,
             on_renewed=on_renewed,
             on_transient_error=on_transient_error,
