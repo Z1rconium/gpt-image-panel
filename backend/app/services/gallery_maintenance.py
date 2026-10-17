@@ -16,7 +16,7 @@ from ..repositories.coordination import (
     list_gallery_job_ids_with_files,
     release_background_lease,
 )
-from ..repositories.gallery.mutations import cleanup_orphan_gallery_files
+from ..repositories.gallery.maintenance import cleanup_orphan_gallery_files
 from ..repositories.gallery.queries import get_gallery_count
 from ..repositories.gallery.sync_state import (
     count_gallery_r2_sync_rows,

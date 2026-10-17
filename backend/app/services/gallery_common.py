@@ -19,7 +19,7 @@ from ..repositories.coordination import (
     delete_gallery_job,
     get_gallery_job,
 )
-from ..repositories.gallery.mutations import (
+from ..repositories.gallery.maintenance import (
     invalidate_thumbnail_cache,
     is_gallery_filename_referenced,
 )

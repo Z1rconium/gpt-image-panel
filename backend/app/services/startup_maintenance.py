@@ -13,11 +13,11 @@ from ..repositories.coordination import (
     release_background_lease,
 )
 from ..repositories.db import verify_storage_writable
-from ..repositories.gallery.mutations import (
+from ..repositories.gallery.maintenance import (
     backfill_missing_gallery_bytes,
     sync_gallery_with_image_files,
 )
-from ..repositories.image_jobs import list_persisted_mask_job_ids
+from ..repositories.image_files import list_persisted_mask_job_ids
 from ..repositories.thumbnail_jobs import cleanup_auxiliary_state
 from ..repositories.db.execution import run_db_operation
 from ..runtime.state import (

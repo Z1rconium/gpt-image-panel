@@ -53,17 +53,19 @@ from ...repositories.coordination import (
     update_gallery_job_progress,
 )
 from ...repositories.gallery.mutations import (
-    cleanup_orphan_gallery_files,
     delete_all_gallery_images,
     delete_gallery_image,
     delete_gallery_images,
     delete_gallery_images_by_filters,
     import_gallery_entries,
-    invalidate_thumbnail_cache,
-    is_gallery_filename_referenced,
     update_gallery_entries_favorite,
     update_gallery_entries_favorite_by_filters,
     update_gallery_entry,
+)
+from ...repositories.gallery.maintenance import (
+    cleanup_orphan_gallery_files,
+    invalidate_thumbnail_cache,
+    is_gallery_filename_referenced,
 )
 from ...repositories.gallery.queries import (
     get_gallery_count,

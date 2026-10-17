@@ -301,6 +301,32 @@ async def save_gallery_entries_from_upstream_data(
     return entries
 
 
+def _emit_stream_partial_preview(
+    *,
+    b64_json: Any,
+    event: dict[str, Any],
+    partial_index: int,
+    call_index: int,
+    preview: "PreviewCallback | None",
+    progress: ProgressCallback | None,
+) -> bool:
+    """Emit one partial-image preview frame; return False if the frame is skipped."""
+    if preview is None:
+        return True
+    try:
+        image_bytes = base64.b64decode(str(b64_json), validate=True)
+    except ValueError:
+        return False
+    mime_type = f"image/{str(event.get('output_format') or 'png').lower()}"
+    if progress:
+        progress("streaming_preview", f"Received partial preview {partial_index + 1}")
+    if call_index:
+        preview(partial_index, mime_type, image_bytes, call_index)
+    else:
+        preview(partial_index, mime_type, image_bytes)
+    return True
+
+
 async def consume_streaming_image_response(
     resp: aiohttp.ClientResponse,
     api_path: str,
@@ -383,21 +409,15 @@ async def consume_streaming_image_response(
             except (TypeError, ValueError):
                 partial_index = next_partial_index
             next_partial_index = partial_index + 1
-            if preview is not None:
-                try:
-                    image_bytes = base64.b64decode(str(b64_json), validate=True)
-                except ValueError:
-                    continue
-                mime_type = f"image/{str(event.get('output_format') or 'png').lower()}"
-                if progress:
-                    progress(
-                        "streaming_preview",
-                        f"Received partial preview {partial_index + 1}",
-                    )
-                if call_index:
-                    preview(partial_index, mime_type, image_bytes, call_index)
-                else:
-                    preview(partial_index, mime_type, image_bytes)
+            if not _emit_stream_partial_preview(
+                b64_json=b64_json,
+                event=event,
+                partial_index=partial_index,
+                call_index=call_index,
+                preview=preview,
+                progress=progress,
+            ):
+                continue
         elif event_type == "response.output_item.done":
             item = event.get("item")
             if isinstance(item, dict) and item.get("type") == "image_generation_call":

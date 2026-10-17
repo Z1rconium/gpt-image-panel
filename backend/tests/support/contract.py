@@ -55,6 +55,7 @@ from backend.app.repositories import image_jobs as image_jobs_repo
 from backend.app.repositories import settings as settings_repo
 from backend.app.repositories import thumbnail_jobs as thumbnail_jobs_repo
 from backend.app.repositories.gallery import filters as gallery_filters
+from backend.app.repositories.gallery import maintenance as gallery_repo_maintenance
 from backend.app.repositories.gallery import mutations as gallery_mutations
 from backend.app.repositories.gallery import queries as gallery_queries
 from backend.app.repositories.gallery import sync_state as gallery_sync_state

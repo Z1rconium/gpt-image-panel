@@ -89,6 +89,14 @@ def _promote_prepared_thumbnails(prepared_files: Sequence[_PreparedGalleryFile])
 
 @contextmanager
 def _thumbnail_cpu_slot() -> Iterator[None]:
+    """Acquire the shared thumbnail-CPU background slot, blocking with backoff.
+
+    Off-loop contract: this helper performs blocking work — a bounded
+    ``time.sleep`` retry loop and a synchronous slot-acquire DB round-trip — so
+    it must run off the event loop. Callers reach it through
+    ``asyncio.to_thread`` (e.g. ``gallery_maintenance`` and the thumbnail
+    backfill paths) or from a worker thread; never from a coroutine directly.
+    """
     owner = f"thumbnail-{os.getpid()}-{threading.get_ident()}-{uuid.uuid4()}"
     slot_name: str | None = None
     retry_delay_seconds = 0.05

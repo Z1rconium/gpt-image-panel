@@ -171,10 +171,10 @@ def test_sync_gallery_with_image_files_uses_bounded_transactions(
         with db_repo._transaction(conn):
             gallery_mutations._insert_gallery_entries_on_conn(conn, entries)
 
-    monkeypatch.setattr(gallery_mutations, "GALLERY_SYNC_BATCH_SIZE", 2)
+    monkeypatch.setattr(gallery_repo_maintenance, "GALLERY_SYNC_BATCH_SIZE", 2)
 
     txn_count = {"count": 0}
-    original_transaction = gallery_mutations._transaction
+    original_transaction = gallery_repo_maintenance._transaction
 
     @contextmanager
     def counting_transaction(conn):
@@ -182,9 +182,9 @@ def test_sync_gallery_with_image_files_uses_bounded_transactions(
         with original_transaction(conn):
             yield
 
-    monkeypatch.setattr(gallery_mutations, "_transaction", counting_transaction)
+    monkeypatch.setattr(gallery_repo_maintenance, "_transaction", counting_transaction)
 
-    removed = gallery_mutations.sync_gallery_with_image_files()
+    removed = gallery_repo_maintenance.sync_gallery_with_image_files()
 
     assert removed == 5
     assert txn_count["count"] >= 3

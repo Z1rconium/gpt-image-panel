@@ -4,6 +4,7 @@ Format tables, in-memory validation, and path resolution live in core/media.py
 so integrations can use them without depending on this layer.
 """
 
+import logging
 import tempfile
 from pathlib import Path
 
@@ -20,6 +21,9 @@ from ..core.media import (
     validate_image_header_bytes,
     verified_pillow_image,
 )
+from .db import _connect, _ensure_database
+
+logger = logging.getLogger(__name__)
 
 
 def validate_image_file_details(
@@ -204,6 +208,30 @@ def delete_mask_file(mask_filename: str) -> bool:
         path.unlink()
         return True
     return False
+
+
+def delete_persisted_masks(job_ids: list[str]) -> None:
+    """Remove the persisted mask file for each job id.
+
+    Mask files are named after their job, so removing a job must remove its
+    mask. Called after the deleting transaction commits so a rollback never
+    leaves the file gone while the row survives.
+    """
+    for job_id in job_ids:
+        try:
+            delete_mask_file(f"{job_id}.png")
+        except OSError:
+            logger.warning("Failed to remove mask file for job %s", job_id)
+
+
+def list_persisted_mask_job_ids() -> set[str]:
+    """Job ids that own a persisted mask file (named ``<job_id>.png``)."""
+    _ensure_database()
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT job_id FROM generate_jobs WHERE mask_applied = 1"
+        ).fetchall()
+    return {str(row["job_id"]) for row in rows}
 
 
 def scan_image_files() -> set[str]:

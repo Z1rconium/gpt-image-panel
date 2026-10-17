@@ -7,7 +7,7 @@ from ..core import settings as config
 from ..core.constants import ACTIVE_GENERATE_JOB_STATUSES, IMAGE_JOB_UNIT_MAX_RECOVERIES
 from ..core.observability import metrics
 from ..core.utils import json_dumps_canonical, utc_now
-from .image_files import delete_mask_file
+from .image_files import delete_persisted_masks
 from .db import (
     EditSourceQueueFullError,
     GENERATE_JOB_COLUMNS,
@@ -32,20 +32,6 @@ import uuid
 from ..core import image_cost
 
 logger = logging.getLogger(__name__)
-
-
-def delete_persisted_masks(job_ids: list[str]) -> None:
-    """Remove the persisted mask file for each job id.
-
-    Mask files are named after their job, so removing a job must remove its
-    mask. Called after the deleting transaction commits so a rollback never
-    leaves the file gone while the row survives.
-    """
-    for job_id in job_ids:
-        try:
-            delete_mask_file(f"{job_id}.png")
-        except OSError:
-            logger.warning("Failed to remove mask file for job %s", job_id)
 
 
 def upsert_generate_job_guarded(job: dict[str, Any]) -> tuple[dict[str, Any], bool]:
@@ -1244,16 +1230,6 @@ def list_generate_jobs(
             before_job_id=seek_job_id,
         )
     return [_generate_job_from_row(row) for row in rows]
-
-
-def list_persisted_mask_job_ids() -> set[str]:
-    """Job ids that own a persisted mask file (named ``<job_id>.png``)."""
-    _ensure_database()
-    with _connect() as conn:
-        rows = conn.execute(
-            "SELECT job_id FROM generate_jobs WHERE mask_applied = 1"
-        ).fetchall()
-    return {str(row["job_id"]) for row in rows}
 
 
 def clear_generate_job_history() -> int:

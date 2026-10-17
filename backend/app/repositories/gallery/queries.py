@@ -483,6 +483,37 @@ def _store_gallery_page_anchor_best_effort(
         conn.close()
 
 
+def _get_gallery_rows_after_keyset_on_conn(
+    conn: sqlite3.Connection,
+    where_sql: str,
+    params: Sequence[Any],
+    *,
+    sort_seq: int,
+    image_id: str,
+    limit: int,
+    columns: Sequence[str] = GALLERY_COLUMNS,
+) -> list[sqlite3.Row]:
+    """Fetch rows strictly after the ``(sort_seq, id)`` keyset position.
+
+    The single canonical keyset primitive shared by anchor-based page fetching
+    and cursor-based batch iteration; both order by ``sort_seq DESC, id DESC``.
+    """
+    combined_where = _combine_gallery_where(
+        where_sql,
+        "(sort_seq < ? OR (sort_seq = ? AND id < ?))",
+    )
+    return conn.execute(
+        f"""
+        SELECT {", ".join(columns)}
+        FROM gallery_entries
+        {combined_where}
+        ORDER BY sort_seq DESC, id DESC
+        LIMIT ?
+        """,
+        (*params, sort_seq, sort_seq, image_id, limit),
+    ).fetchall()
+
+
 def _get_gallery_rows_after_anchor_on_conn(
     conn: sqlite3.Connection,
     components: _GalleryQueryComponents,
@@ -491,20 +522,14 @@ def _get_gallery_rows_after_anchor_on_conn(
     image_id: str,
     limit: int,
 ) -> list[sqlite3.Row]:
-    cursor_where = _combine_gallery_where(
+    return _get_gallery_rows_after_keyset_on_conn(
+        conn,
         components.where_sql,
-        "(sort_seq < ? OR (sort_seq = ? AND id < ?))",
+        components.params,
+        sort_seq=sort_seq,
+        image_id=image_id,
+        limit=limit,
     )
-    return conn.execute(
-        f"""
-        SELECT {", ".join(GALLERY_COLUMNS)}
-        FROM gallery_entries
-        {cursor_where}
-        ORDER BY sort_seq DESC, id DESC
-        LIMIT ?
-        """,
-        (*components.params, sort_seq, sort_seq, image_id, limit),
-    ).fetchall()
 
 
 def _get_gallery_page_rows_by_anchor_on_conn(
@@ -626,20 +651,16 @@ def _get_gallery_row_batch_after_cursor_on_conn(
             LIMIT ?
         """
         query_params = list(params) + [limit]
-    else:
-        combined_where = _combine_gallery_where(
-            where_sql,
-            "(sort_seq < ? OR (sort_seq = ? AND id < ?))",
-        )
-        sql = f"""
-            SELECT {", ".join(columns)}
-            FROM gallery_entries
-            {combined_where}
-            ORDER BY sort_seq DESC, id DESC
-            LIMIT ?
-        """
-        query_params = list(params) + [last_sort_seq, last_sort_seq, last_id, limit]
-    return conn.execute(sql, query_params).fetchall()
+        return conn.execute(sql, query_params).fetchall()
+    return _get_gallery_rows_after_keyset_on_conn(
+        conn,
+        where_sql,
+        params,
+        sort_seq=last_sort_seq,
+        image_id=last_id,
+        limit=limit,
+        columns=columns,
+    )
 
 
 def get_gallery(

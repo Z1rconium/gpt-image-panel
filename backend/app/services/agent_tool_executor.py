@@ -297,6 +297,26 @@ class AgentToolExecutor:
         block["job_id"] = job_id
         await self.run.events.upsert_block(block)
 
+        result, settled, view = await self._await_image_job(job_id, block, image, row)
+        if view is None:
+            return result, settled
+        return await self._settle_image_job(image, row, block, view)
+
+    async def _await_image_job(
+        self,
+        job_id: str,
+        block: dict[str, Any],
+        image: agent_tools.BatchImage,
+        row: dict[str, Any],
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None, dict[str, Any] | None]:
+        """Poll a queued image job to a terminal state, updating the block stage.
+
+        Returns ``(result, settled, view)``. On the early-exit paths (the job
+        view disappeared, or the wait deadline elapsed) ``view`` is ``None`` and
+        ``result``/``settled`` carry the immediate outcome. On a normal terminal
+        transition ``result``/``settled`` are ``None`` and ``view`` is the
+        terminal job view for the caller to settle.
+        """
         deadline = time.monotonic() + config.AGENT_IMAGE_JOB_TIMEOUT_SECONDS
         delay = IMAGE_POLL_MIN_SECONDS
         last_stage = block["stage"]
@@ -304,7 +324,8 @@ class AgentToolExecutor:
             await self.run.check_cancel()
             view = await resolve_generate_job_view(job_id)
             if view is None:
-                return await self._fail_image(image, row, block, "The image job disappeared.")
+                result, settled = await self._fail_image(image, row, block, "The image job disappeared.")
+                return result, settled, None
             status = str(view.get("status") or "")
             stage = str(view.get("stage") or status or "queued")
             if stage != last_stage:
@@ -312,7 +333,7 @@ class AgentToolExecutor:
                 block["stage"] = stage
                 await self.run.events.upsert_block(block)
             if status not in ACTIVE_GENERATE_JOB_STATUSES:
-                break
+                return None, None, view
             if time.monotonic() >= deadline:
                 # The wait window ended, not the job: keep the row pending so
                 # reconciliation settles it from the real job state later.
@@ -322,10 +343,19 @@ class AgentToolExecutor:
                     "id": image.id,
                     "status": "still_running",
                     "note": "Waiting ended; the image job is still running and will appear in the gallery.",
-                }, None
+                }, None, None
             await asyncio.sleep(delay)
             delay = min(IMAGE_POLL_MAX_SECONDS, delay * 1.5)
 
+    async def _settle_image_job(
+        self,
+        image: agent_tools.BatchImage,
+        row: dict[str, Any],
+        block: dict[str, Any],
+        view: dict[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any] | None]:
+        """Settle a terminal image job into the pending output image row."""
+        status = str(view.get("status") or "")
         images_out = view.get("images") or []
         first = images_out[0] if images_out and isinstance(images_out[0], dict) else {}
         image_id = first.get("image_id") or view.get("image_id")

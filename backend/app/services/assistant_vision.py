@@ -21,7 +21,7 @@ from ..core.errors import (
 )
 from ..core.utils import json_dumps_canonical
 from ..integrations import assistant_client
-from ..repositories.gallery.mutations import is_gallery_filename_referenced
+from ..repositories.gallery.maintenance import is_gallery_filename_referenced
 from ..repositories.gallery.queries import get_gallery_entry
 from ..core.media import safe_image_path
 from ..repositories.settings import (

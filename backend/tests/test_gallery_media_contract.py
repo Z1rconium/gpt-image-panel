@@ -426,7 +426,7 @@ def test_orphan_gallery_file_gc_removes_unreferenced_files(client):
     assert orphan_thumbnail_path is not None
     assert orphan_thumbnail_path.exists()
 
-    result = gallery_mutations.cleanup_orphan_gallery_files(ttl_seconds=0, batch_size=20)
+    result = gallery_repo_maintenance.cleanup_orphan_gallery_files(ttl_seconds=0, batch_size=20)
 
     assert result["removed_images"] == 1
     assert result["removed_thumbnails"] == 1
@@ -941,13 +941,13 @@ def test_gallery_total_bytes_uses_sql_aggregate_without_disk_backfill(client, mo
     )
 
     stat_calls: list[str] = []
-    real_stat = gallery_mutations._stat_image_bytes
+    real_stat = gallery_repo_maintenance._stat_image_bytes
 
     def tracked_stat(filename: str):
         stat_calls.append(filename)
         return real_stat(filename)
 
-    monkeypatch.setattr(gallery_mutations, "_stat_image_bytes", tracked_stat)
+    monkeypatch.setattr(gallery_repo_maintenance, "_stat_image_bytes", tracked_stat)
 
     with db_repo._connect() as conn:
         row = conn.execute(
@@ -973,7 +973,7 @@ def test_gallery_total_bytes_uses_sql_aggregate_without_disk_backfill(client, mo
         ).fetchone()
         assert row["bytes"] is None
 
-    updated = gallery_mutations.backfill_missing_gallery_bytes()
+    updated = gallery_repo_maintenance.backfill_missing_gallery_bytes()
     assert updated == 1
     assert stat_calls == ["legacy-bytes.png"]
 
@@ -1141,14 +1141,14 @@ def test_gallery_batch_delete_preserves_shared_filename(client):
 def test_delete_all_gallery_commits_rows_when_file_delete_fails(client, monkeypatch, caplog):
     _fake_gallery_entry("delete-all-1", "one", "1024x1024", "delete-all-1.png")
     _fake_gallery_entry("delete-all-2", "two", "1024x1024", "delete-all-2.png")
-    original_delete = gallery_mutations._delete_image_unlocked
+    original_delete = gallery_repo_maintenance._delete_image_unlocked
 
     def flaky_delete(filename: str):
         if filename == "delete-all-1.png":
             raise OSError("locked")
         return original_delete(filename)
 
-    monkeypatch.setattr(gallery_mutations, "_delete_image_unlocked", flaky_delete)
+    monkeypatch.setattr(gallery_repo_maintenance, "_delete_image_unlocked", flaky_delete)
 
     with caplog.at_level(logging.WARNING):
         total, deleted_files = gallery_mutations.delete_all_gallery_images()
