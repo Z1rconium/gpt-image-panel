@@ -85,3 +85,36 @@ Actionable subset of `research/report.md`. Each row is independently verifiable 
 | C1 | `2d8c83a` | credential/secrets view → `preset_credentials.py` (core-only deps) | preset CRUD, per-feature settings domains and env-ref inventory remain in `presets.py` — follow-up extraction |
 
 Verification per item: backend suite `990 passed / 22 skipped`; OpenAPI dump byte-identical to `main`; `ruff check --select F401,F841,F811` on touched files with no new findings; `test_architecture_boundaries.py` frozen-deferred allowlist only ever shrinks. **Nothing pushed yet**; PR base can switch from the Wave A branch to `main` now that #10 merged.
+
+---
+
+## Progress — Wave D/E landing (on `main`)
+
+| # | Commit | Landed | Still open |
+|---|---|---|---|
+| D1 | `bf837c0` | `repositories/db/schema.py` `_ensure_database` DDL → per-domain `_SCHEMA_DDL` constants; init policy separated | — |
+| D2 | `bf837c0` | **D2b** streaming decoder flatten → `_emit_stream_partial_preview` | **D2a deferred** (see note below) |
+| D3 | `bf837c0` | shared keyset primitive `_get_gallery_rows_after_keyset_on_conn`; anchor/cursor pagination are thin adapters | — |
+| D4 | `bf837c0` | `repositories/gallery/maintenance.py` (byte backfill, reconciliation, orphan GC, cache invalidation) extracted from `mutations.py` | — |
+| D5 | — | already shared (`gallery_archive_shared.py` / `gallery_archive_import.py`) | — |
+| D6 | `bf837c0` | `_run_image` split into `_await_image_job` + `_settle_image_job` | — |
+| D7 | `bf837c0` | `delete_persisted_masks` / `list_persisted_mask_job_ids` moved to `image_files.py` | — |
+| D8 | `bf837c0` | `_thumbnail_cpu_slot` off-loop contract docstring | — |
+| D9 | — | already done (R2 credentials route through `core/secrets.resolve_secret_reference_or_raise`) | — |
+| E1 | `35056e8` | shared `LeaseHolder` fencing state extracted (`services/lease_holder.py`); claim loop, lease renewal, and SSE primitives already shared | gallery background lease + SSE stream endpoints intentionally different (see `10-17-wave-e-job-framework-convergence/design.md` §7) |
+
+### D2a deferred — do not retry this direction
+
+`D2a` ("move gallery-entry construction out of `generation.py` to services") is
+**not implementable under the layer matrix**: `integrations` may only import
+`{core, schemas, runtime, integrations}`, so the four `generation.py` call sites
+cannot import a services helper. This matches the report's original note that
+the function is *"Not an import violation (persistence is an injected callback),
+but a boundary/naming smell."* It already keeps the transport module free of the
+persistence layer via the injected `persist_gallery_entry` callback. Only a full
+move of the upstream call chain into `services` (touching `image_unit_execution`
+and all callers) would make it legal, which is out of proportion for a naming
+smell.
+
+Verification: backend suite `993 passed / 22 skipped`; layer matrix 0 violations;
+`ruff --select F401,F841,F811` clean on touched files.
