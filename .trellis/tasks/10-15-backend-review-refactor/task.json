@@ -22,7 +22,10 @@
     "10-15-wave-a-dedupe-hygiene",
     "10-15-wave-b-lease-renewal",
     "10-15-wave-c-core-api-splits",
-    "10-15-wave-c-services-splits"
+    "10-15-wave-c-services-splits",
+    "10-17-wave-d-db-upstream-gallery",
+    "10-17-wave-d-agent-repos-integrations",
+    "10-17-wave-e-job-framework-convergence"
   ],
   "parent": null,
   "relatedFiles": [],
