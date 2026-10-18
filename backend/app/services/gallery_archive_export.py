@@ -176,16 +176,6 @@ def prepare_gallery_zip_chunks(
     return chunks(), result
 
 
-def _build_export_metadata_from_rows(
-    images: list[dict[str, Any]],
-    skipped: list[dict[str, Any]],
-) -> dict[str, Any]:
-    metadata: dict[str, Any] = {**_export_metadata_header(), "images": images}
-    if skipped:
-        metadata["skipped"] = skipped
-    return metadata
-
-
 def _prepare_gallery_zip_stream(
     entries: Iterable[GalleryEntry | dict[str, Any]],
     skipped: Iterable[dict[str, Any]] | None = None,

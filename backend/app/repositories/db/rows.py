@@ -759,12 +759,7 @@ def _gallery_job_from_row(row: sqlite3.Row) -> dict[str, Any]:
 
 
 def _normalize_prompt_snippet_favorite(value: Any) -> int:
-    if isinstance(value, bool):
-        return 1 if value else 0
-    if isinstance(value, int):
-        return 1 if value else 0
-    text = str(value or "").strip().lower()
-    return 1 if text in {"1", "true", "yes", "on", "favorite", "favorited"} else 0
+    return _normalize_gallery_favorite(value)
 
 
 def _prompt_snippet_from_row(row: sqlite3.Row) -> PromptSnippet:
@@ -779,12 +774,7 @@ def _prompt_snippet_from_row(row: sqlite3.Row) -> PromptSnippet:
 
 
 def _like_prompt_snippet_query(value: str) -> str:
-    escaped = value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-    return f"%{escaped}%"
-
-
-def _public_file_url(base_url: str, filename: str) -> str:
-    return f"{base_url.rstrip('/')}/{quote(filename, safe='')}"
+    return _like_contains_param(value)
 
 
 def image_url_for_filename(filename: str) -> str | None:

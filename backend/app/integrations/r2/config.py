@@ -71,29 +71,6 @@ class RemoteKeyLookup:
     etags: dict[str, str] = field(default_factory=dict)
     use_head_fallback: bool = False
 
-    def contains(
-        self,
-        client: Any,
-        *,
-        bucket_name: str,
-        key: str,
-    ) -> bool:
-        if key in self.keys:
-            return True
-        if not self.use_head_fallback:
-            return False
-        try:
-            response = client.head_object(Bucket=bucket_name, Key=key)
-            self.keys.add(key)
-            etag = _etag_from_response(response)
-            if etag:
-                self.etags[key] = etag
-            return True
-        except Exception as e:
-            if _is_not_found_error(e):
-                return False
-            raise
-
 
 @dataclass(frozen=True)
 class LocalSyncCandidate:

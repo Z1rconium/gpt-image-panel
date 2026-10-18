@@ -92,15 +92,6 @@ async def _publish_gallery_job(job_id: str, updates: dict) -> dict | None:
     return job
 
 
-async def _publish_gallery_job_progress(job_id: str, updates: dict) -> bool:
-    return await run_db_operation(
-        update_gallery_job_progress,
-        job_id,
-        updates,
-        metric_name="update_gallery_job_progress",
-    )
-
-
 def _publish_gallery_job_progress_from_worker(job_id: str, updates: dict) -> bool:
     try:
         return run_db_operation_in_current_thread(
