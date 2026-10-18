@@ -95,3 +95,39 @@ Implemented refactor-checklist Wave A: collapsed six _normalize_stored_* helpers
 ### Status
 
 [OK] **Completed**
+
+
+## Session 4: Repository-wide behavior-preserving cleanup
+<!-- trellis-session: v=2 fp=77e501b32aaf4140 -->
+
+**Date**: 2026-10-18
+**Task**: Repository-wide behavior-preserving cleanup
+**Branch**: `main`
+
+### Summary
+
+Completed the approved repository cleanup in three independently reviewed source batches and pushed each to GitHub main without a PR. Final Verify passed; source behavior, entry points and budgets are preserved.
+
+### Main Changes
+
+- Removed four obsolete backend implementations and shared exact row normalization/LIKE helpers while retaining established names.
+- Removed 283 screened stale imports and unused bindings; retained patch aliases and identical OpenAPI/module initialization.
+- Reused frontend gallery/form/pointer helpers, removed a dead build helper, and added pre-refactor characterization/browser assertions; production diff is net -398 lines.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8fa3cbe` | refactor(backend): remove obsolete helpers and share row normalization |
+| `a9b2098` | refactor(backend): trim stale gallery and assistant imports |
+| `79090f1` | refactor(frontend): reuse gallery and prompt conversion helpers |
+
+### Testing
+
+- [OK] Final GitHub Verify 39090408639 at 79090f1: Python 3.12 backend 1191 passed / 22 opt-in skips; frontend 354 passed; build, budgets, Worker, browser and dependency audits pass.
+- [OK] 12 focused Chromium workflows and actual workspace/gallery/optimizer render inspection passed.
+- [OK] Independent per-batch and full-scope reviews accepted; public contracts, data/default meanings and supported conditions are unchanged.
+
+### Status
+
+[OK] **Completed**
