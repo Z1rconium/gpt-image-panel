@@ -1,0 +1,3 @@
+# Local validation output; durable results are recorded in Markdown.
+*.log
+artifacts/

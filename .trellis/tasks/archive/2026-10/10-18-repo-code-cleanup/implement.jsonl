@@ -1,0 +1,10 @@
+{"file": ".trellis/spec/backend/db-execution.md", "reason": "Preserve DB executor, cancellation and shutdown ownership."}
+{"file": ".trellis/spec/backend/coordination.md", "reason": "Preserve operation facades and lease/fencing semantics."}
+{"file": ".trellis/spec/frontend/forms-and-api.md", "reason": "Preserve shared JSON/raw client contracts and store ownership."}
+{"file": ".trellis/spec/frontend/jobs-lifecycle.md", "reason": "Preserve lifecycle guards and local browser test environment."}
+{"file": ".trellis/tasks/archive/2026-10/10-18-repo-code-cleanup/research/summary.md", "reason": "Authoritative accepted candidates and retained/separate findings."}
+{"file": ".trellis/tasks/archive/2026-10/10-18-repo-code-cleanup/research/backend.md", "reason": "Backend callers, dead-code evidence, import exceptions and focused checks."}
+{"file": ".trellis/tasks/archive/2026-10/10-18-repo-code-cleanup/research/frontend.md", "reason": "Frontend exact reuse boundaries, normalization edge cases and browser checks."}
+{"file": ".trellis/tasks/archive/2026-10/10-18-repo-code-cleanup/research/tooling.md", "reason": "Script-local dead helper and intentionally unchanged deployment tooling."}
+{"file": ".trellis/tasks/archive/2026-10/10-18-repo-code-cleanup/research/baseline.md", "reason": "Pre-change results and environment restrictions for acceptance comparisons."}
+{"file": ".trellis/spec/backend/refactoring-compatibility.md", "reason": "Preserve proven facade exports and module aliases during unused-code cleanup."}
