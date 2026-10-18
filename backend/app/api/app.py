@@ -24,7 +24,6 @@ FRONTEND_BUILD_DIR = config.PROJECT_ROOT / "frontend" / "build"
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_defaults()
-    worker = state.worker_id
     secrets.configure_registry(config.SECRET_REGISTRY_JSON)
     Path(config.IMAGES_DIR).mkdir(parents=True, exist_ok=True)
     Path(config.THUMBNAILS_DIR).mkdir(parents=True, exist_ok=True)

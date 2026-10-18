@@ -1,17 +1,10 @@
 import asyncio
-import contextvars
-import json
 import logging
 import os
-import re
-from contextlib import asynccontextmanager, suppress
-from dataclasses import dataclass
-from pathlib import Path
+from contextlib import suppress
 from typing import Any, Literal
 
-
 from ..repositories.db.execution import run_db_operation
-from . import presets
 from ..core.errors import (
     DomainError,
     NotFoundError,
@@ -19,57 +12,28 @@ from ..core.errors import (
 )
 from ..runtime.state import state, utc_lease_expires_at
 from ..core import settings as config
-from ..core import validators as ssrf
 from ..core.utils import utc_now
-from ..integrations import assistant_client
+# Preserve the established assistant contract-test patch surface.
+from ..integrations import assistant_client as assistant_client
 from ..repositories.coordination import (
-    acquire_background_slot,
     claim_next_gallery_job,
     get_gallery_job,
     has_claimable_gallery_job,
-    release_background_slot,
     renew_gallery_job_lease,
     reserve_gallery_job_capacity,
     update_gallery_job,
     update_gallery_job_progress,
 )
-from ..repositories.gallery.maintenance import is_gallery_filename_referenced
 from ..repositories.gallery.queries import (
     get_gallery_entries_by_ids,
-    get_gallery_entry,
     get_gallery_id_batch,
     get_gallery_selection_snapshot,
 )
-from ..core.media import safe_image_path
-from ..repositories.image_jobs import get_generate_job
-from ..repositories.settings import (
-    get_gallery_ai_metadata,
-    upsert_gallery_ai_metadata,
-)
-from ..schemas.common import ApiPath
 from ..schemas.assistant import (
-    AssistantEditPlanRequest,
-    AssistantEditPlanResponse,
     AssistantGalleryBatchJobStatus,
     AssistantGalleryBatchRequest,
     AssistantGalleryImageResponse,
-    AssistantGalleryMetadataResponse,
-    AssistantHealthResponse,
-    AssistantImagePromptResponse,
-    AssistantJobDiagnoseRequest,
-    AssistantJobDiagnoseResponse,
-    AssistantPromptCheckRequest,
-    AssistantPromptCheckResponse,
-    AssistantPromptIssue,
-    AssistantPromptRewriteRequest,
-    AssistantPromptRewriteResponse,
-    AssistantPromptVariant,
-    AssistantPromptVariantsRequest,
-    AssistantPromptVariantsResponse,
-    AssistantRecommendParamsRequest,
-    AssistantRecommendParamsResponse,
 )
-from ..schemas.settings import AIAssistantSettingsRequest
 
 logger = logging.getLogger(__name__)
 from .claim_loop import fail_open_precheck, run_claim_loop

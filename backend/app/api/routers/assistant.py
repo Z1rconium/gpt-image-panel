@@ -9,8 +9,6 @@ from ..uploads import read_image_upload, resolve_upload_content_type
 from ...core import security as auth
 from ...core.image_models import MAX_PROMPT_CHARS
 from ...schemas.settings import AIAssistantSettingsRequest
-from ...schemas.assistant import AssistantImagePromptOptimizeResponse, AssistantImagePromptResponse
-
 from ...schemas.assistant import (
     AssistantEditPlanResponse,
     AssistantGalleryBatchJobStatus,

@@ -1,13 +1,6 @@
-import contextvars
 import logging
-import os
 import re
-from contextlib import asynccontextmanager, suppress
-from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
-from typing import Any, Literal
-
+from typing import Any
 
 from ..repositories.db.execution import run_db_operation
 from ..core.image_models import MAX_PROMPT_CHARS, image_qualities
@@ -17,44 +10,15 @@ from ..core.errors import (
     NotFoundError,
     UpstreamError,
 )
-from ..core import settings as config
 from ..core.redaction import redact_url
-from ..core.utils import json_dumps_canonical, utc_now
+from ..core.utils import json_dumps_canonical
 from ..integrations import assistant_client
-from ..repositories.coordination import (
-    acquire_background_slot,
-    claim_next_gallery_job,
-    delete_gallery_job,
-    get_gallery_job,
-    release_background_slot,
-    renew_gallery_job_lease,
-    reserve_gallery_job_capacity,
-    update_gallery_job,
-    update_gallery_job_progress,
-)
-from ..repositories.gallery.maintenance import is_gallery_filename_referenced
-from ..repositories.gallery.queries import (
-    get_gallery_entries_by_ids,
-    get_gallery_entry,
-    get_gallery_id_batch,
-    get_gallery_selection_snapshot,
-)
-from ..core.media import safe_image_path
 from ..repositories.image_jobs import get_generate_job
-from ..repositories.settings import (
-    get_gallery_ai_metadata,
-    upsert_gallery_ai_metadata,
-)
 from ..schemas.common import ApiPath
 from ..schemas.assistant import (
     AssistantEditPlanRequest,
     AssistantEditPlanResponse,
-    AssistantGalleryBatchJobStatus,
-    AssistantGalleryBatchRequest,
-    AssistantGalleryImageResponse,
-    AssistantGalleryMetadataResponse,
     AssistantHealthResponse,
-    AssistantImagePromptResponse,
     AssistantJobDiagnoseRequest,
     AssistantJobDiagnoseResponse,
     AssistantPromptCheckRequest,

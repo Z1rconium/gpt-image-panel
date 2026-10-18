@@ -177,7 +177,7 @@ async def prompt_optimizer_health(
             duration_ms=timeout_seconds * 1000,
             status_code=504,
         )
-    except Exception as e:
+    except Exception:
         logger.exception("Prompt optimizer health probe unexpected error")
         return PromptOptimizerHealthResponse(
             status="error",
