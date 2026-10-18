@@ -55,6 +55,37 @@ Examples: `frontend/src/lib/features/agent/AgentComposer.svelte`,
 `AgentMessage.svelte`, and the sections in
 `frontend/src/lib/components/settings/` (`bind:value`, `bind:checked`).
 
+## Reusing image parameters
+
+Use the converters in `lib/utils/promptForm.ts` when a gallery image or job
+populates the workspace form:
+
+```ts
+const reused = galleryEntryToPromptForm(image, fallbackModel, currentApiPath);
+const edited = galleryEntryToEditForm(image, fallbackModel, currentApiPath);
+```
+
+Full gallery reuse accepts a valid stored generation API path. Editing keeps
+`currentApiPath`, derives missing size from image dimensions, and turns every
+`chroma_*` background into `'auto'`. These three edit overrides stay explicit
+when shared fields reuse the gallery converter. Prompt-only reuse changes only
+the prompt; job reuse retains its own stream, partial-image and paste-back values.
+
+Preserve the existing normalization edge cases: compression `0` becomes `'0'`,
+missing compression becomes `''`, and quantity conversion clamps without adding
+integer rounding. Freeze converter behavior in `tests/unit/promptForm.test.ts`
+before refactoring; gallery edit, parameter reuse and retry browser cases cover
+the consumer workflows.
+
+### Gallery filters share one wire mapping
+
+`gallerySearchBody` reuses `galleryFiltersToSelectionPayload` from
+`lib/features/gallery/query.ts`. Keep the prompt trim, `date_from`/`date_to`,
+`collection_id`, and true-or-null favorite/mask flags identical for search and
+batch selection. Pagination, cursor/direction and include flags remain search
+controls. URL-state serialization uses its own URL keys and stays separate.
+`tests/unit/galleryQuery.test.ts` checks complete empty and populated payloads.
+
 ## Toasts and i18n
 
 - Toast UI is in `frontend/src/lib/stores/ui.ts`: `uiStore.showToast(message, variant?,

@@ -352,14 +352,7 @@
       }
     }
 
-    clearPressTimer();
-    activePointerId = null;
-    pointerDownAt = null;
-    pointerDownTriggerPosition = null;
-    dragPointerOffset = null;
-    dragPending = false;
-    dragging = false;
-    lastPointerPosition = null;
+    resetPointerState();
   }
 
   function handlePointerCancel(event: PointerEvent) {

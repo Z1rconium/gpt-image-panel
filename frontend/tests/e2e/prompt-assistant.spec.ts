@@ -141,6 +141,8 @@ test('floating prompt optimizer compares, rejects, cleans up, and accepts withou
   await expect(page.getByTestId('prompt-optimizer-original')).toContainText('sunlit alley with a bicycle');
   await expect(page.getByTestId('prompt-optimizer-optimized')).toContainText('Optimized ');
 
+  await page.screenshot({ path: test.info().outputPath('optimizer-mobile-review.png') });
+
   await dialog.getByRole('button', { name: 'Reject' }).click();
   await expect(dialog).toBeHidden();
   await expect(prompt).toHaveValue('sunlit alley with a bicycle');
@@ -222,8 +224,14 @@ test('floating prompt optimizer opens on click and can be long-press dragged', a
   expect(heldStyle.bottom).toBe('auto');
   expect(heldStyle.marginTop).toBe('0px');
 
+  await trigger.dispatchEvent('pointerup', { pointerId: 999 });
+  await expect(trigger).toHaveClass(/cursor-grabbing/);
+
   await page.mouse.move(dragTargetX, dragTargetY, { steps: 8 });
   await page.mouse.up();
+
+  await expect(trigger).not.toHaveClass(/cursor-grabbing/);
+  await expect(page.getByRole('dialog', { name: 'Quick optimize' })).toBeHidden();
 
   const movedBox = await triggerRect();
   const movedStyle = await trigger.evaluate((element) => ({

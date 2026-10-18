@@ -63,6 +63,47 @@ describe('gallerySearchBody', () => {
   });
 });
 
+describe('shared gallery filter wire contract', () => {
+  it('serializes the exact empty search and selection shapes', () => {
+    const filters = { ...defaultGalleryFilters, prompt: '   ' };
+    const expected = {
+      prompt: '', model: '', preset: '', size: '', date_from: '', date_to: '',
+      favorite: null, mask_only: null, collection_id: null
+    };
+    expect(galleryFiltersToSelectionPayload(filters)).toEqual(expected);
+    expect(gallerySearchBody(new URLSearchParams(), filters)).toEqual({
+      page: 1, page_size: 9, ...expected, include_total_bytes: false,
+      include_counts: true, include_filter_options: true, cursor: null, direction: 'next'
+    });
+  });
+
+  it('preserves untrimmed non-prompt filters and explicit pagination controls', () => {
+    const filters = {
+      prompt: '  lake  ', model: ' model ', preset: ' preset ', size: '1024x1536',
+      dateFrom: '2026-01-01', dateTo: '2026-12-31', favorite: true, maskOnly: true, collectionId: 'album-1'
+    };
+    const expected = {
+      prompt: 'lake', model: ' model ', preset: ' preset ', size: '1024x1536',
+      date_from: '2026-01-01', date_to: '2026-12-31', favorite: true, mask_only: true, collection_id: 'album-1'
+    };
+    expect(galleryFiltersToSelectionPayload(filters)).toEqual(expected);
+    const body = gallerySearchBody(buildGalleryParams(3, filters, true, 'cursor-1', 'prev', false, false), filters);
+    expect(body).toEqual({
+      page: 3, page_size: 9, ...expected, include_total_bytes: true,
+      include_counts: false, include_filter_options: false, cursor: 'cursor-1', direction: 'prev'
+    });
+    const { page, page_size, include_total_bytes, include_counts, include_filter_options, cursor, direction, ...filterBody } = body;
+    expect(filterBody).toEqual(galleryFiltersToSelectionPayload(filters));
+  });
+
+  it('keeps the existing numeric and string parameter coercion', () => {
+    const body = gallerySearchBody(new URLSearchParams({
+      page: '0', page_size: '12', cursor: '', direction: '', include_total_bytes: '1', include_counts: '0'
+    }), defaultGalleryFilters);
+    expect(body).toMatchObject({ page: 0, page_size: 12, cursor: '', direction: 'next', include_total_bytes: false, include_counts: true });
+  });
+});
+
 describe('galleryFiltersToSelectionPayload', () => {
   it('mirrors the search filter shape', () => {
     const payload = galleryFiltersToSelectionPayload({ ...defaultGalleryFilters, model: 'm', favorite: true });

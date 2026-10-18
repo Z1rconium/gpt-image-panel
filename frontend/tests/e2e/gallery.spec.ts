@@ -89,6 +89,10 @@ test('gallery edit choice loads compatible parameters without changing the activ
   await expect(promptForm.getByLabel('Quantity')).toHaveValue('2');
   await expect(promptForm.getByLabel(/^Response format/)).toHaveValue('url');
   await expect(page.getByRole('button', { name: 'Preview Gallery: img-1.png' })).toBeVisible();
+  await expect(editDialog).toHaveCount(0);
+  await promptForm.getByLabel('Quantity').evaluate((element) => element.scrollIntoView({ block: 'center', behavior: 'instant' }));
+  await expect(promptForm.getByLabel('Quantity')).toBeInViewport();
+  await page.screenshot({ path: test.info().outputPath('workspace-gallery-edit.png'), animations: 'disabled' });
 });
 
 test('clearing the gallery prompt focuses the prompt field and cancel preserves form state', async ({ page }) => {
@@ -685,6 +689,11 @@ test('gallery handles 500 mocked images with lightweight cursor paging, filterin
   await filterRequest;
   await expect(page.getByRole('img', { name: 'Paged gallery image 500', exact: true })).toBeVisible();
   await expect(page.getByRole('img', { name: 'Paged gallery image 10', exact: true })).toBeHidden();
+  const filteredImage = page.getByRole('img', { name: 'Paged gallery image 500', exact: true });
+  await page.locator('.gallery-card').first().evaluate((element) => element.scrollIntoView({ block: 'end', behavior: 'instant' }));
+  await expect(filteredImage).toBeInViewport();
+  await expect.poll(() => filteredImage.evaluate((element) => (element as HTMLImageElement).complete && (element as HTMLImageElement).naturalWidth > 0)).toBe(true);
+  await page.screenshot({ path: test.info().outputPath('gallery-filtered-page.png'), animations: 'disabled' });
 });
 
 test('gallery selects current filtered results through a batch token', async ({ page }) => {

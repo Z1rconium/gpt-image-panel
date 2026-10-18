@@ -18,6 +18,7 @@ This directory contains guidelines for frontend development. Fill in each file w
 | [Component Guidelines](./component-guidelines.md) | Component patterns, props, composition | To fill |
 | [Hook Guidelines](./hook-guidelines.md) | Custom hooks, data fetching patterns | To fill |
 | [State Management](./state-management.md) | Local state, global state, server state | To fill |
+| [Forms and API](./forms-and-api.md) | API clients, form parameter reuse and gallery filter payloads | Documented |
 | [Jobs Lifecycle](./jobs-lifecycle.md) | Global feed ownership, stale work guards and reusable cleanup | Documented |
 | [Quality Guidelines](./quality-guidelines.md) | Code standards, forbidden patterns | To fill |
 | [Type Safety](./type-safety.md) | Type patterns, validation | To fill |

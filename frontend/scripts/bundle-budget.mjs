@@ -70,12 +70,6 @@ function statSize(relativeFile) {
   }
 }
 
-function isEntryNamed(expectedSrcSuffix, expectedName) {
-  return (key, value) =>
-    Boolean(value.isEntry) &&
-    (value.name === expectedName || String(value.src || '').endsWith(expectedSrcSuffix));
-}
-
 // Homepage = the bootstrap app entry, the start entry, the root layout (nodes/0)
 // and the root page (nodes/2). Everything they import statically is required.
 const homepageRoots = Object.entries(manifest).filter(([key, value]) => {

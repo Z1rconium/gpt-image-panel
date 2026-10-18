@@ -30,10 +30,6 @@ export function normalizeResponseFormat(value: string | null | undefined, fallba
   return RESPONSE_FORMAT_OPTIONS.includes(value as ResponseFormatDefault) ? (value as ResponseFormatDefault) : fallback;
 }
 
-function normalizeJobResponseFormat(value: string | null | undefined): PromptFormState['responseFormat'] {
-  return normalizeResponseFormat(value);
-}
-
 function clampQuantity(value: number | string | null | undefined): number {
   return Math.min(Math.max(Number(value) || DEFAULT_QUANTITY, 1), 10);
 }
@@ -58,7 +54,7 @@ export function jobToPromptForm(job: GenerateJobStatus, fallbackModel = DEFAULT_
     background: normalizeBackground(job.background),
     outputCompression: job.output_compression === null || job.output_compression === undefined ? '' : String(job.output_compression),
     quantity: clampQuantity(job.n),
-    responseFormat: normalizeJobResponseFormat(job.response_format),
+    responseFormat: normalizeResponseFormat(job.response_format),
     stream: Boolean(job.streaming),
     partialImages: job.partial_images ?? initialPromptFormState.partialImages,
     pasteBack: job.paste_back ?? initialPromptFormState.pasteBack
@@ -80,7 +76,7 @@ export function galleryEntryToPromptForm(
     background: normalizeBackground(image.background),
     outputCompression: image.output_compression === null || image.output_compression === undefined ? '' : String(image.output_compression),
     quantity: clampQuantity(image.n),
-    responseFormat: normalizeJobResponseFormat(image.response_format),
+    responseFormat: normalizeResponseFormat(image.response_format),
     stream: initialPromptFormState.stream,
     partialImages: initialPromptFormState.partialImages,
     pasteBack: initialPromptFormState.pasteBack
@@ -94,19 +90,10 @@ export function galleryEntryToEditForm(
 ): PromptFormState {
   const size = image.size || displayImageSize(image);
   return {
-    prompt: image.prompt || '',
+    ...galleryEntryToPromptForm(image, fallbackModel, currentApiPath),
     apiPath: currentApiPath,
     size: size === '-' ? initialPromptFormState.size : size,
-    model: image.model || fallbackModel || initialPromptFormState.model,
-    quality: normalizeJobQuality(image.quality),
-    outputFormat: normalizeJobOutputFormat(image.output_format),
-    background: image.background?.startsWith('chroma_') ? 'auto' : normalizeBackground(image.background),
-    outputCompression: image.output_compression === null || image.output_compression === undefined ? '' : String(image.output_compression),
-    quantity: clampQuantity(image.n),
-    responseFormat: normalizeJobResponseFormat(image.response_format),
-    stream: initialPromptFormState.stream,
-    partialImages: initialPromptFormState.partialImages,
-    pasteBack: initialPromptFormState.pasteBack
+    background: image.background?.startsWith('chroma_') ? 'auto' : normalizeBackground(image.background)
   };
 }
 
