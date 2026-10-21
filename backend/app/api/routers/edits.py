@@ -23,6 +23,7 @@ from ...services.job_queue import (
     queue_edit_job,
 )
 from ..uploads import is_image_upload, resolve_upload_content_type
+from ...core import overall_config
 from ...core import settings as config
 from ...core.media import get_image_dimensions
 from ...schemas.generation import EditRequest, GenerateJobResponse
@@ -33,6 +34,21 @@ router = APIRouter()
 
 
 MASK_TOO_LARGE_DETAIL = "Mask is too large. Max size is 4 MB."
+
+
+def parse_optional_form_bool(name: str, value: str | None) -> bool | None:
+    """Parse an optional boolean form field without relying on framework coercion.
+
+    FastAPI 0.157 turns a missing ``bool | None = Form(None)`` into ``False``,
+    which would silently disable a server-side default. Reading the raw string
+    keeps "absent" distinct from an explicit false on every supported version.
+    """
+    if value is None:
+        return None
+    try:
+        return overall_config.parse_bool(value)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"{name} must be a boolean") from exc
 
 
 def edit_request_from_form(
@@ -46,7 +62,7 @@ def edit_request_from_form(
     background: str = Form("auto"),
     response_format: str | None = Form(None),
     webhook_url: str | None = Form(None),
-    paste_back: bool | None = Form(None),
+    paste_back: str | None = Form(None),
     api_preset_id: str | None = Form(None),
 ) -> EditRequest:
     return build_edit_request_from_form(
@@ -60,7 +76,7 @@ def edit_request_from_form(
         background=background,
         response_format=response_format,
         webhook_url=webhook_url,
-        paste_back=paste_back,
+        paste_back=parse_optional_form_bool("paste_back", paste_back),
         api_preset_id=api_preset_id,
     )
 
