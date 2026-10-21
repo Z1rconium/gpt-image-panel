@@ -3,7 +3,7 @@
 # always build from the same upstream revision. Override the whole reference to
 # use a mirror, e.g. --build-arg PYTHON_BASE_IMAGE=docker.m.daocloud.io/library/python:3.12-slim
 ARG PYTHON_BASE_IMAGE=python:3.12-slim@sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1ac9b536e184ea
-ARG NODE_BASE_IMAGE=node:24-alpine@sha256:50c8e8ca1d27439048670df5883f32d57cf81cff6233222c893fd0d9884cbd81
+ARG NODE_BASE_IMAGE=node:24-alpine@sha256:6a1c190e17215d844926b0677f4bf87273ff7d5e54db06d3b5b5863ab0b09a3d
 
 FROM --platform=$BUILDPLATFORM ${NODE_BASE_IMAGE} AS frontend-builder
 WORKDIR /frontend
