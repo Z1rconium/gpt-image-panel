@@ -51,7 +51,22 @@ jobs:
       - run: npm --prefix frontend run build
       - run: npm --prefix frontend run check:bundle
       - run: npm --prefix frontend run check:worker-build
-      - run: npm --prefix frontend audit
+      # The npm audit endpoint is occasionally unreachable from runners
+      # (network timeout after hanging on the bulk-advisories request). Cap the
+      # per-attempt timeout and retry so a transient registry error does not
+      # fail the whole job. The command still exits non-zero when real audit
+      # findings are reported, so retries cannot mask vulnerabilities.
+      - name: Audit frontend dependencies
+        run: |
+          for attempt in 1 2 3; do
+            if npm --prefix frontend audit --fetch-timeout=90000; then
+              exit 0
+            fi
+            echo "::warning::npm audit failed on attempt $attempt; retrying in 30s"
+            sleep 30
+          done
+          echo "::error::npm audit failed after 3 attempts"
+          exit 1
 
   e2e:
     name: Agent and settings browser tests
