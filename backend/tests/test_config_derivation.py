@@ -1,5 +1,9 @@
 """Settings derived from other settings, and the one path that changes them."""
 
+import os
+import subprocess
+import sys
+
 import pytest
 
 from backend.app.core import overall_config, settings
@@ -94,17 +98,21 @@ def test_empty_update_changes_nothing(restore_config):
     assert {name: getattr(settings, name) for name in settings.DERIVED_CONFIG_NAMES} == before
 
 
-def test_registry_defaults_match_the_runtime_defaults():
-    """A registry default that drifts from settings would be shown as a lie."""
-    for name in (
+def test_retired_settings_are_not_in_the_runtime_registry(restore_config):
+    retired = {
         "IMPORT_ARCHIVE_MAX_MB",
         "MAX_PENDING_EDIT_SOURCE_MB",
         "AI_ASSISTANT_MAX_CONCURRENCY",
         "IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS",
-        "ACCESS_GLOBAL_MAX_ATTEMPTS_PER_MINUTE",
-    ):
-        spec = overall_config.OVERALL_CONFIG_BY_NAME[name]
-        assert spec.default == str(getattr(settings, name)), name
+        "RUNTIME_METRICS_REFRESH_SECONDS",
+    }
+    assert retired.isdisjoint(overall_config.OVERALL_CONFIG_BY_NAME)
+    before = {name: getattr(settings, name) for name in retired}
+    overall_config.apply_rows_to_config({
+        name: {"override_value": "9999"} for name in retired
+    }, overrides_only=True, include_restart_required=True)
+    assert {name: getattr(settings, name) for name in retired} == before
+
 
 
 def test_lease_renew_cadence_is_clamped_below_half_the_lease(restore_config):
@@ -116,3 +124,23 @@ def test_lease_renew_cadence_is_clamped_below_half_the_lease(restore_config):
     )
 
     assert settings.IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS == 30.0
+
+
+def test_retired_env_values_cannot_override_defaults_or_derived_limits():
+    env = os.environ.copy()
+    env.update({
+        "RUNTIME_METRICS_REFRESH_SECONDS": "999",
+        "PROMPT_OPTIMIZER_MAX_OUTPUT_CHARS": "10",
+        "MAX_FILE_SIZE_MB": "30",
+        "IMPORT_ARCHIVE_MAX_MB": "1",
+    })
+    subprocess.run(
+        [sys.executable, "-c", (
+            "from backend.app.core import settings as s; "
+            "assert s.RUNTIME_METRICS_REFRESH_SECONDS == 10; "
+            "assert s.PROMPT_OPTIMIZER_MAX_OUTPUT_CHARS == 32000; "
+            "assert s.IMPORT_ARCHIVE_MAX_MB == 600"
+        )],
+        env=env,
+        check=True,
+    )

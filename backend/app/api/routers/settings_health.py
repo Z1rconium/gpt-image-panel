@@ -2,7 +2,6 @@
 
 from fastapi import APIRouter, Body, HTTPException
 
-from ...core import settings as config
 from ...core import validators as ssrf
 from ...core.api_paths import (
     ALLOWED_API_PATHS,
@@ -66,7 +65,6 @@ async def validate_health_api_url(
     try:
         await ssrf.validate_upstream_url_async(
             build_upstream_url(normalized_api_url, api_path),
-            config.UPSTREAM_HOST_ALLOWLIST,
         )
     except ValueError as e:
         add_health_check(checks, "ssrf", "error", str(e))
@@ -76,7 +74,7 @@ async def validate_health_api_url(
         checks,
         "ssrf",
         "ok",
-        "API URL passed scheme, host allowlist, DNS, and private-IP checks",
+        "API URL passed scheme, DNS, and private-IP checks",
     )
     return True
 

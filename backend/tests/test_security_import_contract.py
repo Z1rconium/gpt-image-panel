@@ -530,8 +530,8 @@ def test_prepare_upstream_request_centralizes_security_headers_and_peer_check(tm
     async def fake_warn(upstream_url, socks5_proxy):
         calls.append(("warn", upstream_url, socks5_proxy))
 
-    async def fake_validate(upstream_url, allowlist):
-        calls.append(("validate_url", upstream_url, allowlist))
+    async def fake_validate(upstream_url):
+        calls.append(("validate_url", upstream_url))
 
     def fake_peer(resp, label):
         calls.append(("peer", label))

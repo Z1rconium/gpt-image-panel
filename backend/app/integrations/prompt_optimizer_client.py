@@ -159,7 +159,7 @@ def validate_optimizer_endpoint(api_url: str) -> str:
     if not api_url:
         raise ValueError("Prompt optimizer endpoint URL is not configured")
     normalized_api_url = ssrf.normalize_upstream_base_url(api_url)
-    ssrf.validate_upstream_url(normalized_api_url, config.PROMPT_OPTIMIZER_HOST_ALLOWLIST)
+    ssrf.validate_upstream_url(normalized_api_url)
     return normalized_api_url
 
 

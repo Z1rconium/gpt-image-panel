@@ -436,7 +436,7 @@ def test_active_secret_values_includes_access_and_cdn_runtime_secrets(monkeypatc
         secrets.invalidate_active_secret_values_cache()
 
 
-def test_thumbnail_cpu_concurrency_override_is_applied(monkeypatch):
+def test_thumbnail_cpu_concurrency_override_is_ignored(monkeypatch):
     original = config.THUMBNAIL_CPU_CONCURRENCY
     monkeypatch.setattr(config, "THUMBNAIL_CPU_CONCURRENCY", 1)
     try:
@@ -452,7 +452,7 @@ def test_thumbnail_cpu_concurrency_override_is_applied(monkeypatch):
             },
             overrides_only=True,
         )
-        assert config.THUMBNAIL_CPU_CONCURRENCY == 3
+        assert config.THUMBNAIL_CPU_CONCURRENCY == 1
     finally:
         config.THUMBNAIL_CPU_CONCURRENCY = original
 

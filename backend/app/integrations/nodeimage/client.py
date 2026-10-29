@@ -19,7 +19,6 @@ from ..session_pool import TIMEOUT_NODEIMAGE, get_pool
 
 NODEIMAGE_API_URL = "https://api.nodeimage.com"
 NODEIMAGE_UPLOAD_URL = f"{NODEIMAGE_API_URL}/api/upload"
-NODEIMAGE_HOST_ALLOWLIST = "api.nodeimage.com"
 MAX_NODEIMAGE_RESPONSE_BYTES = 2 * 1024 * 1024
 NODEIMAGE_MAX_ATTEMPTS = 2
 NODEIMAGE_RETRY_BACKOFF_SECONDS = 0.2
@@ -67,7 +66,7 @@ def _resolve_secret(value: Any) -> str:
         value,
         purpose="nodeimage_api_key",
         target_url=NODEIMAGE_API_URL,
-        host_allowlist=NODEIMAGE_HOST_ALLOWLIST,
+
         field_name="NodeImage API key",
         error_type=NodeImageConfigurationError,
     )

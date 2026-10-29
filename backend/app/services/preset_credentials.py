@@ -8,7 +8,6 @@ sit on top of it.
 """
 
 from ..core import secrets
-from ..core import settings as config
 from ..core.errors import UnprocessableRequestError
 from ..core.secrets import (
     get_env_var_ref_name,
@@ -43,14 +42,13 @@ def resolve_api_key(
     *,
     purpose: secrets.SecretPurpose,
     target_url: str,
-    host_allowlist: str,
 ) -> str:
     """Resolve an API key reference; ${ENV} is only read through a declared purpose/origin binding."""
     env_var = get_env_var_ref_name(api_key)
     if env_var:
         try:
             return secrets.resolve_env_ref(
-                env_var, purpose=purpose, target_url=target_url, host_allowlist=host_allowlist, field_name="API Key"
+                env_var, purpose=purpose, target_url=target_url, field_name="API Key"
             )
         except secrets.SecretRegistryError as exc:
             raise UnprocessableRequestError(str(exc)) from exc
@@ -62,7 +60,6 @@ def _resolve_secret_or_unprocessable(
     *,
     purpose: secrets.SecretPurpose,
     target_url: str,
-    host_allowlist: str,
 ) -> str:
     """Resolve a registry secret, normalizing registry errors into a 422 domain error."""
     try:
@@ -70,7 +67,6 @@ def _resolve_secret_or_unprocessable(
             secret_id,
             purpose=purpose,
             target_url=target_url,
-            host_allowlist=host_allowlist,
         )
     except secrets.SecretRegistryError as exc:
         raise UnprocessableRequestError(str(exc)) from exc
@@ -133,7 +129,6 @@ def get_effective_preset_api_key(preset: dict) -> str:
             secret_id,
             purpose="upstream_api",
             target_url=str(preset.get("api_url") or ""),
-            host_allowlist=config.UPSTREAM_HOST_ALLOWLIST,
         )
         if resolved_key:
             return resolved_key
@@ -144,7 +139,6 @@ def get_effective_preset_api_key(preset: dict) -> str:
         secret_id,
         purpose="upstream_api",
         target_url=str(preset.get("api_url") or ""),
-        host_allowlist=config.UPSTREAM_HOST_ALLOWLIST,
     )
 
 

@@ -7,7 +7,6 @@ from typing import Literal
 from urllib.parse import urlsplit
 
 from . import settings as config
-from .validators import normalize_host_entry, split_allowlist
 
 
 SecretPurpose = Literal[
@@ -318,7 +317,6 @@ def resolve_env_ref(
     *,
     purpose: SecretPurpose,
     target_url: str,
-    host_allowlist: str,
     field_name: str = "credential",
 ) -> str:
     """Resolve ${ENV_NAME} only through a declared binding for this purpose and origin.
@@ -341,7 +339,7 @@ def resolve_env_ref(
     for entry in candidates:
         try:
             _check_entry_binding(
-                entry, purpose=purpose, target_url=target_url, host_allowlist=host_allowlist
+                entry, purpose=purpose, target_url=target_url
             )
         except SecretRegistryError as exc:
             error = exc
@@ -385,10 +383,9 @@ def validate_secret_binding(
     *,
     purpose: SecretPurpose,
     target_url: str,
-    host_allowlist: str,
 ) -> SecretEntry:
     return _check_entry_binding(
-        secret_entry(secret_id), purpose=purpose, target_url=target_url, host_allowlist=host_allowlist
+        secret_entry(secret_id), purpose=purpose, target_url=target_url
     )
 
 
@@ -397,19 +394,12 @@ def _check_entry_binding(
     *,
     purpose: SecretPurpose,
     target_url: str,
-    host_allowlist: str,
 ) -> SecretEntry:
     if entry.purpose != purpose:
         raise SecretRegistryError("secret_id is not permitted for this purpose")
     if entry.origin != canonical_origin(target_url):
         raise SecretRegistryError("secret_id is not bound to the target origin")
 
-    allowed_hosts = {normalize_host_entry(item) for item in split_allowlist(host_allowlist)}
-    if not allowed_hosts:
-        raise SecretRegistryError("credentials require a non-empty startup host allowlist")
-    target_host = normalize_host_entry(urlsplit(target_url).hostname or "")
-    if target_host not in allowed_hosts:
-        raise SecretRegistryError("credential target is not in the startup host allowlist")
     return entry
 
 
@@ -418,13 +408,11 @@ def resolve_secret(
     *,
     purpose: SecretPurpose,
     target_url: str,
-    host_allowlist: str,
 ) -> str:
     entry = validate_secret_binding(
         secret_id,
         purpose=purpose,
         target_url=target_url,
-        host_allowlist=host_allowlist,
     )
     value = entry.resolve()
     if not value:
@@ -437,7 +425,6 @@ def resolve_secret_reference(
     *,
     purpose: SecretPurpose,
     target_url: str,
-    host_allowlist: str,
     field_name: str,
 ) -> str:
     """Resolve a settings secret reference without exposing its source details.
@@ -445,7 +432,7 @@ def resolve_secret_reference(
     Settings may contain an empty value, an explicit environment reference, a
     predeclared registry ID, or (when plaintext storage is enabled at the
     settings boundary) a literal value. Registry IDs are always validated for
-    purpose, origin, and the startup host allowlist before resolution.
+    purpose and origin before resolution.
     """
 
     raw = str(value or "").strip()
@@ -458,7 +445,6 @@ def resolve_secret_reference(
             env_var,
             purpose=purpose,
             target_url=target_url,
-            host_allowlist=host_allowlist,
             field_name=field_name,
         )
 
@@ -473,7 +459,6 @@ def resolve_secret_reference(
                 raw,
                 purpose=purpose,
                 target_url=target_url,
-                host_allowlist=host_allowlist,
             )
         except SecretRegistryError as exc:
             raise SecretRegistryError(f"{field_name}: {exc}") from exc
@@ -486,7 +471,6 @@ def resolve_secret_reference_or_raise(
     *,
     purpose: SecretPurpose,
     target_url: str,
-    host_allowlist: str,
     field_name: str,
     error_type: type[Exception],
 ) -> str:
@@ -500,7 +484,6 @@ def resolve_secret_reference_or_raise(
             value,
             purpose=purpose,
             target_url=target_url,
-            host_allowlist=host_allowlist,
             field_name=field_name,
         )
     except SecretRegistryError as exc:

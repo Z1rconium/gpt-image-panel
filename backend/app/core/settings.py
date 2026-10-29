@@ -1,14 +1,8 @@
 """Runtime configuration.
 
-Values come from three places, in this order:
-
-1. Environment variables, read once at import into module constants.
-2. Values derived from other settings (``DERIVED_CONFIG_NAMES``), which follow
-   their base value unless the name is configured explicitly.
-3. Runtime overrides stored in SQLite and applied by
-   ``core.overall_config.apply_rows_to_config``, which is the only caller
-   allowed to change a setting after import (see ``apply_overrides``).
-
+Deployment and business settings may be set through the environment or the
+runtime configuration registry. Internal tuning uses fixed defaults, while
+``DERIVED_CONFIG_NAMES`` follows the retained base settings.
 Readers keep using module attributes (``config.MAX_FILE_SIZE_MB``); what
 changed is that writing them now happens in exactly one place that also
 recomputes the derived values.
@@ -53,22 +47,12 @@ def env_non_negative_int(name: str, default: int = 0) -> int:
     return parsed if parsed >= 0 else default
 
 
-def _env_or_derived(
-    name: str,
-    derive: Callable[[], object],
-    cast: Callable[[str], object],
-) -> object:
-    """Read ``name`` from the environment, else derive it from other settings."""
-    raw = os.getenv(name)
-    return cast(raw) if raw is not None else derive()
-
-
 # Formulas for settings derived from other settings. Each lambda is looked up
 # by name in module globals when called, so it is safe to reference a setting
 # defined later in this file as long as it exists by the time the formula
-# actually runs (both at import, via ``_env_or_derived``, and later, via
-# ``recompute_derived``). This is the single source of truth for each
-# formula — do not re-derive the value inline elsewhere.
+# actually runs (both at import and later via ``recompute_derived``). These
+# formulas are the single source of truth; do not re-derive the value inline
+# elsewhere.
 DERIVED_CONFIG_NAMES: dict[str, Callable[[], object]] = {
     "MAX_UPSTREAM_IMAGE_BYTES_PER_TASK_MB": lambda: max(1, MAX_FILE_SIZE_MB),
     "UPSTREAM_MEMORY_BUDGET_MB": lambda: max(MAX_UPSTREAM_IMAGE_BYTES_PER_TASK_MB, 256),
@@ -108,25 +92,19 @@ DEFAULT_API_KEY = os.getenv("DEFAULT_API_KEY", "")
 DEFAULT_API_PATH = os.getenv("DEFAULT_API_PATH", "/v1/images/generations")
 DEFAULT_RESPONSES_MODEL = os.getenv("DEFAULT_RESPONSES_MODEL", "gpt-5.4")
 DEFAULT_UPSTREAM_SOCKS5_PROXY = os.getenv("DEFAULT_UPSTREAM_SOCKS5_PROXY", "").strip()
-AIOHTTP_CONNECTION_LIMIT = max(1, int(os.getenv("AIOHTTP_CONNECTION_LIMIT", "100")))
-AIOHTTP_CONNECTION_LIMIT_PER_HOST = max(
-    0,
-    int(os.getenv("AIOHTTP_CONNECTION_LIMIT_PER_HOST", "20")),
-)
+AIOHTTP_CONNECTION_LIMIT = 100
+AIOHTTP_CONNECTION_LIMIT_PER_HOST = 20
 ALLOW_PLAINTEXT_SECRETS = env_flag("ALLOW_PLAINTEXT_SECRETS")
 SECRET_REGISTRY_JSON = os.getenv("SECRET_REGISTRY_JSON", "").strip()
 # Deprecated escape hatch: resolve undeclared ${ENV_VAR} references without purpose/origin binding.
 ALLOW_LEGACY_ENV_REFS = env_flag("ALLOW_LEGACY_ENV_REFS")
 GITHUB_REPO = _validate_github_repo(os.getenv("GITHUB_REPO", "Z1rconium/gpt-image-linux"))
 ENABLE_VERSION_CHECK = env_flag("ENABLE_VERSION_CHECK", "true")
-VERSION_CHECK_TIMEOUT_SECONDS = float(os.getenv("VERSION_CHECK_TIMEOUT_SECONDS", "3"))
-VERSION_CHECK_BRANCH = os.getenv("VERSION_CHECK_BRANCH", "main").strip() or "main"
-VERSION_CHECK_CACHE_SECONDS = max(
-    60,
-    int(os.getenv("VERSION_CHECK_CACHE_SECONDS", "600")),
-)
+VERSION_CHECK_TIMEOUT_SECONDS = 3.0
+VERSION_CHECK_BRANCH = 'main'
+VERSION_CHECK_CACHE_SECONDS = 600
 ENABLE_METRICS = env_flag("ENABLE_METRICS")
-SLOW_GALLERY_QUERY_MS = max(1.0, float(os.getenv("SLOW_GALLERY_QUERY_MS", "200")))
+SLOW_GALLERY_QUERY_MS = 200.0
 ENABLE_NGINX_ACCEL_REDIRECT = env_flag("ENABLE_NGINX_ACCEL_REDIRECT")
 PUBLIC_IMAGE_BASE_URL = os.getenv("PUBLIC_IMAGE_BASE_URL", "").strip().rstrip("/")
 PUBLIC_THUMBNAIL_BASE_URL = os.getenv("PUBLIC_THUMBNAIL_BASE_URL", "").strip().rstrip("/")
@@ -156,162 +134,96 @@ TRUSTED_PROXY_IPS = os.getenv("TRUSTED_PROXY_IPS", "").strip()
 PUBLIC_ORIGIN = os.getenv("PUBLIC_ORIGIN", "").strip()
 ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "").strip()
 CSRF_ORIGIN_CHECK_ENABLED = env_flag("CSRF_ORIGIN_CHECK_ENABLED", "true")
-UPSTREAM_HOST_ALLOWLIST = os.getenv("UPSTREAM_HOST_ALLOWLIST", "").strip()
-UPSTREAM_PROXY_HOST_ALLOWLIST = os.getenv("UPSTREAM_PROXY_HOST_ALLOWLIST", "").strip()
 UPSTREAM_USER_AGENT = os.getenv("UPSTREAM_USER_AGENT", "").strip() or "opencode"
-WEBHOOK_HOST_ALLOWLIST = os.getenv("WEBHOOK_HOST_ALLOWLIST", "").strip()
 WEBHOOK_SIGNING_SECRET = os.getenv("WEBHOOK_SIGNING_SECRET", "").strip()
-WEBHOOK_TIMEOUT_SECONDS = float(os.getenv("WEBHOOK_TIMEOUT_SECONDS", "5"))
-WEBHOOK_MAX_ATTEMPTS = int(os.getenv("WEBHOOK_MAX_ATTEMPTS", "3"))
+WEBHOOK_TIMEOUT_SECONDS = 5.0
+WEBHOOK_MAX_ATTEMPTS = 3
 MAX_FILE_SIZE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "50"))
 MASK_PASTE_BACK_DEFAULT = env_flag("MASK_PASTE_BACK_DEFAULT", "true")
-NODEIMAGE_UPLOAD_CONCURRENCY = max(1, int(os.getenv("NODEIMAGE_UPLOAD_CONCURRENCY", "4")))
-MAX_JSON_BODY_MB = max(1, int(os.getenv("MAX_JSON_BODY_MB", "1")))
-REQUEST_BODY_IDLE_TIMEOUT_SECONDS = max(1.0, float(os.getenv("REQUEST_BODY_IDLE_TIMEOUT_SECONDS", "15")))
-REQUEST_BODY_TOTAL_TIMEOUT_SECONDS = max(1.0, float(os.getenv("REQUEST_BODY_TOTAL_TIMEOUT_SECONDS", "60")))
-MAX_UPSTREAM_JSON_MB = max(1, int(os.getenv("MAX_UPSTREAM_JSON_MB", "128")))
-MAX_UPSTREAM_IMAGE_BYTES_PER_TASK_MB = _env_or_derived(
-    "MAX_UPSTREAM_IMAGE_BYTES_PER_TASK_MB",
-    DERIVED_CONFIG_NAMES["MAX_UPSTREAM_IMAGE_BYTES_PER_TASK_MB"],
-    lambda raw: max(1, int(raw)),
-)
-UPSTREAM_MEMORY_BUDGET_MB = _env_or_derived(
-    "UPSTREAM_MEMORY_BUDGET_MB",
-    DERIVED_CONFIG_NAMES["UPSTREAM_MEMORY_BUDGET_MB"],
-    lambda raw: max(MAX_UPSTREAM_IMAGE_BYTES_PER_TASK_MB, int(raw)),
-)
-MAX_IMAGE_PIXELS = max(1, int(os.getenv("MAX_IMAGE_PIXELS", "100000000")))
-IMAGE_CPU_CONCURRENCY = max(1, int(os.getenv("IMAGE_CPU_CONCURRENCY", "2")))
-VISION_PREVIEW_MEMORY_BUDGET_MB = min(16384, max(32, int(os.getenv("VISION_PREVIEW_MEMORY_BUDGET_MB", "256"))))
-FILE_IO_CONCURRENCY = max(1, int(os.getenv("FILE_IO_CONCURRENCY", "4")))
+NODEIMAGE_UPLOAD_CONCURRENCY = 4
+MAX_JSON_BODY_MB = 1
+REQUEST_BODY_IDLE_TIMEOUT_SECONDS = 15.0
+REQUEST_BODY_TOTAL_TIMEOUT_SECONDS = 60.0
+MAX_UPSTREAM_JSON_MB = 128
+MAX_UPSTREAM_IMAGE_BYTES_PER_TASK_MB = DERIVED_CONFIG_NAMES["MAX_UPSTREAM_IMAGE_BYTES_PER_TASK_MB"]()
+UPSTREAM_MEMORY_BUDGET_MB = DERIVED_CONFIG_NAMES["UPSTREAM_MEMORY_BUDGET_MB"]()
+MAX_IMAGE_PIXELS = 100000000
+IMAGE_CPU_CONCURRENCY = 2
+VISION_PREVIEW_MEMORY_BUDGET_MB = 256
+FILE_IO_CONCURRENCY = 4
 MAX_ACTIVE_GENERATE_JOBS = max(1, int(os.getenv("MAX_ACTIVE_GENERATE_JOBS", "2")))
 # The DB executor runs short polling reads and the occasional critical write
 # (claim/renew/complete/fail/finalize/cancel). A critical write can occupy one
 # worker for up to the critical busy budget, so size the pool from generation
 # concurrency rather than a fixed constant.
-DB_EXECUTOR_WORKERS = _env_or_derived(
-    "DB_EXECUTOR_WORKERS",
-    DERIVED_CONFIG_NAMES["DB_EXECUTOR_WORKERS"],
-    lambda raw: max(1, int(raw)),
-)
-SQLITE_BUSY_TIMEOUT_MS = max(10, int(os.getenv("SQLITE_BUSY_TIMEOUT_MS", "250")))
-SQLITE_BUSY_RETRY_ATTEMPTS = max(0, int(os.getenv("SQLITE_BUSY_RETRY_ATTEMPTS", "5")))
-SQLITE_BUSY_RETRY_BASE_MS = max(1, int(os.getenv("SQLITE_BUSY_RETRY_BASE_MS", "20")))
+DB_EXECUTOR_WORKERS = DERIVED_CONFIG_NAMES["DB_EXECUTOR_WORKERS"]()
+SQLITE_BUSY_TIMEOUT_MS = 250
+SQLITE_BUSY_RETRY_ATTEMPTS = 5
+SQLITE_BUSY_RETRY_BASE_MS = 20
 # Critical write paths use a much larger busy budget than polling reads: losing
 # a terminal write strands a unit in `running` (D1/D2), so a 2s lock wait with
 # jittered retries is preferable to giving up after the ~2s polling budget.
-SQLITE_CRITICAL_BUSY_TIMEOUT_MS = max(
-    10, int(os.getenv("SQLITE_CRITICAL_BUSY_TIMEOUT_MS", "2000"))
-)
-SQLITE_CRITICAL_BUSY_RETRY_ATTEMPTS = max(
-    0, int(os.getenv("SQLITE_CRITICAL_BUSY_RETRY_ATTEMPTS", "6"))
-)
+SQLITE_CRITICAL_BUSY_TIMEOUT_MS = 2000
+SQLITE_CRITICAL_BUSY_RETRY_ATTEMPTS = 6
 # Write transactions held longer than this are logged with their call label.
-SQLITE_SLOW_TXN_WARN_MS = max(1, int(os.getenv("SQLITE_SLOW_TXN_WARN_MS", "500")))
+SQLITE_SLOW_TXN_WARN_MS = 500
 # Page cache per connection. SQLite's default (~2MB) is small for a gallery
 # database that keyset-scans tens of thousands of rows per page.
-SQLITE_CACHE_SIZE_MB = max(1, int(os.getenv("SQLITE_CACHE_SIZE_MB", "16")))
+SQLITE_CACHE_SIZE_MB = 16
 # Memory-mapped I/O window; 0 disables mmap.
-SQLITE_MMAP_SIZE_MB = max(0, int(os.getenv("SQLITE_MMAP_SIZE_MB", "256")))
+SQLITE_MMAP_SIZE_MB = 256
 # Where transient sorts/aggregates (filter-option rebuilds) are kept.
 _SQLITE_TEMP_STORE_VALUES = {"DEFAULT", "FILE", "MEMORY", "0", "1", "2"}
-SQLITE_TEMP_STORE = os.getenv("SQLITE_TEMP_STORE", "MEMORY").strip().upper()
+SQLITE_TEMP_STORE = 'MEMORY'
 if SQLITE_TEMP_STORE not in _SQLITE_TEMP_STORE_VALUES:
     SQLITE_TEMP_STORE = "MEMORY"
 # WAL auto-checkpoint threshold in pages (SQLite's default is 1000); 0 disables.
-SQLITE_WAL_AUTOCHECKPOINT_PAGES = max(
-    0, int(os.getenv("SQLITE_WAL_AUTOCHECKPOINT_PAGES", "1000"))
-)
+SQLITE_WAL_AUTOCHECKPOINT_PAGES = 1000
 # Interval for the background `PRAGMA optimize` refresh of planner statistics.
-SQLITE_OPTIMIZE_INTERVAL_SECONDS = max(
-    60, int(os.getenv("SQLITE_OPTIMIZE_INTERVAL_SECONDS", "300"))
-)
-IMAGE_JOB_PROGRESS_PERSIST_INTERVAL_SECONDS = max(
-    0.1,
-    float(os.getenv("IMAGE_JOB_PROGRESS_PERSIST_INTERVAL_SECONDS", "1")),
-)
+SQLITE_OPTIMIZE_INTERVAL_SECONDS = 300
+IMAGE_JOB_PROGRESS_PERSIST_INTERVAL_SECONDS = 1.0
 # A running unit persists progress every ~1s, but the parent row's persisted
 # counts only need to track it at the parent persist cadence. The authoritative
 # finalize always happens once the unit reaches a terminal state, so this only
 # gates the interim aggregate read.
-IMAGE_JOB_AGGREGATE_MIN_INTERVAL_SECONDS = max(
-    0.1,
-    float(os.getenv("IMAGE_JOB_AGGREGATE_MIN_INTERVAL_SECONDS", "5")),
-)
-RUNTIME_METRICS_REFRESH_SECONDS = max(
-    5.0,
-    # Also drives the stale in-memory generate-job reconcile (job_events.py);
-    # keep this <= 2 * GENERATE_JOB_PERSIST_INTERVAL_SECONDS (10s) so that
-    # window is checked at least once per staleness period.
-    float(os.getenv("RUNTIME_METRICS_REFRESH_SECONDS", "10")),
-)
-EVENT_LOOP_LAG_SAMPLE_SECONDS = max(
-    0.1,
-    float(os.getenv("EVENT_LOOP_LAG_SAMPLE_SECONDS", "0.5")),
-)
-MAX_PENDING_EDIT_SOURCE_MB = _env_or_derived(
-    "MAX_PENDING_EDIT_SOURCE_MB",
-    DERIVED_CONFIG_NAMES["MAX_PENDING_EDIT_SOURCE_MB"],
-    lambda raw: max(0, int(raw)),
-)
-IMPORT_ARCHIVE_MAX_MB = _env_or_derived(
-    "IMPORT_ARCHIVE_MAX_MB",
-    DERIVED_CONFIG_NAMES["IMPORT_ARCHIVE_MAX_MB"],
-    int,
-)
-IMPORT_MAX_FILES = int(os.getenv("IMPORT_MAX_FILES", "500"))
-IMPORT_MAX_UNCOMPRESSED_MB = int(os.getenv("IMPORT_MAX_UNCOMPRESSED_MB", "1024"))
-IMPORT_MAX_METADATA_BYTES = int(os.getenv("IMPORT_MAX_METADATA_BYTES", str(2 * 1024 * 1024)))
-IMPORT_MAX_ENTRIES = max(1, int(os.getenv("IMPORT_MAX_ENTRIES", "500")))
-IMPORT_MAX_OUTPUT_MB = max(1, int(os.getenv("IMPORT_MAX_OUTPUT_MB", "1024")))
-IMPORT_MAX_COMPRESSION_RATIO = float(os.getenv("IMPORT_MAX_COMPRESSION_RATIO", "20"))
-IMPORT_TEMP_RESERVATION_MAX_MB = _env_or_derived(
-    "IMPORT_TEMP_RESERVATION_MAX_MB",
-    DERIVED_CONFIG_NAMES["IMPORT_TEMP_RESERVATION_MAX_MB"],
-    lambda raw: max(1, int(raw)),
-)
-IMPORT_UPLOAD_RESERVATION_TTL_SECONDS = max(
-    60,
-    int(os.getenv("IMPORT_UPLOAD_RESERVATION_TTL_SECONDS", "1800")),
-)
-IMPORT_UPLOADS_PER_IP_PER_MINUTE = max(
-    1,
-    int(os.getenv("IMPORT_UPLOADS_PER_IP_PER_MINUTE", "3")),
-)
+IMAGE_JOB_AGGREGATE_MIN_INTERVAL_SECONDS = 5.0
+RUNTIME_METRICS_REFRESH_SECONDS = 10.0
+EVENT_LOOP_LAG_SAMPLE_SECONDS = 0.5
+MAX_PENDING_EDIT_SOURCE_MB = DERIVED_CONFIG_NAMES["MAX_PENDING_EDIT_SOURCE_MB"]()
+IMPORT_ARCHIVE_MAX_MB = DERIVED_CONFIG_NAMES["IMPORT_ARCHIVE_MAX_MB"]()
+IMPORT_MAX_FILES = 500
+IMPORT_MAX_UNCOMPRESSED_MB = 1024
+IMPORT_MAX_METADATA_BYTES = 2097152
+IMPORT_MAX_ENTRIES = 500
+IMPORT_MAX_OUTPUT_MB = 1024
+IMPORT_MAX_COMPRESSION_RATIO = 20.0
+IMPORT_TEMP_RESERVATION_MAX_MB = DERIVED_CONFIG_NAMES["IMPORT_TEMP_RESERVATION_MAX_MB"]()
+IMPORT_UPLOAD_RESERVATION_TTL_SECONDS = 1800
+IMPORT_UPLOADS_PER_IP_PER_MINUTE = 3
 # Granian worker processes. Each process runs its own image-unit dispatcher;
 # the per-worker claim share below spreads a job's `n` units across them.
 GRANIAN_WORKERS = max(1, int(os.getenv("GRANIAN_WORKERS", "1")))
 MAX_QUEUED_GENERATE_JOBS = max(0, int(os.getenv("MAX_QUEUED_GENERATE_JOBS", "20")))
-IMAGE_JOB_UNIT_LEASE_SECONDS = max(30, int(os.getenv("IMAGE_JOB_UNIT_LEASE_SECONDS", "120")))
+IMAGE_JOB_UNIT_LEASE_SECONDS = 120
 # Lease renewal cadence. Defaults to lease/3 and is clamped below lease/2 so the
 # renewal loop can always extend the lease before it can expire.
 IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS = _clamp_lease_renew(
-    _env_or_derived(
-        "IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS",
-        DERIVED_CONFIG_NAMES["IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS"],
-        float,
-    )
+    DERIVED_CONFIG_NAMES["IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS"]()
 )
 # How many times an image unit may be claimed (each claim increments attempts)
 # before an exhausted lease is interrupted instead of retried forever.
-IMAGE_JOB_UNIT_MAX_ATTEMPTS = max(1, int(os.getenv("IMAGE_JOB_UNIT_MAX_ATTEMPTS", "2")))
-IMAGE_JOB_UNIT_POLL_INTERVAL_SECONDS = max(
-    0.1,
-    float(os.getenv("IMAGE_JOB_UNIT_POLL_INTERVAL_SECONDS", "0.35")),
-)
+IMAGE_JOB_UNIT_MAX_ATTEMPTS = 2
+IMAGE_JOB_UNIT_POLL_INTERVAL_SECONDS = 0.35
 # SSE pollers query SQLite only as a cross-process fallback for job updates:
 # same-process updates are pushed by the in-process job event bus. They start
 # at the base poll interval and double the delay while nothing changes, capped
 # here, so an idle-but-connected UI does not hold a DB worker at a fixed rate.
-SSE_IDLE_BACKOFF_MAX_SECONDS = max(
-    0.35,
-    float(os.getenv("SSE_IDLE_BACKOFF_MAX_SECONDS", "2")),
-)
+SSE_IDLE_BACKOFF_MAX_SECONDS = 2.0
 IMAGES_DIR = os.getenv("IMAGES_DIR", "./images")
 THUMBNAILS_DIR = os.getenv("THUMBNAILS_DIR", os.path.join(IMAGES_DIR, "thumbs"))
 MASKS_DIR = os.getenv("MASKS_DIR", os.path.join(IMAGES_DIR, "masks"))
-THUMBNAIL_MAX_SIDE = max(1, int(os.getenv("THUMBNAIL_MAX_SIDE", "512")))
-THUMBNAIL_CPU_CONCURRENCY = max(1, int(os.getenv("THUMBNAIL_CPU_CONCURRENCY", "1")))
+THUMBNAIL_MAX_SIDE = 512
+THUMBNAIL_CPU_CONCURRENCY = 1
 DATA_DIR = os.getenv("DATA_DIR", "./data")
 DATABASE_FILE = os.getenv("DATABASE_FILE", os.path.join(DATA_DIR, "app.sqlite3"))
 LOG_DIR = os.getenv("LOG_DIR", os.path.join(DATA_DIR, "logs"))
@@ -319,22 +231,22 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").strip().upper() or "INFO"
 LOG_RETENTION_HOURS = max(1, int(os.getenv("LOG_RETENTION_HOURS", "24")))
 
 # ── SSE connection limits ────────────────────────────────────────
-MAX_SSE_SUBSCRIBERS_GLOBAL = max(1, int(os.getenv("MAX_SSE_SUBSCRIBERS_GLOBAL", "200")))
-MAX_SSE_SUBSCRIBERS_PER_IP = max(1, int(os.getenv("MAX_SSE_SUBSCRIBERS_PER_IP", "10")))
-SSE_CONNECTION_TTL_SECONDS = max(60, int(os.getenv("SSE_CONNECTION_TTL_SECONDS", "3600")))
+MAX_SSE_SUBSCRIBERS_GLOBAL = 200
+MAX_SSE_SUBSCRIBERS_PER_IP = 10
+SSE_CONNECTION_TTL_SECONDS = 3600
 
 # ── Streaming partial-image preview ──────────────────────────────
 # Bounds for the upstream `text/event-stream` response when stream=true.
-STREAMING_MAX_FRAME_MB = max(1, int(os.getenv("STREAMING_MAX_FRAME_MB", "8")))
+STREAMING_MAX_FRAME_MB = 8
 STREAMING_MAX_TOTAL_MB = max(
     STREAMING_MAX_FRAME_MB,
-    int(os.getenv("STREAMING_MAX_TOTAL_MB", "64")),
+    int("64"),
 )
 # In-memory preview cache: one slot per (job_id, unit_index), holding only the
 # most recent partial image. Bounds are defensive backstops, not expected to
 # bind in normal operation.
-PREVIEW_CACHE_MAX_ENTRY_MB = max(1, int(os.getenv("PREVIEW_CACHE_MAX_ENTRY_MB", "8")))
-PREVIEW_CACHE_MAX_ENTRIES = max(1, int(os.getenv("PREVIEW_CACHE_MAX_ENTRIES", "500")))
+PREVIEW_CACHE_MAX_ENTRY_MB = 8
+PREVIEW_CACHE_MAX_ENTRIES = 500
 
 # ── Prompt optimizer ────────────────────────────────────────────
 PROMPT_OPTIMIZER_ENABLED = env_flag("PROMPT_OPTIMIZER_ENABLED")
@@ -345,64 +257,43 @@ PROMPT_OPTIMIZER_TIMEOUT_SECONDS = max(
     1,
     int(os.getenv("PROMPT_OPTIMIZER_TIMEOUT_SECONDS", "60")),
 )
-PROMPT_OPTIMIZER_MAX_OUTPUT_CHARS = int(os.getenv("PROMPT_OPTIMIZER_MAX_OUTPUT_CHARS", "32000"))
-PROMPT_OPTIMIZER_MAX_RESPONSE_MB = max(
-    1,
-    int(os.getenv("PROMPT_OPTIMIZER_MAX_RESPONSE_MB", "8")),
-)
-PROMPT_OPTIMIZER_HOST_ALLOWLIST = os.getenv("PROMPT_OPTIMIZER_HOST_ALLOWLIST", "").strip()
+PROMPT_OPTIMIZER_MAX_OUTPUT_CHARS = 32000
+PROMPT_OPTIMIZER_MAX_RESPONSE_MB = 8
 
 # ── AI Assistant ────────────────────────────────────────────────
 AI_ASSISTANT_ENABLED = env_flag("AI_ASSISTANT_ENABLED", "true")
 AI_ASSISTANT_VISION_MODEL = os.getenv("AI_ASSISTANT_VISION_MODEL", "gpt-4o-mini").strip()
-AI_ASSISTANT_MAX_RESPONSE_MB = max(
-    1,
-    int(os.getenv("AI_ASSISTANT_MAX_RESPONSE_MB", "8")),
-)
-AI_ASSISTANT_MAX_CONCURRENCY = _env_or_derived(
-    "AI_ASSISTANT_MAX_CONCURRENCY",
-    DERIVED_CONFIG_NAMES["AI_ASSISTANT_MAX_CONCURRENCY"],
-    lambda raw: max(1, int(raw)),
-)
-AI_ASSISTANT_BATCH_MAX_IMAGES = max(
-    1,
-    int(os.getenv("AI_ASSISTANT_BATCH_MAX_IMAGES", "200")),
-)
-AI_ASSISTANT_IMAGE_MAX_SIDE = max(
-    256,
-    int(os.getenv("AI_ASSISTANT_IMAGE_MAX_SIDE", "1024")),
-)
-AI_ASSISTANT_IMAGE_MAX_BYTES = max(
-    65536,
-    int(os.getenv("AI_ASSISTANT_IMAGE_MAX_BYTES", str(1024 * 1024))),
-)
+AI_ASSISTANT_MAX_RESPONSE_MB = 8
+AI_ASSISTANT_MAX_CONCURRENCY = DERIVED_CONFIG_NAMES["AI_ASSISTANT_MAX_CONCURRENCY"]()
+AI_ASSISTANT_BATCH_MAX_IMAGES = 200
+AI_ASSISTANT_IMAGE_MAX_SIDE = 1024
+AI_ASSISTANT_IMAGE_MAX_BYTES = 1048576
 
 # ── Agent conversations ─────────────────────────────────────────
-AGENT_MAX_CONVERSATIONS = max(1, int(os.getenv("AGENT_MAX_CONVERSATIONS", "200")))
-AGENT_MAX_TURNS_PER_CONVERSATION = max(1, int(os.getenv("AGENT_MAX_TURNS_PER_CONVERSATION", "100")))
-AGENT_MAX_USER_TEXT_CHARS = max(1, int(os.getenv("AGENT_MAX_USER_TEXT_CHARS", "8000")))
-AGENT_MAX_IMAGE_PROMPT_CHARS = max(1, int(os.getenv("AGENT_MAX_IMAGE_PROMPT_CHARS", "4000")))
-AGENT_MAX_ATTACHMENTS_PER_MESSAGE = max(0, int(os.getenv("AGENT_MAX_ATTACHMENTS_PER_MESSAGE", "8")))
-AGENT_MAX_IMAGES_PER_BATCH = max(1, int(os.getenv("AGENT_MAX_IMAGES_PER_BATCH", "4")))
-AGENT_MAX_IMAGES_PER_TURN = max(1, int(os.getenv("AGENT_MAX_IMAGES_PER_TURN", "12")))
-AGENT_MAX_TOOL_ROUNDS_CEILING = max(1, int(os.getenv("AGENT_MAX_TOOL_ROUNDS_CEILING", "12")))
-AGENT_MAX_HISTORY_IMAGES = max(0, int(os.getenv("AGENT_MAX_HISTORY_IMAGES", "8")))
-AGENT_IMAGE_JOB_TIMEOUT_SECONDS = max(10, int(os.getenv("AGENT_IMAGE_JOB_TIMEOUT_SECONDS", "900")))
-AGENT_TURN_LEASE_SECONDS = max(10, int(os.getenv("AGENT_TURN_LEASE_SECONDS", "60")))
-AGENT_EVENT_RETENTION_SECONDS = max(60, int(os.getenv("AGENT_EVENT_RETENTION_SECONDS", "3600")))
-AGENT_MAX_ACTIVE_TURNS = max(1, int(os.getenv("AGENT_MAX_ACTIVE_TURNS", "4")))
+AGENT_MAX_CONVERSATIONS = 200
+AGENT_MAX_TURNS_PER_CONVERSATION = 100
+AGENT_MAX_USER_TEXT_CHARS = 8000
+AGENT_MAX_IMAGE_PROMPT_CHARS = 4000
+AGENT_MAX_ATTACHMENTS_PER_MESSAGE = 8
+AGENT_MAX_IMAGES_PER_BATCH = 4
+AGENT_MAX_IMAGES_PER_TURN = 12
+AGENT_MAX_TOOL_ROUNDS_CEILING = 12
+AGENT_MAX_HISTORY_IMAGES = 8
+AGENT_IMAGE_JOB_TIMEOUT_SECONDS = 900
+AGENT_TURN_LEASE_SECONDS = 60
+AGENT_EVENT_RETENTION_SECONDS = 3600
+AGENT_MAX_ACTIVE_TURNS = 4
 
 # ── Cloudflare R2 gallery backup ─────────────────────────────────
 R2_BACKUP_ENABLED = env_flag("R2_BACKUP_ENABLED")
 R2_ENDPOINT_URL = os.getenv("R2_ENDPOINT_URL", "").strip()
-R2_ENDPOINT_HOST_ALLOWLIST = os.getenv("R2_ENDPOINT_HOST_ALLOWLIST", "").strip()
 R2_BUCKET_NAME = os.getenv("R2_BUCKET_NAME", "").strip()
 R2_REGION = os.getenv("R2_REGION", "auto").strip() or "auto"
 R2_KEY_PREFIX = os.getenv("R2_KEY_PREFIX", "gallery/").strip()
 R2_ACCESS_KEY_ID = os.getenv("R2_ACCESS_KEY_ID", "").strip()
 R2_SECRET_ACCESS_KEY = os.getenv("R2_SECRET_ACCESS_KEY", "").strip()
 R2_SYNC_INTERVAL_HOURS = env_non_negative_int("R2_SYNC_INTERVAL_HOURS", 0)
-R2_SYNC_CONCURRENCY = max(1, int(os.getenv("R2_SYNC_CONCURRENCY", "4")))
+R2_SYNC_CONCURRENCY = 4
 
 # ── NodeImage gallery upload ────────────────────────────────────
 NODEIMAGE_API_KEY = os.getenv("NODEIMAGE_API_KEY", "").strip()

@@ -93,12 +93,12 @@ images/  data/      # runtime output (generated)
 cp .env.example .env
 # edit .env: set ACCESS_KEY and any default upstream API values you want
 # this example uses plain HTTP on loopback, so disable Secure cookies
-ACCESS_COOKIE_SECURE=false docker-compose up -d --force-recreate
+ACCESS_COOKIE_SECURE=false ACCESS_KEY_COOKIE_NAME=gpt_image_access docker-compose up -d --force-recreate
 ```
 
 Open `http://127.0.0.1:9090`.
 
-This local HTTP example requires `ACCESS_COOKIE_SECURE=false`; keep it `true` when serving the panel over HTTPS. By default, `ACCESS_KEY` is required. For local-only testing, unset `ACCESS_KEY` and set `ALLOW_UNAUTHENTICATED=true`; this makes every non-health API route accessible. To additionally protect the unlock flow with Cloudflare Turnstile, set `TURNSTILE_ENABLED=true` plus your `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` from the Cloudflare dashboard; the verification widget then appears below the Unlock button and a valid token is required for every access-key login.
+This local HTTP example requires `ACCESS_COOKIE_SECURE=false` and `ACCESS_KEY_COOKIE_NAME=gpt_image_access`; keep it `true` when serving the panel over HTTPS. By default, `ACCESS_KEY` is required. For local-only testing, unset `ACCESS_KEY` and set `ALLOW_UNAUTHENTICATED=true`; this makes every non-health API route accessible. To additionally protect the unlock flow with Cloudflare Turnstile, set `TURNSTILE_ENABLED=true` plus your `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` from the Cloudflare dashboard; the verification widget then appears below the Unlock button and a valid token is required for every access-key login.
 
 ### Docker
 
@@ -108,6 +108,7 @@ docker run -d --name gpt-image-panel \
   -p 127.0.0.1:9090:9090 \
   -e ACCESS_KEY=change-me \
   -e ACCESS_COOKIE_SECURE=false \
+  -e ACCESS_KEY_COOKIE_NAME=gpt_image_access \
   -v $(pwd)/images:/app/images \
   -v $(pwd)/data:/app/data \
   gpt-image-panel
@@ -174,10 +175,9 @@ Caddy automatic HTTPS requires the hostname to resolve to the server and inbound
 
 ### Deployment Troubleshooting
 
-1. **Container exits on startup with `SecretRegistryError: credentials require a non-empty startup host allowlist`** — `DEFAULT_API_KEY` is configured in `.env`, but `UPSTREAM_HOST_ALLOWLIST` is missing or empty. Add the raw hostname of `DEFAULT_API_URL` to `UPSTREAM_HOST_ALLOWLIST` in `.env` (e.g. `UPSTREAM_HOST_ALLOWLIST=api.openai.com` or `UPSTREAM_HOST_ALLOWLIST=cf.api.fan`).
 2. **Browser reports `400 Bad Request: Host is not allowed`** — the incoming `Host` header does not match `ALLOWED_HOSTS` or `PUBLIC_ORIGIN` in `.env` (often due to domain typos or failing to recreate the container after editing `.env`). Ensure both match the exact domain, and always run `docker-compose up -d --force-recreate` after modifying `.env`.
-3. **Cannot log in or login loop under direct plain HTTP (no reverse proxy/SSL)** — by default `ACCESS_COOKIE_SECURE=true` requires HTTPS; browsers reject storing or sending `Secure` cookies over plain HTTP. For direct HTTP testing, set `ACCESS_COOKIE_SECURE=false` in `.env`. Switch back to `true` once behind an HTTPS reverse proxy.
-4. **Clicking "Save Preset" in Web UI fails or drawer does not close** — saving literal plaintext API keys to SQLite via the UI is prohibited by default; set `ALLOW_PLAINTEXT_SECRETS=true` in `.env` and restart the container if you need to paste raw API keys directly into Web Settings. If the preset API URL was modified, ensure its domain is also included in `UPSTREAM_HOST_ALLOWLIST`.
+3. **Cannot log in or login loop under direct plain HTTP (no reverse proxy/SSL)** — by default `ACCESS_COOKIE_SECURE=true` requires HTTPS; browsers reject storing or sending `Secure` cookies over plain HTTP. For direct HTTP testing, set `ACCESS_COOKIE_SECURE=false` and `ACCESS_KEY_COOKIE_NAME=gpt_image_access` in `.env`. Switch back to `true` and remove the cookie name override once behind an HTTPS reverse proxy.
+4. **Saving a preset fails** — use a configured secret reference bound to the same purpose and origin, or enable plaintext secret storage where appropriate.
 
 ### Local Development
 
@@ -208,35 +208,34 @@ ALLOW_UNAUTHENTICATED=true .venv/bin/granian --interface asgi backend.app.main:a
 
 ## Configuration
 
-Most runtime options live in `.env.example`. API presets, prompt optimizer, R2 backup, and selected app/runtime options can also be managed through Web Settings / Overall Config. Key variables:
+See the [complete configuration reference](CONFIGURATION.md) for all supported environment settings and defaults.
+
+Existing installations: outbound host allowlist variables and retired tuning overrides are ignored. Existing database rows remain in place for rollback; revert the application version to restore the old behavior. Review the new `.env.example`, then recreate the container. URL public-network checks and secret purpose/origin bindings still apply.
+
+Compose passes only the variables listed in `docker-compose.yml`. If a secret registry entry references another environment variable, add that variable explicitly to the service environment (for example in a Compose override).
+
+Common runtime options are shown in `.env.example`. API presets, prompt optimizer, R2 backup, and selected app/runtime options can also be managed through Web Settings / Overall Config. Key variables:
 
 | Variable | Purpose |
 | --- | --- |
 | `ACCESS_KEY` / `ALLOW_UNAUTHENTICATED` / `TURNSTILE_*` | Access gate key (required unless unset with `ALLOW_UNAUTHENTICATED=true`); `TURNSTILE_*` adds optional Cloudflare Turnstile verification. |
 | `DEFAULT_API_URL` / `DEFAULT_API_KEY` / `DEFAULT_API_PATH` / `DEFAULT_RESPONSES_MODEL` | Default upstream preset. Prefer env refs such as `${OPENAI_API_KEY}` for keys. |
-| `UPSTREAM_HOST_ALLOWLIST` | Required whenever an upstream API key is configured; lists allowed upstream hostnames. |
 | `PUBLIC_ORIGIN` / `ALLOWED_HOSTS` | Reverse-proxy Host/CSRF hardening; must match the deployed domain. |
 | `MAX_ACTIVE_GENERATE_JOBS` / `MAX_QUEUED_GENERATE_JOBS` | Global running image-unit limit and queue capacity (new jobs return `429` beyond it). |
-| `IMAGE_JOB_UNIT_LEASE_SECONDS` / `IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS` / `IMAGE_JOB_UNIT_MAX_ATTEMPTS` | SQLite claim lease for a running image unit (crash-detection latency), its renewal cadence, and max claim attempts. |
-| `GRANIAN_WORKERS` / `GRANIAN_*` | Worker process count and production runtime tuning; set equal to the actual process count. |
-| `VISION_PREVIEW_MEMORY_BUDGET_MB` | Vision-preview decode admission budget: **256 MiB per process** by default, range **32–16384**. Agent previews exceeding the conservative decoded-memory estimate are skipped; text references, original files, generation and editing remain available. |
-| `IMAGE_CPU_CONCURRENCY` / `FILE_IO_CONCURRENCY` / `UPSTREAM_MEMORY_BUDGET_MB` / `MAX_UPSTREAM_IMAGE_BYTES_PER_TASK_MB` | Bounded decode, file-I/O concurrency, and upstream image memory budgets. |
-| `DB_EXECUTOR_WORKERS` / `SQLITE_BUSY_*` / `SQLITE_CRITICAL_BUSY_*` / `SQLITE_SLOW_TXN_WARN_MS` | SQLite executor size and busy-retry budgets; critical claim/lease/finalization writes get a larger budget. |
-| `IMAGES_DIR` / `MASKS_DIR` / `THUMBNAILS_DIR` / `THUMBNAIL_*` / `DATA_DIR` / `DATABASE_FILE` / `LOG_DIR` / `LOG_LEVEL` / `LOG_RETENTION_HOURS` | Storage paths, thumbnail controls, and logging (rotated files retained 24h by default). |
+| `GRANIAN_WORKERS` | Worker process count and production runtime tuning; set equal to the actual process count. |
+| `IMAGES_DIR` / `MASKS_DIR` / `THUMBNAILS_DIR` / `DATA_DIR` / `DATABASE_FILE` / `LOG_DIR` / `LOG_LEVEL` / `LOG_RETENTION_HOURS` | Storage paths, thumbnail controls, and logging (rotated files retained 24h by default). |
 | `MASK_PASTE_BACK_DEFAULT` | Default for pasting a masked edit's result back onto the untouched primary image; overridable per edit request. |
-| `MAX_SSE_SUBSCRIBERS_GLOBAL` / `MAX_SSE_SUBSCRIBERS_PER_IP` / `SSE_CONNECTION_TTL_SECONDS` | SSE slot limits and max connection lifetime. |
 | `PROMPT_OPTIMIZER_*` | Optional server-side prompt optimizer settings. |
-| `AI_ASSISTANT_*` | AI Assistant is enabled by default (`AI_ASSISTANT_ENABLED=false` to disable); reuses `PROMPT_OPTIMIZER_*` for API URL/key/model/timeout/allowlist. |
-| `AGENT_*` | Agent conversation-mode limits; the mode itself is switched on in Settings → AI Assistant and reuses the `PROMPT_OPTIMIZER_*` endpoint. |
-| `R2_*` | Optional Cloudflare R2 gallery backup sync; custom endpoint hosts require `R2_ENDPOINT_HOST_ALLOWLIST`. |
+| `AI_ASSISTANT_*` | AI Assistant is enabled by default (`AI_ASSISTANT_ENABLED=false` to disable); reuses `PROMPT_OPTIMIZER_*` for API URL/key/model/timeout. |
+| `R2_*` | Optional R2-compatible gallery backup; endpoints must use public HTTPS hostnames. |
 | `NODEIMAGE_API_KEY` | Optional NodeImage API key for server-side Gallery uploads. |
 | `IMAGE_COST_RATES_JSON` | Override/extend the builtin per-model USD rates used for cost estimates. |
-| `APP_VERSION` / `GITHUB_REPO` / `ENABLE_VERSION_CHECK` / `VERSION_CHECK_CACHE_SECONDS` | Version reporting and latest-release checks. |
+| `APP_VERSION` / `GITHUB_REPO` / `ENABLE_VERSION_CHECK` | Version reporting and latest-release checks. |
 | `ENABLE_NGINX_ACCEL_REDIRECT` / `PUBLIC_IMAGE_BASE_URL` / `PUBLIC_THUMBNAIL_BASE_URL` | Optional nginx/CDN image byte serving. |
 | `ENABLE_METRICS` | Enables JSON/Prometheus metrics endpoints. |
 | `SECRET_REGISTRY_JSON` / `ALLOW_PLAINTEXT_SECRETS` / `ALLOW_LEGACY_ENV_REFS` | Secret handling: `${ENV_VAR}` references must be declared in `SECRET_REGISTRY_JSON`; literal secrets in SQLite require `ALLOW_PLAINTEXT_SECRETS=true`; `ALLOW_LEGACY_ENV_REFS=true` is a deprecated migration switch. |
 
-Settings resolve in three layers: environment variables (read once at process start), Overall Config overrides persisted in SQLite via `/api/settings/overall-config` (hot-reloadable keys apply immediately, `restart_required` keys on next start), and names marked `exposed_in_settings` (API presets, prompt optimizer, AI assistant, R2, NodeImage), which are read from SQLite once saved through Web Settings — after that, the matching env var has no further effect. A handful of settings (e.g. `DB_EXECUTOR_WORKERS`, `AI_ASSISTANT_MAX_CONCURRENCY`, `IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS`) are derived from another value and recompute automatically. Known limit: changing `DB_EXECUTOR_WORKERS`, `IMAGE_CPU_CONCURRENCY`, or `FILE_IO_CONCURRENCY` at runtime does not resize an already-created thread pool.
+Settings resolve in three layers: environment variables (read once at process start), Overall Config overrides persisted in SQLite via `/api/settings/overall-config` (hot-reloadable keys apply immediately, `restart_required` keys on next start), and names marked `exposed_in_settings` (API presets, prompt optimizer, AI assistant, R2, NodeImage), which are read from SQLite once saved through Web Settings — after that, the matching env var has no further effect. A handful of settings (e.g. `DB_EXECUTOR_WORKERS`, `AI_ASSISTANT_MAX_CONCURRENCY`, `IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS`) are derived from another value and recompute automatically.
 
 With `ENABLE_METRICS=true`, `/api/metrics` exposes diagnostics for sizing SQLite coordination: `sqlite.write_txn`, `sqlite.write_lock_wait_ms`, `sqlite.write_txn_hold_ms` (write-transaction rate and lock wait/hold times, p50–p99/max — watch the p95 as `MAX_ACTIVE_GENERATE_JOBS x GRANIAN_WORKERS` grows), `sqlite.busy`, `sqlite.busy_retries` (failed/retried lock attempts), and `image_jobs.lease_renewed`, `lease_lost`, `unit_reclaimed`, `unit_exhausted` (image-unit lease health; `lease_lost` should stay at zero).
 
@@ -270,7 +269,7 @@ The generation form and preset settings offer `gpt-image-2.5-flare` (fast everyd
 
 Use `/v1/images/generations` for generation. Uploading reference images or selecting a gallery image uses multipart `/v1/images/edits`. Both 2.5 variants support `auto`, `low`, `medium`, `high`, `xhigh`, and `max` quality. Earlier/custom models retain the existing quality options. Selecting a model that does not support the current quality resets it to `auto`.
 
-- Prompts support up to 32,000 Unicode characters across generation, editing, assistants, and snippets (Prompt Optimizer shares this limit unless `PROMPT_OPTIMIZER_MAX_OUTPUT_CHARS` overrides it).
+- Prompts support up to 32,000 Unicode characters across generation, editing, assistants, and snippets (Prompt Optimizer shares this limit).
 - Size is `auto` or `WIDTHxHEIGHT`: edges must be multiples of 16 up to 3840, aspect ratio ≤ 3:1, and total pixels between 655,360–8,294,400. Above 2560×1440 is experimental.
 - Output is PNG, JPEG, or WebP; compression (0–100, default 100) applies only to JPEG/WebP. Transparent backgrounds require PNG/WebP — JPEG plus transparency auto-switches to PNG.
 - 2.5 always returns Base64: the panel saves the image and serves it from a local URL, ignoring any `response_format` inherited from older presets. Other models keep their prior response-format behavior.

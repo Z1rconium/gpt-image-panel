@@ -294,7 +294,6 @@ def get_upstream_socks5_proxy(*, raw: bool = False) -> str:
         value,
         purpose="upstream_proxy",
         target_url=target,
-        host_allowlist=config.UPSTREAM_PROXY_HOST_ALLOWLIST,
     )
 
 
@@ -323,7 +322,6 @@ def get_webhook_url(*, raw: bool = False) -> str:
         value,
         purpose="webhook_url",
         target_url=target,
-        host_allowlist=config.WEBHOOK_HOST_ALLOWLIST,
     )
 
 
@@ -570,7 +568,6 @@ def resolve_prompt_optimizer_api_key(raw: dict | None) -> str:
             secret_id,
             purpose="prompt_optimizer",
             target_url=str(settings.get("api_url") or ""),
-            host_allowlist=config.PROMPT_OPTIMIZER_HOST_ALLOWLIST,
         )
         if resolved_key:
             return resolved_key
@@ -581,7 +578,6 @@ def resolve_prompt_optimizer_api_key(raw: dict | None) -> str:
         secret_id,
         purpose="prompt_optimizer",
         target_url=str(settings.get("api_url") or ""),
-        host_allowlist=config.PROMPT_OPTIMIZER_HOST_ALLOWLIST,
     )
 
 
@@ -596,7 +592,6 @@ def resolve_ai_assistant_api_key(raw: dict | None) -> str:
             secret_id,
             purpose="prompt_optimizer",
             target_url=str(settings.get("api_url") or ""),
-            host_allowlist=config.PROMPT_OPTIMIZER_HOST_ALLOWLIST,
         )
         if resolved_key:
             return resolved_key
@@ -607,7 +602,6 @@ def resolve_ai_assistant_api_key(raw: dict | None) -> str:
         secret_id,
         purpose="prompt_optimizer",
         target_url=str(settings.get("api_url") or ""),
-        host_allowlist=config.PROMPT_OPTIMIZER_HOST_ALLOWLIST,
     )
 
 
@@ -692,7 +686,6 @@ def validate_configured_secret_bindings() -> None:
                 secret_id,
                 purpose="upstream_api",
                 target_url=str(preset.get("api_url") or ""),
-                host_allowlist=config.UPSTREAM_HOST_ALLOWLIST,
             )
 
     optimizer = normalize_prompt_optimizer_settings(get_prompt_optimizer_settings())
@@ -704,7 +697,6 @@ def validate_configured_secret_bindings() -> None:
             optimizer_secret_id,
             purpose="prompt_optimizer",
             target_url=str(optimizer.get("api_url") or ""),
-            host_allowlist=config.PROMPT_OPTIMIZER_HOST_ALLOWLIST,
         )
 
     r2 = get_r2_backup_settings()
@@ -721,7 +713,6 @@ def validate_configured_secret_bindings() -> None:
                 secret_id,
                 purpose=purpose,
                 target_url=endpoint_url,
-                host_allowlist=config.R2_ENDPOINT_HOST_ALLOWLIST,
             )
 
     nodeimage = get_nodeimage_settings()
@@ -731,7 +722,6 @@ def validate_configured_secret_bindings() -> None:
             nodeimage_secret_id,
             purpose="nodeimage_api_key",
             target_url="https://api.nodeimage.com",
-            host_allowlist="api.nodeimage.com",
         )
 
     upstream_proxy = get_upstream_socks5_proxy(raw=True)

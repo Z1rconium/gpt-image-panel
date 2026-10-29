@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Any, Callable, Iterable
 
 from ...core import secrets
-from ...core import settings as config
 from ...core.utils import utc_now
 from ...core.validators import normalize_r2_endpoint_url, validate_r2_endpoint_url
 from ...core.media import safe_image_path
@@ -126,7 +125,6 @@ def _resolve_secret(
         value,
         purpose=purpose,
         target_url=endpoint_url,
-        host_allowlist=config.R2_ENDPOINT_HOST_ALLOWLIST,
         field_name=field_name,
         error_type=R2ConfigurationError,
     )
@@ -145,7 +143,7 @@ def resolve_r2_backup_settings(
     endpoint_url = normalize_r2_endpoint_url(raw.get("endpoint_url"))
     if not endpoint_url:
         raise R2ConfigurationError("R2 endpoint URL is not configured.")
-    validate_r2_endpoint_url(endpoint_url, config.R2_ENDPOINT_HOST_ALLOWLIST)
+    validate_r2_endpoint_url(endpoint_url)
 
     bucket_name = str(raw.get("bucket_name") or "").strip()
     if not bucket_name:

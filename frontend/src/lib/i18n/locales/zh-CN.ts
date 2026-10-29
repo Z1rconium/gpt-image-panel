@@ -216,7 +216,7 @@ const zh: Translation = {
     aiAssistantHint: '服务端文本、视觉、参数和诊断工具。',
     aiAssistantEnabled: '启用',
     aiAssistantVisionModel: '视觉模型',
-    aiAssistantSharedConfigHint: '复用提示词优化器的 API URL、密钥、文本模型、路径、超时和 host allowlist；这里只单独保留视觉模型。',
+    aiAssistantSharedConfigHint: '复用提示词优化器的 API URL、密钥、文本模型、路径和超时；这里只单独保留视觉模型。',
     aiAssistantHealthCheck: '测试 AI Assistant',
     aiAssistantHealthChecking: '测试中...',
     agentMode: 'Agent 对话模式',

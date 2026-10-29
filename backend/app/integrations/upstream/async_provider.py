@@ -201,7 +201,7 @@ def _auth_headers(
 
 async def _validated_upstream_url(url: str) -> str:
     try:
-        await ssrf.validate_upstream_url_async(url, config.UPSTREAM_HOST_ALLOWLIST, allow_query=True)
+        await ssrf.validate_upstream_url_async(url, allow_query=True)
     except ValueError as exc:
         raise UpstreamApiError(redact_sensitive_text(f"Provider URL rejected: {exc}")) from exc
     return url

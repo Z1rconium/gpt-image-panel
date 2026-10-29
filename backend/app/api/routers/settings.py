@@ -286,7 +286,6 @@ async def update_settings(req: SettingsRequest):
             try:
                 await ssrf.validate_r2_endpoint_url_async(
                     updated_r2["endpoint_url"],
-                    config.R2_ENDPOINT_HOST_ALLOWLIST,
                 )
             except ValueError as e:
                 raise HTTPException(status_code=422, detail=str(e)) from e
@@ -317,7 +316,6 @@ async def check_r2_settings_health(req: R2BackupSettingsRequest):
         try:
             await ssrf.validate_r2_endpoint_url_async(
                 draft["endpoint_url"],
-                config.R2_ENDPOINT_HOST_ALLOWLIST,
             )
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e)) from e

@@ -59,7 +59,7 @@ def validate_assistant_endpoint(api_url: str, api_path: str) -> str:
     if not api_url:
         raise ValueError("Prompt Optimizer endpoint URL is not configured for AI Assistant")
     normalized_api_url = ssrf.normalize_upstream_base_url(api_url)
-    ssrf.validate_upstream_url(normalized_api_url, config.PROMPT_OPTIMIZER_HOST_ALLOWLIST)
+    ssrf.validate_upstream_url(normalized_api_url)
     return build_upstream_url(normalized_api_url, normalize_assistant_api_path(api_path))
 
 

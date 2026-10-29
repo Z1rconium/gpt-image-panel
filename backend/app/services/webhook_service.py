@@ -87,7 +87,7 @@ def sign_webhook_body(body: bytes, timestamp: str) -> str:
 
 async def deliver_webhook(webhook_url: str, job: dict[str, Any]):
     try:
-        await ssrf.validate_webhook_url_async(webhook_url, config.WEBHOOK_HOST_ALLOWLIST)
+        await ssrf.validate_webhook_url_async(webhook_url)
     except ValueError as error:
         logger.warning(
             "Webhook URL rejected before delivery: job_id=%s error=%s",
@@ -159,7 +159,7 @@ def validate_job_webhook_url(webhook_url: str | None) -> str | None:
     if not normalized_url:
         return None
     try:
-        ssrf.validate_webhook_url(normalized_url, config.WEBHOOK_HOST_ALLOWLIST)
+        ssrf.validate_webhook_url(normalized_url)
     except ValueError as e:
         raise UnprocessableRequestError(str(e)) from e
     if len(config.WEBHOOK_SIGNING_SECRET.encode("utf-8")) < 32:

@@ -53,10 +53,6 @@ def test_split_allowlist_separator_policy():
     assert validators.split_allowlist("a;b", separators=",") == ["a;b"]
 
 
-def test_parse_host_allowlist_normalizes_entries():
-    assert validators._parse_host_allowlist(" Example.COM. , B.test ") == ["example.com", "b.test"]
-
-
 def test_overall_config_split_list_delegates_to_shared_primitive():
     assert overall_config._split_list(" a ; b , c ") == validators.split_allowlist(" a ; b , c ")
 

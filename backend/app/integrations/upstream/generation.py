@@ -135,7 +135,7 @@ async def _prepare_upstream_request(
 ) -> PreparedUpstreamRequest:
     upstream_url = build_upstream_url(api_url, api_path)
     await _warn_if_socks5_upstream_resolves_private(upstream_url, socks5_proxy)
-    await ssrf.validate_upstream_url_async(upstream_url, config.UPSTREAM_HOST_ALLOWLIST)
+    await ssrf.validate_upstream_url_async(upstream_url)
 
     headers = {
         "Authorization": f"Bearer {api_key}",

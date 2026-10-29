@@ -55,3 +55,12 @@ return bool(value)
 # Correct: preserve the established helper and its full input vocabulary.
 return _normalize_gallery_favorite(value)
 ```
+
+## Deployment configuration simplification
+
+- Keep deployment/business settings separate from fixed internal limits. Retiring a knob removes both environment reads and the overall-config registry entry; hiding only the UI is insufficient.
+- Retired persisted rows remain stored for rollback but cannot override runtime constants. Derived limits continue to follow retained base settings through the existing recomputation owner.
+- Outbound URL validation does not use host allowlists. Secret resolution still checks purpose and canonical target origin; URL format, DNS/public-network checks and inbound access controls remain independent.
+- R2 accepts custom public HTTPS hostnames subject to the existing URL restrictions, not a provider-domain suffix gate.
+- Docker examples must preserve explicit environment forwarding and distinguish unset optional values from empty values. Verify backend/default parity when Compose must repeat defaults.
+- Test retired env and stored overrides, retained base derivation, valid public destinations, rejected private destinations and mismatched secret origins. Never use production data or paid generation calls for onboarding smoke tests.

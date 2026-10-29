@@ -799,7 +799,6 @@ def test_gallery_sync_job_accepts_enabled_r2_env_defaults(tmp_path, monkeypatch)
     monkeypatch.setenv("R2_SECRET_ACCESS_KEY", "env-r2-secret")
     config.R2_BACKUP_ENABLED = True
     config.R2_ENDPOINT_URL = "https://account.r2.cloudflarestorage.com"
-    config.R2_ENDPOINT_HOST_ALLOWLIST = "account.r2.cloudflarestorage.com"
     config.R2_BUCKET_NAME = "env-image-backups"
     config.R2_REGION = "auto"
     config.R2_KEY_PREFIX = "gallery-env/"

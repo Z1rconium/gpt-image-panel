@@ -18,7 +18,6 @@ def test_resolve_secret_reference_supports_all_setting_sources(monkeypatch):
     options = {
         "purpose": "nodeimage_api_key",
         "target_url": target_url,
-        "host_allowlist": "api.nodeimage.com",
         "field_name": "NodeImage API key",
     }
 
@@ -215,7 +214,7 @@ def test_http_exception_envelope_preserves_safe_detail():
 
 
 def _upstream_options(url="https://api.example.com"):
-    return {"purpose": "upstream_api", "target_url": url, "host_allowlist": "api.example.com", "field_name": "API key"}
+    return {"purpose": "upstream_api", "target_url": url, "field_name": "API key"}
 
 
 def test_undeclared_env_refs_are_rejected_before_reading_the_environment(monkeypatch):
@@ -237,11 +236,10 @@ def test_declared_env_refs_are_bound_to_purpose_and_origin(monkeypatch):
     )
     assert secrets.resolve_secret_reference("${BOUND_KEY}", **_upstream_options()) == "bound-value"
     assert secrets.resolve_secret_reference("bound-key", **_upstream_options()) == "bound-value"
-    # Other origin, other purpose, and hosts outside the startup allowlist are refused.
+    # Other origins and purposes are refused.
     for options in (
         _upstream_options("https://evil.example.net"),
         {**_upstream_options(), "purpose": "prompt_optimizer"},
-        {**_upstream_options(), "host_allowlist": "other.example.com"},
         _upstream_options("http://api.example.com"),
     ):
         with pytest.raises(secrets.SecretRegistryError):

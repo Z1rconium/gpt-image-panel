@@ -3,7 +3,6 @@ import ipaddress
 import socket
 from urllib.parse import urlparse, urlsplit, urlunsplit
 
-from . import settings as config
 
 
 def _get_private_ip_ranges() -> tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...]:
@@ -25,7 +24,6 @@ def _get_private_ip_ranges() -> tuple[ipaddress.IPv4Network | ipaddress.IPv6Netw
 
 
 PRIVATE_RANGES = _get_private_ip_ranges()
-R2_ENDPOINT_HOST_SUFFIX = ".r2.cloudflarestorage.com"
 
 BLOCKED_HOSTNAMES = {
     "localhost",
@@ -44,23 +42,13 @@ def split_allowlist(value: str | None, *, separators: str = ",;") -> list[str]:
     """Split an allowlist into stripped, non-empty entries.
 
     The single allowlist splitter. ``separators`` selects which characters
-    separate entries; callers that historically treated a character as part of an
-    entry (e.g. the upstream host allowlist is comma-only) pass a narrower set so
-    accept/reject behavior is unchanged.
+    separate entries; callers may pass a narrower set when a character is part
+    of an entry.
     """
     text = str(value or "")
     if ";" in separators:
         text = text.replace(";", ",")
     return [part.strip() for part in text.split(",") if part.strip()]
-
-
-def normalize_host_entry(entry: str) -> str:
-    """Normalize one host allowlist entry (lowercase, no trailing root dot)."""
-    return entry.strip().lower().rstrip(".")
-
-
-def _parse_host_allowlist(allowlist: str | None) -> list[str]:
-    return [normalize_host_entry(host) for host in split_allowlist(allowlist, separators=",")]
 
 
 def _ip_literal(hostname: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
@@ -149,8 +137,6 @@ def _validate_url_base(
     missing_hostname_error: str,
     blocked_hostname_error: str,
     private_ip_error: str,
-    allowlist: str = "",
-    allowlist_error_prefix: str = "Hostname",
     reject_userinfo: bool = False,
     reject_query_fragment: bool = False,
 ) -> None:
@@ -173,17 +159,10 @@ def _validate_url_base(
     if hostname in BLOCKED_HOSTNAMES:
         raise ValueError(blocked_hostname_error.format(hostname=hostname))
 
-    if allowlist:
-        allowed_hosts = _parse_host_allowlist(allowlist)
-        if hostname not in allowed_hosts:
-            raise ValueError(
-                f"{allowlist_error_prefix} '{hostname}' is not in the allowlist. Allowed: {', '.join(allowed_hosts)}"
-            )
-
     _validate_public_dns_resolution(hostname, private_ip_error=private_ip_error)
 
 
-def validate_upstream_url(url: str, allowlist: str, *, allow_query: bool = False) -> None:
+def validate_upstream_url(url: str, *, allow_query: bool = False) -> None:
     if allow_query and urlsplit(url).fragment:
         raise ValueError("Upstream request URL must not include fragments")
     _validate_url_base(
@@ -193,7 +172,6 @@ def validate_upstream_url(url: str, allowlist: str, *, allow_query: bool = False
         missing_hostname_error="Invalid URL: no hostname",
         blocked_hostname_error="Hostname '{hostname}' is not allowed",
         private_ip_error="Hostname '{hostname}' resolves to private/internal IP(s): {resolved_info}",
-        allowlist=allowlist,
         reject_userinfo=True,
         reject_query_fragment=not allow_query,
     )
@@ -227,19 +205,8 @@ def normalize_upstream_base_url(url: str | None) -> str:
     return urlunsplit(("https", host, path, "", ""))
 
 
-def _is_default_r2_endpoint_hostname(hostname: str) -> bool:
-    normalized = hostname.lower().rstrip(".")
-    account_label = normalized.removesuffix(R2_ENDPOINT_HOST_SUFFIX)
-    return (
-        bool(account_label)
-        and normalized.endswith(R2_ENDPOINT_HOST_SUFFIX)
-        and "." not in account_label
-    )
-
-
 def validate_r2_endpoint_url(
     url: str,
-    allowlist: str | None = None,
     *,
     resolve_dns: bool = True,
 ) -> None:
@@ -265,16 +232,6 @@ def validate_r2_endpoint_url(
 
     if _ip_literal(hostname) is not None:
         raise ValueError("R2 endpoint URL must use a hostname, not an IP address")
-
-    allowed_hosts = _parse_host_allowlist(allowlist)
-    if not _is_default_r2_endpoint_hostname(hostname) and hostname not in allowed_hosts:
-        allowed_message = ", ".join(allowed_hosts) if allowed_hosts else "none"
-        raise ValueError(
-            "R2 endpoint hostname "
-            f"'{hostname}' must be a Cloudflare R2 hostname "
-            f"(*{R2_ENDPOINT_HOST_SUFFIX}) or be listed in "
-            f"R2_ENDPOINT_HOST_ALLOWLIST. Allowed: {allowed_message}"
-        )
 
     if resolve_dns:
         _validate_public_dns_resolution(
@@ -315,7 +272,6 @@ def normalize_r2_endpoint_url(url: str | None) -> str:
     # Pydantic validators and synchronous settings normalization must not do DNS.
     validate_r2_endpoint_url(
         normalized,
-        config.R2_ENDPOINT_HOST_ALLOWLIST,
         resolve_dns=False,
     )
     return normalized
@@ -332,7 +288,7 @@ def validate_image_url(url: str) -> None:
     )
 
 
-def validate_webhook_url(url: str, allowlist: str = "") -> None:
+def validate_webhook_url(url: str) -> None:
     _validate_url_base(
         url,
         allowed_schemes={"https"},
@@ -340,28 +296,25 @@ def validate_webhook_url(url: str, allowlist: str = "") -> None:
         missing_hostname_error="Invalid webhook URL: no hostname",
         blocked_hostname_error="Webhook hostname '{hostname}' is not allowed",
         private_ip_error="Webhook hostname '{hostname}' resolves to private/internal IP(s): {resolved_info}",
-        allowlist=allowlist,
-        allowlist_error_prefix="Webhook hostname",
     )
 
 
-async def validate_upstream_url_async(url: str, allowlist: str, *, allow_query: bool = False) -> None:
-    await asyncio.to_thread(validate_upstream_url, url, allowlist, allow_query=allow_query)
+async def validate_upstream_url_async(url: str, *, allow_query: bool = False) -> None:
+    await asyncio.to_thread(validate_upstream_url, url, allow_query=allow_query)
 
 
 async def validate_r2_endpoint_url_async(
     url: str,
-    allowlist: str | None = None,
 ) -> None:
-    await asyncio.to_thread(validate_r2_endpoint_url, url, allowlist)
+    await asyncio.to_thread(validate_r2_endpoint_url, url)
 
 
 async def validate_image_url_async(url: str) -> None:
     await asyncio.to_thread(validate_image_url, url)
 
 
-async def validate_webhook_url_async(url: str, allowlist: str = "") -> None:
-    await asyncio.to_thread(validate_webhook_url, url, allowlist)
+async def validate_webhook_url_async(url: str) -> None:
+    await asyncio.to_thread(validate_webhook_url, url)
 
 
 def normalize_webhook_url(url: str | None) -> str:

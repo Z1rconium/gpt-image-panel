@@ -347,7 +347,7 @@ async def probe_upstream_endpoint(
     api_key: str = "",
 ) -> dict[str, Any]:
     upstream_url = build_upstream_url(api_url, api_path)
-    await ssrf.validate_upstream_url_async(upstream_url, config.UPSTREAM_HOST_ALLOWLIST)
+    await ssrf.validate_upstream_url_async(upstream_url)
 
     headers = {"User-Agent": config.UPSTREAM_USER_AGENT}
     if api_key:

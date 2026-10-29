@@ -89,12 +89,12 @@ images/  data/      # 运行时输出（生成）
 cp .env.example .env
 # 修改 .env：至少设置 ACCESS_KEY，并按需填默认上游 API
 # 此示例通过回环地址使用 HTTP，需要禁用 Secure cookie
-ACCESS_COOKIE_SECURE=false docker-compose up -d --force-recreate
+ACCESS_COOKIE_SECURE=false ACCESS_KEY_COOKIE_NAME=gpt_image_access docker-compose up -d --force-recreate
 ```
 
 打开 `http://127.0.0.1:9090`。
 
-此本地 HTTP 示例需要设置 `ACCESS_COOKIE_SECURE=false`；通过 HTTPS 提供服务时应保持为 `true`。默认必须设置 `ACCESS_KEY`。仅本地测试时，清空 `ACCESS_KEY` 并设置 `ALLOW_UNAUTHENTICATED=true`，这会让所有非 health API 都不需要鉴权。如需为解锁流程额外启用 Cloudflare Turnstile 人机验证，在 `.env` 中设置 `TURNSTILE_ENABLED=true` 以及来自 Cloudflare 控制台的 `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY`；验证组件会出现在 Unlock 按钮下方，每次使用访问密钥登录都需要有效的 token。
+此本地 HTTP 示例需要设置 `ACCESS_COOKIE_SECURE=false` 和 `ACCESS_KEY_COOKIE_NAME=gpt_image_access`；通过 HTTPS 提供服务时应保持为 `true`。默认必须设置 `ACCESS_KEY`。仅本地测试时，清空 `ACCESS_KEY` 并设置 `ALLOW_UNAUTHENTICATED=true`，这会让所有非 health API 都不需要鉴权。如需为解锁流程额外启用 Cloudflare Turnstile 人机验证，在 `.env` 中设置 `TURNSTILE_ENABLED=true` 以及来自 Cloudflare 控制台的 `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY`；验证组件会出现在 Unlock 按钮下方，每次使用访问密钥登录都需要有效的 token。
 
 ### Docker
 
@@ -104,6 +104,7 @@ docker run -d --name gpt-image-panel \
   -p 127.0.0.1:9090:9090 \
   -e ACCESS_KEY=change-me \
   -e ACCESS_COOKIE_SECURE=false \
+  -e ACCESS_KEY_COOKIE_NAME=gpt_image_access \
   -v $(pwd)/images:/app/images \
   -v $(pwd)/data:/app/data \
   gpt-image-panel
@@ -170,10 +171,9 @@ Caddy 自动 HTTPS 要求域名解析到服务器，并且入站 `80`、`443` �
 
 ### 常见部署问题排查
 
-1. **容器启动闪退并报错 `SecretRegistryError: credentials require a non-empty startup host allowlist`** — 在 `.env` 中配置了 `DEFAULT_API_KEY`，但未配置 `UPSTREAM_HOST_ALLOWLIST`。在 `.env` 中将 `DEFAULT_API_URL` 对应的纯域名填入 `UPSTREAM_HOST_ALLOWLIST`（例如 `UPSTREAM_HOST_ALLOWLIST=api.openai.com` 或 `UPSTREAM_HOST_ALLOWLIST=cf.api.fan`）。
 2. **浏览器访问提示 `400 Bad Request: Host is not allowed`** — 请求的 `Host` 头未在 `.env` 的 `ALLOWED_HOSTS` 或 `PUBLIC_ORIGIN` 白名单中（常见于域名拼写错误，或修改 `.env` 后未重新创建容器）。确保两者与域名完全一致，修改 `.env` 后必须执行 `docker-compose up -d --force-recreate` 重新创建容器生效。
-3. **直连 HTTP（无反代/未配 SSL）环境下无法登录或陷入登录循环** — 默认 `ACCESS_COOKIE_SECURE=true` 要求必须走 HTTPS，纯 HTTP 下浏览器会拒绝保存/携带 Secure Cookie。纯 HTTP 直连测试时，在 `.env` 中设置 `ACCESS_COOKIE_SECURE=false`；部署 HTTPS 反代后再改为 `true`。
-4. **网页端点击「保存预设」无法保存、侧边栏不关闭** — 默认禁止直接在 Web 界面向数据库持久化明文 API Key。若要在网页端直接粘贴明文 Key，需在 `.env` 中设置 `ALLOW_PLAINTEXT_SECRETS=true` 并重启容器。若修改了预设中的 API URL，新域名必须同时加入 `.env` 的 `UPSTREAM_HOST_ALLOWLIST` 白名单。
+3. **直连 HTTP（无反代/未配 SSL）环境下无法登录或陷入登录循环** — 默认 `ACCESS_COOKIE_SECURE=true` 要求必须走 HTTPS，纯 HTTP 下浏览器会拒绝保存/携带 Secure Cookie。纯 HTTP 直连测试时，在 `.env` 中设置 `ACCESS_COOKIE_SECURE=false` 和 `ACCESS_KEY_COOKIE_NAME=gpt_image_access`；部署 HTTPS 反代后再改为 `true`。
+4. **保存预设失败** — 使用绑定了相同用途和来源的已配置密钥引用，或按需启用明文密钥存储。
 
 ### 本地开发
 
@@ -204,35 +204,34 @@ ALLOW_UNAUTHENTICATED=true .venv/bin/granian --interface asgi backend.app.main:a
 
 ## 配置
 
-大多数运行时配置在 `.env.example`。API 预设、提示词优化器、R2 备份和部分应用/运行时配置也可通过 Web Settings / Overall Config 管理。关键变量：
+所有受支持的环境变量及默认值见[完整配置参考](CONFIGURATION.md)。
+
+已有部署：出站主机白名单变量和已移除的调优覆盖不再生效。旧数据库记录会保留以便回滚；恢复旧版程序可恢复原行为。请参考新的 `.env.example` 并重新创建容器。URL 公网检查及密钥用途／来源绑定仍然生效。
+
+Compose 仅向容器传入 `docker-compose.yml` 中列出的变量。如果密钥注册表引用其他环境变量，请将该变量明确添加到服务环境中（例如通过 Compose 覆盖文件）。
+
+常用运行时配置见 `.env.example`。API 预设、提示词优化器、R2 备份和部分应用/运行时配置也可通过 Web Settings / Overall Config 管理。关键变量：
 
 | 变量 | 用途 |
 | --- | --- |
 | `ACCESS_KEY` / `ALLOW_UNAUTHENTICATED` / `TURNSTILE_*` | 访问密钥（除非清空并设置 `ALLOW_UNAUTHENTICATED=true`，否则必填）；`TURNSTILE_*` 可选 Cloudflare Turnstile 人机验证。 |
 | `DEFAULT_API_URL` / `DEFAULT_API_KEY` / `DEFAULT_API_PATH` / `DEFAULT_RESPONSES_MODEL` | 默认上游预设。密钥建议用 `${OPENAI_API_KEY}` 这类 env ref。 |
-| `UPSTREAM_HOST_ALLOWLIST` | 配置上游 API key 时必填；列出允许的上游域名。 |
 | `PUBLIC_ORIGIN` / `ALLOWED_HOSTS` | 反向代理 Host/CSRF 加固；必须与部署域名一致。 |
 | `MAX_ACTIVE_GENERATE_JOBS` / `MAX_QUEUED_GENERATE_JOBS` | 全局运行中 image unit 上限与队列容量（超出后新任务返回 `429`）。 |
-| `IMAGE_JOB_UNIT_LEASE_SECONDS` / `IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS` / `IMAGE_JOB_UNIT_MAX_ATTEMPTS` | 运行中 image unit 的 SQLite 租约（崩溃检测延迟）、续租周期与最大领取次数。 |
-| `GRANIAN_WORKERS` / `GRANIAN_*` | Worker 进程数与生产运行时调优；应等于实际进程数。 |
-| `VISION_PREVIEW_MEMORY_BUDGET_MB` | 视觉预览解码预算：默认每进程 **256 MiB**，范围 **32–16384**。Agent 超出保守内存估算预算的图片跳过视觉预览，文字引用、原图及生成/编辑仍可用。 |
-| `IMAGE_CPU_CONCURRENCY` / `FILE_IO_CONCURRENCY` / `UPSTREAM_MEMORY_BUDGET_MB` / `MAX_UPSTREAM_IMAGE_BYTES_PER_TASK_MB` | 解码、文件 I/O 并发与上游图片内存的有界预算。 |
-| `DB_EXECUTOR_WORKERS` / `SQLITE_BUSY_*` / `SQLITE_CRITICAL_BUSY_*` / `SQLITE_SLOW_TXN_WARN_MS` | SQLite 执行器大小与 busy 重试预算；关键的 claim/lease/finalize 写入使用更大预算。 |
-| `IMAGES_DIR` / `MASKS_DIR` / `THUMBNAILS_DIR` / `THUMBNAIL_*` / `DATA_DIR` / `DATABASE_FILE` / `LOG_DIR` / `LOG_LEVEL` / `LOG_RETENTION_HOURS` | 存储路径、缩略图控制与日志（轮转文件默认保留 24 小时）。 |
+| `GRANIAN_WORKERS` | Worker 进程数与生产运行时调优；应等于实际进程数。 |
+| `IMAGES_DIR` / `MASKS_DIR` / `THUMBNAILS_DIR` / `DATA_DIR` / `DATABASE_FILE` / `LOG_DIR` / `LOG_LEVEL` / `LOG_RETENTION_HOURS` | 存储路径、缩略图控制与日志（轮转文件默认保留 24 小时）。 |
 | `MASK_PASTE_BACK_DEFAULT` | 是否默认把蒙版编辑结果贴回未编辑的原图区域；可在单次编辑请求中覆盖。 |
-| `MAX_SSE_SUBSCRIBERS_GLOBAL` / `MAX_SSE_SUBSCRIBERS_PER_IP` / `SSE_CONNECTION_TTL_SECONDS` | SSE slot 限制和最大连接生命周期。 |
 | `PROMPT_OPTIMIZER_*` | 可选服务端提示词优化器配置。 |
-| `AI_ASSISTANT_*` | AI Assistant 默认启用（设置 `AI_ASSISTANT_ENABLED=false` 关闭）；API URL、密钥、模型、超时、allowlist 复用 `PROMPT_OPTIMIZER_*`。 |
-| `AGENT_*` | Agent 对话模式的各项上限；模式本身在“设置 → AI Assistant”中开启，复用 `PROMPT_OPTIMIZER_*` 端点。 |
-| `R2_*` | 可选 Cloudflare R2 Gallery 备份同步；自定义 endpoint host 需要配置 `R2_ENDPOINT_HOST_ALLOWLIST`。 |
+| `AI_ASSISTANT_*` | AI Assistant 默认启用（设置 `AI_ASSISTANT_ENABLED=false` 关闭）；API URL、密钥、模型、超时 复用 `PROMPT_OPTIMIZER_*`。 |
+| `R2_*` | 可选的 R2 兼容图库备份；端点须使用公网 HTTPS 主机名。 |
 | `NODEIMAGE_API_KEY` | 可选 NodeImage API key，用于服务端 Gallery 图片上传。 |
 | `IMAGE_COST_RATES_JSON` | 覆盖/新增费用估算使用的内置单模型美元费率。 |
-| `APP_VERSION` / `GITHUB_REPO` / `ENABLE_VERSION_CHECK` / `VERSION_CHECK_CACHE_SECONDS` | 版本显示与最新 release 检查。 |
+| `APP_VERSION` / `GITHUB_REPO` / `ENABLE_VERSION_CHECK` | 版本显示与最新 release 检查。 |
 | `ENABLE_NGINX_ACCEL_REDIRECT` / `PUBLIC_IMAGE_BASE_URL` / `PUBLIC_THUMBNAIL_BASE_URL` | 可选 nginx/CDN 图片字节服务行为。 |
 | `ENABLE_METRICS` | 启用 JSON/Prometheus metrics 接口。 |
 | `SECRET_REGISTRY_JSON` / `ALLOW_PLAINTEXT_SECRETS` / `ALLOW_LEGACY_ENV_REFS` | 密钥处理：`${ENV_VAR}` 引用必须在 `SECRET_REGISTRY_JSON` 中声明；明文 secret 写入 SQLite 需 `ALLOW_PLAINTEXT_SECRETS=true`；`ALLOW_LEGACY_ENV_REFS=true` 是弃用的迁移开关。 |
 
-配置解析分三层：环境变量（进程启动时读取一次）；通过 `/api/settings/overall-config` 持久化到 SQLite 的 Overall Config override（可热更新的键立即生效，`restart_required` 的键下次启动生效）；标记为 `exposed_in_settings` 的名称（API 预设、提示词优化器、AI Assistant、R2、NodeImage），一旦通过 Web Settings 保存就从 SQLite 读取——此后同名环境变量不再生效。少数设置（如 `DB_EXECUTOR_WORKERS`、`AI_ASSISTANT_MAX_CONCURRENCY`、`IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS`）由其他值派生并自动重算。已知限制：运行时修改 `DB_EXECUTOR_WORKERS`、`IMAGE_CPU_CONCURRENCY` 或 `FILE_IO_CONCURRENCY` 不会调整已创建的线程池。
+配置解析分三层：环境变量（进程启动时读取一次）；通过 `/api/settings/overall-config` 持久化到 SQLite 的 Overall Config override（可热更新的键立即生效，`restart_required` 的键下次启动生效）；标记为 `exposed_in_settings` 的名称（API 预设、提示词优化器、AI Assistant、R2、NodeImage），一旦通过 Web Settings 保存就从 SQLite 读取——此后同名环境变量不再生效。少数设置（如 `DB_EXECUTOR_WORKERS`、`AI_ASSISTANT_MAX_CONCURRENCY`、`IMAGE_JOB_UNIT_LEASE_RENEW_SECONDS`）由其他值派生并自动重算。
 
 开启 `ENABLE_METRICS=true` 后，`/api/metrics` 提供 SQLite 协调调优诊断：`sqlite.write_txn`、`sqlite.write_lock_wait_ms`、`sqlite.write_txn_hold_ms`（写事务速率与锁等待/持有时间，p50–p99/max——随着 `MAX_ACTIVE_GENERATE_JOBS x GRANIAN_WORKERS` 增长应关注 p95）；`sqlite.busy`、`sqlite.busy_retries`（锁竞争下失败/重试的加锁次数）；`image_jobs.lease_renewed`、`lease_lost`、`unit_reclaimed`、`unit_exhausted`（image unit 租约健康度；`lease_lost` 应保持为零）。
 
@@ -266,7 +265,7 @@ ALLOW_UNAUTHENTICATED=true .venv/bin/granian --interface asgi backend.app.main:a
 
 文生图使用 `/v1/images/generations`，上传参考图或选择图库图片后使用 multipart `/v1/images/edits`。两个变体均支持 `auto/low/medium/high/xhigh/max` 质量；旧模型和自定义模型沿用原有质量选项，切换至不支持当前质量的模型时恢复为 `auto`。
 
-- 生成、编辑、助手和提示词收藏最多支持 32,000 个 Unicode 字符（提示词优化器共用同一上限，除非明确配置了 `PROMPT_OPTIMIZER_MAX_OUTPUT_CHARS`）。
+- 生成、编辑、助手和提示词收藏最多支持 32,000 个 Unicode 字符（提示词优化器共用同一上限）。
 - 尺寸为 `auto` 或 `宽x高`：边长须是 16 的倍数且不超过 3840，宽高比不超过 3:1，总像素为 655,360–8,294,400；超过 2560×1440 属于实验性支持。
 - 输出支持 PNG/JPEG/WebP；压缩参数（0–100，默认 100）仅用于 JPEG/WebP。透明背景需要 PNG/WebP，JPEG 配合透明背景会自动切换为 PNG。
 - 2.5 始终返回 Base64：面板保存图片并提供本地 URL，忽略旧预设继承的 `response_format`；其他模型沿用原有返回格式行为。

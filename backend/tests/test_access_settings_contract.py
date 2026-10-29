@@ -1609,28 +1609,10 @@ def test_r2_backup_settings_rejects_private_endpoint_before_probe(client, monkey
     assert "R2 endpoint URL must use a hostname" in save.text
 
 
-def test_r2_backup_settings_allows_custom_endpoint_only_with_admin_allowlist(
+def test_r2_backup_settings_allows_public_custom_endpoint(
     client,
     monkeypatch,
 ):
-    monkeypatch.setattr(config, "R2_ENDPOINT_HOST_ALLOWLIST", "")
-    blocked = client.post(
-        "/api/settings/r2/health",
-        json={
-            "enabled": True,
-            "endpoint_url": "https://storage.example.com",
-            "bucket_name": "image-backups",
-            "region": "auto",
-            "key_prefix": "gallery/",
-            "access_key_id": "${TEST_R2_ACCESS_KEY_ID}",
-            "secret_access_key": "${TEST_R2_SECRET_ACCESS_KEY}",
-            "use_credentials": True,
-        },
-    )
-    assert blocked.status_code == 422
-    assert "R2_ENDPOINT_HOST_ALLOWLIST" in blocked.text
-
-    monkeypatch.setattr(config, "R2_ENDPOINT_HOST_ALLOWLIST", "storage.example.com")
     monkeypatch.setattr(
         "backend.app.core.validators.resolve_hostname",
         lambda hostname: (hostname, ["93.184.216.34"]),
@@ -2643,8 +2625,7 @@ def test_overall_config_reports_derived_defaults_it_actually_uses(client):
     items = {item["name"]: item for item in body["items"]}
 
     for name in ("IMPORT_ARCHIVE_MAX_MB", "MAX_PENDING_EDIT_SOURCE_MB"):
-        assert items[name]["value"] == getattr(config, name)
-        assert items[name]["source"] == "default"
+        assert name not in items
 
 
 def test_api_settings_reload_is_skipped_while_a_write_is_pending(client):

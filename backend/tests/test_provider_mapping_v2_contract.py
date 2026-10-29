@@ -145,17 +145,18 @@ def test_task_id_is_encoded_as_a_single_path_segment():
 
 def test_provider_request_query_keeps_ssrf_checks_and_strict_base_urls(monkeypatch):
     monkeypatch.setattr(validators, "resolve_hostname", lambda host: (host, ["8.8.8.8"]))
-    monkeypatch.setattr(async_provider.config, "UPSTREAM_HOST_ALLOWLIST", "queue.example.com")
     url = "https://queue.example.com/submit?prompt=fox&model=image"
     assert asyncio.run(async_provider._validated_upstream_url(url)) == url
     with pytest.raises(ValueError, match="query"):
-        validators.validate_upstream_url(url, "queue.example.com")
+        validators.validate_upstream_url(url)
     with pytest.raises(ValueError, match="query"):
         validators.normalize_upstream_base_url(url)
     for rejected in ("https://queue.example.com/path?q=x#fragment", "https://user:key@queue.example.com/path?q=x",
-                     "http://queue.example.com/path?q=x", "https://evil.example.com/path?q=x"):
+                     "http://queue.example.com/path?q=x"):
         with pytest.raises(async_provider.UpstreamApiError):
             asyncio.run(async_provider._validated_upstream_url(rejected))
+    with pytest.raises(async_provider.UpstreamApiError, match="same origin"):
+        asyncio.run(async_provider._validated_followup_url("https://evil.example.com/path", "https://queue.example.com", "poll"))
     monkeypatch.setattr(validators, "resolve_hostname", lambda host: (host, ["127.0.0.1"]))
     with pytest.raises(async_provider.UpstreamApiError, match="private"):
         asyncio.run(async_provider._validated_upstream_url(url))

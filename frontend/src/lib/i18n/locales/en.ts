@@ -214,7 +214,7 @@ const en = {
     aiAssistantHint: 'Server-side text, vision, parameter, and diagnosis tools.',
     aiAssistantEnabled: 'Enabled',
     aiAssistantVisionModel: 'Assistant vision engine',
-    aiAssistantSharedConfigHint: 'Reuses the Prompt Optimizer API URL, key, text model, route, timeout, and host allowlist. Only the vision model stays separate here.',
+    aiAssistantSharedConfigHint: 'Reuses the Prompt Optimizer API URL, key, text model, route, and timeout. Only the vision model stays separate here.',
     aiAssistantHealthCheck: 'Test AI Assistant',
     aiAssistantHealthChecking: 'Testing...',
     agentMode: 'Agent conversation mode',
