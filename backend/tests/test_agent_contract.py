@@ -416,11 +416,19 @@ def test_agent_cancel_does_not_wait_for_the_poll_interval(client, monkeypatch):
 def test_agent_cancel_before_the_watcher_starts_is_still_seen(client, monkeypatch):
     enable_agent(client)
     monkeypatch.setattr(agent_run_lifecycle, "CANCEL_POLL_SECONDS", 60.0)
-    release = threading.Event()
+    watcher_started = threading.Event()
+    release_watcher = threading.Event()
+    original_watcher = agent_run_lifecycle._cancel_watcher
+
+    async def held_watcher(run, main):
+        watcher_started.set()
+        while not release_watcher.is_set():
+            await asyncio.sleep(0.02)
+        await original_watcher(run, main)
+
+    monkeypatch.setattr(agent_run_lifecycle, "_cancel_watcher", held_watcher)
 
     async def held(kwargs):
-        while not release.is_set():
-            await asyncio.sleep(0.02)
         while True:
             await asyncio.sleep(0.05)
         yield  # pragma: no cover
@@ -428,9 +436,11 @@ def test_agent_cancel_before_the_watcher_starts_is_still_seen(client, monkeypatc
     install_model(monkeypatch, [held])
     conversation_id = new_conversation(client)
     accepted = start_turn(client, conversation_id, "go")
-    # The flag is already set when the runner is still starting up.
-    agent_repo.request_turn_cancel(accepted["turn_id"])
-    release.set()
+    assert watcher_started.wait(5)
+    try:
+        assert agent_repo.request_turn_cancel(accepted["turn_id"])
+    finally:
+        release_watcher.set()
     assert wait_turn(client, accepted["turn_id"], timeout=5)["status"] == "cancelled"
 
 
