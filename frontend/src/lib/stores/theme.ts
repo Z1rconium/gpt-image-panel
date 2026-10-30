@@ -1,4 +1,4 @@
-import { browser } from '$app/environment';
+import { BROWSER as browser } from 'esm-env';
 import { writable } from 'svelte/store';
 
 export type Theme = 'light' | 'dark';

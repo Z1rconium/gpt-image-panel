@@ -1,4 +1,4 @@
-import { browser } from '$app/environment';
+import { BROWSER as browser } from 'esm-env';
 import { get, writable } from 'svelte/store';
 import en from './locales/en';
 import type { Language, Translation } from './types';

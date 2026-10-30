@@ -41,7 +41,10 @@ const BUDGETS = {
   // add 505 B gzip over v1.7.6 (13,791 -> 14,296 B). This check includes
   // lazy component styles as well as the global stylesheet; Marked stays
   // in the lazy Agent chunk, and homepage JS remains within 120 KiB.
-  mainCssGzipBytes: 14.0 * 1024,
+  // 14.0 -> 14.5 KiB: the Vite 8 / SvelteKit 3 toolchain emits +550 B gzip of
+  // CSS for the same sources (14,222 -> 14,772 B, measured before/after the
+  // upgrade); homepage JS drops by about 16 KiB gzip in the same upgrade.
+  mainCssGzipBytes: 14.5 * 1024,
   oglGzipBytes: 39.4 * 1024,
   oglReduction: 0.2
 };

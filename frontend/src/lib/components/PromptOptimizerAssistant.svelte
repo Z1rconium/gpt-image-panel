@@ -1,6 +1,6 @@
 <script lang="ts">
   import { dialogIn, dialogOut, overlayIn, overlayOut } from '$lib/motion';
-  import { browser } from '$app/environment';
+  import { BROWSER as browser } from 'esm-env';
   import { dialog } from '$lib/actions/dialog';
   import { onDestroy, onMount, untrack } from 'svelte';
   import { promptForm } from '$lib/features/workspace/formState.svelte';

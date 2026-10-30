@@ -1,7 +1,7 @@
 <script lang="ts">
   import { dialogIn, dialogOut, overlayIn, overlayOut } from '$lib/motion';
   import { onDestroy, tick } from 'svelte';
-  import { browser } from '$app/environment';
+  import { BROWSER as browser } from 'esm-env';
   import { dialog } from '$lib/actions/dialog';
   import { language, t, toggleLanguage } from '$lib/i18n';
 
