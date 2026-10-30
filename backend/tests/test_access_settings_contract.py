@@ -778,6 +778,30 @@ def test_host_allowlist_blocks_unknown_host_even_with_same_origin_fetch_metadata
     assert resp.json()["detail"] == "Host is not allowed"
 
 
+def test_host_allowlist_lets_the_loopback_healthcheck_through(tmp_path):
+    _configure_runtime(tmp_path, access_key="secret", allow_unauthenticated=False)
+    config.ALLOWED_HOSTS = "panel.example.com"
+
+    with _test_client(client=("127.0.0.1", 50000)) as client:
+        health = client.get("/health", headers={"Host": "localhost:9090"})
+        other = client.get("/api/access/status", headers={"Host": "localhost:9090"})
+
+    assert health.status_code == 200
+    assert other.status_code == 400
+    assert other.json()["detail"] == "Host is not allowed"
+
+
+def test_host_allowlist_still_blocks_a_remote_health_request(tmp_path):
+    _configure_runtime(tmp_path, access_key="secret", allow_unauthenticated=False)
+    config.ALLOWED_HOSTS = "panel.example.com"
+
+    with _test_client(client=("203.0.113.9", 50000)) as client:
+        resp = client.get("/health", headers={"Host": "localhost:9090"})
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "Host is not allowed"
+
+
 def test_host_allowlist_blocks_untrusted_forwarded_host(client):
     config.PUBLIC_ORIGIN = "https://panel.example.com"
     config.TRUST_PROXY_HEADERS = True

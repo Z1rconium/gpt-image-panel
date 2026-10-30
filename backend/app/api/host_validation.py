@@ -4,6 +4,7 @@ This is the trust boundary for the ``Host``/``Origin``/``X-Forwarded-*``
 headers; see ``.trellis/spec/backend/auth-and-security.md``.
 """
 
+import ipaddress
 import re
 from urllib.parse import urlsplit
 
@@ -166,9 +167,23 @@ def _first_forwarded_host(request: Request) -> str | None:
     return forwarded_host.split(",", 1)[0].strip()
 
 
+def _is_loopback_health_probe(request: Request) -> bool:
+    """The container healthcheck calls localhost:<port>/health from inside."""
+    if request.url.path != "/health":
+        return False
+    peer = request.client.host if request.client else ""
+    try:
+        return ipaddress.ip_address(peer).is_loopback
+    except ValueError:
+        return False
+
+
 def request_host_allowed(request: Request) -> tuple[bool, str]:
     if _has_invalid_public_origin():
         return False, "PUBLIC_ORIGIN is invalid"
+
+    if _is_loopback_health_probe(request):
+        return True, ""
 
     host = normalize_host(request.headers.get("host") or request.url.netloc)
     if not host or not _host_allowed(host):
