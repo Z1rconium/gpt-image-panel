@@ -177,8 +177,9 @@ async def spool_limited_response(
 
     encoding = get_response_charset(response)
     try:
-        preview_text = bytes(preview).decode(encoding)
-    except (LookupError, UnicodeDecodeError) as e:
+        # The preview is cut at a fixed byte length and may end mid-character.
+        preview_text = bytes(preview).decode(encoding, errors="replace")
+    except LookupError as e:
         path.unlink(missing_ok=True)
         raise UpstreamApiError(f"{label} is not valid {encoding} text") from e
     return path, preview_text, encoding

@@ -226,3 +226,55 @@ def test_consume_streaming_image_response_surfaces_http_error_status():
                 resp, "/v1/images/generations", None, None
             )
         )
+
+
+# ── spool_limited_response / parse_upstream_json_response ────────
+
+
+def _multibyte_json_body() -> bytes:
+    # Echoed non-ASCII prompt pushes a character across the 2048-byte preview cut.
+    payload = {"data": [{"revised_prompt": "身" * 751, "url": "https://example.test/a.png"}]}
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    assert body[2047] & 0xC0 == 0x80  # cut lands mid-character
+    return body
+
+
+def test_spool_limited_response_tolerates_preview_cut_mid_character():
+    resp = _FakeResponse(
+        [_multibyte_json_body()], headers={"Content-Type": "application/json"}
+    )
+    path, preview, encoding = asyncio.run(
+        upstream_transport.spool_limited_response(
+            resp, 10 * 1024 * 1024, label="Upstream JSON response"
+        )
+    )
+    try:
+        assert encoding == "utf-8"
+        assert preview.startswith('{"data": [{"revised_prompt": "身')
+        assert path.read_bytes() == _multibyte_json_body()
+    finally:
+        path.unlink(missing_ok=True)
+
+
+def test_spool_limited_response_rejects_unknown_charset():
+    resp = _FakeResponse(
+        [b"{}"], headers={"Content-Type": "application/json"}, charset="no-such-charset"
+    )
+    with pytest.raises(UpstreamApiError, match="is not valid no-such-charset text"):
+        asyncio.run(
+            upstream_transport.spool_limited_response(
+                resp, 1024, label="Upstream JSON response"
+            )
+        )
+
+
+def test_parse_upstream_json_response_handles_multibyte_body_cut_at_preview_boundary():
+    resp = _FakeResponse(
+        [_multibyte_json_body()], headers={"Content-Type": "application/json"}
+    )
+    result, _preview = asyncio.run(
+        upstream_transport.parse_upstream_json_response(
+            resp, "/v1/images/generations", None
+        )
+    )
+    assert result["data"][0]["revised_prompt"] == "身" * 751
