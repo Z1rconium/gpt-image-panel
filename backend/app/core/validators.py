@@ -5,26 +5,6 @@ from urllib.parse import urlparse, urlsplit, urlunsplit
 
 
 
-def _get_private_ip_ranges() -> tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...]:
-    return (
-        ipaddress.IPv4Network("127.0.0.0/8"),  # loopback
-        ipaddress.IPv4Network("10.0.0.0/8"),  # private Class A
-        ipaddress.IPv4Network("172.16.0.0/12"),  # private Class B
-        ipaddress.IPv4Network("192.168.0.0/16"),  # private Class C
-        ipaddress.IPv4Network("169.254.0.0/16"),  # link-local
-        ipaddress.IPv4Network("0.0.0.0/8"),  # current network
-        ipaddress.IPv4Network("224.0.0.0/4"),  # multicast IPv4
-        ipaddress.IPv4Network("255.255.255.255/32"),  # broadcast
-        ipaddress.IPv6Network("::1/128"),  # loopback
-        ipaddress.IPv6Network("fc00::/7"),  # unique local
-        ipaddress.IPv6Network("fe80::/10"),  # link-local
-        ipaddress.IPv6Network("::ffff:0:0/96"),  # IPv4-mapped
-        ipaddress.IPv6Network("ff00::/8"),  # multicast IPv6
-    )
-
-
-PRIVATE_RANGES = _get_private_ip_ranges()
-
 BLOCKED_HOSTNAMES = {
     "localhost",
     "localhost.localdomain",
@@ -177,25 +157,27 @@ def validate_upstream_url(url: str, *, allow_query: bool = False) -> None:
     )
 
 
-def normalize_upstream_base_url(url: str | None) -> str:
+def _normalize_https_base_url(url: str | None, *, label: str, allow_empty: bool = False) -> str:
     value = str(url or "").strip()
     if not value:
-        raise ValueError("API URL must not be empty")
+        if allow_empty:
+            return ""
+        raise ValueError(f"{label} must not be empty")
 
     try:
         parsed = urlsplit(value)
         port = parsed.port
     except ValueError as e:
-        raise ValueError("API URL must include a valid port") from e
+        raise ValueError(f"{label} must include a valid port") from e
 
     if parsed.scheme.lower() != "https":
-        raise ValueError("API URL must use https://")
+        raise ValueError(f"{label} must use https://")
     if not parsed.hostname:
-        raise ValueError("API URL must include a hostname")
+        raise ValueError(f"{label} must include a hostname")
     if parsed.username is not None or parsed.password is not None:
-        raise ValueError("API URL must not include username or password")
+        raise ValueError(f"{label} must not include username or password")
     if parsed.query or parsed.fragment:
-        raise ValueError("API URL must not include query strings or fragments")
+        raise ValueError(f"{label} must not include query strings or fragments")
 
     hostname = parsed.hostname.lower()
     host = f"[{hostname}]" if ":" in hostname and not hostname.startswith("[") else hostname
@@ -203,6 +185,10 @@ def normalize_upstream_base_url(url: str | None) -> str:
         host = f"{host}:{port}"
     path = parsed.path.rstrip("/")
     return urlunsplit(("https", host, path, "", ""))
+
+
+def normalize_upstream_base_url(url: str | None) -> str:
+    return _normalize_https_base_url(url, label="API URL", allow_empty=False)
 
 
 def validate_r2_endpoint_url(
@@ -244,31 +230,9 @@ def validate_r2_endpoint_url(
 
 
 def normalize_r2_endpoint_url(url: str | None) -> str:
-    value = str(url or "").strip()
-    if not value:
+    normalized = _normalize_https_base_url(url, label="R2 endpoint URL", allow_empty=True)
+    if not normalized:
         return ""
-
-    try:
-        parsed = urlsplit(value)
-        port = parsed.port
-    except ValueError as e:
-        raise ValueError("R2 endpoint URL must include a valid port") from e
-
-    if parsed.scheme.lower() != "https":
-        raise ValueError("R2 endpoint URL must use https://")
-    if not parsed.hostname:
-        raise ValueError("R2 endpoint URL must include a hostname")
-    if parsed.username is not None or parsed.password is not None:
-        raise ValueError("R2 endpoint URL must not include username or password")
-    if parsed.query or parsed.fragment:
-        raise ValueError("R2 endpoint URL must not include query strings or fragments")
-
-    hostname = parsed.hostname.lower()
-    host = f"[{hostname}]" if ":" in hostname and not hostname.startswith("[") else hostname
-    if port is not None:
-        host = f"{host}:{port}"
-    path = parsed.path.rstrip("/")
-    normalized = urlunsplit(("https", host, path, "", ""))
     # Pydantic validators and synchronous settings normalization must not do DNS.
     validate_r2_endpoint_url(
         normalized,

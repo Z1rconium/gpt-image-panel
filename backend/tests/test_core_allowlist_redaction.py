@@ -58,10 +58,6 @@ def test_overall_config_split_list_delegates_to_shared_primitive():
 
 
 def test_allowlist_validators_reject_and_accept():
-    overall_config._validate_host_list("example.com, api.test")
-    with pytest.raises(ValueError):
-        overall_config._validate_host_list("https://example.com")
-
     overall_config._validate_ip_list("10.0.0.1, 192.168.0.0/24")
     with pytest.raises(ValueError):
         overall_config._validate_ip_list("not-an-ip")

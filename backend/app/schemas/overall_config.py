@@ -14,7 +14,7 @@ class OverallConfigItem(BaseModel):
     type: OverallConfigValueType
     group: str
     description: str
-    value: str | bool | int | float
+    value: str | bool | int
     value_masked: str
     env_value_masked: str
     override_value_masked: Optional[str] = None
@@ -37,7 +37,7 @@ class OverallConfigResponse(BaseModel):
 
 class OverallConfigUpdateItem(StrictRequestModel):
     name: str = Field(..., min_length=1, max_length=128)
-    value: str | bool | int | float | None = None
+    value: str | bool | int | None = None
     clear_override: bool = False
 
     @model_validator(mode="after")

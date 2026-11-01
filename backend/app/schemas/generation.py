@@ -79,10 +79,10 @@ class GenerateRequest(StrictRequestModel):
             self.output_compression = None
         elif self.output_compression is None:
             self.output_compression = 100
-        if self.background in {"transparent", "chroma_green", "chroma_magenta"} and self.output_format == "jpeg":
+        if self.background in {"chroma_green", "chroma_magenta"}:
             self.output_format = "png"
             self.output_compression = None
-        if self.background in {"chroma_green", "chroma_magenta"}:
+        elif self.background == "transparent" and self.output_format == "jpeg":
             self.output_format = "png"
             self.output_compression = None
         return self
@@ -143,16 +143,6 @@ class GenerateJobImage(BaseModel):
     diagnostics: list[str] = Field(default_factory=list)
     paste_back: Optional[str] = None
     paste_back_scale: Optional[float] = None
-
-
-class GeneratePreviewEvent(BaseModel):
-    job_id: str
-    unit_index: int = 0
-    call_index: int = 0
-    partial_image_index: int = 0
-    sequence: int = 0
-    mime_type: str = "image/png"
-    data_url: str
 
 
 class JobUnitRemoteSummary(BaseModel):

@@ -7,6 +7,7 @@ DEFAULT_API_PATH = "/v1/images/generations"
 RESPONSES_API_PATH = "/v1/responses"
 CHAT_COMPLETIONS_API_PATH = "/v1/chat/completions"
 ALLOWED_API_PATHS = {DEFAULT_API_PATH, RESPONSES_API_PATH, CHAT_COMPLETIONS_API_PATH}
+ASSISTANT_ALLOWED_API_PATHS = {CHAT_COMPLETIONS_API_PATH, RESPONSES_API_PATH}
 DEFAULT_IMAGE_MODEL = "gpt-image-2"
 DEFAULT_RESPONSE_FORMAT = "url"
 ALLOWED_RESPONSE_FORMATS = {"", "url", "b64_json"}
@@ -18,6 +19,11 @@ ALLOWED_PROVIDER_KINDS = {PROVIDER_KIND_OPENAI, PROVIDER_KIND_ASYNC_JSON}
 def normalize_api_path(api_path: str | None) -> str:
     value = str(api_path or config.DEFAULT_API_PATH or DEFAULT_API_PATH)
     return value if value in ALLOWED_API_PATHS else DEFAULT_API_PATH
+
+
+def normalize_assistant_api_path(value: str | None, default: str = CHAT_COMPLETIONS_API_PATH) -> str:
+    normalized = str(value or default).strip()
+    return normalized if normalized in ASSISTANT_ALLOWED_API_PATHS else default
 
 
 def default_model_for_api_path(api_path: str | None) -> str:

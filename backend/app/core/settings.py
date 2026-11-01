@@ -173,10 +173,7 @@ SQLITE_CACHE_SIZE_MB = 16
 # Memory-mapped I/O window; 0 disables mmap.
 SQLITE_MMAP_SIZE_MB = 256
 # Where transient sorts/aggregates (filter-option rebuilds) are kept.
-_SQLITE_TEMP_STORE_VALUES = {"DEFAULT", "FILE", "MEMORY", "0", "1", "2"}
-SQLITE_TEMP_STORE = 'MEMORY'
-if SQLITE_TEMP_STORE not in _SQLITE_TEMP_STORE_VALUES:
-    SQLITE_TEMP_STORE = "MEMORY"
+SQLITE_TEMP_STORE = "MEMORY"
 # WAL auto-checkpoint threshold in pages (SQLite's default is 1000); 0 disables.
 SQLITE_WAL_AUTOCHECKPOINT_PAGES = 1000
 # Interval for the background `PRAGMA optimize` refresh of planner statistics.
@@ -240,7 +237,7 @@ SSE_CONNECTION_TTL_SECONDS = 3600
 STREAMING_MAX_FRAME_MB = 8
 STREAMING_MAX_TOTAL_MB = max(
     STREAMING_MAX_FRAME_MB,
-    int("64"),
+    64,
 )
 # In-memory preview cache: one slot per (job_id, unit_index), holding only the
 # most recent partial image. Bounds are defensive backstops, not expected to

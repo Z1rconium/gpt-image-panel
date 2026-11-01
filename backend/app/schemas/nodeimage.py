@@ -17,13 +17,6 @@ class NodeImageBatchUploadItem(BaseModel):
     error: Optional[str] = None
 
 
-class NodeImageBatchUploadResponse(BaseModel):
-    requested_count: int
-    uploaded_count: int
-    failed_count: int
-    results: list[NodeImageBatchUploadItem] = Field(default_factory=list)
-
-
 class NodeImageUploadJobStatus(BaseModel):
     job_id: str
     status: Literal["queued", "running", "success", "partial_failure", "cancelled", "error"]
@@ -44,6 +37,3 @@ class NodeImageUploadJobStatus(BaseModel):
     status_url: Optional[str] = None
     events_url: Optional[str] = None
     cancel_url: Optional[str] = None
-
-
-NodeImageBatchUploadCreateResponse = NodeImageUploadJobStatus

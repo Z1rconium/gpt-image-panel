@@ -9,13 +9,14 @@ from typing import Optional, Protocol
 
 
 from . import settings as config
+from .validators import split_allowlist
 
 
 def _signature_secret() -> bytes:
     key = config.ACCESS_KEY
     if not key:
         raise RuntimeError(
-            "No signing secret available. Set ACCESS_KEY or DEFAULT_API_KEY."
+            "No signing secret available. Set ACCESS_KEY."
         )
     return key.encode("utf-8")
 
@@ -73,14 +74,8 @@ def verify_access_token(token: Optional[str]) -> Optional[datetime]:
 
 
 def _parse_trusted_proxy_networks() -> list[ipaddress.IPv4Network | ipaddress.IPv6Network]:
-    raw = config.TRUSTED_PROXY_IPS
-    if not raw:
-        return []
     networks: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
-    for entry in raw.replace(";", ",").split(","):
-        entry = entry.strip()
-        if not entry:
-            continue
+    for entry in split_allowlist(config.TRUSTED_PROXY_IPS):
         try:
             networks.append(ipaddress.ip_network(entry, strict=False))
         except ValueError:
@@ -104,20 +99,22 @@ def validate_proxy_config() -> None:
         )
 
 
-def is_trusted_proxy(client_host: str) -> bool:
-    """Return True if proxy headers should be trusted for this direct client."""
-    if not config.TRUST_PROXY_HEADERS:
-        return False
+def _is_trusted_proxy_ip(ip_str: str) -> bool:
     global _trusted_proxy_networks
     if _trusted_proxy_networks is None:
         _trusted_proxy_networks = _parse_trusted_proxy_networks()
     if not _trusted_proxy_networks:
         return False
     try:
-        addr = ipaddress.ip_address(client_host)
+        addr = ipaddress.ip_address(ip_str)
     except ValueError:
         return False
     return any(addr in net for net in _trusted_proxy_networks)
+
+
+def is_trusted_proxy(client_host: str) -> bool:
+    """Return True if proxy headers should be trusted for this direct client."""
+    return bool(config.TRUST_PROXY_HEADERS and _is_trusted_proxy_ip(client_host))
 
 
 class _ClientAddress(Protocol):
@@ -156,25 +153,8 @@ def get_client_ip(request: ClientRequest) -> str:
     return client_host
 
 
-def _is_trusted_proxy_ip(ip_str: str) -> bool:
-    global _trusted_proxy_networks
-    if _trusted_proxy_networks is None:
-        _trusted_proxy_networks = _parse_trusted_proxy_networks()
-    if not _trusted_proxy_networks:
-        return False
-    try:
-        addr = ipaddress.ip_address(ip_str)
-    except ValueError:
-        return False
-    return any(addr in net for net in _trusted_proxy_networks)
-
-
 def _allowlist_entries() -> list[str]:
-    return [
-        entry.strip()
-        for entry in config.IP_ALLOWLIST.replace(";", ",").split(",")
-        if entry.strip()
-    ]
+    return split_allowlist(config.IP_ALLOWLIST)
 
 
 def is_ip_allowed(ip_text: str) -> bool:

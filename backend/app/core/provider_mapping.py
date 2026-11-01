@@ -43,7 +43,7 @@ def parse_json_path(path: str) -> tuple[PathToken, ...]:
         match = _PATH_TOKEN.match(text, position)
         if not match:
             raise ProviderMappingError(f"unsupported path syntax: {path!r}")
-        key, index, wildcard = match.groups()
+        key, index, _ = match.groups()
         if key is not None:
             tokens.append(key)
         elif index is not None:

@@ -21,12 +21,6 @@ logger = logging.getLogger(__name__)
 
 COST_DECIMAL_PLACES = Decimal("0.000001")
 
-# Builtin USD-per-1,000,000-token rates. Sourced from OpenAI's published Images
-# API pricing (standard tier) for gpt-image-1 and the GPT Image 2 / 2.5 models;
-# verified 2026-09-15. Third-party upstreams rarely match this exactly; override
-# or extend via IMAGE_COST_RATES_JSON (see .env.example).
-PRICING_VERSION = "builtin-2026-09"
-
 # GPT Image 2 and both GPT Image 2.5 tiers share one rate card (OpenAI documents
 # "token rates match GPT Image 2" for the 2.5 models). Text output is not billed
 # because these models only output images.

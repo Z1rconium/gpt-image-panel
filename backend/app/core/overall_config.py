@@ -8,16 +8,19 @@ Names that are derived in `settings` are never given the registry's literal
 default: they follow the base setting they come from.
 """
 
+import ipaddress
 import os
 import re
 from dataclasses import dataclass
 from typing import Any, Literal
+from urllib.parse import urlsplit
 
+from . import secrets, security
 from . import settings as config
 from .validators import split_allowlist
 
 
-OverallConfigType = Literal["string", "secret", "bool", "int", "float"]
+OverallConfigType = Literal["string", "secret", "bool", "int"]
 OverallConfigSource = Literal["override", "env", "default"]
 
 MASKED_OVERALL_SECRET_VALUE = "********"
@@ -36,8 +39,7 @@ class OverallConfigSpec:
     hot_reload: bool = True
     restart_required: bool = False
     build_only: bool = False
-    min_value: float | None = None
-    max_value: float | None = None
+    min_value: int | None = None
     validator: str | None = None
     startup_only: bool = False
 
@@ -125,7 +127,6 @@ STARTUP_RUNTIME_PATH_CONFIG_NAMES = frozenset(
         "DATABASE_FILE",
         "IMAGES_DIR",
         "THUMBNAILS_DIR",
-        "THUMBNAIL_MAX_SIDE",
     }
 )
 
@@ -161,20 +162,8 @@ def coerce_value(spec: OverallConfigSpec, value: str) -> str:
         except ValueError as e:
             raise ValueError("must be an integer") from e
         if spec.min_value is not None and parsed_int < spec.min_value:
-            raise ValueError(f"must be >= {int(spec.min_value)}")
-        if spec.max_value is not None and parsed_int > spec.max_value:
-            raise ValueError(f"must be <= {int(spec.max_value)}")
+            raise ValueError(f"must be >= {spec.min_value}")
         normalized = str(parsed_int)
-    elif spec.type == "float":
-        try:
-            parsed_float = float(raw)
-        except ValueError as e:
-            raise ValueError("must be a number") from e
-        if spec.min_value is not None and parsed_float < spec.min_value:
-            raise ValueError(f"must be >= {spec.min_value:g}")
-        if spec.max_value is not None and parsed_float > spec.max_value:
-            raise ValueError(f"must be <= {spec.max_value:g}")
-        normalized = f"{parsed_float:g}"
     else:
         raise ValueError("unsupported config type")
 
@@ -188,13 +177,9 @@ def validate_named_value(spec: OverallConfigSpec, value: str) -> None:
             raise ValueError("must be formatted as owner/repo")
     elif spec.validator == "ip_list":
         _validate_ip_list(value)
-    elif spec.validator == "host_list":
-        _validate_host_list(value)
     elif spec.validator == "host_or_origin_list":
         _validate_host_or_origin_list(value)
     elif spec.validator == "origin" and value:
-        from urllib.parse import urlsplit
-
         parsed = urlsplit(value)
         if parsed.scheme not in {"http", "https"} or not parsed.hostname:
             raise ValueError("must be an http(s) origin")
@@ -207,8 +192,6 @@ def _split_list(value: str) -> list[str]:
 
 
 def _validate_ip_list(value: str) -> None:
-    import ipaddress
-
     for entry in _split_list(value):
         try:
             if "/" in entry:
@@ -219,15 +202,7 @@ def _validate_ip_list(value: str) -> None:
             raise ValueError(f"invalid IP/CIDR entry: {entry}") from e
 
 
-def _validate_host_list(value: str) -> None:
-    for entry in _split_list(value):
-        if "://" in entry or "/" in entry or "@" in entry or any(ch.isspace() for ch in entry):
-            raise ValueError(f"invalid hostname entry: {entry}")
-
-
 def _validate_host_or_origin_list(value: str) -> None:
-    from urllib.parse import urlsplit
-
     for entry in _split_list(value):
         if "://" in entry:
             parsed = urlsplit(entry)
@@ -255,8 +230,6 @@ def typed_value(spec: OverallConfigSpec, value: str) -> Any:
         return parse_bool(normalized)
     if spec.type == "int":
         return int(normalized)
-    if spec.type == "float":
-        return float(normalized)
     return normalized
 
 
@@ -296,22 +269,18 @@ def apply_rows_to_config(
         applied[spec.name] = typed_value(spec, value)
         if source in {"env", "override"}:
             explicit.add(spec.name)
-        if spec.secret or spec.name in {"ACCESS_KEY", "WEBHOOK_SIGNING_SECRET"}:
+        if spec.secret:
             secret_cache_dirty = True
 
     config.apply_overrides(applied, explicit=frozenset(explicit))
 
     if secret_cache_dirty:
         try:
-            from .secrets import invalidate_active_secret_values_cache
-
-            invalidate_active_secret_values_cache()
+            secrets.invalidate_active_secret_values_cache()
         except Exception:
             pass
 
     try:
-        import backend.app.core.security as security
-
         security._trusted_proxy_networks = None
     except Exception:
         pass

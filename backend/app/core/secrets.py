@@ -189,9 +189,6 @@ def _validate_entry(secret_id: str, raw: object) -> SecretEntry:
     )
 
 
-_ENV_REF_RE = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
-
-
 def _builtin_candidates() -> tuple[tuple[str, str, str, str], ...]:
     return (
         (
@@ -237,15 +234,15 @@ def _builtin_env_bindings() -> dict[str, list[SecretEntry]]:
     """Startup config such as DEFAULT_API_KEY=${NAME} is operator-owned: it binds NAME to its purpose/origin."""
     bindings: dict[str, list[SecretEntry]] = {}
     for secret_id, purpose, target_url, value in _builtin_candidates():
-        match = _ENV_REF_RE.match(str(value or "").strip())
-        if not match or not str(target_url or "").strip():
+        env_name = get_env_var_ref_name(value)
+        if not env_name or not str(target_url or "").strip():
             continue
         try:
             origin = canonical_origin(target_url)
         except SecretRegistryError:
             continue
-        bindings.setdefault(match.group(1), []).append(
-            SecretEntry(secret_id=secret_id, purpose=purpose, origin=origin, env_name=match.group(1))
+        bindings.setdefault(env_name, []).append(
+            SecretEntry(secret_id=secret_id, purpose=purpose, origin=origin, env_name=env_name)
         )
     return bindings
 
