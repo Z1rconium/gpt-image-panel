@@ -6,10 +6,8 @@
   import { promptForm } from '$lib/features/workspace/formState.svelte';
   import { MAX_PROMPT_CHARS, promptLength } from '$lib/utils/imageModels';
   import { plainTextInput } from '$lib/actions/plainTextInput';
-  import { apiFetch } from '$lib/api/client';
   import { language, t } from '$lib/i18n';
-  import type { PromptOptimizeResponse } from '$lib/api/types/assistant';
-  import { buildPromptOptimizeRequest } from '$lib/utils/promptOptimizer';
+  import { requestPromptOptimize } from '$lib/utils/promptOptimizer';
 
   interface Props {
     onApplyPrompt?: (prompt: string) => void;
@@ -216,25 +214,17 @@
     error = '';
 
     try {
-      const response = await apiFetch<PromptOptimizeResponse>(
-        '/api/prompt/optimize',
+      const response = await requestPromptOptimize(
         {
-          method: 'POST',
-          signal: activeRequest.signal,
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(
-            buildPromptOptimizeRequest({
-              prompt: trimmedPrompt,
-              intent: trimmedIntent,
-              targetLanguage: $language,
-              apiPath: promptForm.apiPath,
-              model: promptForm.model,
-              size: promptForm.size,
-              quality: promptForm.quality
-            })
-          )
+          prompt: trimmedPrompt,
+          intent: trimmedIntent,
+          targetLanguage: $language,
+          apiPath: promptForm.apiPath,
+          model: promptForm.model,
+          size: promptForm.size,
+          quality: promptForm.quality
         },
-        'optimizing prompt'
+        activeRequest.signal
       );
 
       if (seq !== requestSeq) return;

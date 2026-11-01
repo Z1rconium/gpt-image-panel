@@ -3,15 +3,9 @@ import {
   DirtyRegionList,
   MaskCheckpointer,
   MaskCoverageTracker,
-  MaskImportError,
   MaskUndoPatches,
-  binarizeMaskAlphaData,
-  countMarked,
-  countMarkedPixels,
   expandRect,
   normalizeSmoothPx,
-  pngHasAlphaChannel,
-  readPngSize,
   rectArea,
   rectCoversAll,
   shapeRectFor,
@@ -19,6 +13,14 @@ import {
   unionRect,
   type MaskRect
 } from '$lib/features/mask/maskDocument';
+import {
+  MaskImportError,
+  binarizeMaskAlphaData,
+  countMarked,
+  countMarkedPixels,
+  pngHasAlphaChannel,
+  readPngSize
+} from '$lib/features/mask/maskImage';
 
 function pngHeader(colorType: number, extra: number[] = []): Uint8Array {
   const bytes = new Uint8Array(33 + extra.length);

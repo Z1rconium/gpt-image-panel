@@ -10,7 +10,7 @@
   import ToastHost from '$lib/components/ToastHost.svelte';
   import { ApiError, apiFetch } from '$lib/api/client';
   import { language, t } from '$lib/i18n';
-  import type { AssistantJobDiagnoseResponse, AssistantRecommendParamsResponse, PromptOptimizeResponse } from '$lib/api/types/assistant';
+  import type { AssistantJobDiagnoseResponse, AssistantRecommendParamsResponse } from '$lib/api/types/assistant';
   import type { GalleryEntry } from '$lib/api/types/gallery';
   import type { GenerateJobStatus } from '$lib/api/types/jobs';
   import type { AIAssistantSettingsInput, OverallConfigUpdateRequest, SettingsInput } from '$lib/api/types/settings';
@@ -38,7 +38,7 @@
   import { canPrefetchNonCritical } from '$lib/utils/network';
   import { readSettingsPrefill, stripSettingsPrefill } from '$lib/utils/settingsPrefill';
   import { buildPresetShareUrl, readPresetShare, stripPresetShare } from '$lib/utils/presetShare';
-  import { buildPromptOptimizeRequest } from '$lib/utils/promptOptimizer';
+  import { requestPromptOptimize } from '$lib/utils/promptOptimizer';
   import {
     agentViewPanel,
     aiAssistantPanel,
@@ -780,24 +780,14 @@
 
     optimizingPrompt = true;
     try {
-      const response = await apiFetch<PromptOptimizeResponse>(
-        '/api/prompt/optimize',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(
-            buildPromptOptimizeRequest({
-              prompt,
-              targetLanguage: $language,
-              apiPath: promptForm.apiPath,
-              model: promptForm.model,
-              size: promptForm.size,
-              quality: promptForm.quality
-            })
-          )
-        },
-        'optimizing prompt'
-      );
+      const response = await requestPromptOptimize({
+        prompt,
+        targetLanguage: $language,
+        apiPath: promptForm.apiPath,
+        model: promptForm.model,
+        size: promptForm.size,
+        quality: promptForm.quality
+      });
       promptForm.prompt = response.optimized_prompt;
       showToast($t.messages.promptOptimized, 'status', {
         actionLabel: $t.common.undo,
@@ -1373,15 +1363,6 @@
     };
 
     const keydown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        if ($uiStore.imagePromptOpen) closeImagePromptDialog();
-        else if ($uiStore.editPreviewOpen) closeEditPreview();
-        else if ($lightboxStore.image) closeLightbox();
-        else if ($uiStore.sizeDialogOpen) setUi('sizeDialogOpen', false);
-        else if ($uiStore.preferencesOpen) setUi('preferencesOpen', false);
-        return;
-      }
-
       if (!$lightboxStore.image || lightboxNavigationBlocked()) return;
       if (event.key === 'ArrowLeft' && $lightboxController.canNavigatePrevious) {
         event.preventDefault();

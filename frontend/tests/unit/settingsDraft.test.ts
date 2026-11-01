@@ -112,6 +112,64 @@ describe('hasSettingsChanges', () => {
     expect(hasSettingsChanges(pristineDraft(), settings, activePreset)).toBe(false);
     expect(hasSettingsChanges({ ...pristineDraft(), defaultModel: 'gpt-image-3' }, settings, activePreset)).toBe(true);
   });
+
+  it('correctly handles registry secrets and env var references without false dirty state', () => {
+    const registryPreset = {
+      ...activePreset,
+      api_key_source: 'registry' as const,
+      api_key_secret_id: 'sec_custom_key',
+      has_api_key: true
+    };
+    const registryDraft = {
+      ...pristineDraft(),
+      apiKey: 'sec_custom_key'
+    };
+    expect(hasSettingsChanges(registryDraft, settings, registryPreset)).toBe(false);
+    expect(hasSettingsChanges({ ...registryDraft, apiKey: 'sec_other' }, settings, registryPreset)).toBe(true);
+
+    const envPreset = {
+      ...activePreset,
+      api_key_source: 'env' as const,
+      api_key_env_var: 'MY_API_KEY',
+      has_api_key: true
+    };
+    const envDraft = {
+      ...pristineDraft(),
+      apiKey: '${MY_API_KEY}'
+    };
+    expect(hasSettingsChanges(envDraft, settings, envPreset)).toBe(false);
+    expect(hasSettingsChanges({ ...envDraft, apiKey: 'sk-direct' }, settings, envPreset)).toBe(true);
+  });
+
+  it('correctly handles registry secrets for prompt optimizer and r2 backup', () => {
+    const customSettings = {
+      ...settings,
+      prompt_optimizer: {
+        ...settings.prompt_optimizer,
+        api_key_source: 'registry',
+        api_key_secret_id: 'sec_optimizer_id',
+        has_api_key: true
+      },
+      r2_backup: {
+        ...settings.r2_backup,
+        access_key_id_source: 'registry',
+        access_key_id_secret_id: 'sec_r2_id',
+        has_access_key_id: true,
+        secret_access_key_source: 'registry',
+        secret_access_key_secret_id: 'sec_r2_secret',
+        has_secret_access_key: true
+      }
+    } as unknown as SettingsResponse;
+
+    const draft = {
+      ...pristineDraft(),
+      promptOptimizerApiKey: 'sec_optimizer_id',
+      r2AccessKeyId: 'sec_r2_id',
+      r2SecretAccessKey: 'sec_r2_secret'
+    };
+    expect(hasSettingsChanges(draft, customSettings, activePreset)).toBe(false);
+    expect(hasSettingsChanges({ ...draft, r2AccessKeyId: 'sec_changed' }, customSettings, activePreset)).toBe(true);
+  });
 });
 
 describe('buildSettingsPayload', () => {

@@ -144,10 +144,7 @@ function createSettingsStore() {
         'saving settings'
       );
       update((state) => ({ ...state, settings }));
-      settingsActivityStore.clearHealth();
-      settingsActivityStore.setR2Health(null);
-      settingsActivityStore.clearPromptOptimizerHealth();
-      settingsActivityStore.clearAiAssistantHealth();
+      clearDerivedHealth();
       showToast(get(t).messages.presetSaved);
       return true;
     } finally {
@@ -167,10 +164,7 @@ function createSettingsStore() {
       'creating preset'
     );
     update((state) => ({ ...state, settings }));
-    settingsActivityStore.clearHealth();
-    settingsActivityStore.setR2Health(null);
-    settingsActivityStore.clearPromptOptimizerHealth();
-    settingsActivityStore.clearAiAssistantHealth();
+    clearDerivedHealth();
     showToast(get(t).messages.presetCreated);
   }
 
@@ -183,10 +177,7 @@ function createSettingsStore() {
       'switching preset'
     );
     update((state) => ({ ...state, settings }));
-    settingsActivityStore.clearHealth();
-    settingsActivityStore.setR2Health(null);
-    settingsActivityStore.clearPromptOptimizerHealth();
-    settingsActivityStore.clearAiAssistantHealth();
+    clearDerivedHealth();
     showToast(get(t).messages.presetSwitched);
   }
 
@@ -210,10 +201,7 @@ function createSettingsStore() {
       'deleting preset'
     );
     update((state) => ({ ...state, settings }));
-    settingsActivityStore.clearHealth();
-    settingsActivityStore.setR2Health(null);
-    settingsActivityStore.clearPromptOptimizerHealth();
-    settingsActivityStore.clearAiAssistantHealth();
+    clearDerivedHealth();
     showToast(get(t).messages.presetDeleted);
   }
 

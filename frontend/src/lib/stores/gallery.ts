@@ -16,6 +16,7 @@ import {
 } from '$lib/features/gallery/query';
 import type { ToastOptions, ToastVariant } from '$lib/stores/ui';
 import type { GalleryEntry, GalleryResponse, GallerySelectionTokenResponse, GalleryThumbnailState } from '$lib/api/types/gallery';
+import { isAbortError } from '$lib/utils/network';
 
 export type { GalleryFilters } from '$lib/features/gallery/query';
 export { defaultGalleryFilters } from '$lib/features/gallery/query';
@@ -96,8 +97,9 @@ function createGalleryActivityStore() {
 
 export const galleryActivityStore = createGalleryActivityStore();
 
-function isAbortError(error: unknown) {
-  return error instanceof Error && error.name === 'AbortError';
+export function batchRequestBody(state: GalleryState) {
+  if (state.selectionToken) return { selection_token: state.selectionToken.token };
+  return { ids: [...state.selectedIds] };
 }
 
 function createGalleryStore() {
@@ -285,26 +287,36 @@ function createGalleryStore() {
     const requestBody = gallerySearchBody(params, filters);
     const requestKey = JSON.stringify(requestBody);
     const seq = ++requestSeq;
-    const cachedGallery = prefetchedPages.get(requestKey);
-    if (cachedGallery) {
-      prefetchedPages.delete(requestKey);
+    function applyLoadedGalleryPage(
+      gallery: GalleryResponse,
+      lightweightPage: boolean,
+      includeTotalBytes: boolean,
+      filters: GalleryFilters
+    ) {
       const mergedGallery =
         lightweightPage && state.gallery
           ? {
-              ...cachedGallery,
+              ...gallery,
               total: state.gallery.total,
               total_bytes: state.gallery.total_bytes,
               total_pages: state.gallery.total_pages,
               filter_options: state.gallery.filter_options
             }
-          : cachedGallery;
+          : gallery;
       const filteredGallery = filterPendingGallery(mergedGallery, includeTotalBytes, filters);
       update((current) => ({
         ...current,
         gallery: filteredGallery,
-        page: filteredGallery.page
+        page: filteredGallery.page,
+        loading: false
       }));
       scheduleThumbnailRefresh(filteredGallery);
+    }
+
+    const cachedGallery = prefetchedPages.get(requestKey);
+    if (cachedGallery) {
+      prefetchedPages.delete(requestKey);
+      applyLoadedGalleryPage(cachedGallery, lightweightPage, includeTotalBytes, filters);
       return;
     }
     const pendingPrefetch = prefetchRequests.get(requestKey);
@@ -313,24 +325,7 @@ function createGalleryStore() {
       const gallery = await pendingPrefetch;
       if (seq !== requestSeq) return;
       if (gallery) {
-        const mergedGallery =
-          lightweightPage && state.gallery
-            ? {
-                ...gallery,
-                total: state.gallery.total,
-                total_bytes: state.gallery.total_bytes,
-                total_pages: state.gallery.total_pages,
-                filter_options: state.gallery.filter_options
-              }
-            : gallery;
-        const filteredGallery = filterPendingGallery(mergedGallery, includeTotalBytes, filters);
-        update((current) => ({
-          ...current,
-          gallery: filteredGallery,
-          page: filteredGallery.page,
-          loading: false
-        }));
-        scheduleThumbnailRefresh(filteredGallery);
+        applyLoadedGalleryPage(gallery, lightweightPage, includeTotalBytes, filters);
         return;
       }
     }
@@ -349,23 +344,7 @@ function createGalleryStore() {
         'loading gallery'
       );
       if (seq !== requestSeq) return;
-      const mergedGallery =
-        lightweightPage && state.gallery
-          ? {
-              ...gallery,
-              total: state.gallery.total,
-              total_bytes: state.gallery.total_bytes,
-              total_pages: state.gallery.total_pages,
-              filter_options: state.gallery.filter_options
-            }
-          : gallery;
-      const filteredGallery = filterPendingGallery(mergedGallery, includeTotalBytes, filters);
-      update((current) => ({
-        ...current,
-        gallery: filteredGallery,
-        page: filteredGallery.page
-      }));
-      scheduleThumbnailRefresh(filteredGallery);
+      applyLoadedGalleryPage(gallery, lightweightPage, includeTotalBytes, filters);
     } catch (error) {
       if (seq !== requestSeq) return;
       if (isAbortError(error)) return;
@@ -627,8 +606,7 @@ function createGalleryStore() {
   }
 
   function selectedBatchRequestBody() {
-    if (state.selectionToken) return { selection_token: state.selectionToken.token };
-    return { ids: [...state.selectedIds] };
+    return batchRequestBody(state);
   }
 
   async function toggleFavorite(image: GalleryEntry, onChanged?: (image: GalleryEntry) => void) {

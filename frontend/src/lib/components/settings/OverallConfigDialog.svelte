@@ -78,8 +78,8 @@
                             {:else}
                               <input
                                 value={String(overallDraftValue(item) ?? '')}
-                                type={item.type === 'int' || item.type === 'float' ? 'number' : item.secret ? 'password' : 'text'}
-                                step={item.type === 'float' ? 'any' : '1'}
+                                type={item.type === 'int' ? 'number' : item.secret ? 'password' : 'text'}
+                                step={item.type === 'int' ? '1' : undefined}
                                 class="control-focus w-full rounded-lg border border-stone-300 bg-white px-3 py-2.5 font-mono text-sm text-stone-900 focus:border-emerald-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
                                 on:input={(event) => setOverallDraft(item, event.currentTarget.value)}
                               />

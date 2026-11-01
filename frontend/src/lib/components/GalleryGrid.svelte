@@ -340,11 +340,10 @@
     event.stopPropagation();
   }
 
-  function handleCardSwipeDown(event: PointerEvent, image: GalleryEntry) {
+  function handleCardSwipeDown(event: PointerEvent) {
     if (!gesturesEnabled) return;
     if (event.pointerType !== 'touch' || !event.isPrimary || event.clientX < 24 || event.clientX > window.innerWidth - 24) return;
     swipeState = swipeSelectBegin(event.pointerId, event.clientX, event.clientY);
-    void image;
   }
 
   function handleCardSwipeMove(event: PointerEvent, image: GalleryEntry) {
@@ -591,7 +590,7 @@
               aria-label={image.prompt}
               aria-pressed={selectionMode ? isImageSelected(image) : undefined}
               onclick={(event) => handleImageClick(event, image)}
-              onpointerdown={(event) => handleCardSwipeDown(event, image)}
+              onpointerdown={handleCardSwipeDown}
               onpointermove={(event) => handleCardSwipeMove(event, image)}
               onpointerup={handleCardSwipeEnd}
               onpointercancel={handleCardSwipeEnd}

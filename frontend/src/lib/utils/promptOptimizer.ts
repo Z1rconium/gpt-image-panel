@@ -1,9 +1,10 @@
-import type { PromptOptimizeRequest } from '$lib/api/types/assistant';
+import { apiFetch } from '$lib/api/client';
+import type { PromptOptimizeRequest, PromptOptimizeResponse } from '$lib/api/types/assistant';
 import type { ApiPath } from '$lib/api/types/common';
 import type { Language } from '$lib/i18n';
 import type { PromptFormState } from '$lib/stores/preview';
 
-type BuildPromptOptimizeRequestInput = {
+export type BuildPromptOptimizeRequestInput = {
   prompt: string;
   intent?: string;
   targetLanguage: Language;
@@ -37,4 +38,20 @@ export function buildPromptOptimizeRequest({
   }
 
   return request;
+}
+
+export async function requestPromptOptimize(
+  input: BuildPromptOptimizeRequestInput,
+  signal?: AbortSignal
+): Promise<PromptOptimizeResponse> {
+  return apiFetch<PromptOptimizeResponse>(
+    '/api/prompt/optimize',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(buildPromptOptimizeRequest(input)),
+      signal
+    },
+    'optimizing prompt'
+  );
 }

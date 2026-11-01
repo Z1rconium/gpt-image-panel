@@ -432,7 +432,6 @@
       panPointerId = null;
       dragging = false;
       tapSuppressed = false;
-      releasePointer(event);
       return;
     }
     if (swipePointerId !== event.pointerId) return;
@@ -451,7 +450,6 @@
     }
     tapSuppressed = false;
 
-    releasePointer(event);
     resetSwipeTracking();
     snapBack();
   }

@@ -6,7 +6,6 @@
   export let model = '';
   export let timeoutSeconds: number | string = 60;
   export let apiKey = '';
-  export let apiKeyInputType = 'password';
   export let healthChecking = false;
   export let onNormalizeTimeout: () => void = () => {};
   export let onOpenSystemPrompt: () => void | Promise<void> = () => {};
@@ -33,7 +32,7 @@
     </label>
     <label class="block">
       <span class="mb-1.5 block text-xs font-medium text-stone-600 dark:text-zinc-400">{$t.settings.promptOptimizerApiKey}</span>
-      <input bind:value={apiKey} type={apiKeyInputType} class="control-focus w-full rounded-md border border-stone-300 bg-stone-50 px-3 py-2.5 font-mono text-sm text-stone-900 focus:border-emerald-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100" />
+      <input bind:value={apiKey} type="text" class="control-focus w-full rounded-md border border-stone-300 bg-stone-50 px-3 py-2.5 font-mono text-sm text-stone-900 focus:border-emerald-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100" />
       <span class="mt-1.5 block text-xs text-stone-500 dark:text-zinc-500">{$t.settings.apiKeyHint}</span>
     </label>
     <button type="button" class="control-focus w-full rounded-md border border-stone-300 px-3 py-2.5 text-sm font-semibold text-stone-700 hover:bg-stone-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800" on:click={onOpenSystemPrompt}>{$t.settings.editSystemPrompt}</button>

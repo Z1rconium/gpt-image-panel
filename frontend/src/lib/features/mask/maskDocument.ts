@@ -42,22 +42,6 @@ import {
 import type { EdgeMap } from './maskSnap';
 import type { MaskRegionParams, MaskRegionRequest } from './maskRegion';
 
-// Shared with the workspace's mask restore path, which must not pull in the
-// painting document (see maskImage.ts); re-exported so importers keep one home.
-export {
-  MAX_MASK_FILE_BYTES,
-  MARK_ALPHA_THRESHOLD,
-  MaskImportError,
-  binarizeMaskAlphaData,
-  countMarked,
-  countMarkedPixels,
-  measureMaskBlob,
-  pngHasAlphaChannel,
-  readPngSize,
-  type MaskImportErrorCode,
-  type MaskMeasurements
-} from './maskImage';
-
 export const MAX_SMOOTH_PX = 64;
 
 /**

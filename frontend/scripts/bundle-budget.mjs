@@ -112,12 +112,10 @@ function formatBytes(bytes) {
   return `${bytes.toLocaleString('en-US')} B`;
 }
 
-function checkBudget(label, actual, budget, { higherIsBetter = false } = {}) {
-  const pass = higherIsBetter ? actual >= budget : actual <= budget;
+function checkBudget(label, actual, budget) {
+  const pass = actual <= budget;
   const status = pass ? 'PASS' : 'FAIL';
-  const direction = higherIsBetter
-    ? `target >= ${formatBytes(budget)}`
-    : `budget <= ${formatBytes(budget)}`;
+  const direction = `budget <= ${formatBytes(budget)}`;
   return { label, actual, budget, pass, status, direction };
 }
 

@@ -229,12 +229,8 @@ export type OverallConfigItem = {
   is_env_set: boolean;
   has_override: boolean;
   secret: boolean;
-  hot_reload: boolean;
   restart_required: boolean;
   build_only: boolean;
-  startup_only: boolean;
-  updated_at?: string | null;
-  override_updated_at?: string | null;
 };
 
 export type OverallConfigResponse = {

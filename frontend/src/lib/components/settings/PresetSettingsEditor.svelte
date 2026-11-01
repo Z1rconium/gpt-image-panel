@@ -29,7 +29,6 @@
   export let supportsMask = true;
   export let promptGuard = false;
   export let apiKey = '';
-  export let apiKeyInputType = 'password';
   export let upstreamSocks5Proxy = '';
   export let webhookUrl = '';
   export let r2BackupEnabled = false;
@@ -40,8 +39,6 @@
   export let r2SyncIntervalHours: number | string = 0;
   export let r2AccessKeyId = '';
   export let r2SecretAccessKey = '';
-  export let r2AccessKeyIdInputType = 'password';
-  export let r2SecretAccessKeyInputType = 'password';
   export let r2Health: R2HealthResponse | null = null;
   export let r2HealthChecking = false;
   export let nodeImageEnabled = false;
@@ -51,7 +48,6 @@
   export let promptOptimizerModel = '';
   export let promptOptimizerTimeoutSeconds: number | string = 60;
   export let promptOptimizerApiKey = '';
-  export let promptOptimizerApiKeyInputType = 'password';
   export let promptOptimizerHealthChecking = false;
   export let aiAssistantEnabled = false;
   export let aiAssistantVisionModel = '';
@@ -255,7 +251,7 @@
           </label>
           <label class="block">
             <span class="mb-1.5 block text-xs font-medium text-stone-600 dark:text-zinc-400">{$t.settings.apiKey}</span>
-            <input bind:value={apiKey} type={apiKeyInputType} class="control-focus w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-2.5 font-mono text-sm text-stone-900 focus:border-emerald-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100" />
+            <input bind:value={apiKey} type="text" class="control-focus w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-2.5 font-mono text-sm text-stone-900 focus:border-emerald-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100" />
             <span class="mt-1.5 block text-xs text-stone-500 dark:text-zinc-500">{$t.settings.apiKeyHint}</span>
           </label>
           <label class="block">
@@ -278,8 +274,6 @@
             bind:syncIntervalHours={r2SyncIntervalHours}
             bind:accessKeyId={r2AccessKeyId}
             bind:secretAccessKey={r2SecretAccessKey}
-            accessKeyInputType={r2AccessKeyIdInputType}
-            secretKeyInputType={r2SecretAccessKeyInputType}
             health={r2Health}
             healthChecking={r2HealthChecking}
             onNormalizeInterval={normalizeR2SyncIntervalHours}
@@ -297,7 +291,6 @@
             bind:model={promptOptimizerModel}
             bind:timeoutSeconds={promptOptimizerTimeoutSeconds}
             bind:apiKey={promptOptimizerApiKey}
-            apiKeyInputType={promptOptimizerApiKeyInputType}
             healthChecking={promptOptimizerHealthChecking}
             onNormalizeTimeout={normalizePromptOptimizerTimeout}
             onOpenSystemPrompt={openSystemPromptEditor}

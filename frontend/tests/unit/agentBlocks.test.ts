@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AgentBlock, AgentImageTaskBlock, AgentStreamEvent } from '$lib/api/types/agent';
-import { agentBlocksText, applyAgentEvent, groupAgentBlocks, isTerminalAgentEvent, upsertAgentBlock } from '$lib/utils/agentBlocks';
+import { applyAgentEvent, groupAgentBlocks, isTerminalAgentEvent, upsertAgentBlock } from '$lib/utils/agentBlocks';
 
 function task(overrides: Partial<AgentImageTaskBlock> = {}): AgentImageTaskBlock {
   return {
@@ -36,7 +36,6 @@ describe('applyAgentEvent', () => {
       { event: 'block.text', data: { block_id: 't1', delta: 'lo' } }
     ]);
     expect(blocks).toEqual([{ id: 't1', type: 'text', text: 'Hello' }]);
-    expect(agentBlocksText(blocks)).toBe('Hello');
   });
 
   it('replaces an image task in place as it progresses', () => {

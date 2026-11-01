@@ -19,7 +19,7 @@ import type {
 } from '$lib/api/types/agent';
 import { t } from '$lib/i18n';
 import { observeAgentTurn } from '$lib/utils/completionNotifications';
-import { isAbortError } from './assistant';
+import { isAbortError } from '$lib/utils/network';
 import {
   foldStreamBatch,
   initialAgentState,
@@ -277,18 +277,6 @@ function createAgentStore() {
     }
   }
 
-  async function create(title = ''): Promise<string | null> {
-    try {
-      const created = await createAgentConversation(title);
-      update((current) => ({ ...current, conversations: [created, ...current.conversations] }));
-      await open(created.id);
-      return created.id;
-    } catch (error) {
-      update((current) => ({ ...current, actionError: errorMessage(error, get(t).agent.errorSend) }));
-      return null;
-    }
-  }
-
   async function rename(conversationId: string, title: string): Promise<boolean> {
     try {
       const updated = await renameAgentConversation(conversationId, title);
@@ -517,7 +505,6 @@ function createAgentStore() {
     subscribe,
     loadList,
     open,
-    create,
     rename,
     remove,
     send,

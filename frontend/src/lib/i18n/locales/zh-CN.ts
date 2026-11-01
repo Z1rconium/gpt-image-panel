@@ -175,7 +175,7 @@ const zh: Translation = {
     promptGuard: '防止提示词改写',
     promptGuardHint: '在提示词前加入"按原样使用"的指令，要求上游不要扩写或改写。适用于 /v1/responses 及会自动扩写提示词的网关。',
     apiKey: 'API 密钥',
-    apiKeyHint: '可填写 ${OPENAI_API_KEY}，SQLite 里只保存环境变量引用。直接填写的 key 会以明文保存。',
+    apiKeyHint: '支持填写 ${OPENAI_API_KEY} 环境变量引用或已配置的密钥标识符。',
     upstreamSocks5Proxy: 'SOCKS5 代理',
     upstreamSocks5ProxyHint: '可选。格式为 socks5://host:port 或 socks5://user:pass@host:port；仅生成/编辑的上游 API 请求会使用。',
     webhookUrl: 'Webhook URL',

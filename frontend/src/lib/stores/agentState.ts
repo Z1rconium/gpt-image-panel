@@ -11,7 +11,7 @@ import type {
   AgentMessage,
   AgentStreamEvent
 } from '$lib/api/types/agent';
-import { applyAgentEvent } from '$lib/utils/agentBlocks';
+import { applyAgentEvent, isTerminalAgentEvent } from '$lib/utils/agentBlocks';
 
 export type AgentState = {
   conversations: AgentConversationSummary[];
@@ -152,7 +152,7 @@ export function foldStreamBatch(current: AgentState, turnId: string, batch: Pend
   for (const entry of batch) {
     const name = entry.event.event;
     if (name === 'turn.started') started = true;
-    if (name === 'turn.completed' || name === 'turn.failed' || name === 'turn.cancelled') terminal = name;
+    if (isTerminalAgentEvent(name)) terminal = name as TerminalEventName;
     if (name === 'block.upsert' || name === 'block.text') blockEvents.push(entry);
   }
   let next = current;

@@ -31,7 +31,6 @@
   import type { EditMask } from '$lib/stores/editSource';
   import {
     MAX_SMOOTH_PX,
-    MaskImportError,
     createMaskDocument,
     type MaskDocument,
     type MaskImportMode,
@@ -39,6 +38,7 @@
     type MaskShapeMode,
     type MaskTool
   } from '$lib/features/mask/maskDocument';
+  import { MaskImportError } from '$lib/features/mask/maskImage';
   import {
     SNAP_RADIUS_DEFAULT,
     SNAP_RADIUS_MAX,

@@ -118,14 +118,6 @@ export function secretDraftValue(
   return hasSecret ? MASKED_API_KEY_VALUE : '';
 }
 
-function expectedSecretValue(
-  source: 'empty' | 'stored' | 'env' | 'registry' | undefined,
-  hasSecret: boolean | undefined,
-  envVar: string | null | undefined
-) {
-  return source === 'env' && envVar ? `\${${envVar}}` : hasSecret ? MASKED_API_KEY_VALUE : '';
-}
-
 export function hasSettingsChanges(
   draft: SettingsDraft,
   settings: SettingsResponse | null,
@@ -144,7 +136,13 @@ export function hasSettingsChanges(
     draft.defaultResponseFormat !== normalizeResponseFormat(activePreset?.default_response_format ?? settings?.default_response_format, 'url') ||
     draft.supportsMask !== (activePreset?.supports_mask ?? settings?.supports_mask ?? true) ||
     draft.promptGuard !== (activePreset?.prompt_guard ?? settings?.prompt_guard ?? false) ||
-    draft.apiKey !== expectedSecretValue(activePreset?.api_key_source, activePreset?.has_api_key || settings?.has_api_key, activePreset?.api_key_env_var) ||
+    draft.apiKey !==
+      secretDraftValue(
+        activePreset?.api_key_source,
+        activePreset?.has_api_key || settings?.has_api_key,
+        activePreset?.api_key_env_var,
+        activePreset?.api_key_secret_id
+      ) ||
     draft.apiPath !== (activePreset?.api_path || settings?.api_path || '/v1/images/generations') ||
     draft.providerKind !== (activePreset?.provider_kind ?? settings?.provider_kind ?? 'openai') ||
     providerConfigChanged(draft.providerConfigText, activePreset?.provider_config) ||
@@ -155,10 +153,11 @@ export function hasSettingsChanges(
     draft.promptOptimizerModel !== (settings?.prompt_optimizer?.model || 'gpt-4o-mini') ||
     draft.promptOptimizerTimeoutSeconds !== (settings?.prompt_optimizer?.timeout_seconds || 60) ||
     draft.promptOptimizerApiKey !==
-      expectedSecretValue(
+      secretDraftValue(
         settings?.prompt_optimizer?.api_key_source,
         settings?.prompt_optimizer?.has_api_key,
-        settings?.prompt_optimizer?.api_key_env_var
+        settings?.prompt_optimizer?.api_key_env_var,
+        settings?.prompt_optimizer?.api_key_secret_id
       ) ||
     draft.aiAssistantEnabled !== Boolean(settings?.ai_assistant?.enabled) ||
     draft.aiAssistantVisionModel !==
@@ -176,16 +175,18 @@ export function hasSettingsChanges(
     draft.r2KeyPrefix !== (settings?.r2_backup?.key_prefix || 'gallery/') ||
     draft.r2SyncIntervalHours !== (settings?.r2_backup?.sync_interval_hours ?? 0) ||
     draft.r2AccessKeyId !==
-      expectedSecretValue(
+      secretDraftValue(
         settings?.r2_backup?.access_key_id_source,
         settings?.r2_backup?.has_access_key_id,
-        settings?.r2_backup?.access_key_id_env_var
+        settings?.r2_backup?.access_key_id_env_var,
+        settings?.r2_backup?.access_key_id_secret_id
       ) ||
     draft.r2SecretAccessKey !==
-      expectedSecretValue(
+      secretDraftValue(
         settings?.r2_backup?.secret_access_key_source,
         settings?.r2_backup?.has_secret_access_key,
-        settings?.r2_backup?.secret_access_key_env_var
+        settings?.r2_backup?.secret_access_key_env_var,
+        settings?.r2_backup?.secret_access_key_secret_id
       ) ||
     draft.nodeImageEnabled !== Boolean(settings?.nodeimage?.enabled) ||
     draft.nodeImageApiKey !==

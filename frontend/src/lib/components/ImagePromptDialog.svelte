@@ -4,8 +4,10 @@
   import { dialog } from '$lib/actions/dialog';
   import type { AssistantImagePromptOptimizeResponse, AssistantImagePromptResponse } from '$lib/api/types/assistant';
   import { language, t } from '$lib/i18n';
-  import { assistantStore, isAbortError } from '$lib/stores/assistant';
+  import { assistantStore } from '$lib/stores/assistant';
+  import { isImageFile } from '$lib/stores/editSource';
   import { settingsStore } from '$lib/stores/settings';
+  import { isAbortError } from '$lib/utils/network';
 
   type MaybePromise = void | Promise<void>;
   type Operation = 'reverse' | 'optimize' | null;
@@ -19,7 +21,6 @@
 
   const FALLBACK_MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
   const FALLBACK_MAX_IMAGE_PIXELS = 100_000_000;
-  const SAFE_IMAGE_EXTENSIONS = /\.(avif|bmp|gif|heic|heif|ico|jpe?g|png|tiff?|webp)$/i;
   const GENERATIONS_API_PATH = '/v1/images/generations';
 
   let input: HTMLInputElement | null = null;
@@ -109,10 +110,6 @@
     onClose();
   }
 
-  function supportedImage(file: File) {
-    return file.type !== 'image/svg+xml' && !/\.svg$/i.test(file.name) && SAFE_IMAGE_EXTENSIONS.test(file.name);
-  }
-
   function errorText(caught: unknown) {
     if (caught instanceof Error && caught.message) return caught.message;
     return $t.imagePrompt.formatError;
@@ -149,7 +146,7 @@
     error = '';
     if (input) input.value = '';
 
-    if (!supportedImage(file)) {
+    if (!isImageFile(file)) {
       error = $t.imagePrompt.formatError;
       return;
     }

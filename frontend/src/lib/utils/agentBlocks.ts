@@ -48,15 +48,6 @@ export function applyAgentEvent(blocks: AgentBlock[], event: AgentStreamEvent): 
   return blocks;
 }
 
-/** Text of the visible reply, used for empty-state checks and announcements. */
-export function agentBlocksText(blocks: AgentBlock[]): string {
-  return blocks
-    .filter((block): block is Extract<AgentBlock, { type: 'text' }> => block.type === 'text')
-    .map((block) => block.text)
-    .join('\n\n')
-    .trim();
-}
-
 export type AgentBlockGroup =
   | { kind: 'text'; key: string; block: AgentTextBlock }
   | { kind: 'batch'; key: string; block: AgentBatchParamsBlock }

@@ -13,7 +13,6 @@ export type AssistantState = {
   paramsLoadingCount: number;
   editPlanLoadingCount: number;
   galleryLoadingImageIds: string[];
-  batchJob: AssistantGalleryBatchJobStatus | null;
 };
 
 const initialAssistantState: AssistantState = {
@@ -25,13 +24,10 @@ const initialAssistantState: AssistantState = {
   promptLoadingCount: 0,
   paramsLoadingCount: 0,
   editPlanLoadingCount: 0,
-  galleryLoadingImageIds: [],
-  batchJob: null
+  galleryLoadingImageIds: []
 };
 
-export function isAbortError(error: unknown): boolean {
-  return error instanceof Error && error.name === 'AbortError';
-}
+export { isAbortError } from '$lib/utils/network';
 
 function createAssistantStore() {
   const { subscribe, update } = writable<AssistantState>(initialAssistantState);
@@ -281,21 +277,6 @@ function createAssistantStore() {
     }
   }
 
-  async function promptFromGalleryImage(imageId: string, signal?: AbortSignal) {
-    const requestSignal = operationSignal(`gallery:prompt:${imageId}`, signal);
-    beginGalleryLoading(imageId);
-    try {
-      return await apiFetch<AssistantGalleryImageResponse>(
-        `/api/assistant/gallery/${encodeURIComponent(imageId)}/prompt?target_language=${encodeURIComponent(get(language))}`,
-        { method: 'POST', signal: requestSignal },
-        'reverse prompting gallery image with AI Assistant'
-      );
-    } finally {
-      endGalleryLoading(imageId);
-      clearOperationSignal(`gallery:prompt:${imageId}`, requestSignal);
-    }
-  }
-
   async function analyzeGalleryImage(imageId: string, signal?: AbortSignal) {
     const requestSignal = operationSignal(`gallery:analyze:${imageId}`, signal);
     beginGalleryLoading(imageId);
@@ -320,7 +301,7 @@ function createAssistantStore() {
   }
 
   async function batchAnalyzeGallery(body: AssistantGalleryBatchRequest) {
-    const job = await apiFetch<AssistantGalleryBatchJobStatus>(
+    return apiFetch<AssistantGalleryBatchJobStatus>(
       '/api/assistant/gallery/batch/analyze',
       {
         method: 'POST',
@@ -329,8 +310,6 @@ function createAssistantStore() {
       },
       'starting gallery AI analysis'
     );
-    update((state) => ({ ...state, batchJob: job }));
-    return job;
   }
 
   function reset() {
@@ -350,7 +329,6 @@ function createAssistantStore() {
     promptFromImage,
     optimizeImagePrompt,
     describeGalleryImage,
-    promptFromGalleryImage,
     analyzeGalleryImage,
     loadGalleryMetadata,
     batchAnalyzeGallery,

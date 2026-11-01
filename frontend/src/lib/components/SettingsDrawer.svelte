@@ -195,12 +195,12 @@
     draft.presetName = activePreset.name || '';
     draft.apiUrl = activePreset.api_url || settings.api_url || '';
     draft.defaultModel = activePreset.default_model || settings.default_model || 'gpt-image-2';
-    draft.apiKey =
-      activePreset.api_key_source === 'registry' && activePreset.api_key_secret_id
-        ? activePreset.api_key_secret_id
-        : activePreset.has_api_key || settings.has_api_key
-          ? MASKED_API_KEY_VALUE
-          : '';
+    draft.apiKey = secretDraftValue(
+      activePreset.api_key_source,
+      activePreset.has_api_key || settings.has_api_key,
+      activePreset.api_key_env_var,
+      activePreset.api_key_secret_id
+    );
     draft.apiPath = activePreset.api_path || settings.api_path || '/v1/images/generations';
     draft.providerKind = activePreset.provider_kind ?? settings.provider_kind ?? 'openai';
     draft.providerConfigText = formatProviderConfig(activePreset.provider_config);
@@ -213,12 +213,12 @@
     draft.promptOptimizerApiUrl = settings.prompt_optimizer?.api_url || '';
     draft.promptOptimizerModel = settings.prompt_optimizer?.model || 'gpt-4o-mini';
     draft.promptOptimizerTimeoutSeconds = settings.prompt_optimizer?.timeout_seconds || 60;
-    draft.promptOptimizerApiKey =
-      settings.prompt_optimizer?.api_key_source === 'registry' && settings.prompt_optimizer.api_key_secret_id
-        ? settings.prompt_optimizer.api_key_secret_id
-        : settings.prompt_optimizer?.has_api_key
-          ? MASKED_API_KEY_VALUE
-          : '';
+    draft.promptOptimizerApiKey = secretDraftValue(
+      settings.prompt_optimizer?.api_key_source,
+      settings.prompt_optimizer?.has_api_key,
+      settings.prompt_optimizer?.api_key_env_var,
+      settings.prompt_optimizer?.api_key_secret_id
+    );
     draft.aiAssistantEnabled = Boolean(settings.ai_assistant?.enabled);
     draft.aiAssistantVisionModel = settings.ai_assistant?.vision_model || settings.prompt_optimizer?.model || 'gpt-4o-mini';
     draft.agentEnabled = Boolean(settings.ai_assistant?.agent_enabled);
@@ -233,18 +233,18 @@
     draft.r2Region = settings.r2_backup?.region || 'auto';
     draft.r2KeyPrefix = settings.r2_backup?.key_prefix || 'gallery/';
     draft.r2SyncIntervalHours = settings.r2_backup?.sync_interval_hours ?? 0;
-    draft.r2AccessKeyId =
-      settings.r2_backup?.access_key_id_source === 'registry' && settings.r2_backup.access_key_id_secret_id
-        ? settings.r2_backup.access_key_id_secret_id
-        : settings.r2_backup?.has_access_key_id
-          ? MASKED_API_KEY_VALUE
-          : '';
-    draft.r2SecretAccessKey =
-      settings.r2_backup?.secret_access_key_source === 'registry' && settings.r2_backup.secret_access_key_secret_id
-        ? settings.r2_backup.secret_access_key_secret_id
-        : settings.r2_backup?.has_secret_access_key
-          ? MASKED_API_KEY_VALUE
-          : '';
+    draft.r2AccessKeyId = secretDraftValue(
+      settings.r2_backup?.access_key_id_source,
+      settings.r2_backup?.has_access_key_id,
+      settings.r2_backup?.access_key_id_env_var,
+      settings.r2_backup?.access_key_id_secret_id
+    );
+    draft.r2SecretAccessKey = secretDraftValue(
+      settings.r2_backup?.secret_access_key_source,
+      settings.r2_backup?.has_secret_access_key,
+      settings.r2_backup?.secret_access_key_env_var,
+      settings.r2_backup?.secret_access_key_secret_id
+    );
     draft.nodeImageEnabled = Boolean(settings.nodeimage?.enabled);
     draft.nodeImageApiKey = secretDraftValue(
       settings.nodeimage?.api_key_source,
@@ -568,7 +568,6 @@
         bind:supportsMask={draft.supportsMask}
         bind:promptGuard={draft.promptGuard}
         bind:apiKey={draft.apiKey}
-        apiKeyInputType="text"
         bind:upstreamSocks5Proxy={draft.upstreamSocks5Proxy}
         bind:webhookUrl={draft.webhookUrl}
         bind:r2BackupEnabled={draft.r2BackupEnabled}
@@ -579,8 +578,6 @@
         bind:r2SyncIntervalHours={draft.r2SyncIntervalHours}
         bind:r2AccessKeyId={draft.r2AccessKeyId}
         bind:r2SecretAccessKey={draft.r2SecretAccessKey}
-        r2AccessKeyIdInputType="text"
-        r2SecretAccessKeyInputType="text"
         {r2Health}
         {r2HealthChecking}
         bind:nodeImageEnabled={draft.nodeImageEnabled}
@@ -590,7 +587,6 @@
         bind:promptOptimizerModel={draft.promptOptimizerModel}
         bind:promptOptimizerTimeoutSeconds={draft.promptOptimizerTimeoutSeconds}
         bind:promptOptimizerApiKey={draft.promptOptimizerApiKey}
-        promptOptimizerApiKeyInputType="text"
         {promptOptimizerHealthChecking}
         bind:aiAssistantEnabled={draft.aiAssistantEnabled}
         bind:aiAssistantVisionModel={draft.aiAssistantVisionModel}

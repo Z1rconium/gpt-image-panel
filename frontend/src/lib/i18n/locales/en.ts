@@ -173,7 +173,7 @@ const en = {
     promptGuard: 'Prevent prompt rewriting',
     promptGuardHint: 'Prepends an instruction asking upstream to use the prompt as-is. Useful for /v1/responses and gateways that expand prompts.',
     apiKey: 'API key',
-    apiKeyHint: 'Use ${OPENAI_API_KEY} to store only an environment-variable reference in SQLite. Literal keys are saved as plaintext.',
+    apiKeyHint: 'Use ${OPENAI_API_KEY} to reference an environment variable, or use a configured secret identifier.',
     upstreamSocks5Proxy: 'SOCKS5 proxy',
     upstreamSocks5ProxyHint: 'Optional. Use socks5://host:port or socks5://user:pass@host:port. Only generation/edit upstream API calls use it.',
     webhookUrl: 'Webhook URL',
@@ -1083,7 +1083,5 @@ const en = {
     edit_failed: 'Edit failed'
   }
 };
-
-type TranslationValue = string | ((...args: any[]) => string) | Record<string, unknown>;
 
 export default en;

@@ -84,7 +84,7 @@ export function isMaskValid(source: EditSourceState) {
   return Boolean(source.mask && source.mask.sourceId === primaryEditSourceId(source));
 }
 
-function isImageFile(file: File) {
+export function isImageFile(file: File): boolean {
   if (file.type.startsWith('image/') && file.type !== 'image/svg+xml') return true;
   return /\.(avif|bmp|gif|heic|heif|ico|jpe?g|png|tiff?|webp)$/i.test(file.name);
 }

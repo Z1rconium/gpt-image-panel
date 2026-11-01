@@ -15,9 +15,10 @@ import type {
   NodeImageUploadJobStatus,
   NodeImageUploadResponse
 } from '$lib/api/types/gallery';
-import type { GalleryLoadOptions, GalleryNavigation, GalleryOperationStatus, GalleryState } from '$lib/stores/gallery';
+import { batchRequestBody, type GalleryLoadOptions, type GalleryNavigation, type GalleryOperationStatus, type GalleryState } from '$lib/stores/gallery';
 import { nodeImageResult, type NodeImageResultItem } from '$lib/stores/nodeImage';
 import { abortError, waitForGalleryJob } from '$lib/stores/galleryJobEvents';
+import { downloadBlob, isAbortError } from '$lib/utils/network';
 
 const STREAMING_ZIP_DOWNLOAD_BYTES_THRESHOLD = 64 * 1024 * 1024;
 const NODE_IMAGE_CANCEL_POLL_INTERVAL_MS = 250;
@@ -37,19 +38,6 @@ export type GalleryActionDeps = {
   clearPendingSingleDeletes: () => void;
   registerAbortController: (controller: AbortController) => () => void;
 };
-
-function downloadBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  // Revoking synchronously can cancel the download in WebKit before the
-  // navigation consumes the blob URL; defer it to a later task.
-  setTimeout(() => URL.revokeObjectURL(url), 0);
-}
 
 function startNativeDownload(url: string, filename?: string) {
   const link = document.createElement('a');
@@ -174,11 +162,6 @@ function selectedVisibleEntries(state: GalleryState) {
   };
 }
 
-function batchRequestBody(state: GalleryState) {
-  if (state.selectionToken) return { selection_token: state.selectionToken.token };
-  return { ids: [...state.selectedIds] };
-}
-
 async function refreshGalleryPageBestEffort(
   deps: GalleryActionDeps,
   page: number
@@ -206,10 +189,6 @@ function waitForAbortableDelay(delayMs: number, signal?: AbortSignal) {
     }, delayMs);
     signal?.addEventListener('abort', handleAbort, { once: true });
   });
-}
-
-function isAbortError(error: unknown) {
-  return error instanceof Error && error.name === 'AbortError';
 }
 
 function waitForGalleryExportJob(

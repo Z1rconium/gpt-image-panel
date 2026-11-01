@@ -1,10 +1,9 @@
 <script lang="ts">
-  import { apiFetch } from '$lib/api/client';
   import { promptForm } from '$lib/features/workspace/formState.svelte';
   import { language, t } from '$lib/i18n';
   import { assistantStore } from '$lib/stores/assistant';
-  import type { AssistantPromptCheckResponse, AssistantPromptVariant, AssistantRecommendParamsResponse, PromptOptimizeResponse } from '$lib/api/types/assistant';
-  import { buildPromptOptimizeRequest } from '$lib/utils/promptOptimizer';
+  import type { AssistantPromptCheckResponse, AssistantPromptVariant, AssistantRecommendParamsResponse } from '$lib/api/types/assistant';
+  import { requestPromptOptimize } from '$lib/utils/promptOptimizer';
   import { normalizeSubmissionQuantity } from '$lib/utils/promptForm';
 
   type ResultMode = 'rewrite' | 'quickOptimize' | 'check' | 'variants' | 'params';
@@ -114,25 +113,15 @@
     quickOptimizing = true;
     const contextKey = activeContextKey;
     try {
-      const response = await apiFetch<PromptOptimizeResponse>(
-        '/api/prompt/optimize',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(
-            buildPromptOptimizeRequest({
-              prompt,
-              intent: instruction.trim(),
-              targetLanguage: $language,
-              apiPath: promptForm.apiPath,
-              model: promptForm.model,
-              size: promptForm.size,
-              quality: promptForm.quality
-            })
-          )
-        },
-        'quick optimizing prompt'
-      );
+      const response = await requestPromptOptimize({
+        prompt,
+        intent: instruction.trim(),
+        targetLanguage: $language,
+        apiPath: promptForm.apiPath,
+        model: promptForm.model,
+        size: promptForm.size,
+        quality: promptForm.quality
+      });
       if (contextKey !== activeContextKey) return;
       resultMode = 'quickOptimize';
       rewrittenPrompt = response.optimized_prompt;
