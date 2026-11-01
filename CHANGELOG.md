@@ -1,6 +1,24 @@
 # Changelog
 
-## Unreleased
+## v1.8.1
+
+- **Bug fixes**:
+  - Fixed undefined `logger` in gallery job SSE streaming error handler.
+  - Removed redundant database query during agent conversation opening.
+  - Fixed secret draft dirty check in settings drawer that failed to recognize registry secret references, preventing false-positive dirty states.
+- **Dead code and logic cleanups**:
+  - Backend: removed unused host list validator, float config schemas, pricing version constant, dead private IP ranges helper, unreachable aiohttp exception blocks, and obsolete temporary image/thumbnail writing helpers.
+  - Frontend: deleted dead `agentStore.create` method, unused `batchJob` assistant store state and `promptFromGalleryImage` action, dead `agentBlocksText` utility, unreachable Escape keydown cascade in Workspace, and redundant `releasePointer` calls in Lightbox.
+  - Cleaned barrel re-exports in maskDocument to keep mask image decoder decoupled from editor document.
+- **Business logic consolidation**:
+  - Unified assistant API path normalization with `normalize_assistant_api_path`.
+  - Unified settings default coercion helpers for AI assistant and prompt optimizer settings.
+  - Consolidated settings health badges and status labels under shared utility module.
+  - Consolidated gallery page update logic with `applyLoadedGalleryPage` and unified selection batch request payload construction.
+  - Consolidated `isAbortError`, `downloadBlob`, and image file detection utilities.
+  - Extracted shared `requestPromptOptimize` helper across workspace and assistant components.
+
+## v1.8.0
 
 Implements the v1.7.0–v1.7.10 review (`reviews/`), findings R1–R11.
 

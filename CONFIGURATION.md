@@ -81,7 +81,7 @@ For custom cost estimates, rates are USD per million tokens, for example:
 
 ## Image and build inputs
 
-- `GPT_IMAGE_PANEL_IMAGE`: Compose image selector; defaults to `ghcr.io/z1rconium/gpt-image-linux:v1.8.0`.
+- `GPT_IMAGE_PANEL_IMAGE`: Compose image selector; defaults to `ghcr.io/z1rconium/gpt-image-linux:v1.8.1`.
 - Docker build arguments `PYTHON_BASE_IMAGE` and `NODE_BASE_IMAGE` override pinned Python 3.12 slim and Node 24 Alpine images respectively; see `Dockerfile` for exact digests. `APP_VERSION` and `VCS_REF` build arguments set image labels. Docker Bake also accepts `IMAGE` and `TAG`; see `docker-bake.hcl`.
 
 ## Granian native options
