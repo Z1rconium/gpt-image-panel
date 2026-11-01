@@ -207,10 +207,6 @@ def load_nodeimage_settings() -> dict:
         return _load_nodeimage_settings_from_conn(conn)
 
 
-def get_nodeimage_settings() -> dict:
-    return load_nodeimage_settings()
-
-
 def save_nodeimage_settings(settings: dict):
     _ensure_database()
     normalized = _normalize_nodeimage_settings(settings)

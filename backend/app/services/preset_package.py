@@ -19,7 +19,12 @@ from ..core.errors import NotFoundError, UnprocessableRequestError
 from ..core.utils import utc_now
 from ..runtime.state import state
 from ..schemas.provider import provider_capabilities
-from ..schemas.presets import MAX_PRESET_IMPORT_BYTES, PresetExportPackage
+from ..schemas.presets import (
+    MAX_PRESET_IMPORT_BYTES,
+    PRESET_EXPORT_FORMAT,
+    PRESET_EXPORT_VERSION,
+    PresetExportPackage,
+)
 from .presets import (
     _stored_provider_config,
     apply_api_preset,
@@ -56,8 +61,8 @@ def build_preset_export(preset_id: str) -> dict:
     if not preset:
         raise NotFoundError("Preset not found")
     return {
-        "format": "gpt-image-panel-presets",
-        "format_version": 1,
+        "format": PRESET_EXPORT_FORMAT,
+        "format_version": PRESET_EXPORT_VERSION,
         "exported_at": utc_now(),
         "presets": [_preset_export_item(preset)],
     }

@@ -24,10 +24,6 @@ def output_label(round_no: int, image_index: int) -> str:
     return f"round-{round_no}-image-{image_index}"
 
 
-def input_label(round_no: int, image_index: int) -> str:
-    return f"round-{round_no}-input-{image_index}"
-
-
 def is_valid_label(value: str) -> bool:
     return bool(LABEL_RE.match(str(value or "")))
 

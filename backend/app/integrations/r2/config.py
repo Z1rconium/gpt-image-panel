@@ -1,16 +1,10 @@
 import logging
-import mimetypes
-import uuid
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field
-from itertools import islice
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
 from ...core import secrets
-from ...core.utils import utc_now
 from ...core.validators import normalize_r2_endpoint_url, validate_r2_endpoint_url
-from ...core.media import safe_image_path
 
 
 HealthStatus = str

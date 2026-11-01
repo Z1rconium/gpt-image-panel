@@ -13,13 +13,16 @@ from ...core.api_paths import (
     default_model_for_api_path,
     normalize_api_preset,
 )
+from ...core.overall_config import OVERALL_CONFIG_BY_NAME
 from ...core.secrets import configured_secret_ids
 from ...schemas.provider import provider_capabilities
 from ...core.settings_defaults import (
-    coerce_positive_int as _coerce_positive_int,
+    coerce_bool as _coerce_bool,
     default_ai_assistant_settings as _default_ai_assistant_settings,
     default_prompt_optimizer_settings as _default_prompt_optimizer_settings,
     default_secret_reference as _default_secret_reference,
+    normalize_ai_assistant_settings as _normalize_ai_assistant_settings,
+    normalize_prompt_optimizer_settings as _normalize_prompt_optimizer_settings_base,
 )
 from ...core.utils import coerce_nonnegative_int, utc_now
 from ...core.secrets import (
@@ -117,14 +120,6 @@ def _default_settings() -> dict:
     }
 
 
-def _coerce_bool(value: Any, default: bool = False) -> bool:
-    if isinstance(value, bool):
-        return value
-    if value is None:
-        return default
-    return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
-
-
 def _normalize_r2_key_prefix(value: Any, default: str = "gallery/") -> str:
     raw = str(value if value is not None else default).strip()
     if not raw:
@@ -188,49 +183,10 @@ def _coerce_iso_datetime(value: str | None) -> datetime | None:
 
 
 def _normalize_prompt_optimizer_settings(settings: dict | None) -> dict:
-    default = _default_prompt_optimizer_settings()
-    if not isinstance(settings, dict):
-        return default
-    return {
-        "enabled": _coerce_bool(settings.get("enabled"), default["enabled"]),
-        "api_url": str(settings.get("api_url") or "").strip(),
-        "api_key": _normalize_stored_secret(settings.get("api_key"), "API key"),
-        "model": str(settings.get("model") or default["model"]).strip()
-        or default["model"],
-        "timeout_seconds": _coerce_positive_int(
-            settings.get("timeout_seconds"),
-            default["timeout_seconds"],
-        ),
-    }
-
-
-def _normalize_agent_settings(settings: dict, default: dict) -> dict:
-    return {
-        "agent_enabled": _coerce_bool(settings.get("agent_enabled"), default["agent_enabled"]),
-        "agent_model": str(settings.get("agent_model") or "").strip()[:200],
-        "agent_max_tool_rounds": min(
-            max(1, _coerce_positive_int(settings.get("agent_max_tool_rounds"), default["agent_max_tool_rounds"])),
-            config.AGENT_MAX_TOOL_ROUNDS_CEILING,
-        ),
-        "agent_system_prompt": str(settings.get("agent_system_prompt") or "").strip()[:4000],
-        "agent_web_search_enabled": bool(settings.get("agent_web_search_enabled", False)),
-        "agent_web_search_supported": bool(settings.get("agent_web_search_supported", False)),
-    }
-
-
-def _normalize_ai_assistant_settings(settings: dict | None) -> dict:
-    default = _default_ai_assistant_settings()
-    if not isinstance(settings, dict):
-        return default
-    vision_model = (
-        str(settings.get("vision_model") or default["vision_model"] or config.PROMPT_OPTIMIZER_MODEL).strip()
-        or config.PROMPT_OPTIMIZER_MODEL
+    return _normalize_prompt_optimizer_settings_base(
+        settings,
+        api_key_normalizer=lambda k: _normalize_stored_secret(k, "API key"),
     )
-    return {
-        "enabled": _coerce_bool(settings.get("enabled"), default["enabled"]),
-        "vision_model": vision_model,
-        **_normalize_agent_settings(settings, default),
-    }
 
 
 def _normalize_r2_backup_settings(settings: dict | None) -> dict:
@@ -287,16 +243,20 @@ def _has_r2_backup_storage_values(settings: dict | None) -> bool:
     )
 
 
-def _store_r2_backup_settings_on_conn(conn: sqlite3.Connection, settings: dict):
+def _store_json_setting_on_conn(conn: sqlite3.Connection, key: str, settings: dict) -> None:
     # Runs from the read path when stored values are missing, so it must not
     # commit a transaction the caller already opened.
     started_transaction = not conn.in_transaction
     if started_transaction:
         conn.execute("BEGIN IMMEDIATE")
-    _set_setting_value(conn, R2_BACKUP_SETTINGS_KEY, json.dumps(settings))
+    _set_setting_value(conn, key, json.dumps(settings))
     if started_transaction:
         conn.commit()
     _secure_data_storage_permissions()
+
+
+def _store_r2_backup_settings_on_conn(conn: sqlite3.Connection, settings: dict) -> None:
+    _store_json_setting_on_conn(conn, R2_BACKUP_SETTINGS_KEY, settings)
 
 
 def _load_r2_backup_settings_from_conn(conn: sqlite3.Connection) -> dict:
@@ -341,15 +301,7 @@ def _has_nodeimage_storage_values(settings: dict | None) -> bool:
 
 
 def _store_nodeimage_settings_on_conn(conn: sqlite3.Connection, settings: dict) -> None:
-    # Runs from the read path when stored values are missing, so it must not
-    # commit a transaction the caller already opened.
-    started_transaction = not conn.in_transaction
-    if started_transaction:
-        conn.execute("BEGIN IMMEDIATE")
-    _set_setting_value(conn, NODEIMAGE_SETTINGS_KEY, json.dumps(settings))
-    if started_transaction:
-        conn.commit()
-    _secure_data_storage_permissions()
+    _store_json_setting_on_conn(conn, NODEIMAGE_SETTINGS_KEY, settings)
 
 
 def _load_nodeimage_settings_from_conn(conn: sqlite3.Connection) -> dict:
@@ -394,8 +346,6 @@ def _overall_config_rows(conn: sqlite3.Connection) -> dict[str, dict[str, Any]]:
 
 
 def sync_overall_config_env_values(env_values: dict[str, tuple[str, bool]]) -> dict[str, dict[str, Any]]:
-    from ...core.overall_config import OVERALL_CONFIG_BY_NAME
-
     _ensure_database()
     now = utc_now()
     scrubbed_plaintext_overrides: list[str] = []
@@ -462,8 +412,6 @@ def list_overall_config_values() -> dict[str, dict[str, Any]]:
 def save_overall_config_overrides(
     updates: dict[str, str | None],
 ) -> dict[str, dict[str, Any]]:
-    from ...core.overall_config import OVERALL_CONFIG_BY_NAME
-
     _ensure_database()
     now = utc_now()
     with _connect() as conn:

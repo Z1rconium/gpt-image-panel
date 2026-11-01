@@ -8,9 +8,6 @@ from typing import Any
 from ...core.utils import utc_now
 
 
-ACTIVE_TURN_STATUSES = ("queued", "running")
-
-
 TERMINAL_TURN_STATUSES = ("completed", "failed", "cancelled", "interrupted")
 
 

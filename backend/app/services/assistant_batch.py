@@ -40,7 +40,6 @@ from .claim_loop import fail_open_precheck, run_claim_loop
 from .assistant_runtime import (
     AIAnalyzeJobLeaseLost,
     AI_ANALYZE_JOB_BATCH_SIZE,
-    AI_ANALYZE_JOB_KIND,
     AI_ANALYZE_JOB_LEASE_RENEW_SECONDS,
     AI_ANALYZE_JOB_LEASE_SECONDS,
     MAX_ACTIVE_AI_ANALYZE_JOBS,
@@ -52,8 +51,10 @@ from .assistant_runtime import (
 )
 from .assistant_slots import AI_ASSISTANT_SLOT_RETRY_SECONDS
 from .assistant_vision import _analyze_gallery_image
-from .gallery_common import _gallery_filters_from_selection_token
+from .gallery_common import AI_ANALYZE_JOB_KIND, _gallery_filters_from_selection_token
+from .gallery_job_payloads import _gallery_ai_analyze_payload as _ai_analyze_payload
 from .gallery_job_sse import stream_gallery_job
+from .lease_renewal import renew_lease_until_lost
 
 AI_ANALYZE_DISPATCH_INTERVAL_SECONDS = 1.0
 AI_ANALYZE_DISPATCH_MAX_IDLE_BACKOFF_SECONDS = 5.0
@@ -165,24 +166,6 @@ async def stream_batch_analyze_job(
     )
 
 
-def _ai_analyze_payload(job: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "job_id": job.get("job_id"),
-        "status": job.get("status"),
-        "stage": job.get("stage"),
-        "message": job.get("message"),
-        "progress": job.get("progress") or 0,
-        "requested_count": job.get("requested_count") or 0,
-        "processed_count": job.get("processed_count") or 0,
-        "analyzed_count": job.get("exported_count") or 0,
-        "missing_count": job.get("missing_count") or 0,
-        "failed_count": job.get("failed_count") or 0,
-        "created_at": job.get("created_at"),
-        "updated_at": job.get("updated_at"),
-        "error": job.get("error"),
-    }
-
-
 def _build_ai_analyze_job(
     *,
     payload: dict[str, Any],
@@ -214,22 +197,27 @@ def _gallery_job_lease_expires_at() -> str:
 
 
 async def _renew_ai_analyze_job_lease(job_id: str, lease_owner: str, stop_event: asyncio.Event) -> None:
-    while True:
+    def on_lost() -> None:
+        raise AIAnalyzeJobLeaseLost(f"Lost AI analysis job lease for {job_id}")
+
+    async def renew() -> bool:
         try:
-            await asyncio.wait_for(stop_event.wait(), timeout=AI_ANALYZE_JOB_LEASE_RENEW_SECONDS)
-            return
-        except asyncio.TimeoutError:
-            try:
-                renewed = await run_db_operation(renew_gallery_job_lease,
-                    job_id=job_id,
-                    lease_owner=lease_owner,
-                    lease_expires_at=_gallery_job_lease_expires_at(),
-                    now=utc_now(),
-                )
-            except Exception as e:
-                raise AIAnalyzeJobLeaseLost(f"Failed to renew AI analysis job lease for {job_id}") from e
-            if not renewed:
-                raise AIAnalyzeJobLeaseLost(f"Lost AI analysis job lease for {job_id}")
+            return await run_db_operation(
+                renew_gallery_job_lease,
+                job_id=job_id,
+                lease_owner=lease_owner,
+                lease_expires_at=_gallery_job_lease_expires_at(),
+                now=utc_now(),
+            )
+        except Exception as e:
+            raise AIAnalyzeJobLeaseLost(f"Failed to renew AI analysis job lease for {job_id}") from e
+
+    await renew_lease_until_lost(
+        renew,
+        interval_seconds=AI_ANALYZE_JOB_LEASE_RENEW_SECONDS,
+        on_lost=on_lost,
+        stop_event=stop_event,
+    )
 
 
 def _ai_analyze_ids_from_payload(payload: dict[str, Any]) -> list[str]:

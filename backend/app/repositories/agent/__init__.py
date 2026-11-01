@@ -5,7 +5,6 @@ The implementation is split by entity; this package re-exports the stable names.
 # ruff: noqa: F401  (re-export facade)
 
 from ._common import (
-    ACTIVE_TURN_STATUSES,
     AgentAttachmentError,
     AgentConversationLimitError,
     AgentLeaseLostError,
@@ -45,7 +44,6 @@ from .turns import (
     get_turn,
     get_turn_by_client_id,
     is_turn_cancel_requested,
-    list_turns_needing_reconcile,
     renew_turn_lease,
     request_turn_cancel,
     set_turn_rounds_used,
@@ -59,7 +57,6 @@ from .messages import (
     list_messages,
     list_pending_images_for_turn,
     list_reconcilable_images_for_conversation,
-    list_reconcilable_images_for_turn,
     set_image_job,
     settle_image,
     update_message_content,

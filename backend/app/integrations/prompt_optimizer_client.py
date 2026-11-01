@@ -7,8 +7,6 @@ import time
 from pathlib import Path
 from typing import Any
 
-import aiohttp
-
 from ..core import settings as config
 from ..core import validators as ssrf
 from .upstream.transport import classify_probe_status
@@ -377,7 +375,3 @@ async def probe_prompt_optimizer_endpoint(
             "duration_ms": int((time.monotonic() - start) * 1000),
             "status_code": e.status,
         }
-    except (aiohttp.ServerTimeoutError, TimeoutError, asyncio.TimeoutError) as e:
-        raise OptimizerTimeoutError("Prompt optimizer request timed out") from e
-    except aiohttp.ClientError as e:
-        raise UpstreamOptimizerError(f"Prompt optimizer connection error: {e}") from e

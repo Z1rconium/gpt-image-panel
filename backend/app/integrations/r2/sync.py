@@ -1,23 +1,11 @@
-import logging
-import uuid
-from contextlib import nullcontext
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import asdict, dataclass, field
+from contextlib import nullcontext
 from itertools import islice
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
-from ...core import settings as config
-from ...core.utils import utc_now
-from ...core.secrets import (
-    get_env_var_ref_name,
-    is_malformed_env_var_ref,
-    resolve_env_var_ref,
-)
-from ...core.validators import (
-    normalize_r2_endpoint_url,
-)
 from ...core.media import image_content_type_for_filename, safe_image_path
+from ...core.utils import utc_now
 
 
 HealthStatus = str

@@ -33,10 +33,6 @@ class AgentEventWriter:
         self._emit_lock = asyncio.Lock()
         self._persist_lock = asyncio.Lock()
 
-    @property
-    def text_block(self) -> dict[str, Any] | None:
-        return self._text_block
-
     def begin_text_segment(self) -> None:
         self._text_block = None
 

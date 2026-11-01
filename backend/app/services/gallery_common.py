@@ -25,7 +25,7 @@ from ..repositories.gallery.maintenance import (
 )
 from ..repositories.gallery.queries import (
     get_gallery_entries_by_ids,
-    get_gallery_ids,
+    get_gallery_ids as get_gallery_ids,
 )
 from ..repositories.thumbnail_jobs import ensure_thumbnail_for_image
 from ..schemas.gallery import (
@@ -46,7 +46,6 @@ MAX_ACTIVE_EXPORT_JOBS = 5
 MAX_ACTIVE_SYNC_JOBS = 1
 MAX_ACTIVE_IMPORT_JOBS = 1
 MAX_ACTIVE_NODEIMAGE_UPLOAD_JOBS = 1
-MAX_ACTIVE_NODEIMAGE_JOBS = MAX_ACTIVE_NODEIMAGE_UPLOAD_JOBS
 EXPORT_JOB_TTL_SECONDS = 1800
 EXPORT_JOB_GC_INTERVAL_SECONDS = 300
 SYNC_JOB_TTL_SECONDS = 1800
@@ -337,13 +336,7 @@ def _missing_gallery_ids(
 
 
 async def _resolve_gallery_batch_ids(req: GalleryBatchRequest) -> tuple[list[str], list[GalleryEntry], int, list[str]]:
-    if req.ids:
-        entries = await run_db_operation(get_gallery_entries_by_ids, req.ids)
-        missing_ids = _missing_gallery_ids(req.ids, entries)
-        return req.ids, entries, len(req.ids), missing_ids
-
-    filters = await _gallery_filters_from_selection_token(req.selection_token)
-    ids = await run_db_operation(get_gallery_ids, filters)
+    ids = req.ids or []
     if not ids:
         return [], [], 0, []
     entries = await run_db_operation(get_gallery_entries_by_ids, ids)

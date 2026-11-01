@@ -117,14 +117,6 @@ def _read_image_file_details(
     return detected_format, upright_width, upright_height, len(data)
 
 
-def save_image_to_temp(image_bytes: bytes, filename: str) -> Path:
-    path, _format, _width, _height = save_image_to_temp_with_metadata(
-        image_bytes,
-        filename,
-    )
-    return path
-
-
 def save_image_to_temp_with_metadata(
     image_bytes: bytes,
     filename: str,

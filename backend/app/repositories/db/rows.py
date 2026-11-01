@@ -8,7 +8,7 @@ import secrets
 import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Iterator, Sequence
+from typing import Any, Sequence
 from urllib.parse import quote
 
 from ...core import settings as config
@@ -18,26 +18,10 @@ from ...core.utils import coerce_nonnegative_int, json_dumps_canonical, utc_now
 from ...schemas.gallery import GalleryEntry, GalleryFilterOptions
 from ...schemas.snippets import PromptSnippet
 from ...core.media import (
-    IMAGE_CONTENT_TYPE_FORMATS,
-    IMAGE_EXTENSION_FORMATS,
-    IMAGE_FILE_EXTENSIONS,
-    IMAGE_FORMAT_CONTENT_TYPES,
-    THUMBNAIL_CONTENT_TYPE,
-    THUMBNAIL_EXTENSION,
-    detect_image_format,
-    generate_image_id,
-    get_image_dimensions,
-    image_dimension_metadata as _image_dimension_metadata,
     safe_image_path,
     safe_thumbnail_path,
-    validate_image_header_bytes,
-    validate_image_bytes,
 )
 from ..thumbnails import (
-    create_thumbnail_temp as _create_thumbnail_temp_unlocked,
-    create_thumbnail_temp_from_path as _create_thumbnail_temp_from_path_unlocked,
-    delete_thumbnail as _delete_thumbnail_unlocked,
-    promote_thumbnail_temp as _promote_thumbnail_temp_unlocked,
     thumbnail_filename_for_image as _thumbnail_filename_for_image,
     thumbnail_url_for_filename as _thumbnail_url_for_filename,
 )
@@ -47,59 +31,19 @@ from .connection import (
 )
 
 from .state import (
-    _add_verified_thumbnail,
-    _remove_verified_thumbnail,
-    _clear_verified_thumbnails,
-    _invalidate_filter_options_cache,
     _bump_filter_options_cache_version,
-    _get_filter_options_cache_version,
-    _invalidate_gallery_total_bytes_cache,
-    _invalidate_gallery_count_cache,
 )
 from .constants import (
-    AI_ASSISTANT_SETTINGS_KEY,
-    DATA_DIR_MODE,
-    DATA_FILE_MODE,
-    DATA_PERMISSION_CHECK_INTERVAL_SECONDS,
-    EditSourceQueueFullError,
     GALLERY_COLUMNS,
-    GALLERY_COUNT_CACHE_SECONDS,
     GALLERY_FTS_MIN_QUERY_LENGTH,
-    GALLERY_FTS_VERSION,
-    GALLERY_FTS_VERSION_KEY,
-    GALLERY_IMPORT_BATCH_SIZE,
     GALLERY_JOB_COLUMNS,
-    GALLERY_ORPHAN_FILE_TTL_SECONDS,
-    GALLERY_ORPHAN_GC_BATCH_SIZE,
-    GALLERY_PAGE_ANCHOR_INTERVAL_PAGES,
-    GALLERY_PAGE_ANCHOR_INVALIDATING_UPDATE_FIELDS,
-    GALLERY_PAGE_ANCHOR_MAX_PER_QUERY,
-    GALLERY_PAGE_ANCHOR_SMALL_OFFSET_THRESHOLD,
-    GALLERY_SYNC_BATCH_SIZE,
-    GALLERY_TOTAL_BYTES_CACHE_SECONDS,
     GENERATE_JOB_COLUMNS,
     IMAGE_JOB_UNIT_COLUMNS,
     INTEGER_GALLERY_COLUMNS,
     INTEGER_GENERATE_JOB_COLUMNS,
-    ImageJobQueueFullError,
     MAX_PERSISTED_JOB_TEXT_CHARS,
-    NODEIMAGE_SETTINGS_KEY,
-    PROMPT_OPTIMIZER_SETTINGS_KEY,
-    PROMPT_SNIPPET_COLUMNS,
     REAL_GALLERY_COLUMNS,
-    R2_BACKUP_SETTINGS_KEY,
     REQUIRED_GALLERY_COLUMNS,
-    SETTINGS_ACTIVE_PRESET_KEY,
-    SQLITE_IN_CLAUSE_CHUNK_SIZE,
-    SQLITE_TIMEOUT_SECONDS,
-    THUMBNAIL_CPU_SLOT_LEASE_SECONDS,
-    THUMBNAIL_JOB_LEASE_SECONDS,
-    THUMBNAIL_JOB_MAX_ATTEMPTS,
-    UPSTREAM_SOCKS5_PROXY_KEY,
-    WEBHOOK_URL_KEY,
-    WORKER_METRIC_SNAPSHOT_TTL_SECONDS,
-    _GALLERY_BYTES_CACHE_MAX_SIZE,
-    _GALLERY_COUNT_CACHE_MAX_SIZE,
     _GALLERY_INTERNAL_COLUMNS,
 )
 

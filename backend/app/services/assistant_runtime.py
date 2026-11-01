@@ -7,7 +7,6 @@ endpoint (and the Agent-specific knobs) into an immutable runtime snapshot.
 """
 
 import contextvars
-import logging
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -17,10 +16,6 @@ from ..integrations import assistant_client
 from ..repositories.db.execution import run_db_operation
 from ..schemas.settings import AIAssistantSettingsRequest
 from . import presets
-
-logger = logging.getLogger(__name__)
-
-ASSISTANT_IMAGE_UPLOAD_CHUNK_BYTES = 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -45,8 +40,6 @@ _batch_target_language: contextvars.ContextVar[Literal["en", "zh-CN"]] = context
     "batch_target_language", default="en"
 )
 
-AI_ANALYZE_JOB_KIND = "ai_analyze"
-GALLERY_SELECTION_TOKEN_KIND = "batch_selection"
 MAX_ACTIVE_AI_ANALYZE_JOBS = 1
 AI_ANALYZE_JOB_LEASE_SECONDS = 300
 AI_ANALYZE_JOB_LEASE_RENEW_SECONDS = 60

@@ -1,43 +1,38 @@
 import logging
 
-from ..core.errors import UnprocessableRequestError
-from ..runtime.state import state
-from ..core import secrets
-from ..core import settings as config
-from ..core.utils import coerce_nonnegative_int
-from ..core.settings_defaults import (
-    coerce_positive_int as _coerce_positive_int,
-    default_ai_assistant_settings as _default_ai_assistant_settings,
-    default_prompt_optimizer_settings as _default_prompt_optimizer_settings,
-    default_secret_reference as _default_secret_reference,
-)
 from pydantic import ValidationError
 
+from ..core import secrets
+from ..core import settings as config
 from ..core.api_paths import (
     PROVIDER_KIND_ASYNC_JSON,
     normalize_api_path,
     normalize_api_preset,
+    normalize_assistant_api_path as _normalize_assistant_api_path,
     normalize_default_model,
     normalize_default_response_format,
     normalize_prompt_guard,
     normalize_provider_kind,
     normalize_supports_mask,
 )
-from ..schemas.provider import (
-    ProviderCapabilities,
-    ProviderConfigPayload,
-    parse_provider_config,
-    provider_capabilities,
-)
+from ..core.errors import UnprocessableRequestError
 from ..core.redaction import (
     mask_socks5_proxy_url,
     mask_webhook_url,
+    redact_sensitive_text,
 )
 from ..core.secrets import (
     get_env_var_ref_name,
     normalize_secret_env_ref_or_plaintext,
     resolve_env_var_ref,
 )
+from ..core.settings_defaults import (
+    coerce_positive_int as _coerce_positive_int,
+    default_secret_reference as _default_secret_reference,
+    normalize_ai_assistant_settings,
+    normalize_prompt_optimizer_settings,
+)
+from ..core.utils import coerce_nonnegative_int
 from ..core.validators import (
     normalize_socks5_proxy_url,
     normalize_webhook_url,
@@ -48,18 +43,25 @@ from ..integrations.nodeimage.client import (
 )
 from ..repositories.settings import (
     load_ai_assistant_settings,
+    load_nodeimage_settings,
     load_prompt_optimizer_settings,
     load_r2_backup_settings,
-    load_nodeimage_settings,
     load_settings,
     save_settings,
 )
+from ..runtime.state import state
 from ..schemas.presets import ApiPresetResponse
+from ..schemas.provider import (
+    ProviderCapabilities,
+    ProviderConfigPayload,
+    parse_provider_config,
+    provider_capabilities,
+)
 from ..schemas.settings import (
     AIAssistantSettingsResponse,
+    NodeImageSettingsResponse,
     PromptOptimizerSettingsResponse,
     R2BackupSettingsResponse,
-    NodeImageSettingsResponse,
     SettingsResponse,
 )
 from .preset_credentials import (
@@ -72,39 +74,12 @@ from .preset_credentials import (
 )
 
 
-
 def get_exception_message(error: Exception) -> str:
-    from ..core.redaction import redact_sensitive_text
-
     return redact_sensitive_text(str(error) or repr(error) or error.__class__.__name__)
-
-
 
 
 def _coerce_non_negative_int(value, default: int = 0) -> int:
     return coerce_nonnegative_int(value, default=default)
-
-
-def normalize_prompt_optimizer_settings(raw: dict | None) -> dict:
-    defaults = _default_prompt_optimizer_settings()
-    if not isinstance(raw, dict):
-        return defaults
-    return {
-        "enabled": bool(raw.get("enabled", defaults["enabled"])),
-        "api_url": str(raw.get("api_url") or "").strip(),
-        "api_key": str(raw.get("api_key") or "").strip(),
-        "model": str(raw.get("model") or defaults["model"]).strip()
-        or defaults["model"],
-        "timeout_seconds": _coerce_positive_int(
-            raw.get("timeout_seconds"),
-            defaults["timeout_seconds"],
-        ),
-    }
-
-
-def _normalize_assistant_api_path(value: object, default: str = "/v1/chat/completions") -> str:
-    normalized = str(value or default).strip()
-    return normalized if normalized in {"/v1/chat/completions", "/v1/responses"} else default
 
 
 def _assistant_endpoint_from_optimizer_url(api_url: str) -> tuple[str, str]:
@@ -113,29 +88,6 @@ def _assistant_endpoint_from_optimizer_url(api_url: str) -> tuple[str, str]:
         if value.endswith(suffix):
             return value[: -len(suffix)].rstrip("/"), suffix
     return value, "/v1/chat/completions"
-
-
-def normalize_ai_assistant_settings(raw: dict | None) -> dict:
-    defaults = _default_ai_assistant_settings()
-    if not isinstance(raw, dict):
-        return defaults
-    vision_model = (
-        str(raw.get("vision_model") or defaults["vision_model"] or config.PROMPT_OPTIMIZER_MODEL).strip()
-        or config.PROMPT_OPTIMIZER_MODEL
-    )
-    return {
-        "enabled": bool(raw.get("enabled", defaults["enabled"])),
-        "vision_model": vision_model,
-        "agent_enabled": bool(raw.get("agent_enabled", defaults["agent_enabled"])),
-        "agent_model": str(raw.get("agent_model") or "").strip()[:200],
-        "agent_max_tool_rounds": min(
-            max(1, _coerce_positive_int(raw.get("agent_max_tool_rounds"), defaults["agent_max_tool_rounds"])),
-            config.AGENT_MAX_TOOL_ROUNDS_CEILING,
-        ),
-        "agent_system_prompt": str(raw.get("agent_system_prompt") or "").strip()[:4000],
-        "agent_web_search_enabled": bool(raw.get("agent_web_search_enabled", False)),
-        "agent_web_search_supported": bool(raw.get("agent_web_search_supported", False)),
-    }
 
 
 def persist_api_settings():

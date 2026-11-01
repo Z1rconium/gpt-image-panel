@@ -4,36 +4,37 @@ Subscribers are per worker process; updates written by another worker are
 picked up by polling each job's updated_at edge (see job_events)."""
 
 import asyncio
+import logging
 import time
 
-
-from ..repositories.db.execution import run_db_operation
-from .gallery_job_payloads import (
-    _gallery_job_event_name,
-    _gallery_job_payload,
-)
+from ..core import settings as config
 from ..core.errors import (
     NotFoundError,
     RateLimitedError,
 )
-from ..runtime.state import state
-from .job_events import publish_job_edges, publish_queue, serialize_sse_event
-from .poll_backoff import next_poll_delay
-from ..repositories.sse_limiter import sse_limiter
-from ..core import security as auth
-from ..core import settings as config
-from ..core.streaming import StreamedBody
 from ..core.observability import metrics
+from ..core.streaming import StreamedBody
 from ..repositories.coordination import (
     get_gallery_job,
     get_gallery_jobs_updated_at_edges,
 )
+from ..repositories.db.execution import run_db_operation
+from ..repositories.sse_limiter import sse_limiter
+from ..runtime.state import state
 from .gallery_common import (
     GALLERY_JOB_DISPATCH_INTERVAL_SECONDS,
     GALLERY_JOB_SSE_IDLE_CHECK_SECONDS,
     GALLERY_JOB_SSE_QUEUE_MAXSIZE,
     PRIVATE_GALLERY_CACHE_CONTROL,
 )
+from .gallery_job_payloads import (
+    _gallery_job_event_name,
+    _gallery_job_payload,
+)
+from .job_events import publish_job_edges, publish_queue, serialize_sse_event
+from .poll_backoff import next_poll_delay
+
+logger = logging.getLogger(__name__)
 
 
 def _get_gallery_job_subscribers(kind: str) -> dict[str, set[asyncio.Queue]]:

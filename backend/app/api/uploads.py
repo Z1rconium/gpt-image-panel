@@ -7,7 +7,7 @@ from fastapi import UploadFile
 from ..core import settings as config
 from ..core.errors import DomainError, InvalidRequestError
 from ..core.media import IMAGE_CONTENT_TYPE_FORMATS, image_content_type_for_filename
-from ..services.uploads import IMAGE_UPLOAD_CONTENT_TYPES, IMAGE_UPLOAD_EXTENSIONS
+from ..services.uploads import IMAGE_UPLOAD_EXTENSIONS
 
 ASSISTANT_IMAGE_UPLOAD_CHUNK_BYTES = 1024 * 1024
 

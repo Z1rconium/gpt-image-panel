@@ -13,14 +13,10 @@ from ..repositories.db.execution import run_db_operation
 from ..core.image_models import MAX_PROMPT_CHARS
 from . import vision_previews
 from ..core.errors import (
-    DomainError,
-    InvalidRequestError,
     NotFoundError,
     UpstreamError,
-    UpstreamTimeoutError,
 )
 from ..core.utils import json_dumps_canonical
-from ..integrations import assistant_client
 from ..repositories.gallery.maintenance import is_gallery_filename_referenced
 from ..repositories.gallery.queries import get_gallery_entry
 from ..core.media import safe_image_path
@@ -35,6 +31,7 @@ from ..schemas.assistant import (
 from .assistant_json import (
     _clamp_text,
     _image_prompt_system_prompt,
+    _request_assistant_json_truncated,
     _string_list,
     _truncate_assistant_data,
     _warnings,
@@ -82,34 +79,21 @@ async def _assistant_vision_json(
         else:
             runtime = await _resolve_runtime_async(vision=True)
     async with _assistant_request_limit(runtime.timeout_seconds, wait_for_slot=wait_for_slot):
-        try:
-            entry, preview = await _gallery_entry_and_preview(image_id)
-            data, model_used, duration_ms = await assistant_client.request_assistant_json(
-                api_url=runtime.api_url,
-                api_key=runtime.api_key,
-                api_path=runtime.api_path,
-                model=runtime.model,
-                system_prompt=system_prompt,
-                user_prompt=_gallery_vision_user_prompt(
-                    entry,
-                    preview,
-                    include_stored_prompt=include_stored_prompt,
-                ),
-                schema=schema,
-                image=preview,
-                timeout_seconds=runtime.timeout_seconds,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                prevalidated_endpoint=runtime.endpoint,
-            )
-        except assistant_client.AssistantTimeoutError as e:
-            raise UpstreamTimeoutError(str(e)) from e
-        except assistant_client.AssistantError as e:
-            status_code = 400 if e.status == 400 else 502
-            raise DomainError(str(e), status_code=status_code) from e
-        except ValueError as e:
-            raise InvalidRequestError(str(e)) from e
-        return entry, preview, _truncate_assistant_data(data), model_used, duration_ms
+        entry, preview = await _gallery_entry_and_preview(image_id)
+        data, model_used, duration_ms = await _request_assistant_json_truncated(
+            runtime,
+            system_prompt=system_prompt,
+            user_prompt=_gallery_vision_user_prompt(
+                entry,
+                preview,
+                include_stored_prompt=include_stored_prompt,
+            ),
+            schema=schema,
+            image=preview,
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
+        return entry, preview, data, model_used, duration_ms
 
 
 def _gallery_vision_user_prompt(entry: Any, preview: dict[str, Any], *, include_stored_prompt: bool = True) -> str:

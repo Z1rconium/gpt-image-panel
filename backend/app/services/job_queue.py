@@ -38,7 +38,6 @@ from ..core.utils import utc_now
 from ..repositories.image_files import delete_mask_file, write_mask_file
 from ..repositories.image_jobs import (
     aggregate_image_job_units,
-    count_pending_image_job_units,
     enqueue_image_job,
     get_pending_edit_source_bytes as get_persisted_pending_edit_source_bytes,
     release_edit_source_reservation,
@@ -59,7 +58,6 @@ from .job_events import (
     publish_generate_job,
     remember_generate_job_memory,
 )
-from .job_persistence import store_generate_job
 from .webhook_service import validate_job_webhook_url
 
 
@@ -250,8 +248,6 @@ def gallery_entry_job_result(entry: GalleryEntry) -> dict:
     image["api_path"] = entry.api_path
     image["api_preset_name"] = entry.api_preset_name
     image["completed_at"] = entry.completed_at
-    image["paste_back"] = entry.paste_back
-    image["paste_back_scale"] = entry.paste_back_scale
     return image
 
 
@@ -532,8 +528,6 @@ async def queue_image_job(
     except EditSourceQueueFullError as e:
         metrics.increment("image_jobs.rejected.edit_source_full")
         raise RateLimitedError("Edit source queue is full") from e
-    except Exception:
-        raise
 
     remember_generate_job_memory(job_id, stored_job)
     state.generate_job_last_persist_at.pop(job_id, None)

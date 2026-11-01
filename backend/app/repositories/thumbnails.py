@@ -1,5 +1,4 @@
 import hashlib
-import io
 import logging
 import tempfile
 import warnings
@@ -106,18 +105,6 @@ def _render_thumbnail(open_image, filename: str, thumbnail_path: Path) -> bool:
     return True
 
 
-def _write_thumbnail_file(
-    image_bytes: bytes,
-    filename: str,
-    thumbnail_path: Path,
-) -> bool:
-    return _render_thumbnail(
-        lambda: Image.open(io.BytesIO(image_bytes)),
-        filename,
-        thumbnail_path,
-    )
-
-
 def _write_thumbnail_from_path(
     image_path: Path,
     filename: str,
@@ -125,31 +112,6 @@ def _write_thumbnail_from_path(
 ) -> bool:
     """Generate a thumbnail by opening the image file directly (no full read into memory)."""
     return _render_thumbnail(lambda: Image.open(image_path), filename, thumbnail_path)
-
-
-def create_thumbnail_temp(image_bytes: bytes, filename: str) -> tuple[str, Path] | None:
-    thumbnail_filename = thumbnail_filename_for_image(filename)
-    if not thumbnail_filename:
-        return None
-
-    thumbnail_path = safe_thumbnail_path(thumbnail_filename)
-    if not thumbnail_path:
-        return None
-
-    thumbnail_path.parent.mkdir(parents=True, exist_ok=True)
-    temp_file = tempfile.NamedTemporaryFile(
-        prefix=f".{thumbnail_path.stem}-",
-        suffix=f"{THUMBNAIL_EXTENSION}.tmp",
-        dir=thumbnail_path.parent,
-        delete=False,
-    )
-    temp_path = Path(temp_file.name)
-    temp_file.close()
-
-    if not _write_thumbnail_file(image_bytes, filename, temp_path):
-        temp_path.unlink(missing_ok=True)
-        return None
-    return thumbnail_filename, temp_path
 
 
 def create_thumbnail_temp_from_path(

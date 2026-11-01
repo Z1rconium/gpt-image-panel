@@ -7,7 +7,6 @@ from collections.abc import Iterable
 from urllib.parse import quote
 
 
-from ..schemas.gallery import GalleryEntry
 from ..schemas.nodeimage import NodeImageBatchUploadItem
 from .gallery_common import NODEIMAGE_UPLOAD_JOB_KIND
 

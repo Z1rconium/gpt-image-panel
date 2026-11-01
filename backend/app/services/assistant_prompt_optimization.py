@@ -26,7 +26,7 @@ from ..core.errors import (
 from ..integrations import assistant_client
 from ..integrations.upstream.errors import UpstreamApiError
 from ..integrations.upstream.generation import call_image_generation_preview_api
-from ..core.media import detect_image_format
+from ..core.media import IMAGE_FORMAT_CONTENT_TYPES, detect_image_format
 from ..schemas.generation import GenerateRequest
 from ..schemas.assistant import (
     AssistantImagePromptResponse,
@@ -152,18 +152,7 @@ def _prompt_preview_generation_config() -> tuple[str, str, str, str | None, str 
 
 def _generated_image_mime_type(image_bytes: bytes) -> str:
     image_format = detect_image_format(image_bytes)
-    mime_types = {
-        "avif": "image/avif",
-        "bmp": "image/bmp",
-        "gif": "image/gif",
-        "heif": "image/heif",
-        "ico": "image/x-icon",
-        "jpeg": "image/jpeg",
-        "png": "image/png",
-        "tiff": "image/tiff",
-        "webp": "image/webp",
-    }
-    return mime_types.get(str(image_format or ""), "application/octet-stream")
+    return IMAGE_FORMAT_CONTENT_TYPES.get(str(image_format or ""), "application/octet-stream")
 
 
 async def optimize_uploaded_image_prompt(

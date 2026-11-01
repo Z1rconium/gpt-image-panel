@@ -15,9 +15,9 @@ from ..core import settings as config
 from ..core import validators as ssrf
 from ..core.utils import json_dumps_canonical
 from ..core.api_paths import (
-    CHAT_COMPLETIONS_API_PATH,
     RESPONSES_API_PATH,
     build_upstream_url,
+    normalize_assistant_api_path,
 )
 from ..core.media import configure_pillow_image_limits, validate_image_header_bytes
 from .json_client import UpstreamJsonError, json_headers, post_json
@@ -36,7 +36,6 @@ DecompressionBombWarning = (
 
 logger = logging.getLogger(__name__)
 
-ASSISTANT_ALLOWED_API_PATHS = {CHAT_COMPLETIONS_API_PATH, RESPONSES_API_PATH}
 ASSISTANT_JSON_FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE | re.MULTILINE)
 
 
@@ -48,11 +47,6 @@ class AssistantError(Exception):
 
 class AssistantTimeoutError(Exception):
     pass
-
-
-def normalize_assistant_api_path(value: str | None) -> str:
-    normalized = str(value or CHAT_COMPLETIONS_API_PATH).strip()
-    return normalized if normalized in ASSISTANT_ALLOWED_API_PATHS else CHAT_COMPLETIONS_API_PATH
 
 
 def validate_assistant_endpoint(api_url: str, api_path: str) -> str:

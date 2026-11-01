@@ -190,20 +190,6 @@ def settle_image(
     return _image_from_row(row) if row else None
 
 
-def list_reconcilable_images_for_turn(turn_id: str) -> list[dict[str, Any]]:
-    """Pending rows plus legacy rows failed only because the wait window ended."""
-    _ensure_database()
-    with _connect() as conn:
-        rows = conn.execute(
-            f"""{_IMAGE_SELECT_SQL}
-            WHERE i.turn_id = ?
-              AND (i.status = 'pending'
-                   OR (i.status = 'failed' AND i.job_id IS NOT NULL AND i.error = ?))""",
-            (turn_id, LEGACY_IMAGE_WAIT_TIMEOUT_ERROR),
-        ).fetchall()
-    return [_image_from_row(row) for row in rows]
-
-
 def list_reconcilable_images_for_conversation(conversation_id: str) -> list[dict[str, Any]]:
     """Reconcilable rows across every terminal turn of a conversation in one query.
 

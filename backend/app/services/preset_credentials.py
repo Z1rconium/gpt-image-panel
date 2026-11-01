@@ -33,10 +33,6 @@ def get_api_key_env_var(api_key: str) -> str | None:
     return get_env_var_ref_name(api_key)
 
 
-def is_malformed_api_key_env_ref(api_key: str) -> bool:
-    return "${" in str(api_key or "") or "}" in str(api_key or "")
-
-
 def resolve_api_key(
     api_key: str,
     *,

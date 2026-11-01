@@ -362,9 +362,6 @@ async def get_conversation_detail(
     if conversation is None:
         raise NotFoundError("Agent conversation not found")
     await _reconcile_images(conversation_id)
-    conversation = await run_db_operation(
-        agent_repo.get_conversation, conversation_id, metric_name="agent_get_conversation"
-    ) or conversation
     snapshot = await run_db_operation(
         agent_repo.branch_snapshot,
         conversation_id,

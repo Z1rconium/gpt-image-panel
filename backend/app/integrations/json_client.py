@@ -12,7 +12,6 @@ from typing import Any
 
 import aiohttp
 
-from ..core import settings as config
 from ..core import validators as ssrf
 from .session_pool import TIMEOUT_PROMPT_OPTIMIZER, get_pool
 from .upstream.errors import UpstreamApiError

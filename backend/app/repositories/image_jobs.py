@@ -1,6 +1,5 @@
 """Image generation and edit job queue persistence."""
 
-import logging
 from collections.abc import Callable
 
 from ..core import settings as config
@@ -30,8 +29,6 @@ from typing import Any
 import sqlite3
 import uuid
 from ..core import image_cost
-
-logger = logging.getLogger(__name__)
 
 
 def upsert_generate_job_guarded(job: dict[str, Any]) -> tuple[dict[str, Any], bool]:

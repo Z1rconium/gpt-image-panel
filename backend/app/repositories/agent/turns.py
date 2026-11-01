@@ -362,21 +362,3 @@ def sweep_stale_turns() -> list[dict[str, Any]]:
 
 
 LEGACY_IMAGE_WAIT_TIMEOUT_ERROR = "Timed out waiting for the image job; it may still finish in the gallery."
-
-
-def list_turns_needing_reconcile(conversation_id: str) -> list[dict[str, Any]]:
-    """Terminal turns that still hold pending image rows (e.g. after an interrupt)."""
-    _ensure_database()
-    with _connect() as conn:
-        rows = conn.execute(
-            """
-            SELECT DISTINCT t.* FROM agent_turns AS t
-            JOIN agent_message_images AS i ON i.turn_id = t.id
-            WHERE t.conversation_id = ?
-              AND t.status IN ('completed', 'failed', 'cancelled', 'interrupted')
-              AND (i.status = 'pending'
-                   OR (i.status = 'failed' AND i.job_id IS NOT NULL AND i.error = ?))
-            """,
-            (conversation_id, LEGACY_IMAGE_WAIT_TIMEOUT_ERROR),
-        ).fetchall()
-    return [_turn_from_row(row) for row in rows]

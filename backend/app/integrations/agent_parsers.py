@@ -29,7 +29,6 @@ class ChatStreamParser:
 
     def __init__(self) -> None:
         self._calls: dict[int, dict[str, Any]] = {}
-        self._finished = False
         self._finish_reason: str | None = None
         self._usage: dict[str, Any] = {}
 

@@ -451,8 +451,6 @@ def _update_gallery_entries_favorite_by_where_on_conn(
 def update_gallery_entries_favorite_by_filters(
     filters: dict[str, Any] | None,
     favorite: bool,
-    *,
-    batch_size: int = 500,
 ) -> int:
     _ensure_database()
     normalized_favorite = _normalize_gallery_favorite(favorite)

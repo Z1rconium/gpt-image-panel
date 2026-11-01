@@ -2,9 +2,7 @@ import json
 from typing import BinaryIO
 import os
 import re
-import shutil
 import tempfile
-import time
 import uuid
 import zipfile
 from collections.abc import Callable, Iterable, Iterator
@@ -17,7 +15,6 @@ from ..core.errors import InvalidRequestError
 from ..core import settings as config
 from ..core.utils import utc_now
 from ..core.media import validate_image_bytes
-from ..schemas.gallery import GalleryEntry
 from .uploads import IMAGE_UPLOAD_CONTENT_TYPES, IMAGE_UPLOAD_EXTENSIONS
 
 GalleryZipProgressCallback = Callable[[dict[str, Any]], None]

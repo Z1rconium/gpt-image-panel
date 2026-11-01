@@ -59,9 +59,6 @@ class _JsonArrayTempWriter:
     def close(self) -> None:
         self._file.close()
 
-    def cleanup(self) -> None:
-        self.path.unlink(missing_ok=True)
-
 
 def _compact_json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))

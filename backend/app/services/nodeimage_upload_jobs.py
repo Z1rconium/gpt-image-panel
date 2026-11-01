@@ -493,7 +493,6 @@ async def _run_nodeimage_upload_job(job: dict) -> None:
     except Exception:
         logger.exception("NodeImage upload job %s failed", job_id)
         try:
-            results = ordered_results()
             remaining_error = "NodeImage upload job failed"
             entries = await run_db_operation(get_gallery_entries_by_ids, ids)
             for entry in entries:

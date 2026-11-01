@@ -112,6 +112,43 @@ def _string_list(value: Any, *, max_items: int = 8) -> list[str]:
     return [_clamp_text(item, 800) for item in value if _clamp_text(item, 800)][:max_items]
 
 
+async def _request_assistant_json_truncated(
+    runtime: AssistantRuntime,
+    *,
+    system_prompt: str,
+    user_prompt: str,
+    schema: dict[str, Any],
+    image: dict[str, str | int | bool] | None = None,
+    images: list[dict[str, str | int | bool]] | None = None,
+    max_tokens: int = 900,
+    temperature: float = 0.2,
+) -> tuple[dict[str, Any], str, int]:
+    try:
+        data, model_used, duration_ms = await assistant_client.request_assistant_json(
+            api_url=runtime.api_url,
+            api_key=runtime.api_key,
+            api_path=runtime.api_path,
+            model=runtime.model,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            schema=schema,
+            image=image,
+            images=images,
+            timeout_seconds=runtime.timeout_seconds,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            prevalidated_endpoint=runtime.endpoint,
+        )
+        return _truncate_assistant_data(data), model_used, duration_ms
+    except assistant_client.AssistantTimeoutError as e:
+        raise UpstreamTimeoutError(str(e)) from e
+    except assistant_client.AssistantError as e:
+        status_code = 400 if e.status == 400 else 502
+        raise DomainError(str(e), status_code=status_code) from e
+    except ValueError as e:
+        raise InvalidRequestError(str(e)) from e
+
+
 async def _assistant_json(
     *,
     system_prompt: str,
@@ -125,31 +162,17 @@ async def _assistant_json(
     runtime: AssistantRuntime | None = None,
 ) -> tuple[dict[str, Any], str, int]:
     runtime = runtime or await _resolve_runtime_async(vision=vision)
-    try:
-        async with _assistant_request_limit(runtime.timeout_seconds):
-            data, model_used, duration_ms = await assistant_client.request_assistant_json(
-                api_url=runtime.api_url,
-                api_key=runtime.api_key,
-                api_path=runtime.api_path,
-                model=runtime.model,
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                schema=schema,
-                image=image,
-                images=images,
-                timeout_seconds=runtime.timeout_seconds,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                prevalidated_endpoint=runtime.endpoint,
-            )
-            return _truncate_assistant_data(data), model_used, duration_ms
-    except assistant_client.AssistantTimeoutError as e:
-        raise UpstreamTimeoutError(str(e)) from e
-    except assistant_client.AssistantError as e:
-        status_code = 400 if e.status == 400 else 502
-        raise DomainError(str(e), status_code=status_code) from e
-    except ValueError as e:
-        raise InvalidRequestError(str(e)) from e
+    async with _assistant_request_limit(runtime.timeout_seconds):
+        return await _request_assistant_json_truncated(
+            runtime,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            schema=schema,
+            image=image,
+            images=images,
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
 
 
 __all__ = [name for name in globals() if not name.startswith("__")]

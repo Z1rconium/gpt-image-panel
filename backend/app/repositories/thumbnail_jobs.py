@@ -27,7 +27,6 @@ from .thumbnails import (
     create_thumbnail_temp_from_path as _create_thumbnail_temp_from_path_unlocked,
     promote_thumbnail_temp as _promote_thumbnail_temp_unlocked,
     thumbnail_filename_for_image as _thumbnail_filename_for_image,
-    thumbnail_url_for_filename as _thumbnail_url_for_filename,
 )
 
 from contextlib import contextmanager

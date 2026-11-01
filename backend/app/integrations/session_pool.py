@@ -1,7 +1,6 @@
 import asyncio
 import aiohttp
 import logging
-from typing import Any
 
 from ..core import settings as config
 from ..core.safe_connector import create_safe_connector

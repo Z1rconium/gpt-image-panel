@@ -100,8 +100,8 @@ async def optimize_prompt_endpoint(req: PromptOptimizeRequest):
         api_url, model, timeout_seconds, api_key = await run_db_operation(_resolve_prompt_optimizer_runtime,
             settings
         )
-    except HTTPException as e:
-        raise HTTPException(status_code=e.status_code, detail=e.detail) from e
+    except HTTPException:
+        raise
 
     try:
         optimized_prompt, model_used, duration_ms = await optimize_prompt(
