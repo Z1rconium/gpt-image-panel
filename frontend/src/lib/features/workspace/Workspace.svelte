@@ -4,7 +4,14 @@
   import AccessGate from '$lib/components/AccessGate.svelte';
   import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
   import { isImage26 } from '$lib/utils/imageModels';
-  import { attachMarkup } from '$lib/features/workspace/markup';
+  import {
+    attachMarkup,
+    installMarkup,
+    markupRejectionMessage,
+    MarkupRejectedError,
+    validatePaintedMarkup,
+    type MarkupApplyPayload
+  } from '$lib/features/workspace/markup';
   import EditSourcePicker from '$lib/components/EditSourcePicker.svelte';
   import Header from '$lib/components/Header.svelte';
   import PreviewPanel from '$lib/components/PreviewPanel.svelte';
@@ -20,7 +27,7 @@
   import { accessStore } from '$lib/stores/access';
   import { assistantStore, isAbortError } from '$lib/stores/assistant';
   import { confirmStore } from '$lib/stores/confirm';
-  import { editMaskDiscards, editSourceCount, editSourceStore, isMaskValid, MAX_EDIT_SOURCE_IMAGES, primaryEditSourceId, type EditMask } from '$lib/stores/editSource';
+  import { editMarkupDiscards, editMaskDiscards, editSourceCount, editSourceStore, isMaskValid, MAX_EDIT_SOURCE_IMAGES, primaryEditSourceId, type EditMask } from '$lib/stores/editSource';
   import { galleryActivityStore, galleryStore } from '$lib/stores/gallery';
   import { jobsStore } from '$lib/stores/jobs';
   import type { JobMaskFetch } from '$lib/features/workspace/jobMaskRestore';
@@ -50,6 +57,7 @@
     imagePromptPanel,
     jobsPanel,
     lightboxPanel,
+    markupEditorPanel,
     maskEditorPanel,
     nodeImageResultPanel,
     optimizerPanel,
@@ -73,6 +81,11 @@
   } from '$lib/utils/promptForm';
 
   let jobsTab = $state<JobsTab>('running');
+  // One drawing session per editor opening. `id` makes a late apply from a closed
+  // session detectable; `markupRef` is the applied markup it started from.
+  let markupSession = $state<{ id: number; sourceId: string; markupRef: string | null } | null>(null);
+  let markupSessionSeq = 0;
+  let markupFileInput = $state<HTMLInputElement>();
   let editPicker: EditSourcePicker | undefined = $state();
   let galleryEditImage = $state<GalleryEntry | null>(null);
   let galleryEditDialogOpen = $state(false);
@@ -129,10 +142,43 @@
       : null;
   });
   const activeEditMask = $derived(isMaskValid($editSourceStore) ? $editSourceStore.mask : null);
+  // Markup needs a 2.6 model, a primary image, and (for async providers) the
+  // provider's `markup` capability. Every entry point reads this one value.
+  const markupAvailable = $derived(
+    isImage26(promptForm.model) &&
+      Boolean(primaryEditSource) &&
+      ($settingsStore.settings?.provider_kind !== 'async_json' || Boolean($settingsStore.settings?.provider_capabilities?.markup))
+  );
   $effect(() => {
     if ($editSourceStore.markup && (!isImage26(promptForm.model) || ($settingsStore.settings?.provider_kind === 'async_json' && !$settingsStore.settings?.provider_capabilities?.markup))) {
       editSourceStore.removeMarkup();
       showToast($t.promptForm.markupUnavailable, 'status');
+    }
+  });
+  // A markup dropped by a primary-image change happens inside the store; as with
+  // the mask, the store only bumps a counter and the warning lives here.
+  let markupDiscardCount = 0;
+  $effect(() => {
+    const count = $editMarkupDiscards;
+    if (count > markupDiscardCount) {
+      markupDiscardCount = count;
+      showToast($t.markupEditor.discarded);
+    }
+  });
+  // The drawing session is bound to one primary image and one capability set.
+  // If either goes away while the editor is open, the session is invalidated:
+  // the editor closes, its working copy is released, and a late export is refused.
+  $effect(() => {
+    const session = markupSession;
+    if (!session) return;
+    // A changed or removed primary image is reported as such even though it also
+    // makes `markupAvailable` false; only a real capability loss says "unavailable".
+    if (primaryEditSourceId($editSourceStore) !== session.sourceId) {
+      closeMarkupEditor();
+      showToast($t.markupEditor.closedSourceChanged, 'status');
+    } else if (!markupAvailable) {
+      closeMarkupEditor();
+      showToast($t.markupEditor.closedUnavailable, 'status');
     }
   });
   const maskSupported = $derived($settingsStore.settings?.supports_mask !== false);
@@ -158,6 +204,7 @@
       !$uiStore.sizeDialogOpen &&
       !$uiStore.preferencesOpen &&
       !$uiStore.maskEditorOpen &&
+      !$uiStore.markupEditorOpen &&
       !$confirmStore.request &&
       !Boolean($lightboxStore.image)
   );
@@ -319,6 +366,7 @@
         $uiStore.sizeDialogOpen ||
         $uiStore.preferencesOpen ||
         $uiStore.maskEditorOpen ||
+        $uiStore.markupEditorOpen ||
         galleryEditDialogOpen ||
         $uiStore.promptSnippetsOpen ||
         $uiStore.imagePromptOpen ||
@@ -960,10 +1008,102 @@
     closeUiPanel('maskEditor', 'maskEditorOpen');
   }
 
-  function applyEditMask(mask: EditMask) {
+  async function applyEditMask(mask: EditMask) {
+    // A request carries a mask or a markup layer, never both. Applying a mask
+    // over an existing markup is confirmed; declining keeps both untouched.
+    if ($editSourceStore.markup) {
+      const replace = await confirmStore.confirm({
+        title: $t.markupEditor.replaceMarkupTitle,
+        message: $t.markupEditor.replaceMarkupMessage,
+        confirmLabel: $t.markupEditor.replaceMarkupConfirm,
+        cancelLabel: $t.confirm.cancel,
+        closeLabel: $t.confirm.closeLabel,
+        variant: 'default'
+      });
+      if (!replace || primaryEditSourceId($editSourceStore) !== mask.sourceId) {
+        URL.revokeObjectURL(mask.previewUrl);
+        return;
+      }
+    }
     editSourceStore.setMask(mask);
     showToast($t.messages.editMaskApplied((mask.coverage * 100).toFixed(1)));
     closeMaskEditor();
+  }
+
+  async function openMarkupEditor() {
+    if (!markupAvailable || !primaryEditSource || $uiStore.markupEditorOpen) return;
+    rememberPanelFocus('markupEditor');
+    if (!(await ensurePanel('markupEditor'))) return;
+    // Availability and the primary image may have changed while the chunk loaded.
+    const source = primaryEditSource;
+    if (!markupAvailable || !source) return;
+    markupSession = { id: ++markupSessionSeq, sourceId: source.id, markupRef: $editSourceStore.markup?.previewUrl ?? null };
+    setUi('markupEditorOpen', true);
+  }
+
+  function closeMarkupEditor() {
+    markupSession = null;
+    closeUiPanel('markupEditor', 'markupEditorOpen');
+  }
+
+  /**
+   * Final, atomic step of "Apply markup". Returns true only when the new markup
+   * is installed; on any refusal the previous markup, mask and the editor's
+   * working copy are left exactly as they were.
+   */
+  async function applyPaintedMarkup(payload: MarkupApplyPayload): Promise<boolean> {
+    const session = markupSession;
+    const current = () =>
+      Boolean(
+        session &&
+          markupSession?.id === session.id &&
+          payload.sessionId === session.id &&
+          payload.sourceId === session.sourceId &&
+          $uiStore.markupEditorOpen &&
+          markupAvailable &&
+          primaryEditSourceId($editSourceStore) === session.sourceId &&
+          ($editSourceStore.markup?.previewUrl ?? null) === session.markupRef
+      );
+    if (!current()) return false;
+    try {
+      await validatePaintedMarkup(payload.blob, payload.width, payload.height);
+      if (!current()) throw new MarkupRejectedError('source');
+      if ($editSourceStore.mask) {
+        const replace = await confirmStore.confirm({
+          title: $t.markupEditor.replaceMaskTitle,
+          message: $t.markupEditor.replaceMaskMessage,
+          confirmLabel: $t.markupEditor.replaceMaskConfirm,
+          cancelLabel: $t.confirm.cancel,
+          closeLabel: $t.confirm.closeLabel,
+          variant: 'default'
+        });
+        if (!replace) return false;
+        if (!current()) throw new MarkupRejectedError('source');
+      }
+      installMarkup(
+        {
+          sourceId: payload.sourceId,
+          blob: payload.blob,
+          width: payload.width,
+          height: payload.height,
+          origin: payload.origin,
+          editorState: payload.editorState
+        },
+        current
+      );
+      showToast($t.markupEditor.applied);
+      closeMarkupEditor();
+      return true;
+    } catch (error) {
+      showToast(markupRejectionMessage(error), 'error');
+      return false;
+    }
+  }
+
+  function removeMarkupFromEditor() {
+    editSourceStore.removeMarkup();
+    showToast($t.markupEditor.removed);
+    closeMarkupEditor();
   }
 
   function removeEditMask() {
@@ -1206,7 +1346,7 @@
       try {
         const { fetchJobMaskBlob } = await import('$lib/features/workspace/jobMaskRestore');
         const fetched = await fetchJobMaskBlob(job.job_id, source.selectedGalleryImageId ? { galleryImageId: source.selectedGalleryImageId } : { file: source.files[0].file }, 'markup');
-        await attachMarkup(fetched.blob);
+        await attachMarkup(fetched.blob, { origin: 'restored' });
       } catch {
         previewStore.setError($t.promptForm.markupRestoreFailed);
         return;
@@ -1371,6 +1511,7 @@
       $uiStore.sizeDialogOpen ||
       $uiStore.preferencesOpen ||
       $uiStore.maskEditorOpen ||
+      $uiStore.markupEditorOpen ||
       galleryEditDialogOpen ||
       Boolean($lightboxStore.image);
 
@@ -1616,23 +1757,40 @@
           }}
           {maskSupported}
         />
-        {#if isImage26(promptForm.model) && primaryEditSource && ($settingsStore.settings?.provider_kind !== 'async_json' || $settingsStore.settings?.provider_capabilities?.markup)}
+        {#if markupAvailable && primaryEditSource}
           <div class="mt-3 space-y-2">
-            <label class="block text-sm font-medium">{$t.promptForm.markupUpload}
-              <input type="file" accept="image/png,.png" class="mt-1 block w-full text-sm" onchange={async (event) => {
+            <div class="flex flex-wrap items-center gap-2">
+              <button type="button" class="ui-button-primary" onclick={openMarkupEditor}>
+                {$editSourceStore.markup ? $t.promptForm.markupEdit : $t.promptForm.markupDraw}
+              </button>
+              <button type="button" class="ui-button" onclick={() => markupFileInput?.click()}>
+                {$editSourceStore.markup ? $t.promptForm.markupReplaceAction : $t.promptForm.markupUploadAction}
+              </button>
+              {#if $editSourceStore.markup}
+                <button type="button" class="ui-button" onclick={() => editSourceStore.removeMarkup()}>{$t.promptForm.removeMarkup}</button>
+              {/if}
+            </div>
+            <input
+              bind:this={markupFileInput}
+              type="file"
+              accept="image/png,.png"
+              class="sr-only"
+              tabindex="-1"
+              aria-hidden="true"
+              aria-label={$t.promptForm.markupUpload}
+              onchange={async (event) => {
                 const file = event.currentTarget.files?.[0];
                 event.currentTarget.value = '';
                 if (!file) return;
                 try { await attachMarkup(file); } catch (error) { previewStore.setError(error instanceof Error ? error.message : $t.promptForm.invalidMarkup); }
-              }} />
-            </label>
+              }}
+            />
             <p class="text-xs text-stone-500">{$t.promptForm.markupHint}</p>
             {#if $editSourceStore.markup}
               <div class="relative inline-block max-w-full overflow-hidden rounded-lg bg-stone-100">
                 <img src={primaryEditSource.previewUrl} alt={primaryEditSource.label} class="max-h-72 max-w-full object-contain" />
                 <img src={$editSourceStore.markup.previewUrl} alt={$t.promptForm.markupOverlay} class="absolute inset-0 h-full w-full object-contain" />
               </div>
-              <button type="button" class="ui-button" onclick={() => editSourceStore.removeMarkup()}>{$t.promptForm.removeMarkup}</button>
             {/if}
           </div>
         {:else if isImage26(promptForm.model) && primaryEditSource}
@@ -1744,6 +1902,21 @@
     onClose={closeMaskEditor}
     onError={(message: string) => showToast(message, 'error')}
     onNotice={(message: string) => showToast(message)}
+  />
+{/if}
+
+{#if $markupEditorPanel.component && primaryEditSource}
+  {@const Panel = $markupEditorPanel.component}
+  <Panel
+    open={$uiStore.markupEditorOpen && Boolean(markupSession)}
+    sessionId={markupSession?.id ?? 0}
+    sourceId={markupSession?.sourceId ?? primaryEditSource.id}
+    label={primaryEditSource.label}
+    existing={$editSourceStore.markup ?? null}
+    onApply={applyPaintedMarkup}
+    onRemove={removeMarkupFromEditor}
+    onClose={closeMarkupEditor}
+    onError={(message: string) => showToast(message, 'error')}
   />
 {/if}
 

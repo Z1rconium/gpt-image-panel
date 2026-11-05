@@ -12,7 +12,8 @@ export type PanelUiKey =
   | 'sizeDialogOpen'
   | 'preferencesOpen'
   | 'editPreviewOpen'
-  | 'maskEditorOpen';
+  | 'maskEditorOpen'
+  | 'markupEditorOpen';
 
 type ShowToast = (message: string, variant?: ToastVariant, options?: ToastOptions) => void;
 

@@ -3,6 +3,9 @@ import { t } from '$lib/i18n';
 // Type-only: erased at compile time, so this does not pull the mask editor's
 // code into whatever eagerly imports this store (see maskImage.ts's header).
 import type { MaskRegionPreferences } from '$lib/features/mask/maskRegion';
+// Type-only as well: the markup editor's drawing code must not be pulled into
+// the homepage graph by the store that carries its browser-side state.
+import type { MarkupEditorState } from '$lib/features/markup/markupDocument';
 
 export const MAX_EDIT_SOURCE_IMAGES = 16;
 
@@ -45,7 +48,20 @@ export type EditMask = {
   editorState?: EditMaskEditorState;
 };
 
-export type EditMarkup = { sourceId: string; blob: Blob; previewUrl: string; width: number; height: number };
+export type EditMarkupOrigin = 'painted' | 'uploaded' | 'restored';
+
+// `blob` is the only thing that is uploaded. `editorState` lets the same page
+// session resume drawing; it is browser-only, immutable, and optional, so every
+// pre-existing `{sourceId, blob, previewUrl, width, height}` caller stays valid.
+export type EditMarkup = {
+  sourceId: string;
+  blob: Blob;
+  previewUrl: string;
+  width: number;
+  height: number;
+  origin?: EditMarkupOrigin;
+  editorState?: MarkupEditorState;
+};
 
 export type EditSourceState = {
   files: EditUploadSource[];
@@ -81,6 +97,8 @@ let nextEditSourceId = 0;
 // Workspace subscribes so it can warn once without every caller threading a
 // return flag through its own signature.
 export const editMaskDiscards = writable(0);
+// Same idea for the markup layer, which is also bound to the primary image.
+export const editMarkupDiscards = writable(0);
 
 export function primaryEditSourceId(source: EditSourceState) {
   return source.selectedGalleryImageId || source.files[0]?.id || '';
@@ -108,6 +126,7 @@ function revokeMaskUrl(mask: EditMask | null) {
 function dropStaleMask(next: EditSourceState): EditSourceState {
   if (next.markup && next.markup.sourceId !== primaryEditSourceId(next)) {
     URL.revokeObjectURL(next.markup.previewUrl);
+    editMarkupDiscards.update((count) => count + 1);
     next = { ...next, markup: null };
   }
   if (next.mask && next.mask.sourceId !== primaryEditSourceId(next)) {
