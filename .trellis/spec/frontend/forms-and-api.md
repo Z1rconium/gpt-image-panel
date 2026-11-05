@@ -92,8 +92,59 @@ its mask. Validate transparent PNG bytes and upright dimensions under both the
 16M-pixel limit and deployment byte cap. Replace/remove it explicitly, release
 object URLs, and clear it when the primary changes (not when adding references).
 Retry restoration goes through the identity-checked POST endpoint; a same-sized
-but different source must not inherit an annotation. Do not add a drawing canvas
-or enable mask paste-back for markup.
+but different source must not inherit an annotation. Never enable mask paste-back
+for markup.
+
+#### In-browser markup editor contract
+
+The workspace draws markup in `MarkupEditorDialog` (lazy `markupEditor` panel;
+`features/markup/markupDocument.ts` + `markupViewport.ts`). A mask editor is not
+reused: a mask means "pixels that may change" and is binarised, while markup
+keeps colour, text and antialiased alpha.
+
+- **Layer and coordinates.** One native-resolution RGBA layer, transparent at
+  start; the primary image is rendered separately and is never drawn into it.
+  Commands are recorded in image pixels and preview/export share
+  `renderMarkupCommand`. Zoom, pan, window size and DPR change only the viewport
+  canvas (sized from the stage and DPR, capped), never the exported PNG size.
+- **Primary image identity.** Dimensions and display pixels come from
+  `features/workspace/editPrimaryImage.ts`: the upload `File`, or the
+  authenticated same-origin `/api/image/<filename>` for gallery sources — never
+  `galleryPreviewUrl` (a CDN preview) and never gallery size metadata (raw,
+  pre-EXIF). `attachMarkup` and the editor both use it. Decode with default
+  orientation handling so EXIF photos are upright.
+- **Working copy.** Opening, drawing and clearing never touch the applied
+  `editSourceStore.markup`; cancel/close with unapplied changes asks first. Reopen
+  continues from `markup.editorState` (immutable `{width,height,base,commands}`,
+  browser-only, type-only import in `editSource.ts`, never uploaded). Uploaded
+  (`origin: 'uploaded'`) and task-restored (`'restored'`) PNGs open as an
+  un-undoable base layer. Undo keeps 100 steps; older commands are folded into a
+  base checkpoint and the visible result is kept. The editable state is not
+  persisted across reloads and no image data goes to storage or logs.
+- **Apply is atomic.** Export (fails with explicit `empty`/`opaque`/`encode`/
+  `canvas` reasons), `validatePaintedMarkup`, mask-replacement confirmation, then
+  `installMarkup` — a synchronous check-and-swap that re-verifies the primary id
+  and the caller's session. Every await is followed by a `current()` re-check
+  (session id, open state, capability, primary id, applied-markup version). A
+  refusal leaves the previous markup, the mask and the draft untouched; the old
+  object URL is revoked only by the swap.
+- **Session invalidation.** The editor session ends (editor closed, canvases and
+  bitmaps released, late results refused) when the primary image changes or is
+  removed, or the model/provider stops supporting markup. Adding/removing
+  reference images does not. Applying a mask over a markup is confirmed the same
+  way as the reverse.
+- **Input.** Pointer Events with capture; coalesced events + `requestAnimationFrame`.
+  A second touch cancels an unfinished stroke and becomes a pinch; `pointercancel`,
+  capture loss and window blur cancel instead of committing a partial shape;
+  nothing is drawn after a pinch until all fingers lift. Escape closes the text
+  box first, then cancels an in-progress gesture, then the dialog. IME composition
+  Enter never submits text.
+- **Budgets.** Drawing code stays in the lazy chunk (the store only imports
+  types); reuse existing utility classes before adding new ones — the main CSS
+  gzip budget is nearly exhausted.
+- **Tests.** `tests/unit/markup{Viewport,Document,Install}.test.ts`,
+  `editSource.test.ts` and `tests/e2e/markup-editor.spec.ts` (real canvas pixels,
+  multipart bodies, touch via CDP, lifecycle and resource tracking).
 
 Render SVG/GIF originals using an `img` URL. Keep animation and download bytes;
 never inject SVG as HTML. Disable raster-only edit/reference actions for these
