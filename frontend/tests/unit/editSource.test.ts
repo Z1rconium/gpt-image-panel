@@ -1,6 +1,7 @@
 import { get } from 'svelte/store';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  editMarkupDiscards,
   editMaskDiscards,
   editSourceCount,
   editSourceStore,
@@ -38,6 +39,7 @@ beforeEach(() => {
   (URL as unknown as { revokeObjectURL: (url: string) => void }).revokeObjectURL = revokeSpy;
   editSourceStore.set({ ...initialEditSourceState });
   editMaskDiscards.set(0);
+  editMarkupDiscards.set(0);
 });
 
 describe('edit source primary selection', () => {
@@ -179,5 +181,73 @@ describe('markup primary binding', () => {
     expect(get(editSourceStore).mask).toBeNull();
     editSourceStore.setMask(makeMask(id, 'blob:newmask'));
     expect(get(editSourceStore).markup).toBeNull();
+  });
+});
+
+describe('markup editor state (browser-only, optional)', () => {
+  const state = (commands = 1) => ({
+    width: 8,
+    height: 8,
+    base: null,
+    commands: Object.freeze(Array.from({ length: commands }, (_, index) => Object.freeze({ id: index + 1, kind: 'clear' as const })))
+  });
+
+  it('still accepts the legacy markup shape without origin or editor state', () => {
+    editSourceStore.addFiles([makeFile('primary.png')], () => {});
+    const id = primaryEditSourceId(get(editSourceStore));
+    editSourceStore.setMarkup({ sourceId: id, blob: makeFile('markup.png'), width: 8, height: 8, previewUrl: 'blob:legacy' });
+    const markup = get(editSourceStore).markup;
+    expect(markup?.origin).toBeUndefined();
+    expect(markup?.editorState).toBeUndefined();
+  });
+
+  it('carries origin and the immutable editor state next to the PNG', () => {
+    editSourceStore.addFiles([makeFile('primary.png')], () => {});
+    const id = primaryEditSourceId(get(editSourceStore));
+    const editorState = state();
+    editSourceStore.setMarkup({
+      sourceId: id,
+      blob: makeFile('markup.png'),
+      width: 8,
+      height: 8,
+      previewUrl: 'blob:painted',
+      origin: 'painted',
+      editorState
+    });
+    expect(get(editSourceStore).markup?.origin).toBe('painted');
+    expect(get(editSourceStore).markup?.editorState).toBe(editorState);
+    expect(Object.isFrozen(get(editSourceStore).markup?.editorState?.commands)).toBe(true);
+  });
+
+  it('replacing a markup releases the previous preview exactly once', () => {
+    editSourceStore.addFiles([makeFile('primary.png')], () => {});
+    const id = primaryEditSourceId(get(editSourceStore));
+    editSourceStore.setMarkup({ sourceId: id, blob: makeFile('a.png'), width: 8, height: 8, previewUrl: 'blob:first', origin: 'painted', editorState: state() });
+    editSourceStore.setMarkup({ sourceId: id, blob: makeFile('b.png'), width: 8, height: 8, previewUrl: 'blob:second', origin: 'painted', editorState: state(2) });
+    expect(revokeSpy.mock.calls.filter(([url]) => url === 'blob:first')).toHaveLength(1);
+    expect(revokeSpy.mock.calls.filter(([url]) => url === 'blob:second')).toHaveLength(0);
+    expect(get(editSourceStore).markup?.editorState?.commands).toHaveLength(2);
+  });
+
+  it('counts a discard only when a primary change drops the markup, not for reference changes', () => {
+    editSourceStore.addFiles([makeFile('primary.png'), makeFile('reference.png')], () => {});
+    const [primary, reference] = get(editSourceStore).files;
+    editSourceStore.setMarkup({ sourceId: primary.id, blob: makeFile('markup.png'), width: 8, height: 8, previewUrl: 'blob:markup', origin: 'painted', editorState: state() });
+    editSourceStore.remove(reference.id);
+    editSourceStore.addFiles([makeFile('another.png')], () => {});
+    expect(get(editSourceStore).markup?.sourceId).toBe(primary.id);
+    expect(get(editMarkupDiscards)).toBe(0);
+    editSourceStore.remove(primary.id);
+    expect(get(editSourceStore).markup).toBeNull();
+    expect(get(editMarkupDiscards)).toBe(1);
+  });
+
+  it('removeMarkup revokes the preview and drops the editor state with it', () => {
+    editSourceStore.addFiles([makeFile('primary.png')], () => {});
+    const id = primaryEditSourceId(get(editSourceStore));
+    editSourceStore.setMarkup({ sourceId: id, blob: makeFile('markup.png'), width: 8, height: 8, previewUrl: 'blob:gone', origin: 'painted', editorState: state() });
+    editSourceStore.removeMarkup();
+    expect(get(editSourceStore).markup).toBeNull();
+    expect(revokeSpy).toHaveBeenCalledWith('blob:gone');
   });
 });
