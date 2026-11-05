@@ -376,7 +376,7 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _mask_response(path: Path, coverage: float | None, *, verified: bool) -> FileResponse:
+def _mask_response(path: Path, coverage: float | None, *, verified: bool, filename: str = "mask.png") -> FileResponse:
     headers = {
         "Cache-Control": (
             "private, no-store" if verified else "private, max-age=31536000, immutable"
@@ -384,7 +384,7 @@ def _mask_response(path: Path, coverage: float | None, *, verified: bool) -> Fil
     }
     if coverage is not None:
         headers["X-Mask-Coverage"] = str(coverage)
-    return FileResponse(path, media_type=MASK_CONTENT_TYPE, filename="mask.png", headers=headers)
+    return FileResponse(path, media_type=MASK_CONTENT_TYPE, filename=filename, headers=headers)
 
 
 @router.post("/api/generate/{job_id}/mask/restore")
@@ -461,6 +461,82 @@ async def get_generate_job_mask(job_id: str):
     # job_id is unique and the file is never rewritten after promotion, so a
     # retry re-fetching the same job's mask can cache it indefinitely.
     return _mask_response(path, await _job_mask_coverage(job_id), verified=False)
+
+
+@router.post("/api/generate/{job_id}/markup/restore")
+async def restore_generate_job_markup(
+    job_id: str,
+    source_sha256: str | None = Form(None),
+    gallery_image_id: str | None = Form(None),
+):
+    job = await run_db_operation(
+        get_persisted_generate_job, job_id, metric_name="restore_generate_job_markup"
+    )
+    if not job or not job.get("markup_applied"):
+        raise HTTPException(status_code=404, detail="No markup is stored for this job")
+    path = safe_mask_path(f"{job_id}-markup.png")
+    if not path or not path.is_file():
+        raise HTTPException(status_code=404, detail="Markup file not found")
+    if bool(source_sha256) == bool(gallery_image_id):
+        raise HTTPException(status_code=400, detail="Provide exactly one edit source identity")
+    aggregate = await run_db_operation(
+        aggregate_image_job_units, job_id, metric_name="restore_generate_job_sources"
+    )
+    primary = next(
+        (
+            source
+            for unit in aggregate.get("units", [])
+            for source in unit.get("edit_sources") or []
+            if source.get("role", "image") == "image"
+        ),
+        None,
+    )
+    expected = primary.get("raw_sha256") if primary else None
+    if not isinstance(expected, str) or len(expected) != 64:
+        raise HTTPException(status_code=409, detail="Original edit source identity is unavailable")
+    if source_sha256 is not None:
+        if (
+            primary.get("gallery_image_id")
+            or len(source_sha256) != 64
+            or any(c not in "0123456789abcdef" for c in source_sha256)
+        ):
+            raise HTTPException(status_code=409, detail="Edit source does not match this job")
+        actual = source_sha256
+    else:
+        if primary.get("gallery_image_id") != gallery_image_id:
+            raise HTTPException(status_code=409, detail="Edit source does not match this job")
+        entry = await run_db_operation(
+            get_gallery_entry, gallery_image_id, metric_name="restore_generate_gallery_source"
+        )
+        gallery_path = safe_image_path(entry.filename) if entry else None
+        if not gallery_path or not gallery_path.is_file():
+            raise HTTPException(status_code=409, detail="Original gallery image is unavailable")
+        try:
+            actual = await run_image_operation(
+                _sha256_file, gallery_path, metric_name="hash_restore_gallery_source"
+            )
+        except OSError as exc:
+            raise HTTPException(status_code=409, detail="Original gallery image is unavailable") from exc
+    if not hmac.compare_digest(expected, actual):
+        raise HTTPException(status_code=409, detail="Edit source does not match this job")
+    return _mask_response(path, None, verified=True, filename="markup.png")
+
+
+@router.get("/api/generate/{job_id}/markup")
+async def get_generate_job_markup(job_id: str):
+    job = await run_db_operation(
+        get_persisted_generate_job,
+        job_id,
+        metric_name="get_generate_job_markup",
+    )
+    if not job or not job.get("markup_applied"):
+        raise HTTPException(status_code=404, detail="No markup is stored for this job")
+    path = safe_mask_path(f"{job_id}-markup.png")
+    if not path or not path.is_file():
+        raise HTTPException(status_code=404, detail="Markup file not found")
+    # job_id is unique and the file is never rewritten after promotion, so a
+    # retry re-fetching the same job's mask can cache it indefinitely.
+    return _mask_response(path, None, verified=False, filename="markup.png")
 
 
 @router.get("/api/generate/{job_id}/events")

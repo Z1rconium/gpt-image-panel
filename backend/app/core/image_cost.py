@@ -25,6 +25,8 @@ COST_DECIMAL_PLACES = Decimal("0.000001")
 # "token rates match GPT Image 2" for the 2.5 models). Text output is not billed
 # because these models only output images.
 _IMAGE_2_SERIES_MODELS = (
+    "gpt-image-2.6-flare",
+    "gpt-image-2.6-sunburst",
     "gpt-image-2",
     "gpt-image-2-2026-04-21",
     "gpt-image-2.5-flare",
@@ -86,7 +88,7 @@ def _coerce_nonneg_int(value: Any) -> int | None:
     )
 
 
-def normalize_usage(raw_usage: Any) -> NormalizedUsage | None:
+def normalize_usage(raw_usage: Any, *, output_format: str | None = None) -> NormalizedUsage | None:
     """Best-effort normalization of an upstream `usage` object.
 
     Returns None when no usable usage payload was provided. Unknown or
@@ -127,7 +129,7 @@ def normalize_usage(raw_usage: Any) -> NormalizedUsage | None:
     if total_tokens is None and input_tokens is not None and output_tokens is not None:
         total_tokens = input_tokens + output_tokens
 
-    if image_output is None and output_tokens is not None and text_input is None and image_input is None:
+    if output_format != "svg" and image_output is None and output_tokens is not None and text_input is None and image_input is None:
         # Image generation/edit responses have no text output component, so an
         # upstream that reports output_tokens without a breakdown means it's
         # entirely image tokens.
@@ -194,9 +196,16 @@ def _resolve_rates(model: str) -> tuple[dict[str, float] | None, str]:
     return None, "unknown"
 
 
-def estimate_image_cost(model: str | None, usage: NormalizedUsage | None) -> CostEstimate:
+def estimate_image_cost(model: str | None, usage: NormalizedUsage | None, *, output_format: str | None = None) -> CostEstimate:
     normalized_model = str(model or "").strip() or None
 
+    if output_format == "svg":
+        return {
+            "currency": "USD", "estimated_cost_usd": None,
+            "rate_source": "unknown", "pricing_model": normalized_model,
+            "complete": False,
+            "reason": "SVG author-model usage and authoring cost are unavailable",
+        }
     if usage is None or not usage.get("available"):
         return {
             "currency": "USD",
@@ -298,13 +307,15 @@ def sum_costs(costs: list[CostEstimate | None]) -> CostEstimate | None:
 
     priced = [cost for cost in present if cost.get("estimated_cost_usd") is not None]
     if not priced:
+        reasons = {cost.get("reason") for cost in present}
+        reason = next(iter(reasons)) if len(reasons) == 1 else None
         return {
             "currency": "USD",
             "estimated_cost_usd": None,
             "rate_source": "unknown",
             "pricing_model": None,
             "complete": False,
-            "reason": "No unit reported a priceable cost",
+            "reason": reason or "No unit reported a priceable cost",
         }
 
     total = Decimal(0)

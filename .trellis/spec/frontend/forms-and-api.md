@@ -77,6 +77,32 @@ integer rounding. Freeze converter behavior in `tests/unit/promptForm.test.ts`
 before refactoring; gallery edit, parameter reuse and retry browser cases cover
 the consumer workflows.
 
+### Model capabilities travel with reused parameters
+
+Keep `complexity`, `frame_count` and `frame_duration_ms` in both API types and
+form converters; omitted values stay null/empty rather than becoming explicit
+upstream defaults. The exact 2.6 model IDs enable SVG/GIF only when generating.
+Switching to editing, a model or provider that cannot send a selected option
+resets incompatible controls with localized feedback. Provider `markup`,
+`complexity` and `animation` capabilities must gate their controls, and the
+backend remains the authority for the actual operation's mapping.
+
+The uploaded markup layer belongs to the primary edit source, separately from
+its mask. Validate transparent PNG bytes and upright dimensions under both the
+16M-pixel limit and deployment byte cap. Replace/remove it explicitly, release
+object URLs, and clear it when the primary changes (not when adding references).
+Retry restoration goes through the identity-checked POST endpoint; a same-sized
+but different source must not inherit an annotation. Do not add a drawing canvas
+or enable mask paste-back for markup.
+
+Render SVG/GIF originals using an `img` URL. Keep animation and download bytes;
+never inject SVG as HTML. Disable raster-only edit/reference actions for these
+new outputs at every entry point, while retaining existing custom-model input
+behavior. Unit tests cover converters and bound-layer lifecycle; browser tests
+must exercise upload/from-gallery/retry, actual loaded previews and original
+downloads, including a narrow mobile viewport. Add UI copy to both existing
+locale catalogs (`en`, `zh-CN`); the three README translations are separate docs.
+
 ### Gallery filters share one wire mapping
 
 `gallerySearchBody` reuses `galleryFiltersToSelectionPayload` from

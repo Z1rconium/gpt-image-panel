@@ -395,6 +395,7 @@ class ImageUnitExecutionContext:
                         socks5_proxy=self.socks5_proxy,
                         persist_gallery_entry=add_to_gallery_async,
                         mask_source=mask_source,
+                        **({"markup_source": next(s for s in edit_sources if s.role == "markup")} if any(s.role == "markup" for s in edit_sources) else {}),
                         mask_coverage=mask_source.coverage if mask_source else None,
                         prompt_guard=self.prompt_guard,
                         **self.provider_kwargs,
@@ -409,6 +410,7 @@ class ImageUnitExecutionContext:
                     socks5_proxy=self.socks5_proxy,
                     persist_gallery_entry=add_to_gallery_async,
                     mask_source=mask_source,
+                    **({"markup_source": next(s for s in edit_sources if s.role == "markup")} if any(s.role == "markup" for s in edit_sources) else {}),
                     mask_coverage=mask_source.coverage if mask_source else None,
                     **self.stream_kwargs,
                 )
@@ -459,8 +461,8 @@ class ImageUnitExecutionContext:
         kick_thumbnail_dispatcher()
         result_images = [gallery_entry_job_result(entry) for entry in updated_entries]
         stage_timings = self.stage_timer.snapshot()
-        usage = image_cost.normalize_usage(self.usage_sink.raw_usage)
-        cost = image_cost.estimate_image_cost(self.req.model, usage)
+        usage = image_cost.normalize_usage(self.usage_sink.raw_usage, output_format=self.req.output_format)
+        cost = image_cost.estimate_image_cost(self.req.model, usage, output_format=self.req.output_format)
         metrics.increment(f"image_jobs.{self.operation}.succeeded")
         metrics.observe_ms("image_job.duration", duration_seconds * 1000)
         metrics.observe_job_stage_timings(stage_timings)
@@ -525,8 +527,8 @@ class ImageUnitExecutionContext:
         await self.session.abort_upstream()
         duration_seconds = time.monotonic() - self.started_at
         stage_timings = self.stage_timer.snapshot()
-        usage = image_cost.normalize_usage(self.usage_sink.raw_usage)
-        cost = image_cost.estimate_image_cost(self.req.model, usage) if usage else None
+        usage = image_cost.normalize_usage(self.usage_sink.raw_usage, output_format=self.req.output_format)
+        cost = image_cost.estimate_image_cost(self.req.model, usage, output_format=self.req.output_format) if usage else None
         await self.session.flush_progress_before_terminal(suppress_cancelled=True)
         if self.async_provider:
             # Do not terminalize a mapped provider unit here: a user cancel
@@ -576,8 +578,8 @@ class ImageUnitExecutionContext:
         )
         duration_seconds = time.monotonic() - self.started_at
         stage_timings = self.stage_timer.snapshot()
-        usage = image_cost.normalize_usage(self.usage_sink.raw_usage)
-        cost = image_cost.estimate_image_cost(self.req.model, usage) if usage else None
+        usage = image_cost.normalize_usage(self.usage_sink.raw_usage, output_format=self.req.output_format)
+        cost = image_cost.estimate_image_cost(self.req.model, usage, output_format=self.req.output_format) if usage else None
         cancelled = await self.parent_was_cancelled()
         if not cancelled:
             metrics.increment(f"image_jobs.{self.operation}.failed")

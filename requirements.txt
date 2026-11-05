@@ -12,3 +12,6 @@ anyio>=4.14.2
 urllib3>=2.8.0
 # Fixes GHSA-54p9-h82j-f925 (items-view memory leak) in the locked 6.8.0.
 multidict>=6.9.1
+
+CairoSVG>=2.9.1
+defusedxml>=0.7.1

@@ -670,6 +670,7 @@
                 <button
                   type="button"
                   class="gallery-icon-action control-focus border-stone-300 text-stone-700 hover:bg-stone-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                  disabled={/\.(svg|gif)$/i.test(image.filename)}
                   aria-label={$t.common.edit}
                   title={$t.common.edit}
                   onclick={(event) => handleGalleryAction(event, () => onEdit(image))}

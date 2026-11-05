@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 4
-- **Last Active**: 2026-10-18
+- **Total Sessions**: 5
+- **Last Active**: 2026-11-05
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~133 | Active |
+| `journal-1.md` | ~158 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 5 | 2026-11-05 | GPT Image 2.6 implementation and v1.9.0 release | `e17e038`, `344b33f`, `88f0490`, `320ef2f` | `codex/gpt-image-26` |
 | 4 | 2026-10-18 | Repository-wide behavior-preserving cleanup | `8fa3cbe`, `a9b2098`, `79090f1` | `main` |
 | 3 | 2026-10-15 | Wave A: low-risk dedupe and hygiene refactors | `19e9615`, `55b8d0d`, `2ce294a`, `a12301f`, `48a7458`, `4314d93` | `refactor/wave-a-dedupe-hygiene` |
 | 2 | 2026-10-15 | Fix Starlette gzip compatibility for refactor merge | `bb2dde9` | `refactor/architecture-legacy-modules` |

@@ -17,6 +17,7 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 
 from . import settings as config
+from .svg_validation import _svg
 
 try:
     from PIL import Image, ImageOps, UnidentifiedImageError
@@ -26,6 +27,7 @@ except ImportError:  # pragma: no cover - Pillow is a runtime dependency
     UnidentifiedImageError = OSError
 
 IMAGE_FILE_EXTENSIONS = {
+    ".svg",
     ".avif",
     ".bmp",
     ".gif",
@@ -41,6 +43,7 @@ IMAGE_FILE_EXTENSIONS = {
 }
 
 IMAGE_EXTENSION_FORMATS = {
+    ".svg": "svg",
     ".avif": "avif",
     ".bmp": "bmp",
     ".gif": "gif",
@@ -71,6 +74,7 @@ IMAGE_CONTENT_TYPE_FORMATS = {
     "image/x-icon": "ico",
 }
 IMAGE_FORMAT_CONTENT_TYPES = {
+    "svg": "image/svg+xml",
     "avif": "image/avif",
     "bmp": "image/bmp",
     "gif": "image/gif",
@@ -258,6 +262,11 @@ def verified_pillow_image(opener, *, expected_format: str):
                     raise ValueError("Image decoder format does not match image data")
                 if getattr(image, "is_animated", False):
                     image.seek(0)
+                if expected_format == "gif":
+                    for frame in range(image.n_frames):
+                        image.seek(frame)
+                        image.load()
+                    image.seek(0)
                 image.load()
                 width, height = image.size
                 if width <= 0 or height <= 0:
@@ -418,7 +427,13 @@ def get_image_dimensions(image_bytes: bytes) -> tuple[int, int] | None:
 
 
 def image_dimension_metadata(image_bytes: bytes) -> dict[str, int]:
-    dimensions = get_image_dimensions(image_bytes)
+    if not detect_image_format(image_bytes):
+        try:
+            dimensions = _svg(image_bytes)
+        except ValueError:
+            return {}
+    else:
+        dimensions = get_image_dimensions(image_bytes)
     if not dimensions and Image is not None:
         configure_pillow_image_limits()
         try:

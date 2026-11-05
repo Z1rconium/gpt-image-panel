@@ -1,3 +1,6 @@
+from ...services.edit_markup import validate_edit_markup
+from ...core.image_models import is_image_26
+from ...services.job_queue import get_active_preset, get_api_presets
 import asyncio
 from dataclasses import replace
 
@@ -57,6 +60,7 @@ def edit_request_from_form(
     model: str = Form(""),
     n: int = Form(1),
     quality: str = Form("auto"),
+    complexity: str | None = Form(None),
     output_format: str = Form("png"),
     output_compression: int | None = Form(None),
     background: str = Form("auto"),
@@ -71,6 +75,7 @@ def edit_request_from_form(
         model=model,
         n=n,
         quality=quality,
+        complexity=complexity,
         output_format=output_format,
         output_compression=output_compression,
         background=background,
@@ -206,6 +211,38 @@ async def read_upload_edit_mask(form: FormData) -> EditImageSource | None:
     return replace(source, role="mask")
 
 
+async def read_upload_edit_markup(form: FormData) -> EditImageSource | None:
+    values = form.getlist("markup")
+    if not values:
+        return None
+    if form.getlist("mask"):
+        raise HTTPException(status_code=422, detail="Mask and markup cannot be combined")
+    if len(values) != 1 or not isinstance(values[0], StarletteUploadFile):
+        raise HTTPException(status_code=422, detail="Upload one PNG markup layer")
+    upload = values[0]
+    source = await run_image_operation(
+        copy_edit_source_stream_to_temp, upload.file, upload.filename or "markup.png", "image/png",
+        max_bytes=min(config.MAX_FILE_SIZE_MB * 1024 * 1024, 50 * 1024 * 1024 - 1), validate=True,
+        empty_detail="Markup is empty", too_large_detail="Markup must be smaller than 50 MiB",
+        read_error_detail="Failed to read markup", metric_name="copy_edit_markup",
+    )
+    return replace(source, role="markup")
+
+
+async def validate_uploaded_markup(markup: EditImageSource | None, primary: EditImageSource, req: EditRequest):
+    if markup is None:
+        return
+    preset = next((p for p in get_api_presets() if p.get("id") == req.api_preset_id), None) if req.api_preset_id else get_active_preset()
+    effective_model = req.model.strip() or str((preset or {}).get("default_model") or "gpt-image-2")
+    if not is_image_26(effective_model):
+        raise HTTPException(status_code=422, detail="Markup requires GPT Image 2.6")
+    try:
+        await run_image_operation(validate_edit_markup, markup.temp_path, primary.width, primary.height, metric_name="validate_edit_markup")
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    req.paste_back = False
+
+
 async def validate_edit_mask(mask: EditImageSource, primary: EditImageSource) -> EditMaskInfo:
     try:
         if primary.width > 0 and primary.height > 0:
@@ -241,6 +278,7 @@ async def edit_image(
     # whether an EXIF-oriented primary is rotated upright (see
     # `validate_edit_source_file_details`); the header read for that costs
     # nothing and the mask itself is still decoded exactly once.
+    markup = await read_upload_edit_markup(form)
     mask = await read_upload_edit_mask(form)
     sources: list[EditImageSource] = []
     try:
@@ -251,6 +289,7 @@ async def edit_image(
         if not sources:
             raise HTTPException(status_code=422, detail="Upload image is required.")
         validate_edit_source_count(sources)
+        await validate_uploaded_markup(markup, sources[0], req)
         mask_coverage = None
         mask_optimized_png = None
         if mask is not None:
@@ -261,11 +300,12 @@ async def edit_image(
             req=req,
             image_sources=sources,
             mask_source=mask,
+            markup_source=markup,
             mask_coverage=mask_coverage,
             mask_optimized_png=mask_optimized_png,
         )
     except BaseException:
-        cleanup_edit_sources(sources if mask is None else [*sources, mask])
+        cleanup_edit_sources([*sources, *([mask] if mask else []), *([markup] if markup else [])])
         raise
 
 
@@ -280,6 +320,7 @@ async def edit_image_from_gallery(
     req: EditRequest = Depends(edit_request_from_form),
 ):
     form = await request.form()
+    markup = await read_upload_edit_markup(form)
     mask = await read_upload_edit_mask(form)
     upload_sources: list[EditImageSource] = []
     try:
@@ -291,11 +332,12 @@ async def edit_image_from_gallery(
             orientation_mask_size=mask_dimensions(mask),
         )
     except BaseException:
-        cleanup_edit_sources([*upload_sources, *([mask] if mask is not None else [])])
+        cleanup_edit_sources([*upload_sources, *([mask] if mask is not None else []), *([markup] if markup is not None else [])])
         raise
     sources = [gallery_source, *upload_sources]
     try:
         validate_edit_source_count(sources)
+        await validate_uploaded_markup(markup, sources[0], req)
         mask_coverage = None
         mask_optimized_png = None
         if mask is not None:
@@ -306,9 +348,10 @@ async def edit_image_from_gallery(
             req=req,
             image_sources=sources,
             mask_source=mask,
+            markup_source=markup,
             mask_coverage=mask_coverage,
             mask_optimized_png=mask_optimized_png,
         )
     except BaseException:
-        cleanup_edit_sources(sources if mask is None else [*sources, mask])
+        cleanup_edit_sources([*sources, *([mask] if mask else []), *([markup] if markup else [])])
         raise

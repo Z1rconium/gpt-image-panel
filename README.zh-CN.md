@@ -16,7 +16,7 @@
 
   <p>
     <img alt="CI 通过" src="https://img.shields.io/badge/CI-passing-2cc653?logo=github&logoColor=white" />
-    <img alt="版本 v1.8.1" src="https://img.shields.io/badge/release-v1.8.1-0e8dcc" />
+    <img alt="版本 v1.9.0" src="https://img.shields.io/badge/release-v1.9.0-0e8dcc" />
     <img alt="Python 3.11+" src="https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white" />
     <img alt="Node.js 24" src="https://img.shields.io/badge/Node.js-24-339933?logo=node.js&logoColor=white" />
     <img alt="FastAPI 0.115+" src="https://img.shields.io/badge/FastAPI-0.115+-009688?logo=fastapi&logoColor=white" />
@@ -259,6 +259,21 @@ Compose 仅向容器传入 `docker-compose.yml` 中列出的变量。如果密�
 
 搜索进度及上游 annotations 提供的来源会随回合保存，行内引用编号对应「来源」列表及引用片段，刷新、SSE 重放和切换路径后可恢复。普通 Markdown 链接不会变成来源。搜索遵守既有工具轮次、超时、取消及分支历史预算；缺少 usage 时不编造费用。数据库迁移 37/38 在启动时自动应用。
 
+## GPT Image 2.6
+
+选择 `gpt-image-2.6-flare` 进行快速迭代，或选择 `gpt-image-2.6-sunburst` 处理精细构图与准确编辑，接口使用 Images API。两个模型均提供 `auto/low/medium/high/xhigh/max` 质量。**复杂度**独立控制生成前的规划：可保持模型默认值（`high`），或选择 `low/medium/high`。已有预设和默认模型 `gpt-image-2` 不变。
+
+- **标注引导编辑：**添加源图后上传透明 PNG 标注层，可叠加预览；标注通过 `markup` 独立发送，不会合并进原图。标注须包含透明像素，与方向归一化后的主图尺寸一致，小于 50 MiB 且符合部署上传上限；主图和标注层各不超过 16,777,216 像素。标注与蒙版不能同时使用，标注编辑不贴回。重试只在主图身份仍匹配时恢复已保存标注。
+- **SVG：**选择 SVG 生成一张矢量图，预览和下载保留矢量原文件，图库使用栅格缩略图。支持原生透明背景；拒绝活动内容、嵌入图片和外部资源。
+- **动画 GIF：**选择 GIF，并在提示词中描述动作与循环。默认 9 帧、每帧 200 ms，可选 2–64 帧和 20–2000 ms（步长 10 ms）。灯箱播放动画，图库缩略图显示首帧；下载和 ZIP 导出保留原动画。
+- SVG/GIF 仅支持文生图，不支持参考图、蒙版、标注、流式预览、压缩或本地色键去背景；SVG 限一张。GIF 仍受上游帧尺寸及总像素限制，遇到限制错误请减少尺寸或帧数。不会自动把 SVG/GIF 转成编辑输入。
+- 2.6 不发送 `response_format`，返回的 Base64 结果保存后通过本地 URL 提供。自定义供应商映射必须显式传递新参数，缺失能力时在入队前报错。
+- 2.6 内置费率为每百万 token：文本输入 $5、图片输入 $8、图片输出 $30。SVG 还包含作者模型费用，缺少对应用量或费率时显示估算不完整。
+
+Docker 已包含 SVG 缩略图所需 Cairo 运行库。本地开发请先安装 Cairo（macOS：`brew install cairo`；Debian/Ubuntu：`apt-get install libcairo2`），再安装锁定 Python 依赖。Apple Silicon 如无法定位 Homebrew Cairo，可用 `DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib` 启动后端。
+
+规范核对日期：2026-11-05。[官方指南](https://developers.openai.com/api/docs/guides/image-generation) · [2.6 参数](https://developers.openai.com/api/docs/guides/image-prompting) · [定价](https://developers.openai.com/api/docs/pricing)。
+
 ## GPT Image 2.5
 
 生成表单和预设设置提供 `gpt-image-2.5-flare`（快速日常生成）与 `gpt-image-2.5-sunburst`（精细编辑）。默认模型仍为 `gpt-image-2`，保留已保存预设和自定义模型；通过「自定义模型 / 快照」可输入两个模型的 `-2026-09-08` 快照名称。
@@ -326,7 +341,7 @@ Compose 仅向容器传入 `docker-compose.yml` 中列出的变量。如果密�
 - 流式预览需主动开启，支持 Images 生成/编辑端点和 `/v1/responses`，数量为 1–10。每张图片仍作为独立单元排队，遵守现有并发限制。可选 1–3 个中间帧，实际帧数与用量取决于上游；Responses 图片按输出调用归属，文字 delta 不会成为图片预览。声明式自定义供应商映射仍要求 `capabilities.stream: false`。
 - 如果兼容服务拒绝 `stream`/`partial_images` 参数，任务会以明确错误结束，而不是自动降级为非流式重试，以免重复计费。
 - 中间图片只存在服务端内存中（每个执行单元/输出调用保留最新一帧，受 `PREVIEW_CACHE_MAX_ENTRY_MB`/`PREVIEW_CACHE_MAX_ENTRIES` 限制，默认 8 MiB / 500 项）；慢 SSE 客户端的帧会合并。最终图只替换自己的槽位，失败、取消与完成会清理预览。重连先恢复任务快照再回放缓存帧，重启或切换 worker 后无预览可回放。同一次请求返回有效 JSON 最终结果时会直接接受，不重新提交。
-- **费用估算不是账单。** 仅当上游返回 `usage` 时才会计算；缺少 usage 或未配置费率时会显示原因而非 `$0.00`。内置费率覆盖 `gpt-image-1` 与 GPT Image 2 / 2.5，取自 OpenAI 官方定价——第三方上游通常并不相同。可通过 `IMAGE_COST_RATES_JSON` 覆盖或新增费率。
+- **费用估算不是账单。** 仅当上游返回 `usage` 时才会计算；缺少 usage 或未配置费率时会显示原因而非 `$0.00`。内置费率覆盖 `gpt-image-1` 与 GPT Image 2 / 2.5 / 2.6，取自 OpenAI 官方定价——第三方上游通常并不相同。可通过 `IMAGE_COST_RATES_JSON` 覆盖或新增费率。
 
 ## 图库、触摸操作与完成通知
 

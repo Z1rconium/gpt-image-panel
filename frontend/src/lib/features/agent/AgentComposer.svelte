@@ -335,7 +335,7 @@
 
 <AgentAttachDialog
   open={attachOpen}
-  images={galleryImages}
+  images={galleryImages.filter((image) => !/\.(svg|gif)$/i.test(image.filename))}
   preselectedIds={gallerySelectedIds}
   max={AGENT_MAX_ATTACHMENTS - attachments.length}
   onConfirm={confirmAttachments}

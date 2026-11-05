@@ -24,11 +24,13 @@ from ...core.observability import observe_job_stage, record_upstream_usage
 from ...core.diagnostics import UnitDiagnostics
 from ...core import validators as ssrf
 from ...core.media import (
-    detect_image_format,
     generate_image_id,
-    get_image_dimensions,
     stable_image_id_for,
-    validate_image_header_bytes,
+)
+from ...core.generated_media import (
+    detect_generated_image_format as detect_image_format,
+    get_generated_image_dimensions as get_image_dimensions,
+    validate_generated_image_header_bytes as validate_image_header_bytes,
 )
 from ...core.observability import metrics
 from ...runtime.blocking import run_file_operation, run_image_operation, upstream_memory_lease
@@ -549,6 +551,7 @@ async def _build_provider_edit_uploads(
     edit_submit: ResolvedEditSubmit,
     image_sources: Sequence[ImageEditSource],
     mask_source: ImageEditSource | None,
+    markup_source: ImageEditSource | None = None,
 ) -> EditUploads:
     """Package validated edit sources for a custom-provider submit.
 
@@ -575,6 +578,12 @@ async def _build_provider_edit_uploads(
                 "Edit sources exceed the inline data-URL budget for this provider "
                 f"mapping ({total_bytes} bytes; max {PROVIDER_EDIT_INLINE_MAX_BYTES})"
             )
+        if markup_source is not None:
+            total_bytes += int(getattr(markup_source, "byte_size", 0) or 0)
+            if total_bytes > PROVIDER_EDIT_INLINE_MAX_BYTES:
+                raise UpstreamApiError("Markup exceeds provider inline data-URL budget")
+            data = await run_file_operation(_read_source_bytes, markup_source.temp_path, metric_name="read_provider_markup")
+            inline["markup"] = f"data:image/png;base64,{base64.b64encode(data).decode('ascii')}"
         encoded: list[str] = []
         for part in parts:
             data = await run_file_operation(
@@ -590,7 +599,7 @@ async def _build_provider_edit_uploads(
             inline["mask"] = f"data:{content_type};base64,{base64.b64encode(data).decode('ascii')}"
     elif mask_source is not None:
         mask_part = part_of(mask_source)
-    return EditUploads(parts=parts, mask_part=mask_part, inline_variables=inline)
+    return EditUploads(parts=parts, mask_part=mask_part, inline_variables=inline, markup_part=part_of(markup_source) if markup_source is not None and edit_submit.body_format == "multipart" else None)
 
 
 async def call_image_provider_edit_api(
@@ -606,6 +615,7 @@ async def call_image_provider_edit_api(
     persist_gallery_entry: PersistGalleryEntry,
     prompt_guard: bool = False,
     mask_source: ImageEditSource | None = None,
+    markup_source: ImageEditSource | None = None,
     mask_coverage: float | None = None,
     async_remote: dict[str, Any] | None = None,
     async_checkpoint: CheckpointCallback | None = None,
@@ -624,7 +634,7 @@ async def call_image_provider_edit_api(
             "Provider mapping does not declare image edit support; "
             "add an edit_submit section to provider_config"
         )
-    uploads = await _build_provider_edit_uploads(edit_submit, image_sources, mask_source)
+    uploads = await _build_provider_edit_uploads(edit_submit, image_sources, mask_source, markup_source)
 
     format_info = get_output_format_info(payload.output_format)
     gallery_metadata = build_gallery_metadata(
@@ -633,6 +643,7 @@ async def call_image_provider_edit_api(
         api_preset_name,
         mask_coverage=mask_coverage,
     )
+    gallery_metadata["markup_applied"] = markup_source is not None
     gallery_metadata["sent_prompt"] = sent_generation_prompt(payload, prompt_guard=prompt_guard)
 
     transform_image = None
@@ -946,6 +957,7 @@ async def call_image_edit_api(
     preview: "PreviewCallback | None" = None,
     persist_gallery_entry: PersistGalleryEntry,
     mask_source: ImageEditSource | None = None,
+    markup_source: ImageEditSource | None = None,
     mask_coverage: float | None = None,
     prompt_guard: bool = False,
 ) -> list[GalleryEntry]:
@@ -969,6 +981,7 @@ async def call_image_edit_api(
         api_preset_name,
         mask_coverage=mask_coverage,
     )
+    gallery_metadata["markup_applied"] = markup_source is not None
     gallery_metadata["sent_prompt"] = sent_generation_prompt(payload, prompt_guard=prompt_guard)
     transform_image = None
     if mask_source is not None:
@@ -1013,6 +1026,10 @@ async def call_image_edit_api(
                 filename=mask_source.filename or "mask.png",
                 content_type="image/png",
             )
+        if markup_source is not None:
+            markup_file = markup_source.temp_path.open("rb")
+            image_files.append(markup_file)
+            form.add_field("markup", markup_file, filename="markup.png", content_type="image/png")
         for key, value in _build_image_params(payload, prompt_guard=prompt_guard).items():
             form.add_field(key, str(value))
         if use_streaming:

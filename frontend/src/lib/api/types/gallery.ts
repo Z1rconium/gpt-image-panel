@@ -27,6 +27,10 @@ export type GalleryEntry = {
   diagnostics?: string[];
   model?: string | null;
   quality?: string | null;
+  complexity?: 'low' | 'medium' | 'high' | null;
+  frame_count?: number | null;
+  frame_duration_ms?: number | null;
+  markup_applied?: boolean | null;
   output_format?: string | null;
   output_compression?: number | null;
   background?: string | null;

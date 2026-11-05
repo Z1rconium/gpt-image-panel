@@ -194,6 +194,7 @@ class ProviderEditFilesV2(StrictRequestModel):
 
     images: str = Field(default="", max_length=64)
     mask: str = Field(default="", max_length=64)
+    markup: str = Field(default="", max_length=64)
 
     @field_validator("images")
     @classmethod
@@ -203,7 +204,7 @@ class ProviderEditFilesV2(StrictRequestModel):
             raise ValueError("edit_submit.files.images must be a form field name (letters, digits, . _ -)")
         return value
 
-    @field_validator("mask")
+    @field_validator("mask", "markup")
     @classmethod
     def validate_mask(cls, value: str) -> str:
         value = value.strip()
@@ -265,7 +266,7 @@ class ProviderEditSubmitV2(StrictRequestModel):
                     "edit_submit.files.images is required for multipart edits so "
                     "reference images are never silently dropped"
                 )
-            if variables & {"reference_images", "mask"}:
+            if variables & {"reference_images", "mask", "markup"}:
                 raise ValueError(
                     "edit_submit.body cannot use {{reference_images}} or {{mask}} "
                     "with multipart bodies; files carry the images instead"
@@ -298,7 +299,7 @@ class ProviderCapabilitiesV2(StrictRequestModel):
             "Null auto-detects: true only when the mapping uses {{background}}."
         ),
     )
-    formats: Optional[list[Literal["png", "jpeg", "webp"]]] = Field(
+    formats: Optional[list[Literal["png", "jpeg", "webp", "svg", "gif"]]] = Field(
         default=None,
         description="Output formats this provider can produce; null allows every panel format.",
     )

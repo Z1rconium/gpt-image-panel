@@ -45,9 +45,12 @@ export type EditMask = {
   editorState?: EditMaskEditorState;
 };
 
+export type EditMarkup = { sourceId: string; blob: Blob; previewUrl: string; width: number; height: number };
+
 export type EditSourceState = {
   files: EditUploadSource[];
   selectedGalleryImageId: string;
+  galleryFilename?: string;
   galleryLabel: string;
   galleryPreviewUrl: string;
   galleryPreviewLabel: string;
@@ -55,17 +58,20 @@ export type EditSourceState = {
   // same "unknown, decode if you need it" contract as EditUploadSource above.
   galleryWidth: number;
   galleryHeight: number;
+  markup?: EditMarkup | null;
   mask: EditMask | null;
 };
 
 export const initialEditSourceState: EditSourceState = {
   files: [],
   selectedGalleryImageId: '',
+  galleryFilename: '',
   galleryLabel: '',
   galleryPreviewUrl: '',
   galleryPreviewLabel: '',
   galleryWidth: 0,
   galleryHeight: 0,
+  markup: null,
   mask: null
 };
 
@@ -100,6 +106,10 @@ function revokeMaskUrl(mask: EditMask | null) {
 // The mask is bound to the primary image: only a change of primary invalidates
 // it, so adding or removing a reference image must not discard the user's work.
 function dropStaleMask(next: EditSourceState): EditSourceState {
+  if (next.markup && next.markup.sourceId !== primaryEditSourceId(next)) {
+    URL.revokeObjectURL(next.markup.previewUrl);
+    next = { ...next, markup: null };
+  }
   if (next.mask && next.mask.sourceId !== primaryEditSourceId(next)) {
     revokeMaskUrl(next.mask);
     editMaskDiscards.update((count) => count + 1);
@@ -196,6 +206,7 @@ function createEditSourceStore() {
     addFiles,
     updateUploadSize,
     clear(input?: HTMLInputElement) {
+      if (state.markup) URL.revokeObjectURL(state.markup.previewUrl);
       revokeEditSourceUrls(state);
       if (state.mask) editMaskDiscards.update((count) => count + 1);
       revokeMaskUrl(state.mask);
@@ -216,7 +227,8 @@ function createEditSourceStore() {
       previewLabel: string,
       setError?: (message: string) => void,
       width = 0,
-      height = 0
+      height = 0,
+      filename = ''
     ) {
       const current = state;
       if (!current.selectedGalleryImageId && editSourceCount(current) >= MAX_EDIT_SOURCE_IMAGES) {
@@ -228,6 +240,7 @@ function createEditSourceStore() {
         dropStaleMask({
           ...source,
           selectedGalleryImageId: imageId,
+          galleryFilename: filename,
           galleryLabel: label,
           galleryPreviewUrl: previewUrl,
           galleryPreviewLabel: previewLabel,
@@ -243,6 +256,7 @@ function createEditSourceStore() {
         return dropStaleMask({
           ...source,
           selectedGalleryImageId: '',
+          galleryFilename: '',
           galleryLabel: '',
           galleryPreviewUrl: '',
           galleryPreviewLabel: '',
@@ -268,7 +282,8 @@ function createEditSourceStore() {
           dropStaleMask({
             ...source,
             selectedGalleryImageId: '',
-            galleryLabel: '',
+            galleryFilename: '',
+          galleryLabel: '',
             galleryPreviewUrl: '',
             galleryPreviewLabel: '',
             galleryWidth: 0,
@@ -279,15 +294,26 @@ function createEditSourceStore() {
       }
       return false;
     },
-    setMask(mask: EditMask) {
+    setMarkup(markup: EditMarkup) {
+      if (state.markup) URL.revokeObjectURL(state.markup.previewUrl);
       revokeMaskUrl(state.mask);
-      update((source) => ({ ...source, mask }));
+      update((source) => ({ ...source, mask: null, markup }));
+    },
+    removeMarkup() {
+      if (state.markup) URL.revokeObjectURL(state.markup.previewUrl);
+      update((source) => ({ ...source, markup: null }));
+    },
+    setMask(mask: EditMask) {
+      if (state.markup) URL.revokeObjectURL(state.markup.previewUrl);
+      revokeMaskUrl(state.mask);
+      update((source) => ({ ...source, markup: null, mask }));
     },
     removeMask() {
       revokeMaskUrl(state.mask);
       update((source) => ({ ...source, mask: null }));
     },
     cleanup() {
+      if (state.markup) URL.revokeObjectURL(state.markup.previewUrl);
       revokeEditSourceUrls(state);
       revokeMaskUrl(state.mask);
     }

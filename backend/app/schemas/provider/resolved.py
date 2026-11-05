@@ -52,6 +52,7 @@ class ResolvedEditSubmit:
     body_format: str
     files_images: str
     files_mask: str
+    files_markup: str = ""
 
 
 @dataclass(frozen=True)
@@ -65,6 +66,9 @@ class ProviderCapabilities:
     generate: bool = True
     edit: bool = False
     mask: bool = False
+    markup: bool = False
+    complexity: bool = False
+    animation: bool = False
     stream: bool = False
     transparent_background: bool = False
     formats: tuple[str, ...] = APP_IMAGE_FORMATS
@@ -74,6 +78,9 @@ class ProviderCapabilities:
             "generate": self.generate,
             "edit": self.edit,
             "mask": self.mask,
+            "markup": self.markup,
+            "complexity": self.complexity,
+            "animation": self.animation,
             "stream": self.stream,
             "transparent_background": self.transparent_background,
             "formats": list(self.formats),
@@ -142,12 +149,18 @@ def _capabilities_from_v2(config: ProviderConfigV2) -> ProviderCapabilities:
     formats = (
         tuple(config.capabilities.formats) if config.capabilities.formats else APP_IMAGE_FORMATS
     )
+    variables = template_variables(config.submit.body)
+    if config.edit_submit is not None:
+        variables |= template_variables(config.edit_submit.body)
     return ProviderCapabilities(
+        markup=bool(config.edit_submit and (config.edit_submit.files.markup if config.edit_submit.body_format == "multipart" else "markup" in template_variables(config.edit_submit.body))),
+        complexity="complexity" in variables,
+        animation={"frame_count", "frame_duration_ms"} <= variables,
         edit=edit,
         mask=mask,
         stream=bool(config.capabilities.stream),
         transparent_background=transparent,
-        formats=tuple(sorted(formats, key=APP_IMAGE_FORMATS.index)),
+        formats=tuple(sorted(formats, key=lambda value: (APP_IMAGE_FORMATS + ("svg", "gif")).index(value))),
     )
 
 
@@ -201,6 +214,7 @@ def resolve_provider_config(raw: Any) -> ResolvedProviderConfig:
                 body_format=str(config.edit_submit.body_format),
                 files_images=config.edit_submit.files.images,
                 files_mask=config.edit_submit.files.mask,
+                files_markup=config.edit_submit.files.markup,
             )
         return ResolvedProviderConfig(
             version=2,

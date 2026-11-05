@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.9.0
+
+- Add GPT Image 2.6 Flare and Sunburst with independent complexity control, uploaded-markup edits, SVG and animated GIF generation, original-format downloads and gallery support. Existing default models and presets are retained.
+- Persist new image parameters across jobs, reuse and recovery; require explicit support in custom provider mappings.
+- Add static SVG validation, isolated thumbnail rendering and Cairo runtime dependencies. SVG costs remain incomplete when authoring-model charges are unavailable.
+
 ## v1.8.1
 
 - **Bug fixes**:

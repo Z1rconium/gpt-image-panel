@@ -113,6 +113,7 @@ def derive_parent_update(
                 "image_height": first_image.get("image_height"),
                 "model": parent.get("model"),
                 "quality": parent.get("quality"),
+                **{key: parent.get(key) for key in ("complexity", "frame_count", "frame_duration_ms", "markup_applied")},
                 "output_format": parent.get("output_format"),
                 "output_compression": parent.get("output_compression"),
                 "background": parent.get("background"),

@@ -17,7 +17,7 @@ function normalizeJobQuality(value: string | null | undefined): PromptFormState[
 }
 
 function normalizeJobOutputFormat(value: string | null | undefined): PromptFormState['outputFormat'] {
-  if (value === 'png' || value === 'jpeg' || value === 'webp') return value;
+  if (value === 'png' || value === 'jpeg' || value === 'webp' || value === 'svg' || value === 'gif') return value;
   return initialPromptFormState.outputFormat;
 }
 
@@ -50,6 +50,9 @@ export function jobToPromptForm(job: GenerateJobStatus, fallbackModel = DEFAULT_
     size: job.size || initialPromptFormState.size,
     model: job.model || fallbackModel || initialPromptFormState.model,
     quality: normalizeJobQuality(job.quality),
+    complexity: job.complexity ?? null,
+    frameCount: job.frame_count ?? 9,
+    frameDurationMs: job.frame_duration_ms ?? 200,
     outputFormat: normalizeJobOutputFormat(job.output_format),
     background: normalizeBackground(job.background),
     outputCompression: job.output_compression === null || job.output_compression === undefined ? '' : String(job.output_compression),
@@ -72,6 +75,9 @@ export function galleryEntryToPromptForm(
     size: image.size || initialPromptFormState.size,
     model: image.model || fallbackModel || initialPromptFormState.model,
     quality: normalizeJobQuality(image.quality),
+    complexity: image.complexity ?? null,
+    frameCount: image.frame_count ?? 9,
+    frameDurationMs: image.frame_duration_ms ?? 200,
     outputFormat: normalizeJobOutputFormat(image.output_format),
     background: normalizeBackground(image.background),
     outputCompression: image.output_compression === null || image.output_compression === undefined ? '' : String(image.output_compression),

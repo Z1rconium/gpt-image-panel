@@ -8,7 +8,7 @@
   import type { PromptFormState } from '$lib/stores/preview';
   import { settingsStore } from '$lib/stores/settings';
   import { RESPONSE_FORMAT_OPTIONS, sanitizeQuantityInput } from '$lib/utils/promptForm';
-  import { imageQualities, isImage25, MAX_PROMPT_CHARS, promptLength } from '$lib/utils/imageModels';
+  import { imageQualities, isImage25, isImage26, MAX_PROMPT_CHARS, promptLength } from '$lib/utils/imageModels';
 
   interface Props {
     loading?: boolean;
@@ -42,7 +42,20 @@
 
   const promptLen = $derived(promptLength(promptForm.prompt));
   const qualities = $derived(imageQualities(promptForm.model));
-  const image25 = $derived(isImage25(promptForm.model));
+  const image26 = $derived(isImage26(promptForm.model));
+  const specialMedia = $derived(promptForm.outputFormat === 'svg' || promptForm.outputFormat === 'gif');
+  let mediaReset = $state(false);
+  $effect(() => {
+    if (specialMedia) {
+      if (!image26 || hasEditSource) { promptForm.outputFormat = 'png'; mediaReset = true; return; }
+      if (promptForm.stream || promptForm.outputCompression || promptForm.background.startsWith('chroma_') || (promptForm.outputFormat === 'svg' && Number(promptForm.quantity) !== 1)) mediaReset = true;
+      promptForm.stream = false;
+      promptForm.outputCompression = '';
+      if (promptForm.background.startsWith('chroma_')) promptForm.background = 'auto';
+      if (promptForm.outputFormat === 'svg') promptForm.quantity = 1;
+    }
+  });
+  const image25 = $derived(isImage25(promptForm.model) || isImage26(promptForm.model));
   const promptOnlyMode = $derived(promptForm.apiPath === '/v1/responses' || promptForm.apiPath === '/v1/chat/completions');
   const parameterControlsDisabled = $derived((promptOnlyMode && !hasEditSource) || loading);
   const modeLabel = $derived(promptForm.apiPath === '/v1/chat/completions' ? $t.promptForm.chatCompletionsMode : $t.promptForm.responsesMode);
@@ -69,13 +82,17 @@
         ? $t.promptForm.streamUnavailableMapped
         : ''
   );
-  const streamDisabled = $derived(loading || Boolean(streamUnavailableReason));
+  const streamDisabled = $derived(specialMedia || loading || Boolean(streamUnavailableReason));
   const transparentDisabledReason = $derived(
     providerMapped && providerCaps && !providerCaps.transparent_background
       ? $t.promptForm.transparentUnavailableMapped
       : ''
   );
 
+  $effect(() => {
+    if (providerMapped && !providerCaps?.complexity) promptForm.complexity = null;
+    if (specialMedia && providerMapped && (!providerCaps?.formats.includes(promptForm.outputFormat) || (promptForm.outputFormat === 'gif' && !providerCaps?.animation))) { promptForm.outputFormat = 'png'; mediaReset = true; }
+  });
   let qualityResetModel = $state('');
 
   // Field-scoped normalizers: each effect tracks only the fields it
@@ -227,6 +244,21 @@
       </div>
     </div>
 
+    {#if mediaReset}<p role="status" class="text-sm text-amber-700 dark:text-amber-300">{$t.promptForm.mediaReset}</p>{/if}
+    {#if image26}
+      <div class="grid gap-3 sm:grid-cols-3">
+        <label class="block text-sm">{$t.promptForm.complexity}
+          <select bind:value={promptForm.complexity} disabled={loading || (providerMapped && !providerCaps?.complexity)} class="form-select w-full">
+            <option value={null}>{$t.promptForm.modelDefaultHigh}</option>
+            <option value="low">{$t.promptForm.complexityLow}</option><option value="medium">{$t.promptForm.complexityMedium}</option><option value="high">{$t.promptForm.complexityHigh}</option>
+          </select>
+        </label>
+        {#if promptForm.outputFormat === 'gif'}
+          <label class="block text-sm">{$t.promptForm.frameCount}<input type="number" min="2" max="64" step="1" bind:value={promptForm.frameCount} class="ui-field w-full" /></label>
+          <label class="block text-sm">{$t.promptForm.frameDuration}<input type="number" min="20" max="2000" step="10" bind:value={promptForm.frameDurationMs} class="ui-field w-full" /></label>
+        {/if}
+      </div>
+    {/if}
     <!-- Block 2: Output Style & Protocol Dual Cards (7:5 split on desktop, balanced and aligned) -->
     <div class="grid gap-3 lg:grid-cols-12">
       <!-- Output Settings (3 columns: Format, Compression, Background) -->
@@ -238,6 +270,7 @@
               <option value="png">png</option>
               <option value="jpeg">jpeg</option>
               <option value="webp">webp</option>
+              {#if image26 && !hasEditSource}{#if !providerMapped || providerCaps?.formats.includes('svg')}<option value="svg">svg</option>{/if}{#if !providerMapped || (providerCaps?.animation && providerCaps?.formats.includes('gif'))}<option value="gif">gif</option>{/if}{/if}
             </select>
           </label>
 
@@ -245,7 +278,7 @@
             <span class="mb-1.5 block text-xs font-medium text-stone-600 dark:text-zinc-400">{$t.promptForm.compression}</span>
             <input
               bind:value={promptForm.outputCompression}
-              disabled={parameterControlsDisabled || promptForm.outputFormat === 'png'}
+              disabled={parameterControlsDisabled || specialMedia || promptForm.outputFormat === 'png'}
               type="number"
               min="0"
               max="100"

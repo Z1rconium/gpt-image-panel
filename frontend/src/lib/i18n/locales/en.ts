@@ -368,6 +368,26 @@ const en = {
     historySummaryPriced: 'priced'
   },
   promptForm: {
+    rasterOnly: 'SVG/GIF cannot be used as raster edit or reference inputs.',
+    markupUnavailable: 'This provider does not support uploaded markup.',
+
+    markupUpload: 'Upload / replace markup PNG',
+    markupHint: 'Transparent PNG matching the primary image. Replaces any mask; paste-back is not applied.',
+    markupOverlay: 'Markup overlay',
+    removeMarkup: 'Remove markup',
+    invalidMarkup: 'Use a transparent PNG below 50 MiB, matching the primary image and no larger than 16,777,216 pixels.',
+    markupRestoreFailed: 'Markup could not be restored for this primary image. Upload it again.',
+
+    invalidFrames: 'Use 2–64 frames and a duration of 20–2000 ms in steps of 10.',
+    complexity: 'Complexity',
+    modelDefaultHigh: 'Model default (high)',
+    complexityLow: 'Low',
+    complexityMedium: 'Medium',
+    complexityHigh: 'High',
+    frameCount: 'Frames',
+    frameDuration: 'Frame duration (ms)',
+    mediaReset: 'Incompatible output settings were reset. SVG/GIF support generation only, without streaming, compression or local chroma; SVG requires one image.',
+
     customModel: 'Custom model / snapshot',
     flareHint: 'Fast, high-quality everyday generation',
     sunburstHint: 'Greater precision for image editing',

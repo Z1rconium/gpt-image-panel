@@ -131,3 +131,28 @@ Completed the approved repository cleanup in three independently reviewed source
 ### Status
 
 [OK] **Completed**
+
+
+## Session 5: GPT Image 2.6 implementation and v1.9.0 release
+<!-- trellis-session: v=2 fp=52d32583f847f5a1 -->
+
+**Date**: 2026-11-05
+**Task**: GPT Image 2.6 implementation and v1.9.0 release
+**Branch**: `codex/gpt-image-26`
+
+### Summary
+
+Implemented and locally accepted GPT Image 2.6 support. User authorized split commits, push, main merge and GitHub Actions Docker v1.9.0 publication; release CI is pending.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e17e038` | feat(backend): support GPT Image 2.6 markup and generated media |
+| `344b33f` | feat(frontend): add GPT Image 2.6 controls and media workflows |
+| `88f0490` | docs(images): document GPT Image 2.6 contracts and acceptance |
+| `320ef2f` | chore(release): prepare v1.9.0 |
+
+### Status
+
+[OK] **Completed**

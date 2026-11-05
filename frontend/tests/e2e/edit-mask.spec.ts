@@ -1494,7 +1494,7 @@ test('editor readout, exported PNG and backend gallery coverage agree within 0.1
   const exportedPct = (await maskStats(page, mask)).coverage * 100;
 
   const repo = resolve(process.cwd(), '..');
-  const response = execFileSync(resolve(repo, '.venv/bin/python'), [
+  const response = execFileSync(process.env.PYTHON_EXECUTABLE || resolve(repo, '.venv/bin/python'), [
     resolve(repo, 'backend/tests/support/browser_mask_coverage.py')
   ], {
     cwd: repo,

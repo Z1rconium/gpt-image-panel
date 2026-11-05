@@ -3,6 +3,8 @@
   import { OPEN_COMPLETION_EVENT, type CompletionTarget } from '$lib/utils/completionNotifications';
   import AccessGate from '$lib/components/AccessGate.svelte';
   import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+  import { isImage26 } from '$lib/utils/imageModels';
+  import { attachMarkup } from '$lib/features/workspace/markup';
   import EditSourcePicker from '$lib/components/EditSourcePicker.svelte';
   import Header from '$lib/components/Header.svelte';
   import PreviewPanel from '$lib/components/PreviewPanel.svelte';
@@ -127,6 +129,12 @@
       : null;
   });
   const activeEditMask = $derived(isMaskValid($editSourceStore) ? $editSourceStore.mask : null);
+  $effect(() => {
+    if ($editSourceStore.markup && (!isImage26(promptForm.model) || ($settingsStore.settings?.provider_kind === 'async_json' && !$settingsStore.settings?.provider_capabilities?.markup))) {
+      editSourceStore.removeMarkup();
+      showToast($t.promptForm.markupUnavailable, 'status');
+    }
+  });
   const maskSupported = $derived($settingsStore.settings?.supports_mask !== false);
   const activeJobsCount = $derived($jobsStore.jobs.length);
   const optimizerSettings = $derived($settingsStore.settings?.prompt_optimizer || null);
@@ -859,6 +867,7 @@
   }
 
   function openGalleryEditDialog(image: GalleryEntry) {
+    if (/\.(svg|gif)$/i.test(image.filename)) { showToast($t.promptForm.rasterOnly, 'error'); return; }
     void editGalleryDialogPanel.prefetch();
     galleryEditImage = image;
     galleryEditDialogOpen = true;
@@ -891,7 +900,8 @@
         nextLabel,
         previewStore.setError,
         image.image_width || 0,
-        image.image_height || 0
+        image.image_height || 0,
+        image.filename
       )
     ) {
       showToast($t.messages.editSourceLimit(MAX_EDIT_SOURCE_IMAGES), 'error');
@@ -1188,6 +1198,19 @@
       previewStore.setError($t.messages.editRetryNeedsSource);
       showToast($t.messages.editRetryNeedsSource, 'error');
       return;
+    }
+    editSourceStore.removeMarkup();
+    if (job.markup_applied) {
+      editSourceStore.removeMask();
+      const source = $editSourceStore;
+      try {
+        const { fetchJobMaskBlob } = await import('$lib/features/workspace/jobMaskRestore');
+        const fetched = await fetchJobMaskBlob(job.job_id, source.selectedGalleryImageId ? { galleryImageId: source.selectedGalleryImageId } : { file: source.files[0].file }, 'markup');
+        await attachMarkup(fetched.blob);
+      } catch {
+        previewStore.setError($t.promptForm.markupRestoreFailed);
+        return;
+      }
     }
     if (job.mask_applied) {
       // Clear any current selection before the identity check. A failed
@@ -1593,6 +1616,28 @@
           }}
           {maskSupported}
         />
+        {#if isImage26(promptForm.model) && primaryEditSource && ($settingsStore.settings?.provider_kind !== 'async_json' || $settingsStore.settings?.provider_capabilities?.markup)}
+          <div class="mt-3 space-y-2">
+            <label class="block text-sm font-medium">{$t.promptForm.markupUpload}
+              <input type="file" accept="image/png,.png" class="mt-1 block w-full text-sm" onchange={async (event) => {
+                const file = event.currentTarget.files?.[0];
+                event.currentTarget.value = '';
+                if (!file) return;
+                try { await attachMarkup(file); } catch (error) { previewStore.setError(error instanceof Error ? error.message : $t.promptForm.invalidMarkup); }
+              }} />
+            </label>
+            <p class="text-xs text-stone-500">{$t.promptForm.markupHint}</p>
+            {#if $editSourceStore.markup}
+              <div class="relative inline-block max-w-full overflow-hidden rounded-lg bg-stone-100">
+                <img src={primaryEditSource.previewUrl} alt={primaryEditSource.label} class="max-h-72 max-w-full object-contain" />
+                <img src={$editSourceStore.markup.previewUrl} alt={$t.promptForm.markupOverlay} class="absolute inset-0 h-full w-full object-contain" />
+              </div>
+              <button type="button" class="ui-button" onclick={() => editSourceStore.removeMarkup()}>{$t.promptForm.removeMarkup}</button>
+            {/if}
+          </div>
+        {:else if isImage26(promptForm.model) && primaryEditSource}
+          <p class="mt-2 text-sm text-stone-500">{$t.promptForm.markupUnavailable}</p>
+        {/if}
       {/snippet}
     </PromptForm>
 

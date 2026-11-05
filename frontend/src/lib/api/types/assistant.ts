@@ -77,7 +77,7 @@ export type AssistantRecommendParamsRequest = {
   current_model?: string | null;
   current_size?: string | null;
   current_quality?: ImageQuality | null;
-  current_output_format?: 'png' | 'jpeg' | 'webp' | null;
+  current_output_format?: 'png' | 'jpeg' | 'webp' | 'svg' | 'gif' | null;
   current_n?: number | null;
 };
 

@@ -9,7 +9,7 @@ export type JobMaskFetch = {
 };
 
 /** Verify the current primary before reading the stored mask and coverage. */
-export async function fetchJobMaskBlob(jobId: string, source: { file: File } | { galleryImageId: string }): Promise<JobMaskFetch> {
+export async function fetchJobMaskBlob(jobId: string, source: { file: File } | { galleryImageId: string }, kind: 'mask' | 'markup' = 'mask'): Promise<JobMaskFetch> {
   const form = new FormData();
   if ('file' in source) {
     const digest = await crypto.subtle.digest('SHA-256', await source.file.arrayBuffer());
@@ -19,7 +19,7 @@ export async function fetchJobMaskBlob(jobId: string, source: { file: File } | {
   }
   let response: Response;
   try {
-    response = await apiFetchRaw(`/api/generate/${encodeURIComponent(jobId)}/mask/restore`, {
+    response = await apiFetchRaw(`/api/generate/${encodeURIComponent(jobId)}/${kind}/restore`, {
       method: 'POST',
       headers: { Accept: 'image/png' },
       body: form,

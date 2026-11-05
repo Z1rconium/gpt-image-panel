@@ -654,6 +654,7 @@
             type="button"
             role="menuitem"
             class="control-focus rounded-lg px-3 py-2 text-xs font-medium text-stone-800 hover:bg-stone-100 dark:text-zinc-100 dark:hover:bg-zinc-800"
+            disabled={/\.(svg|gif)$/i.test(image.filename)}
             onclick={() => {
               onEdit(image);
               closeActionMenu();
@@ -687,10 +688,10 @@
                 {/if}
               </div>
               <div class="grid grid-cols-2 gap-2">
-                <button type="button" disabled={aiLoading} class="control-focus rounded-lg border border-zinc-700 px-2 py-2 text-xs text-zinc-300 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50" onclick={() => onAiDescribe(image)}>
+                <button type="button" disabled={aiLoading || /\.svg$/i.test(image.filename)} title={/\.svg$/i.test(image.filename) ? $t.promptForm.rasterOnly : undefined} class="control-focus rounded-lg border border-zinc-700 px-2 py-2 text-xs text-zinc-300 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50" onclick={() => onAiDescribe(image)}>
                   {$t.lightbox.aiDescribe}
                 </button>
-                <button type="button" disabled={aiLoading} class="control-focus rounded-lg border border-cyan-500/35 px-2 py-2 text-xs text-cyan-700 hover:bg-cyan-500/10 disabled:cursor-not-allowed disabled:opacity-50 dark:text-cyan-200" onclick={() => onAiAnalyze(image)}>
+                <button type="button" disabled={aiLoading || /\.svg$/i.test(image.filename)} title={/\.svg$/i.test(image.filename) ? $t.promptForm.rasterOnly : undefined} class="control-focus rounded-lg border border-cyan-500/35 px-2 py-2 text-xs text-cyan-700 hover:bg-cyan-500/10 disabled:cursor-not-allowed disabled:opacity-50 dark:text-cyan-200" onclick={() => onAiAnalyze(image)}>
                   {$t.lightbox.aiAnalyze}
                 </button>
               </div>
@@ -736,7 +737,7 @@
           </div>
         </div>
         <div class="lightbox-details-actions grid grid-cols-2 gap-2 border-t border-stone-200 p-5 dark:border-zinc-800">
-          <button type="button" class="control-focus rounded-lg border border-stone-300 px-3 py-2 text-xs text-stone-700 hover:bg-stone-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800" onclick={() => onEdit(image)}>{$t.common.edit}</button>
+          <button type="button" class="control-focus rounded-lg border border-stone-300 px-3 py-2 text-xs text-stone-700 hover:bg-stone-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800" disabled={/\.(svg|gif)$/i.test(image.filename)} onclick={() => onEdit(image)}>{$t.common.edit}</button>
           <button type="button" class="control-focus rounded-lg border border-stone-300 px-3 py-2 text-xs text-stone-700 hover:bg-stone-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800" onclick={() => onFavorite(image)}>{image.favorite ? $t.common.unfavorite : $t.common.favorite}</button>
           <button type="button" class="control-focus rounded-lg border border-emerald-500/40 px-3 py-2 text-xs text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-200" onclick={() => onUsePrompt(image)}>{$t.common.usePrompt}</button>
           <button type="button" class="control-focus rounded-lg border border-emerald-500/40 px-3 py-2 text-xs text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-200" onclick={() => onUseAll(image)}>{$t.common.useAllParams}</button>

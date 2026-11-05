@@ -14,8 +14,12 @@ from ..runtime.blocking import run_file_operation
 from ..core.errors import InvalidRequestError
 from ..core import settings as config
 from ..core.utils import utc_now
-from ..core.media import validate_image_bytes
-from .uploads import IMAGE_UPLOAD_CONTENT_TYPES, IMAGE_UPLOAD_EXTENSIONS
+from ..core.generated_media import validate_generated_image_bytes as validate_image_bytes
+from ..core.media import IMAGE_FILE_EXTENSIONS, image_content_type_for_filename
+
+# Archive admission is independent of raster-only edit uploads.
+IMAGE_UPLOAD_EXTENSIONS = IMAGE_FILE_EXTENSIONS
+IMAGE_UPLOAD_CONTENT_TYPES = {ext: image_content_type_for_filename("image" + ext) for ext in IMAGE_FILE_EXTENSIONS}
 
 GalleryZipProgressCallback = Callable[[dict[str, Any]], None]
 from .gallery_archive_shared import (
@@ -165,6 +169,17 @@ def count_import_gallery_entries(zip_path: Path) -> int:
             if zip_name in seen_members:
                 raise InvalidRequestError("Import metadata references an image more than once")
             seen_members.add(zip_name)
+            # SVG is newly admitted by extension; check its complete static XML
+            # before promising an import job for otherwise non-importable XML.
+            if Path(zip_name).suffix.lower() == ".svg":
+                with zf.open(zip_name) as stream:
+                    data = stream.read(max_upload_bytes() + 1)
+                if len(data) > max_upload_bytes():
+                    raise InvalidRequestError("Imported image is too large")
+                try:
+                    validate_image_bytes(data, filename=Path(zip_name).name, content_type="image/svg+xml")
+                except ValueError:
+                    continue
             count += 1
             if count > config.IMPORT_MAX_ENTRIES:
                 raise InvalidRequestError("Import metadata contains too many entries")

@@ -9,7 +9,7 @@ import re
 from typing import Any
 
 TEMPLATE_VARIABLES = frozenset(
-    {"prompt", "model", "n", "width", "height", "size", "quality", "output_format", "background"}
+    {"complexity", "frame_count", "frame_duration_ms", "prompt", "model", "n", "width", "height", "size", "quality", "output_format", "background"}
 )
 MAX_PATH_TOKENS = 12
 MAX_TEMPLATE_DEPTH = 6

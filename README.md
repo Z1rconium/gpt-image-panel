@@ -18,7 +18,7 @@
 
   <p>
     <img alt="CI passing" src="https://img.shields.io/badge/CI-passing-2cc653?logo=github&logoColor=white" />
-    <img alt="Release v1.8.1" src="https://img.shields.io/badge/release-v1.8.1-0e8dcc" />
+    <img alt="Release v1.9.0" src="https://img.shields.io/badge/release-v1.9.0-0e8dcc" />
     <img alt="Python 3.11+" src="https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white" />
     <img alt="Node.js 24" src="https://img.shields.io/badge/Node.js-24-339933?logo=node.js&logoColor=white" />
     <img alt="FastAPI 0.115+" src="https://img.shields.io/badge/FastAPI-0.115+-009688?logo=fastapi&logoColor=white" />
@@ -263,6 +263,21 @@ Web search is **off by default**. Under **Settings → AI Assistant**, declare t
 
 Search progress and citations supplied by upstream annotations are saved with the turn. Inline numbers link to the same sources listed under **Sources**, including quoted spans; reloads, stream replay, and path switches restore them. Ordinary Markdown links do not become sources. Search shares tool-round, timeout, and cancellation limits, uses bounded branch history, and does not invent costs when usage is missing. Migrations 37/38 apply automatically at startup.
 
+## GPT Image 2.6
+
+Choose `gpt-image-2.6-flare` for fast iteration or `gpt-image-2.6-sunburst` for detailed compositions and precise edits, then use the Images API generation path. Both models offer `auto/low/medium/high/xhigh/max` quality. **Complexity** controls planning separately from quality: leave it at the model default (`high`), or choose `low`, `medium`, or `high`. Existing presets and the default `gpt-image-2` are unchanged.
+
+- **Markup-guided edits:** add your source image, then upload a transparent PNG annotation layer. The overlay is previewed over the primary image and sent separately as `markup`; it is never flattened onto the original. It must match the upright primary image, contain transparent pixels, and stay under 50 MiB and the configured upload limit; each image/layer is limited to 16,777,216 pixels. Markup and masks are mutually exclusive. Markup edits do not use paste-back. Retry restores a stored annotation only when its primary image still matches.
+- **SVG:** select SVG for a single vector result. Preview and download retain the vector original; the gallery uses a raster thumbnail. Transparent SVG backgrounds are supported. Active content, embedded images and external resources are rejected.
+- **Animated GIF:** select GIF and describe the motion and loop in the prompt. The default is 9 frames at 200 ms each; choose 2–64 frames and 20–2000 ms per frame in 10 ms steps. The lightbox plays the animation, while gallery thumbnails show its first frame. Downloads and ZIP exports preserve the original animation.
+- SVG/GIF are generation-only: no reference inputs, masks, markup, streaming previews, compression or local chroma removal. SVG is limited to one result. GIF frame-size and aggregate pixel limits still apply upstream; reduce the dimensions/frame count if your provider reports a limit error. SVG/GIF are not automatically converted into edit inputs.
+- The panel omits `response_format` for 2.6 and serves saved Base64 results through local URLs. Custom provider mappings must explicitly carry new controls; unsupported controls are rejected before a task is queued.
+- Built-in 2.6 rates are $5/M text input tokens, $8/M image input tokens and $30/M image output tokens. SVG also has authoring-model charges; when their usage/rate is unavailable, the panel marks the estimate incomplete.
+
+Docker includes the Cairo runtime needed for SVG thumbnails. For local development, install Cairo first (`brew install cairo` on macOS, `apt-get install libcairo2` on Debian/Ubuntu), then install the locked Python dependencies. On Apple Silicon, if the dynamic loader cannot find Homebrew Cairo, start the backend with `DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib`.
+
+API rules checked on 2026-11-05: [image generation guide](https://developers.openai.com/api/docs/guides/image-generation), [2.6 parameters](https://developers.openai.com/api/docs/guides/image-prompting), [pricing](https://developers.openai.com/api/docs/pricing).
+
 ## GPT Image 2.5
 
 The generation form and preset settings offer `gpt-image-2.5-flare` (fast everyday generation) and `gpt-image-2.5-sunburst` (precise editing). `gpt-image-2` remains the default; saved presets and custom model names are preserved. Choose **Custom model / snapshot** to pin either model to its `-2026-09-08` snapshot.
@@ -330,7 +345,7 @@ Some gateways accept a task, return status/result URLs, and finish later. A pres
 - Streaming preview is opt-in for the Images generation/edit endpoints and `/v1/responses`, with quantities of 1–10. Each image remains a separate queue unit under the existing concurrency limit. Choose 1–3 intermediate frames; the upstream determines their availability and usage. Responses partial images are associated with their output call, and text deltas never become image previews. Declarative custom provider mappings continue to require `capabilities.stream: false`.
 - If a compatible upstream rejects the `stream`/`partial_images` parameters, the job fails with a clear error instead of silently retrying non-streaming, since that could double-bill the generation.
 - Partial images live only in server memory (one latest frame per running unit/output call, bounded by `PREVIEW_CACHE_MAX_ENTRY_MB`/`PREVIEW_CACHE_MAX_ENTRIES`, defaults 8 MiB / 500 entries). Slow SSE subscribers receive coalesced frames. Final results replace only their own slots; failed, cancelled and completed slots release previews. Reconnect restores the job snapshot before cached frames; a restarted or different worker has no preview frames to replay. A valid JSON final response is accepted from the original request without resubmission.
-- **Estimated cost is not a bill.** It's computed only from the `usage` object the upstream actually returns; when usage or a model price is missing, the UI shows why instead of `$0.00`. The builtin rate table covers `gpt-image-1` and GPT Image 2 / 2.5, taken from OpenAI's published pricing — third-party upstreams rarely match it. Override or add rates with `IMAGE_COST_RATES_JSON`.
+- **Estimated cost is not a bill.** It's computed only from the `usage` object the upstream actually returns; when usage or a model price is missing, the UI shows why instead of `$0.00`. The builtin rate table covers `gpt-image-1` and GPT Image 2 / 2.5 / 2.6, taken from OpenAI's published pricing — third-party upstreams rarely match it. Override or add rates with `IMAGE_COST_RATES_JSON`.
 
 ## Gallery, Touch Controls, and Completion Notifications
 

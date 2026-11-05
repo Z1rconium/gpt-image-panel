@@ -370,6 +370,26 @@ const zh: Translation = {
     historySummaryPriced: '已计价'
   },
   promptForm: {
+    rasterOnly: 'SVG/GIF 无法作为栅格编辑或参考输入。',
+    markupUnavailable: '当前服务商不支持上传标注。',
+
+    markupUpload: '上传 / 替换标注 PNG',
+    markupHint: '透明 PNG，尺寸须与主图一致。将替换蒙版，不进行贴回。',
+    markupOverlay: '标注叠加预览',
+    removeMarkup: '移除标注',
+    invalidMarkup: '请使用小于 50 MiB、尺寸与主图一致且不超过 16,777,216 像素的透明 PNG。',
+    markupRestoreFailed: '无法为当前主图恢复标注，请重新上传。',
+
+    invalidFrames: '帧数须为 2–64，每帧时长须为 20–2000 毫秒且为 10 的倍数。',
+    complexity: '复杂度',
+    modelDefaultHigh: '模型默认（高）',
+    complexityLow: '低',
+    complexityMedium: '中',
+    complexityHigh: '高',
+    frameCount: '帧数',
+    frameDuration: '每帧时长（毫秒）',
+    mediaReset: '已重置不兼容的输出设置。SVG/GIF 仅支持生成，不支持流式、压缩或本地色键；SVG 限一张。',
+
     customModel: '自定义模型 / 日期快照',
     flareHint: '适合快速、高质量的日常生成',
     sunburstHint: '适合更精细的图像编辑',

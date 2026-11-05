@@ -159,7 +159,7 @@ def test_estimate_image_cost_uses_builtin_image_2_series_rates(model):
 
 def test_configured_model_count_includes_builtin_image_2_series(monkeypatch):
     monkeypatch.setattr(image_cost.config, "IMAGE_COST_RATES_JSON", "")
-    assert image_cost.configured_model_count() == 7
+    assert image_cost.configured_model_count() == 9
 
 
 # ── sum_usage / sum_costs ────────────────────────────────────────
