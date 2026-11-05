@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 from pydantic import ValidationError
 from backend.app.schemas.generation import GenerateRequest, EditRequest
@@ -56,15 +58,14 @@ def test_provider_26_capabilities_are_explicit():
     assert set(resolved.capabilities.formats) == {'svg', 'gif'}
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize('body_format', ['json', 'multipart'])
-async def test_provider_markup_upload_packaging(tmp_path, body_format):
+def test_provider_markup_upload_packaging(tmp_path, body_format):
     from types import SimpleNamespace
     from backend.app.integrations.upstream.generation import _build_provider_edit_uploads
     path = tmp_path / 'markup.png'
     path.write_bytes(b'original-markup')
     source = SimpleNamespace(temp_path=path, filename='markup.png', content_type='image/png', byte_size=15)
-    uploads = await _build_provider_edit_uploads(SimpleNamespace(body_format=body_format), [], None, source)
+    uploads = asyncio.run(_build_provider_edit_uploads(SimpleNamespace(body_format=body_format), [], None, source))
     if body_format == 'json':
         import base64
         assert uploads.inline_variables['markup'] == 'data:image/png;base64,' + base64.b64encode(b'original-markup').decode()
@@ -117,9 +118,8 @@ def test_svg_usage_preserves_raw_without_inventing_image_tokens():
     assert normalize_usage(raw)['image_output_tokens'] == 123
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize('cancel', [False, True])
-async def test_markup_copy_removed_on_queue_rejection_or_cancel(tmp_path, monkeypatch, cancel):
+def test_markup_copy_removed_on_queue_rejection_or_cancel(tmp_path, monkeypatch, cancel):
     import asyncio
     from backend.app.services import job_queue
     source_path = tmp_path / 'source.png'
@@ -137,13 +137,12 @@ async def test_markup_copy_removed_on_queue_rejection_or_cancel(tmp_path, monkey
     source = job_queue.EditImageSource(temp_path=source_path, filename='source.png', byte_size=8, content_type='image/png')
     markup = job_queue.replace(source, role='markup')
     with pytest.raises(asyncio.CancelledError if cancel else RuntimeError):
-        await job_queue.queue_edit_job(EditRequest(prompt='x'), [source], markup_source=markup)
+        asyncio.run(job_queue.queue_edit_job(EditRequest(prompt='x'), [source], markup_source=markup))
     assert persisted == {}
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize('body_format', ['json', 'multipart'])
-async def test_provider_markup_actual_submit_wire(tmp_path, body_format):
+def test_provider_markup_actual_submit_wire(tmp_path, body_format):
     from types import SimpleNamespace
     from backend.app.integrations.upstream import async_provider
     from backend.app.integrations.upstream.generation import _build_provider_edit_uploads
@@ -152,10 +151,10 @@ async def test_provider_markup_actual_submit_wire(tmp_path, body_format):
     path.write_bytes(b'original-layer')
     source = SimpleNamespace(temp_path=path, filename='markup.png', content_type='image/png', byte_size=14)
     submit = SimpleNamespace(body_format=body_format, method='POST', files_images='images', files_mask='', files_markup='annotation')
-    uploads = await _build_provider_edit_uploads(submit, [], None, source)
+    uploads = asyncio.run(_build_provider_edit_uploads(submit, [], None, source))
     body = {'complexity': 'low', 'frames': 9, 'duration': 200, **uploads.inline_variables}
     session = _ScriptedSession({('POST', 'https://mapped.example.com/edit'): [_json({'ok': True})]})
-    await async_provider._submit_provider_request(session, submit, 'https://mapped.example.com/edit', headers={}, socks5_proxy='socks5://proxy', body=body, uploads=uploads)
+    asyncio.run(async_provider._submit_provider_request(session, submit, 'https://mapped.example.com/edit', headers={}, socks5_proxy='socks5://proxy', body=body, uploads=uploads))
     sent = session.calls[0][2]
     if body_format == 'json':
         assert sent['json']['markup'].startswith('data:image/png;base64,')
@@ -168,8 +167,7 @@ async def test_provider_markup_actual_submit_wire(tmp_path, body_format):
         assert by_name['frames'][2] == '9'
 
 
-@pytest.mark.asyncio
-async def test_markup_uses_saved_preset_default_model(tmp_path, monkeypatch):
+def test_markup_uses_saved_preset_default_model(tmp_path, monkeypatch):
     from backend.app.api.routers.edits import validate_uploaded_markup
     from backend.app.services import job_queue
     from PIL import Image
@@ -178,7 +176,7 @@ async def test_markup_uses_saved_preset_default_model(tmp_path, monkeypatch):
     source = job_queue.EditImageSource(temp_path=path, byte_size=path.stat().st_size, filename='markup.png', content_type='image/png', width=16, height=16, role='markup')
     monkeypatch.setattr('backend.app.api.routers.edits.get_active_preset', lambda: {'default_model': 'gpt-image-2.6-flare'})
     req = EditRequest(prompt='x', model='')
-    await validate_uploaded_markup(source, source, req)
+    asyncio.run(validate_uploaded_markup(source, source, req))
     assert req.paste_back is False
 
 
