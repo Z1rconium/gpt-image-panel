@@ -22,7 +22,7 @@
     <img alt="Python 3.11+" src="https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white" />
     <img alt="Node.js 24" src="https://img.shields.io/badge/Node.js-24-339933?logo=node.js&logoColor=white" />
     <img alt="FastAPI 0.115+" src="https://img.shields.io/badge/FastAPI-0.115+-009688?logo=fastapi&logoColor=white" />
-    <img alt="SvelteKit 2" src="https://img.shields.io/badge/SvelteKit-2-FF3E00?logo=svelte&logoColor=white" />
+    <img alt="SvelteKit 3" src="https://img.shields.io/badge/SvelteKit-3-FF3E00?logo=svelte&logoColor=white" />
     <img alt="License CC BY-NC 4.0" src="https://img.shields.io/badge/License-CC_BY--NC_4.0-6f42c1" />
     <img alt="Image GHCR" src="https://img.shields.io/badge/GHCR-gpt--image--linux-1f6f8b?logo=github&logoColor=white" />
   </p>
@@ -39,7 +39,10 @@ This project is only a self-hosted control panel. It does not provide, proxy, re
 ## Features
 
 - Image generation through `/v1/images/generations`, `/v1/responses`, or OpenAI-compatible `/v1/chat/completions`.
-- Image editing through `/v1/images/edits`, using uploaded references or gallery images as sources, with a built-in mask editor (brush/eraser/shape/lasso, zoom, feathering, mask import, auto gap-fill/edge-smoothing). Masks persist and restore on retry; results paste back onto the untouched original behind a color-drift guard.
+- Full support for **GPT Image 2.6** (`gpt-image-2.6-flare` and `gpt-image-2.6-sunburst`) with independent complexity control, vector SVG and animated GIF generation (2–64 frames, 20–2000 ms duration), and markup-guided edits.
+- Image editing through `/v1/images/edits`, using uploaded references or gallery images as sources:
+  - Built-in **mask editor** (brush/eraser/shape/lasso, zoom, feathering, mask import, auto gap-fill/edge-smoothing) with persistent masks on retry and color-drift guarded paste-back.
+  - Built-in **in-browser markup editor** (pen, arrow, rectangle, ellipse, text, eraser, 6 colors, stroke width, zoom/pan, 100-step undo/redo; touch/stylus/mouse) and transparent PNG layer upload for markup-guided edits.
 - API presets with base URL/path/key, default model, response format, health checks, SOCKS5 proxy, webhook, env-ref secret support, and capability flags: `supports_mask` (mask editing) and `prompt_guard` (ask upstream to use the prompt as-is).
 - Prompt helper tags, reusable prompt snippets, an optional server-side prompt optimizer, and an AI Assistant subsystem for prompt rewrites/checks/variants, parameter recommendations, job diagnosis, edit planning, and gallery image analysis.
 - Agent conversation mode: a multi-turn chat where the model plans and creates images through the existing job queue (batches of images, dependent follow-up rounds, edits of earlier images via `@` references), with server-side history, resumable streaming, and every image saved to the gallery. Requires an AI Assistant endpoint whose model supports function calling.
@@ -59,7 +62,7 @@ This project is only a self-hosted control panel. It does not provide, proxy, re
 
 ## Tech Stack
 
-Python 3.11+, FastAPI, Granian, aiohttp (+aiohttp-socks), boto3, SQLite, Pydantic v2, Pillow, python-multipart, zipstream-ng · SvelteKit, TypeScript, Tailwind CSS 4 · Playwright, pytest. Browser baseline: Chrome 111+, Safari 16.4+, Firefox 128+.
+Python 3.11+, FastAPI, Granian, aiohttp (+aiohttp-socks), boto3, SQLite, Pydantic v2, Pillow, CairoSVG, python-multipart, zipstream-ng · SvelteKit 3, TypeScript, Tailwind CSS 4 · Playwright, pytest. Browser baseline: Chrome 111+, Safari 16.4+, Firefox 128+.
 
 ## Project Structure
 
@@ -175,13 +178,13 @@ Caddy automatic HTTPS requires the hostname to resolve to the server and inbound
 
 ### Deployment Troubleshooting
 
-2. **Browser reports `400 Bad Request: Host is not allowed`** — the incoming `Host` header does not match `ALLOWED_HOSTS` or `PUBLIC_ORIGIN` in `.env` (often due to domain typos or failing to recreate the container after editing `.env`). Ensure both match the exact domain, and always run `docker-compose up -d --force-recreate` after modifying `.env`.
-3. **Cannot log in or login loop under direct plain HTTP (no reverse proxy/SSL)** — by default `ACCESS_COOKIE_SECURE=true` requires HTTPS; browsers reject storing or sending `Secure` cookies over plain HTTP. For direct HTTP testing, set `ACCESS_COOKIE_SECURE=false` and `ACCESS_KEY_COOKIE_NAME=gpt_image_access` in `.env`. Switch back to `true` and remove the cookie name override once behind an HTTPS reverse proxy.
-4. **Saving a preset fails** — use a configured secret reference bound to the same purpose and origin, or enable plaintext secret storage where appropriate.
+1. **Browser reports `400 Bad Request: Host is not allowed`** — the incoming `Host` header does not match `ALLOWED_HOSTS` or `PUBLIC_ORIGIN` in `.env` (often due to domain typos or failing to recreate the container after editing `.env`). Ensure both match the exact domain, and always run `docker-compose up -d --force-recreate` after modifying `.env`.
+2. **Cannot log in or login loop under direct plain HTTP (no reverse proxy/SSL)** — by default `ACCESS_COOKIE_SECURE=true` requires HTTPS; browsers reject storing or sending `Secure` cookies over plain HTTP. For direct HTTP testing, set `ACCESS_COOKIE_SECURE=false` and `ACCESS_KEY_COOKIE_NAME=gpt_image_access` in `.env`. Switch back to `true` and remove the cookie name override once behind an HTTPS reverse proxy.
+3. **Saving a preset fails** — use a configured secret reference bound to the same purpose and origin, or enable plaintext secret storage where appropriate.
 
 ### Local Development
 
-Create a project-local Python 3.11+ virtual environment first. The `.venv` directory is local developer state and is not provided by the repository.
+Create a project-local Python 3.11+ virtual environment first. The `.venv` directory is local developer state and is not provided by the repository. (Note: Cairo runtime is required for SVG thumbnail generation; see [GPT Image 2.6](#gpt-image-26) below).
 
 ```bash
 python3 -m venv .venv
@@ -329,10 +332,10 @@ Some gateways accept a task, return status/result URLs, and finish later. A pres
 ```
 
 - **Flow**: `POST` the rendered body to `API URL + submit.path`, read the status URL from the response, poll until `status_path` is in `done` (or `failed`), optionally fetch `result.url_path`, then read images at `images_path` (URLs or base64). Nothing is evaluated as code; paths support `$.a.b[0]` and `[*]` only.
-- **Variables**: `prompt`, `model`, `n`, `width`, `height`, `size`, `quality`, `output_format`, `background`. A field whose only content is a variable without a value (for example `width` when the size is `auto`) is left out. `submit.path` may use only `{{model}}`.
+- **Variables**: `prompt`, `model`, `n`, `width`, `height`, `size`, `quality`, `output_format`, `background`, `complexity`, `frame_count`, `frame_duration_ms`. A field whose only content is a variable without a value (for example `width` when the size is `auto`) is left out. `submit.path` may use only `{{model}}`.
 - **Task-id mappings (version 2)**: providers that return only a task id can set `"version": 2` and use `poll.task_id_path` with `poll.url_template` (and the same pair for `result`/`cancel`), for example `{"task_id_path": "$.data.id", "url_template": "/v1/jobs/{{task_id}}"}`. Templates are plain paths; the task id is percent-encoded as one path segment, and absolute URLs are rejected. An optional `submit.idempotency_header` (for example `Idempotency-Key`) lets an interrupted submit be retried under the same stable key. **Sync mode**: v2 mappings can set `"mode": "sync"` when the submit response already contains the images — omit `poll` and `cancel` and read images with `result.images_path` from the submit response.
 - **Methods and query mapping**: `submit.method` and `poll.method` accept `GET` or `POST` (a GET submit must have an empty body; a POST poll sends an empty JSON object). `submit.query`, `edit_submit.query` and `poll.query` map URL query parameters from templates — the submit variables for submits, `{{task_id}}` for polls; literal values may contain letters, digits and `- _ . ~` only.
-- **Image edits (edit_submit)**: adding an `edit_submit` section declares edit support. Multipart edits upload the validated reference images and mask as file parts (`files.images`, one part per image, and `files.mask`); JSON edits inline `{{reference_images}}` (the bounded list of data URLs) and optionally `{{mask}}` (one data URL) in `edit_submit.body`. Edits reuse the panel's upload validation, size caps, mask preprocessing, cancellation and result paste-back, and a configured mask is always sent — a mapping that cannot carry one is rejected before submit.
+- **Image edits (edit_submit)**: adding an `edit_submit` section declares edit support. Multipart edits upload the validated reference images and mask as file parts (`files.images`, one part per image, `files.mask`, and optional `files.markup`); JSON edits inline `{{reference_images}}` (the bounded list of data URLs) and optionally `{{mask}}` or `{{markup}}` (data URLs) in `edit_submit.body`. Edits reuse the panel's upload validation, size caps, mask and markup preprocessing, cancellation and result paste-back, and a configured mask/markup is always sent — a mapping that cannot carry one is rejected before submit.
 - **Capabilities**: `capabilities.transparent_background` gates `background: transparent` (when omitted, the panel auto-detects it from `{{background}}` usage) and `capabilities.formats` narrows the accepted output formats; anything undeclared is refused before submit with a clear reason. `stream` stays reserved. Chroma backgrounds remain available for generation — the provider receives the opaque background and the keyed prompt, and the panel removes the color locally.
 - **Credentials**: the mapping never contains a key. The preset's API key (env reference or Secret Registry ID) is sent as `header: scheme key`; `header` is `Authorization` or `X-API-Key`, `scheme` is `Bearer`, `Key`, `Token` or empty.
 - **Safety**: status, result and cancel URLs come from upstream responses, so they must be on the same origin as the preset's API URL (the key travels with them) and pass the same SSRF and peer-IP checks as the submit URL. Images are downloaded without credentials. Errors are redacted.
@@ -371,7 +374,8 @@ Key backend routes (grouped by area):
 | `POST` | `/api/assistant/health`, `/api/assistant/prompt/rewrite\|check\|variants`, `/api/assistant/generate/recommend-params`, `/api/assistant/jobs/{job_id}/diagnose`, `/api/assistant/edit/plan`, `/api/assistant/image/prompt`, `/api/assistant/image/prompt/optimize`; `POST/GET /api/assistant/gallery/*` | Probe Assistant connectivity; prompt rewrite/review/variants; parameter recommendations; job diagnosis and edit planning; reverse-prompt local images; gallery describe/analyze/batch operations. |
 | `GET/POST` | `/api/agent/conversations`; `GET/PATCH/DELETE /api/agent/conversations/{conversation_id}`; `POST .../turns`; `PATCH .../branch` | List/create, read/rename/delete conversations (deleting keeps gallery images); send a message (idempotent via `client_turn_id`, returns `202`); select a persisted path. |
 | `GET` | `/api/agent/turns/{turn_id}` (+ `/events`); `POST /api/agent/turns/{turn_id}/cancel` | Read a turn or stream its replayable SSE events; stop a running turn and cancel its queued image jobs. |
-| `POST` | `/api/generate`, `/api/edits`, `/api/edits/from-gallery/{image_id}` | Start generation or edit jobs (edits accept an optional PNG mask and paste-back preference). |
+| `POST` | `/api/generate`, `/api/edits`, `/api/edits/from-gallery/{image_id}` | Start generation or edit jobs (edits accept an optional PNG mask or markup layer, and paste-back preference). |
+| `GET`, `POST` | `/api/generate/{job_id}/markup`, `/api/generate/{job_id}/markup/restore` | Download persisted original markup PNG, or restore markup for edit retry against verified primary source. |
 | `GET`, `GET/DELETE` | `/api/generate/jobs` (+ `/events`), `/api/generate/{job_id}` (+ `/events`); `DELETE /api/generate/jobs/history` | List live jobs/history, stream job-list or single-job SSE, read/cancel one job, clear terminal history. |
 | `GET`, `POST` | `/api/gallery`, `/api/gallery/search`; `GET/DELETE /api/gallery/{image_id}`; `PATCH /api/gallery/{image_id}/favorite` | List/search/filter gallery images (incl. `mask_only`), read/delete/favorite an image. |
 | `POST/PATCH` | `/api/gallery/batch/*`; `POST /api/gallery/thumbnails/status` | Selection-token, favorite, delete, and download batch actions; thumbnail presence checks. |
@@ -389,7 +393,7 @@ The public API surface is contract-tested; keep paths, methods, status codes, SS
 - Keep ownership boundaries intact: routers/request orchestration in `backend/app/api/routers/`, DTOs in `backend/app/schemas/`, persistence and SQLite coordination in `backend/app/repositories/`, upstream integrations in `backend/app/integrations/`, mirrored frontend API types in `frontend/src/lib/api/types/`.
 - Keep public contracts stable unless a breaking change is intentional: API paths, methods, status codes, cookies, SSE event names, response shapes; generation/edit queue lifecycle, cancellation semantics, and multi-worker SQLite coordination. File-system races are tolerated by UUID filenames, atomic replacement, and orphan GC; do not rely on process-local locks for cross-worker exclusion.
 - Keep validation and safety centralized: image byte validation, safe paths, thumbnail/archive helpers; SSRF-sensitive URL handling in validators, safe connector, and integration clients; secrets exposed to the frontend only as masked values or env-ref metadata.
-- Preserve current runtime constraints: edits accept up to 16 raster source images, plus an optional single PNG mask capped at 4 MB; gallery ZIP import/export keeps existing safety limits; SSE uses SQLite slot leases with global/per-IP caps and TTL; R2 sync is backup-only — local SQLite rows and local image files remain the source of truth.
+- Preserve current runtime constraints: edits accept up to 16 raster source images, plus an optional single PNG mask capped at 4 MB or transparent PNG markup capped at 50 MiB; gallery ZIP import/export keeps existing safety limits; SSE uses SQLite slot leases with global/per-IP caps and TTL; R2 sync is backup-only — local SQLite rows and local image files remain the source of truth.
 - When changing environment variables, update `backend/app/core/settings.py`, `backend/app/core/overall_config.py` when user-visible, `.env.example`, `docker-compose.yml` when configurable in Compose, and this README.
 - Do not commit runtime/generated artifacts such as `images/`, `data/`, `frontend/build/`, `.svelte-kit/`, Playwright reports, test results, dependency folders, local DB files, or logs.
 

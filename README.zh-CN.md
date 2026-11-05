@@ -20,7 +20,7 @@
     <img alt="Python 3.11+" src="https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white" />
     <img alt="Node.js 24" src="https://img.shields.io/badge/Node.js-24-339933?logo=node.js&logoColor=white" />
     <img alt="FastAPI 0.115+" src="https://img.shields.io/badge/FastAPI-0.115+-009688?logo=fastapi&logoColor=white" />
-    <img alt="SvelteKit 2" src="https://img.shields.io/badge/SvelteKit-2-FF3E00?logo=svelte&logoColor=white" />
+    <img alt="SvelteKit 3" src="https://img.shields.io/badge/SvelteKit-3-FF3E00?logo=svelte&logoColor=white" />
     <img alt="许可证 CC BY-NC 4.0" src="https://img.shields.io/badge/License-CC_BY--NC_4.0-6f42c1" />
     <img alt="GHCR 镜像" src="https://img.shields.io/badge/GHCR-gpt--image--linux-1f6f8b?logo=github&logoColor=white" />
   </p>
@@ -35,7 +35,10 @@ GPT Image Panel 是一个轻量级 Web UI，用于图像生成、图像编辑、
 ## 功能
 
 - 支持 `/v1/images/generations`、`/v1/responses`、OpenAI 兼容 `/v1/chat/completions` 图像生成。
-- 支持 `/v1/images/edits` 图像编辑，可用上传参考图或 Gallery 图片作为源图；内置蒙版编辑器（画笔/橡皮擦/形状/套索、缩放、羽化、蒙版导入、自动补洞/边缘平滑）。蒙版随任务持久化并支持重试恢复，结果默认贴回未编辑的原图区域，并带颜色漂移防护。
+- 完整支持 **GPT Image 2.6**（`gpt-image-2.6-flare` 与 `gpt-image-2.6-sunburst`）：独立复杂度控制、矢量 SVG 与动画 GIF 生成（2–64 帧、20–2000 ms 帧间隔），以及标注引导编辑。
+- 支持 `/v1/images/edits` 图像编辑，可用上传参考图或 Gallery 图片作为源图：
+  - 内置**蒙版编辑器**（画笔/橡皮擦/形状/套索、缩放、羽化、蒙版导入、自动补洞/边缘平滑），蒙版随任务持久化并支持重试恢复，结果默认贴回未编辑的原图区域并带颜色漂移防护。
+  - 内置**网页端标注编辑器**（画笔、箭头、矩形、椭圆、短文字、橡皮擦，6 种颜色、线宽调节、缩放平移、100 步撤销重做；支持鼠标、触控笔与触摸），亦支持直接上传透明 PNG 标注层进行标注引导编辑。
 - API 预设管理：base URL/path/key、默认模型、response format、健康检查、SOCKS5 代理、webhook、环境变量引用式密钥，以及能力开关：`supports_mask`（蒙版编辑）与 `prompt_guard`（要求上游按原样使用提示词）。
 - 提示词助手标签、可复用提示词片段、可选服务端提示词优化器，以及 AI Assistant 子系统（提示词改写/检查/变体、参数推荐、任务诊断、编辑规划、Gallery 图片分析）。
 - Agent 对话模式：多轮对话中由模型规划并通过现有任务队列生成图片（批量并发、有依赖的后续轮次、用 `@` 引用修改历史图片），对话历史保存在服务端，流式回复可断线续传，所有图片进入 Gallery。需要 AI Assistant 端点使用支持 function calling 的模型。
@@ -55,7 +58,7 @@ GPT Image Panel 是一个轻量级 Web UI，用于图像生成、图像编辑、
 
 ## 技术栈
 
-Python 3.11+、FastAPI、Granian、aiohttp（+aiohttp-socks）、boto3、SQLite、Pydantic v2、Pillow、python-multipart、zipstream-ng · SvelteKit、TypeScript、Tailwind CSS 4 · Playwright、pytest。浏览器最低版本：Chrome 111、Safari 16.4、Firefox 128。
+Python 3.11+、FastAPI、Granian、aiohttp（+aiohttp-socks）、boto3、SQLite、Pydantic v2、Pillow、CairoSVG、python-multipart、zipstream-ng · SvelteKit 3、TypeScript、Tailwind CSS 4 · Playwright、pytest。浏览器最低版本：Chrome 111、Safari 16.4、Firefox 128。
 
 ## 项目结构
 
@@ -171,13 +174,13 @@ Caddy 自动 HTTPS 要求域名解析到服务器，并且入站 `80`、`443` �
 
 ### 常见部署问题排查
 
-2. **浏览器访问提示 `400 Bad Request: Host is not allowed`** — 请求的 `Host` 头未在 `.env` 的 `ALLOWED_HOSTS` 或 `PUBLIC_ORIGIN` 白名单中（常见于域名拼写错误，或修改 `.env` 后未重新创建容器）。确保两者与域名完全一致，修改 `.env` 后必须执行 `docker-compose up -d --force-recreate` 重新创建容器生效。
-3. **直连 HTTP（无反代/未配 SSL）环境下无法登录或陷入登录循环** — 默认 `ACCESS_COOKIE_SECURE=true` 要求必须走 HTTPS，纯 HTTP 下浏览器会拒绝保存/携带 Secure Cookie。纯 HTTP 直连测试时，在 `.env` 中设置 `ACCESS_COOKIE_SECURE=false` 和 `ACCESS_KEY_COOKIE_NAME=gpt_image_access`；部署 HTTPS 反代后再改为 `true`。
-4. **保存预设失败** — 使用绑定了相同用途和来源的已配置密钥引用，或按需启用明文密钥存储。
+1. **浏览器访问提示 `400 Bad Request: Host is not allowed`** — 请求的 `Host` 头未在 `.env` 的 `ALLOWED_HOSTS` 或 `PUBLIC_ORIGIN` 白名单中（常见于域名拼写错误，或修改 `.env` 后未重新创建容器）。确保两者与域名完全一致，修改 `.env` 后必须执行 `docker-compose up -d --force-recreate` 重新创建容器生效。
+2. **直连 HTTP（无反代/未配 SSL）环境下无法登录或陷入登录循环** — 默认 `ACCESS_COOKIE_SECURE=true` 要求必须走 HTTPS，纯 HTTP 下浏览器会拒绝保存/携带 Secure Cookie。纯 HTTP 直连测试时，在 `.env` 中设置 `ACCESS_COOKIE_SECURE=false` 和 `ACCESS_KEY_COOKIE_NAME=gpt_image_access`；部署 HTTPS 反代后再改为 `true`。
+3. **保存预设失败** — 使用绑定了相同用途和来源的已配置密钥引用，或按需启用明文密钥存储。
 
 ### 本地开发
 
-先使用本机的 Python 3.11+ 创建项目专用虚拟环境。`.venv` 属于本地开发环境，仓库不提供该目录。
+先使用本机的 Python 3.11+ 创建项目专用虚拟环境。`.venv` 属于本地开发环境，仓库不提供该目录。（注：生成 SVG 缩略图依赖 Cairo 运行时，见下文 [GPT Image 2.6](#gpt-image-26)）。
 
 ```bash
 python3 -m venv .venv
@@ -325,10 +328,10 @@ Docker 已包含 SVG 缩略图所需 Cairo 运行库。本地开发请先安装 
 ```
 
 - **流程**：把渲染后的请求体 `POST` 到 `API URL + submit.path`，从响应里取状态 URL，轮询直到 `status_path` 的值属于 `done`（或 `failed`），按需再请求 `result.url_path`，最后从 `images_path` 读取图片（URL 或 base64）。不会把任何内容当作代码执行；路径只支持 `$.a.b[0]` 和 `[*]`。
-- **变量**：`prompt`、`model`、`n`、`width`、`height`、`size`、`quality`、`output_format`、`background`。值只是一个没有内容的变量（例如尺寸为 `auto` 时的 `width`）时，该字段会被省略。`submit.path` 只能使用 `{{model}}`。
+- **变量**：`prompt`、`model`、`n`、`width`、`height`、`size`、`quality`、`output_format`、`background`、`complexity`、`frame_count`、`frame_duration_ms`。值只是一个没有内容的变量（例如尺寸为 `auto` 时的 `width`）时，该字段会被省略。`submit.path` 只能使用 `{{model}}`。
 - **仅返回任务 ID 的映射（version 2）**：若供应商只返回任务 ID，可设置 `"version": 2`，用 `poll.task_id_path` + `poll.url_template`（`result`/`cancel` 同理），例如 `{"task_id_path": "$.data.id", "url_template": "/v1/jobs/{{task_id}}"}`。模板必须是纯路径，任务 ID 会按路径段进行 URL 编码，绝对 URL 会被拒绝。可选 `submit.idempotency_header`（如 `Idempotency-Key`）让中断的提交用同一稳定键重试。**同步模式**：提交响应里已包含图片时，v2 映射可设置 `"mode": "sync"`——省略 `poll` 和 `cancel`，用 `result.images_path` 从提交响应读取图片。
 - **方法与查询映射**：`submit.method` 和 `poll.method` 接受 `GET` 或 `POST`（GET 提交必须为空请求体；POST 轮询发送空 JSON 对象）。`submit.query`、`edit_submit.query` 和 `poll.query` 用模板映射 URL 查询参数——提交用 submit 变量，轮询用 `{{task_id}}`；字面值只允许字母、数字和 `- _ . ~`。
-- **图片编辑（edit_submit）**：添加 `edit_submit` 段即声明编辑支持。Multipart 编辑将校验后的参考图和蒙版作为文件分片上传（`files.images` 每张图片一个分片、`files.mask`）；JSON 编辑在 `edit_submit.body` 内联 `{{reference_images}}`（有界 data URL 列表）和可选的 `{{mask}}`（一个 data URL）。编辑复用面板的上传校验、大小上限、蒙版预处理、取消和结果贴回；配置了蒙版就一定会发送——无法携带蒙版的映射会在提交前被拒绝。
+- **图片编辑（edit_submit）**：添加 `edit_submit` 段即声明编辑支持。Multipart 编辑将校验后的参考图和蒙版作为文件分片上传（`files.images` 每张图片一个分片、`files.mask`，以及可选的 `files.markup`）；JSON 编辑在 `edit_submit.body` 内联 `{{reference_images}}`（有界 data URL 列表）和可选的 `{{mask}}` 或 `{{markup}}`（data URL）。编辑复用面板的上传校验、大小上限、蒙版与标注预处理、取消和结果贴回；配置了蒙版或标注就一定会发送——无法携带的映射会在提交前被拒绝。
 - **能力声明**：`capabilities.transparent_background` 控制 `background: transparent`（省略时面板会从 `{{background}}` 用法自动检测），`capabilities.formats` 收窄可接受的输出格式；未声明的请求会在提交前被明确拒绝。`stream` 保持保留位。色键背景仍可用于生成——上游收到不透明背景和键控提示词，面板在本地移除颜色。
 - **凭据**：映射里不放任何密钥。预设的 API 密钥（环境变量引用或 Secret Registry ID）按 `header: scheme key` 发送；`header` 为 `Authorization` 或 `X-API-Key`，`scheme` 为 `Bearer`、`Key`、`Token` 或留空。
 - **安全**：状态、结果和取消 URL 来自上游响应，因此必须与预设 API URL 同源（密钥会随请求发送），并通过与提交 URL 相同的 SSRF 和对端 IP 检查。图片下载不带凭据，错误信息会脱敏。
@@ -367,7 +370,8 @@ Docker 已包含 SVG 缩略图所需 Cairo 运行库。本地开发请先安装 
 | `POST` | `/api/assistant/health`、`/api/assistant/prompt/rewrite\|check\|variants`、`/api/assistant/generate/recommend-params`、`/api/assistant/jobs/{job_id}/diagnose`、`/api/assistant/edit/plan`、`/api/assistant/image/prompt`、`/api/assistant/image/prompt/optimize`；`POST/GET /api/assistant/gallery/*` | 探测 Assistant 连通性；提示词改写/检查/变体；参数推荐；任务诊断与编辑规划；本地图片反推 prompt；Gallery 描述/分析/批量操作。 |
 | `GET/POST` | `/api/agent/conversations`；`GET/PATCH/DELETE /api/agent/conversations/{conversation_id}`；`POST .../turns`；`PATCH .../branch` | 列出/创建、读取/重命名/删除对话（删除对话保留 Gallery 图片）；发送消息（`client_turn_id` 保证幂等，返回 `202`）；选择持久化路径。 |
 | `GET` | `/api/agent/turns/{turn_id}`（+ `/events`）；`POST /api/agent/turns/{turn_id}/cancel` | 读取回合或订阅可回放的 SSE 事件；停止运行中的回合并取消其排队图片任务。 |
-| `POST` | `/api/generate`、`/api/edits`、`/api/edits/from-gallery/{image_id}` | 创建生成/编辑任务（编辑支持可选 PNG 蒙版和贴回偏好）。 |
+| `POST` | `/api/generate`、`/api/edits`、`/api/edits/from-gallery/{image_id}` | 创建生成/编辑任务（编辑支持可选 PNG 蒙版或标注图层，以及贴回偏好）。 |
+| `GET`、`POST` | `/api/generate/{job_id}/markup`、`/api/generate/{job_id}/markup/restore` | 下载已持久化的原始标注 PNG，或在主图身份匹配时恢复标注以供重试编辑。 |
 | `GET`、`GET/DELETE` | `/api/generate/jobs`（+ `/events`）、`/api/generate/{job_id}`（+ `/events`）；`DELETE /api/generate/jobs/history` | 查询实时任务/历史、任务列表或单任务 SSE、读取/取消单个任务、清理终态历史。 |
 | `GET`、`POST` | `/api/gallery`、`/api/gallery/search`；`GET/DELETE /api/gallery/{image_id}`；`PATCH /api/gallery/{image_id}/favorite` | 列出/搜索/筛选 Gallery（含 `mask_only`）、读取/删除/收藏图片。 |
 | `POST/PATCH` | `/api/gallery/batch/*`；`POST /api/gallery/thumbnails/status` | selection token、收藏、删除、下载等批量操作；缩略图存在/状态检查。 |
@@ -385,7 +389,7 @@ Docker 已包含 SVG 缩略图所需 Cairo 运行库。本地开发请先安装 
 - 保持现有代码分层：路由与请求编排在 `backend/app/api/routers/`，DTO 在 `backend/app/schemas/`，持久化与 SQLite 协调在 `backend/app/repositories/`，上游集成在 `backend/app/integrations/`，前端镜像 API 类型在 `frontend/src/lib/api/types/`。
 - 除非明确要做 breaking change，否则保持这些公共契约稳定：API 路径、方法、状态码、cookie、SSE 事件名、响应结构；生成/编辑队列生命周期、取消语义、多 worker 下的 SQLite 协调。文件系统竞争通过 UUID 文件名、原子替换和孤儿文件 GC 来容忍；不要依赖进程内锁实现跨 worker 互斥。
 - 校验与安全逻辑保持集中：图片字节校验、安全路径、缩略图/归档 helper；SSRF 敏感 URL 处理继续放在 validators、safe connector、integration client 中；前端可见 secret 只能是打码值或 env-ref 元数据。
-- 保持现有运行时约束：编辑任务最多接受 16 张 raster 源图，外加最多 4 MB 的单张 PNG 蒙版；Gallery ZIP 导入导出继续沿用现有安全限制；SSE 使用 SQLite slot lease、全局/单 IP 限制和连接 TTL；R2 同步只是备份——本地 SQLite 记录和本地图片文件始终是源数据。
+- 保持现有运行时约束：编辑任务最多接受 16 张 raster 源图，外加最多 4 MB 的单张 PNG 蒙版或最多 50 MiB 的透明 PNG 标注层；Gallery ZIP 导入导出继续沿用现有安全限制；SSE 使用 SQLite slot lease、全局/单 IP 限制和连接 TTL；R2 同步只是备份——本地 SQLite 记录和本地图片文件始终是源数据。
 - 新增或修改环境变量时，同步更新 `backend/app/core/settings.py`、用户可见时的 `backend/app/core/overall_config.py`、`.env.example`、可由 Compose 配置时的 `docker-compose.yml`，以及本 README。
 - 不要提交运行时/生成产物，例如 `images/`、`data/`、`frontend/build/`、`.svelte-kit/`、Playwright 报告、测试结果、依赖目录、本地 DB 文件或日志。
 

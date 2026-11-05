@@ -20,7 +20,7 @@
     <img alt="Python 3.11+" src="https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white" />
     <img alt="Node.js 24" src="https://img.shields.io/badge/Node.js-24-339933?logo=node.js&logoColor=white" />
     <img alt="FastAPI 0.115+" src="https://img.shields.io/badge/FastAPI-0.115+-009688?logo=fastapi&logoColor=white" />
-    <img alt="SvelteKit 2" src="https://img.shields.io/badge/SvelteKit-2-FF3E00?logo=svelte&logoColor=white" />
+    <img alt="SvelteKit 3" src="https://img.shields.io/badge/SvelteKit-3-FF3E00?logo=svelte&logoColor=white" />
     <img alt="授權 CC BY-NC 4.0" src="https://img.shields.io/badge/License-CC_BY--NC_4.0-6f42c1" />
     <img alt="GHCR 映像" src="https://img.shields.io/badge/GHCR-gpt--image--linux-1f6f8b?logo=github&logoColor=white" />
   </p>
@@ -35,7 +35,10 @@ GPT Image Panel 是一套輕量 Web UI，可用於圖片生成、圖片編輯、
 ## 功能
 
 - 透過 `/v1/images/generations`、`/v1/responses` 或 OpenAI 相容的 `/v1/chat/completions` 生成圖片。
-- 透過 `/v1/images/edits` 編輯圖片，可使用上傳的參考圖或 Gallery 圖片作為來源；內建遮罩編輯器（畫筆/橡皮擦/形狀/套索、縮放、羽化、遮罩匯入、自動補洞/邊緣平滑）。遮罩隨工作持久化並可在重試時還原，結果預設貼回未編輯的原圖區域，並具備色彩漂移防護。
+- 完整支援 **GPT Image 2.6**（`gpt-image-2.6-flare` 與 `gpt-image-2.6-sunburst`）：獨立複雜度控制、向量 SVG 與動畫 GIF 生成（2–64 影格、20–2000 ms 影格間隔），以及標註引導編輯。
+- 透過 `/v1/images/edits` 編輯圖片，可使用上傳的參考圖或 Gallery 圖片作為來源：
+  - 內建**遮罩編輯器**（畫筆/橡皮擦/形狀/套索、縮放、羽化、遮罩匯入、自動補洞/邊緣平滑），遮罩隨工作持久化並可在重試時還原，結果預設貼回未編輯的原圖區域並具備色彩漂移防護。
+  - 內建**網頁端標註編輯器**（畫筆、箭頭、矩形、橢圓、短文字、橡皮擦，6 種顏色、線寬調整、縮放平移、100 步復原重做；支援滑鼠、觸控筆與觸控），亦支援直接上傳透明 PNG 標註圖層進行標註引導編輯。
 - API 預設管理：base URL/path/key、預設模型、response format、健康檢查、SOCKS5 Proxy、webhook、環境變數參照式密鑰，以及能力開關：`supports_mask`（遮罩編輯）與 `prompt_guard`（要求上游按原樣使用提示詞）。
 - 提示詞輔助標籤、可重複使用的提示詞片段、選用的伺服器端提示詞最佳化器，以及 AI Assistant 子系統（提示詞改寫/檢查/變體、參數建議、工作診斷、編輯規劃與 Gallery 圖片分析）。
 - Agent 對話模式：多輪對話中由模型規劃並透過既有工作佇列產生圖片（批次並行、有相依性的後續輪次、以 `@` 引用修改歷史圖片），對話歷史儲存在伺服器端，串流回覆可斷線續傳，所有圖片都會進入 Gallery。需要 AI Assistant 端點使用支援 function calling 的模型。
@@ -55,7 +58,7 @@ GPT Image Panel 是一套輕量 Web UI，可用於圖片生成、圖片編輯、
 
 ## 技術堆疊
 
-Python 3.11+、FastAPI、Granian、aiohttp（+aiohttp-socks）、boto3、SQLite、Pydantic v2、Pillow、python-multipart、zipstream-ng · SvelteKit、TypeScript、Tailwind CSS 4 · Playwright、pytest。瀏覽器最低版本：Chrome 111、Safari 16.4、Firefox 128。
+Python 3.11+、FastAPI、Granian、aiohttp（+aiohttp-socks）、boto3、SQLite、Pydantic v2、Pillow、CairoSVG、python-multipart、zipstream-ng · SvelteKit 3、TypeScript、Tailwind CSS 4 · Playwright、pytest。瀏覽器最低版本：Chrome 111、Safari 16.4、Firefox 128。
 
 ## 專案結構
 
@@ -171,13 +174,13 @@ Caddy 自動 HTTPS 要求網域解析至伺服器，且入站 `80`、`443` 連�
 
 ### 常見部署問題排查
 
-2. **瀏覽器存取顯示 `400 Bad Request: Host is not allowed`** — 請求的 `Host` 標頭未在 `.env` 的 `ALLOWED_HOSTS` 或 `PUBLIC_ORIGIN` 白名單中（常見於網域名稱拼寫錯誤，或修改 `.env` 後未重新建立容器）。確保兩者與網域完全一致，修改 `.env` 後必須執行 `docker-compose up -d --force-recreate` 重新建立容器以套用新變數。
-3. **直連 HTTP（無反代/未設定 SSL）環境下無法登入或陷入登入循環** — 預設 `ACCESS_COOKIE_SECURE=true` 要求必須透過 HTTPS，在純 HTTP 下瀏覽器會拒絕儲存/攜帶 Secure Cookie。純 HTTP 直連測試時，在 `.env` 中設定 `ACCESS_COOKIE_SECURE=false` 與 `ACCESS_KEY_COOKIE_NAME=gpt_image_access`；部署 HTTPS 反代後再改回 `true`。
-4. **儲存預設失敗** — 使用綁定相同用途與來源的已設定密鑰參照，或視需要啟用明文密鑰儲存。
+1. **瀏覽器存取顯示 `400 Bad Request: Host is not allowed`** — 請求的 `Host` 標頭未在 `.env` 的 `ALLOWED_HOSTS` 或 `PUBLIC_ORIGIN` 白名單中（常見於網域名稱拼寫錯誤，或修改 `.env` 後未重新建立容器）。確保兩者與網域完全一致，修改 `.env` 後必須執行 `docker-compose up -d --force-recreate` 重新建立容器以套用新變數。
+2. **直連 HTTP（無反代/未設定 SSL）環境下無法登入或陷入登入循環** — 預設 `ACCESS_COOKIE_SECURE=true` 要求必須透過 HTTPS，在純 HTTP 下瀏覽器會拒絕儲存/攜帶 Secure Cookie。純 HTTP 直連測試時，在 `.env` 中設定 `ACCESS_COOKIE_SECURE=false` 與 `ACCESS_KEY_COOKIE_NAME=gpt_image_access`；部署 HTTPS 反代後再改回 `true`。
+3. **儲存預設失敗** — 使用綁定相同用途與來源的已設定密鑰參照，或視需要啟用明文密鑰儲存。
 
 ### 本機開發
 
-先使用本機 Python 3.11+ 建立專案專用虛擬環境。`.venv` 屬於本機開發狀態，專案儲存庫不提供此目錄。
+先使用本機 Python 3.11+ 建立專案專用虛擬環境。`.venv` 屬於本機開發狀態，專案儲存庫不提供此目錄。（注意：產生 SVG 縮圖需依賴 Cairo 執行庫，見下文 [GPT Image 2.6](#gpt-image-26)）。
 
 ```bash
 python3 -m venv .venv
@@ -325,10 +328,10 @@ Docker 已包含 SVG 縮圖所需的 Cairo 執行庫。本機開發請先安裝 
 ```
 
 - **流程**：把轉譯後的請求本文 `POST` 到 `API URL + submit.path`，從回應取得狀態 URL，輪詢直到 `status_path` 的值屬於 `done`（或 `failed`），視需要再請求 `result.url_path`，最後從 `images_path` 讀取圖片（URL 或 base64）。不會把任何內容當作程式碼執行；路徑只支援 `$.a.b[0]` 與 `[*]`。
-- **變數**：`prompt`、`model`、`n`、`width`、`height`、`size`、`quality`、`output_format`、`background`。值只是一個沒有內容的變數（例如尺寸為 `auto` 時的 `width`）時，該欄位會被省略。`submit.path` 只能使用 `{{model}}`。
+- **變數**：`prompt`、`model`、`n`、`width`、`height`、`size`、`quality`、`output_format`、`background`、`complexity`、`frame_count`、`frame_duration_ms`。值只是一個沒有內容的變數（例如尺寸為 `auto` 時的 `width`）時，該欄位會被省略。`submit.path` 只能使用 `{{model}}`。
 - **只回傳任務 ID 的對映（version 2）**：若供應商只回傳任務 ID，可設定 `"version": 2`，使用 `poll.task_id_path` + `poll.url_template`（`result`/`cancel` 同理），例如 `{"task_id_path": "$.data.id", "url_template": "/v1/jobs/{{task_id}}"}`。範本必須是純路徑，任務 ID 會以路徑片段進行 URL 編碼，絕對 URL 會被拒絕。可選 `submit.idempotency_header`（例如 `Idempotency-Key`）讓中斷的提交以同一穩定鍵重試。**同步模式**：提交回應已包含圖片時，v2 對映可設定 `"mode": "sync"`——省略 `poll` 與 `cancel`，以 `result.images_path` 從提交回應讀取圖片。
 - **方法與查詢對映**：`submit.method` 與 `poll.method` 接受 `GET` 或 `POST`（GET 提交必須為空請求本文；POST 輪詢傳送空 JSON 物件）。`submit.query`、`edit_submit.query` 與 `poll.query` 以範本對映 URL 查詢參數——提交用 submit 變數，輪詢用 `{{task_id}}`；字面值僅允許字母、數字與 `- _ . ~`。
-- **圖片編輯（edit_submit）**：新增 `edit_submit` 區段即宣告編輯支援。Multipart 編輯將驗證後的參考圖與遮罩作為檔案分片（`files.images` 每張圖片一個分片、`files.mask`）；JSON 編輯在 `edit_submit.body` 內嵌 `{{reference_images}}`（有界 data URL 清單）與選用的 `{{mask}}`（一個 data URL）。編輯沿用面板的上傳驗證、大小上限、遮罩前置處理、取消與結果貼回；設定遮罩就一定會送出——無法攜帶遮罩的對映會在提交前被拒絕。
+- **圖片編輯（edit_submit）**：新增 `edit_submit` 區段即宣告編輯支援。Multipart 編輯將驗證後的參考圖與遮罩作為檔案分片（`files.images` 每張圖片一個分片、`files.mask` 以及選用的 `files.markup`）；JSON 編輯在 `edit_submit.body` 內嵌 `{{reference_images}}`（有界 data URL 清單）與選用的 `{{mask}}` 或 `{{markup}}`（data URL）。編輯沿用面板的上傳驗證、大小上限、遮罩與標註前置處理、取消與結果貼回；設定遮罩或標註就一定會送出——無法攜帶的對映會在提交前被拒絕。
 - **能力宣告**：`capabilities.transparent_background` 控制 `background: transparent`（省略時面板會從 `{{background}}` 用法自動偵測），`capabilities.formats` 收窄可接受的輸出格式；未宣告的要求會在提交前被明確拒絕。`stream` 保持保留位。色鍵背景仍可用於生成——上游收到不透明背景與鍵控提示詞，面板於本機移除顏色。
 - **憑證**：對映中不放任何金鑰。預設的 API 金鑰（環境變數參照或 Secret Registry ID）以 `header: scheme key` 傳送；`header` 為 `Authorization` 或 `X-API-Key`，`scheme` 為 `Bearer`、`Key`、`Token` 或留空。
 - **安全**：狀態、結果與取消 URL 來自上游回應，因此必須與預設 API URL 同源（金鑰會隨請求傳送），並通過與提交 URL 相同的 SSRF 與對端 IP 檢查。圖片下載不帶憑證，錯誤訊息會遮蔽敏感內容。
@@ -367,7 +370,8 @@ Docker 已包含 SVG 縮圖所需的 Cairo 執行庫。本機開發請先安裝 
 | `POST` | `/api/assistant/health`、`/api/assistant/prompt/rewrite\|check\|variants`、`/api/assistant/generate/recommend-params`、`/api/assistant/jobs/{job_id}/diagnose`、`/api/assistant/edit/plan`、`/api/assistant/image/prompt`、`/api/assistant/image/prompt/optimize`；`POST/GET /api/assistant/gallery/*` | 探測 Assistant 連線；提示詞改寫/檢查/變體；參數建議；工作診斷與編輯規劃；本機圖片反推 Prompt；Gallery 描述/分析/批次操作。 |
 | `GET/POST` | `/api/agent/conversations`；`GET/PATCH/DELETE /api/agent/conversations/{conversation_id}`；`POST .../turns`；`PATCH .../branch` | 列出/建立、讀取/重新命名/刪除對話（刪除對話保留 Gallery 圖片）；送出訊息（`client_turn_id` 讓重試具冪等性，回傳 `202`）；選取持久化路徑。 |
 | `GET` | `/api/agent/turns/{turn_id}`（+ `/events`）；`POST /api/agent/turns/{turn_id}/cancel` | 讀取回合或訂閱可重播的 SSE 事件；停止執行中的回合并取消其排隊圖片工作。 |
-| `POST` | `/api/generate`、`/api/edits`、`/api/edits/from-gallery/{image_id}` | 建立生成/編輯工作（編輯支援選用的 PNG 遮罩與貼回偏好）。 |
+| `POST` | `/api/generate`、`/api/edits`、`/api/edits/from-gallery/{image_id}` | 建立生成/編輯工作（編輯支援選用 PNG 遮罩或標註圖層，以及貼回偏好）。 |
+| `GET`、`POST` | `/api/generate/{job_id}/markup`、`/api/generate/{job_id}/markup/restore` | 下載已持久化的原始標註 PNG，或在主圖身分相符時還原標註以供重試編輯。 |
 | `GET`、`GET/DELETE` | `/api/generate/jobs`（+ `/events`）、`/api/generate/{job_id}`（+ `/events`）；`DELETE /api/generate/jobs/history` | 列出即時工作/歷史、工作清單或單一工作 SSE、讀取/取消單一工作、清除已終止的工作歷史。 |
 | `GET`、`POST` | `/api/gallery`、`/api/gallery/search`；`GET/DELETE /api/gallery/{image_id}`；`PATCH /api/gallery/{image_id}/favorite` | 列出/搜尋/篩選 Gallery（含 `mask_only`）、讀取/刪除/收藏圖片。 |
 | `POST/PATCH` | `/api/gallery/batch/*`；`POST /api/gallery/thumbnails/status` | Selection Token、收藏、刪除與下載等批次操作；縮圖存在/狀態檢查。 |
@@ -385,7 +389,7 @@ Docker 已包含 SVG 縮圖所需的 Cairo 執行庫。本機開發請先安裝 
 - 維持現有程式碼分層：路由與要求協調位於 `backend/app/api/routers/`，DTO 位於 `backend/app/schemas/`，持久化與 SQLite 協調位於 `backend/app/repositories/`，上游整合位於 `backend/app/integrations/`，前端鏡像 API 型別位於 `frontend/src/lib/api/types/`。
 - 除非刻意進行破壞性變更，否則請維持下列公開契約：API 路徑、方法、狀態碼、Cookie、SSE 事件名稱與回應結構；生成/編輯佇列生命週期、取消語意與多 Worker SQLite 協調。檔案系統競爭透過 UUID 檔名、原子替換與孤兒檔案 GC 來容忍；請勿依賴程序內鎖實作跨 Worker 互斥。
 - 集中管理驗證與安全邏輯：圖片位元組驗證、安全路徑、縮圖/封存輔助函式；SSRF 敏感 URL 處理應位於 Validator、Safe Connector 與整合 Client；前端只能看到遮罩後的 Secret 或環境變數參照中繼資料。
-- 保留目前的執行期限制：編輯工作最多接受 16 張點陣來源圖片，外加最多 4 MB 的單張 PNG 遮罩；Gallery ZIP 匯入/匯出沿用既有安全限制；SSE 使用具有全域/單一 IP 上限與 TTL 的 SQLite Slot Lease；R2 同步僅作備份——本機 SQLite 記錄與本機圖片檔案仍是唯一真實來源。
+- 保留目前的執行期限制：編輯工作最多接受 16 張點陣來源圖片，外加最多 4 MB 的單張 PNG 遮罩或最多 50 MiB 的透明 PNG 標註圖層；Gallery ZIP 匯入/匯出沿用既有安全限制；SSE 使用具有全域/單一 IP 上限與 TTL 的 SQLite Slot Lease；R2 同步僅作備份——本機 SQLite 記錄與本機圖片檔案仍是唯一真實來源。
 - 新增或修改環境變數時，請同步更新 `backend/app/core/settings.py`、必要時的 `backend/app/core/overall_config.py`、`.env.example`、`docker-compose.yml` 與 README。
 - 請勿提交 `images/`、`data/`、`frontend/build/`、`.svelte-kit/`、Playwright 報告、測試結果、相依套件目錄、本機資料庫或日誌等執行期/產生檔案。
 
