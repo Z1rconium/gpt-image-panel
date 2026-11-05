@@ -23,6 +23,9 @@ class PromptFormController {
   model = $state(initialPromptFormState.model);
   quality = $state<PromptFormState['quality']>(initialPromptFormState.quality);
   outputFormat = $state<PromptFormState['outputFormat']>(initialPromptFormState.outputFormat);
+  complexity = $state<PromptFormState['complexity']>(null);
+  frameCount = $state(9);
+  frameDurationMs = $state(200);
   background = $state<PromptFormState['background']>(initialPromptFormState.background);
   outputCompression = $state(initialPromptFormState.outputCompression);
   quantity = $state<number | string>(initialPromptFormState.quantity);
@@ -50,6 +53,9 @@ class PromptFormController {
       model: this.model,
       quality: this.quality,
       outputFormat: this.outputFormat,
+      complexity: this.complexity,
+      frameCount: this.frameCount,
+      frameDurationMs: this.frameDurationMs,
       background: this.background,
       outputCompression: this.outputCompression,
       quantity: this.quantity,
@@ -61,6 +67,9 @@ class PromptFormController {
   }
 
   patch(updates: Partial<PromptFormState>) {
+    if (updates.complexity !== undefined) this.complexity = updates.complexity;
+    if (updates.frameCount !== undefined) this.frameCount = updates.frameCount;
+    if (updates.frameDurationMs !== undefined) this.frameDurationMs = updates.frameDurationMs;
     if (updates.prompt !== undefined) this.prompt = updates.prompt;
     if (updates.apiPath !== undefined) this.apiPath = updates.apiPath;
     if (updates.size !== undefined) this.size = updates.size;

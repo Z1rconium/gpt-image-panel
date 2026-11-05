@@ -34,6 +34,7 @@ const fullParameters = {
 const fullForm: PromptFormState = {
   prompt: '  keep whitespace  ', apiPath: '/v1/responses', size: '1536x1024', model: 'stored-model',
   quality: 'xhigh', outputFormat: 'webp', outputCompression: '0', background: 'chroma_magenta',
+  complexity: null, frameCount: 9, frameDurationMs: 200,
   quantity: 3, responseFormat: 'b64_json', stream: false, partialImages: 2, pasteBack: true
 };
 
@@ -146,3 +147,14 @@ for (const { name, convert } of converters) {
     });
   });
 }
+
+
+describe('2.6 parameter reuse', () => {
+  it('retains animated output and scalar metadata', () => {
+    const result = jobToPromptForm(job({ model: 'gpt-image-2.6-flare', output_format: 'gif', complexity: 'low', frame_count: 12, frame_duration_ms: 300 }));
+    expect(result).toMatchObject({ outputFormat: 'gif', complexity: 'low', frameCount: 12, frameDurationMs: 300 });
+  });
+  it('retains SVG output for gallery parameter reuse', () => {
+    expect(galleryEntryToPromptForm(image({ output_format: 'svg' })).outputFormat).toBe('svg');
+  });
+});

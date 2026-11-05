@@ -159,3 +159,25 @@ describe('mask lifecycle', () => {
     expect(revokeSpy).toHaveBeenCalledWith('blob:second');
   });
 });
+
+describe('markup primary binding', () => {
+  it('preserves markup for reference changes and revokes it when the primary changes', () => {
+    editSourceStore.addFiles([makeFile('primary.png')], () => {});
+    const id = primaryEditSourceId(get(editSourceStore));
+    editSourceStore.setMarkup({ sourceId: id, blob: makeFile('markup.png'), width: 8, height: 8, previewUrl: 'blob:markup' });
+    editSourceStore.addFiles([makeFile('reference.png')], () => {});
+    expect(get(editSourceStore).markup?.sourceId).toBe(id);
+    editSourceStore.remove(id);
+    expect(get(editSourceStore).markup).toBeNull();
+    expect(revokeSpy).toHaveBeenCalledWith('blob:markup');
+  });
+  it('makes mask and markup mutually exclusive', () => {
+    editSourceStore.addFiles([makeFile('primary.png')], () => {});
+    const id = primaryEditSourceId(get(editSourceStore));
+    editSourceStore.setMask(makeMask(id, 'blob:mask'));
+    editSourceStore.setMarkup({ sourceId: id, blob: makeFile('markup.png'), width: 8, height: 8, previewUrl: 'blob:markup' });
+    expect(get(editSourceStore).mask).toBeNull();
+    editSourceStore.setMask(makeMask(id, 'blob:newmask'));
+    expect(get(editSourceStore).markup).toBeNull();
+  });
+});

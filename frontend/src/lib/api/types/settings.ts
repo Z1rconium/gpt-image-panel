@@ -11,6 +11,9 @@ export type ProviderCapabilities = {
   mask: boolean;
   stream: boolean;
   transparent_background: boolean;
+  markup?: boolean;
+  complexity?: boolean;
+  animation?: boolean;
   formats: string[];
 };
 
