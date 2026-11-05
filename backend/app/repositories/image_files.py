@@ -21,6 +21,7 @@ from ..core.media import (
     validate_image_header_bytes,
     verified_pillow_image,
 )
+from ..core.generated_media import validate_generated_image_header_bytes, get_generated_image_dimensions
 from .db import _connect, _ensure_database
 
 logger = logging.getLogger(__name__)
@@ -121,7 +122,7 @@ def save_image_to_temp_with_metadata(
     image_bytes: bytes,
     filename: str,
 ) -> tuple[Path, str, int, int]:
-    validate_image_header_bytes(image_bytes, filename=filename)
+    detected = validate_generated_image_header_bytes(image_bytes, filename=filename)
     path = safe_image_path(filename)
     if not path:
         raise ValueError(f"Invalid image filename: {filename}")
@@ -137,10 +138,11 @@ def save_image_to_temp_with_metadata(
     try:
         with temp_file:
             temp_file.write(image_bytes)
-        detected_format, width, height = validate_image_file_details(
-            temp_path,
-            filename=filename,
-        )
+        if detected == "svg":
+            detected_format = detected
+            width, height = get_generated_image_dimensions(image_bytes)
+        else:
+            detected_format, width, height = validate_image_file_details(temp_path, filename=filename)
     except BaseException:
         temp_path.unlink(missing_ok=True)
         raise
@@ -212,18 +214,25 @@ def delete_persisted_masks(job_ids: list[str]) -> None:
     for job_id in job_ids:
         try:
             delete_mask_file(f"{job_id}.png")
+            delete_mask_file(f"{job_id}-markup.png")
         except OSError:
             logger.warning("Failed to remove mask file for job %s", job_id)
 
 
 def list_persisted_mask_job_ids() -> set[str]:
-    """Job ids that own a persisted mask file (named ``<job_id>.png``)."""
+    """Known PNG stems for persisted masks and markup originals."""
     _ensure_database()
     with _connect() as conn:
         rows = conn.execute(
-            "SELECT job_id FROM generate_jobs WHERE mask_applied = 1"
+            "SELECT job_id, mask_applied, markup_applied FROM generate_jobs WHERE mask_applied = 1 OR markup_applied = 1"
         ).fetchall()
-    return {str(row["job_id"]) for row in rows}
+    stems = set()
+    for row in rows:
+        if row["mask_applied"]:
+            stems.add(str(row["job_id"]))
+        if row["markup_applied"]:
+            stems.add(f"{row['job_id']}-markup")
+    return stems
 
 
 def scan_image_files() -> set[str]:

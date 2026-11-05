@@ -1,3 +1,5 @@
+from ..schemas.provider import resolve_provider_config
+from ..core.provider_mapping import template_variables
 """Image job request construction and durable queue admission."""
 
 import asyncio
@@ -31,7 +33,7 @@ from ..core.api_paths import (
     normalize_default_response_format,
     normalize_provider_kind,
 )
-from ..core.image_models import is_image_25
+from ..core.image_models import is_image_25, is_image_26
 from ..core.constants import ACTIVE_GENERATE_JOB_STATUSES
 from ..core.observability import metrics
 from ..core.utils import utc_now
@@ -74,7 +76,7 @@ class EditImageSource:
     byte_size: int
     filename: str
     content_type: str
-    role: Literal["image", "mask"] = "image"
+    role: Literal["image", "mask", "markup"] = "image"
     coverage: float | None = None
     # Populated when the source was admitted with Pillow validation (see
     # `copy_edit_source_stream_to_temp(..., validate=True)`); 0 for sources
@@ -199,6 +201,9 @@ def build_pending_job(
         "quality": req.quality,
         "output_format": req.output_format,
         "output_compression": req.output_compression,
+        "complexity": req.complexity,
+        "frame_count": req.frame_count,
+        "frame_duration_ms": req.frame_duration_ms,
         "background": req.background,
         "response_format": req.response_format,
         "n": req.n,
@@ -274,7 +279,7 @@ def edit_source_from_payload(payload: dict) -> EditImageSource:
         byte_size=int(payload.get("byte_size") or 0),
         filename=str(payload.get("filename") or "image.png"),
         content_type=str(payload.get("content_type") or "application/octet-stream"),
-        role="mask" if role == "mask" else "image",
+        role=role if role in {"mask", "markup"} else "image",
         coverage=float(coverage) if coverage is not None else None,
         # Missing on payloads persisted before this field existed; 0 means
         # "decode to find out" to every reader (see EditImageSource docstring).
@@ -353,6 +358,7 @@ def build_edit_request_from_form(
     background: str = "auto",
     paste_back: bool | None = None,
     api_preset_id: str | None = None,
+    complexity: str | None = None,
 ) -> EditRequest:
     try:
         return EditRequest(
@@ -361,6 +367,7 @@ def build_edit_request_from_form(
             model=model,
             n=n,
             quality=quality,
+            complexity=complexity,
             output_format=output_format,
             output_compression=output_compression,
             background=background,
@@ -423,17 +430,32 @@ async def queue_image_job(
         req.normalize_model_options(resolved_api_path)
     except ValueError as e:
         raise UnprocessableRequestError(str(e)) from e
-    if operation == "edit" and is_image_25(req.model):
+    if req.output_format in {"svg", "gif"} and "partial_images" in req.model_fields_set:
+        raise UnprocessableRequestError("SVG/GIF does not support partial_images")
+    if operation == "edit" and (is_image_25(req.model) or is_image_26(req.model)):
         for source in edit_sources_payload or []:
             if source.get("content_type") not in {"image/png", "image/jpeg", "image/webp"}:
-                raise UnprocessableRequestError("GPT Image 2.5 edit inputs must be PNG, JPEG or WebP; convert this image before editing")
+                raise UnprocessableRequestError("GPT Image 2.5/2.6 edit inputs must be PNG, JPEG or WebP; convert this image before editing")
             if int(source.get("byte_size") or 0) >= 50 * 1024 * 1024:
-                raise UnprocessableRequestError("GPT Image 2.5 edit inputs must be smaller than 50 MB")
+                raise UnprocessableRequestError("GPT Image 2.5/2.6 edit inputs must be smaller than 50 MB")
 
     if normalize_provider_kind(active_preset.get("provider_kind")) == PROVIDER_KIND_ASYNC_JSON:
         # Admission and the frontend both read this single capability view of
         # the mapping, so a task never enters the queue on an unstated ability.
         provider_caps = provider_capabilities(active_preset.get("provider_config"))
+        resolved_provider = resolve_provider_config(active_preset.get("provider_config"))
+        active_submit = resolved_provider.edit_submit if operation == "edit" else resolved_provider.submit
+        active_variables = template_variables(active_submit.body) if active_submit is not None else set()
+        if req.complexity is not None and "complexity" not in active_variables:
+            raise UnprocessableRequestError("Provider mapping does not send complexity for this operation")
+        if req.output_format == "gif" and not {"frame_count", "frame_duration_ms"} <= active_variables:
+            raise UnprocessableRequestError("Provider mapping does not send animation controls for this operation")
+        if req.complexity is not None and not provider_caps.complexity:
+            raise UnprocessableRequestError("Provider mapping does not send complexity")
+        if req.output_format == "gif" and not provider_caps.animation:
+            raise UnprocessableRequestError("Provider mapping does not send animation controls")
+        if any(source.get("role") == "markup" for source in (edit_sources_payload or [])) and not provider_caps.markup:
+            raise UnprocessableRequestError("Provider mapping does not send markup")
         if operation == "edit":
             if not provider_caps.edit:
                 raise UnprocessableRequestError(
@@ -500,6 +522,7 @@ async def queue_image_job(
     pending_job["webhook_url"] = webhook_url
     pending_job["agent_turn_id"] = agent_turn_id
     pending_job["agent_conversation_id"] = agent_conversation_id
+    pending_job["markup_applied"] = any(source.get("role") == "markup" for source in (edit_sources_payload or []))
     request_payload = build_request_payload(req)
     request_payload["_provider_snapshot"] = {
         key: active_preset.get(key)
@@ -550,6 +573,7 @@ async def queue_edit_job(
     mask_source: EditImageSource | None = None,
     mask_coverage: float | None = None,
     mask_optimized_png: bytes | None = None,
+    markup_source: EditImageSource | None = None,
     *,
     agent_turn_id: str | None = None,
     agent_conversation_id: str | None = None,
@@ -574,6 +598,9 @@ async def queue_edit_job(
             f"{job_id}.png",
         )
     edit_sources = [*image_sources, mask_source] if mask_source is not None else image_sources
+    if markup_source is not None:
+        await asyncio.to_thread(lambda: write_mask_file(markup_source.temp_path.read_bytes(), f"{job_id}-markup.png"))
+        edit_sources = [*edit_sources, markup_source]
     edit_source_bytes = sum(source.byte_size for source in edit_sources)
 
     try:
@@ -591,6 +618,8 @@ async def queue_edit_job(
             preset_snapshot=preset_snapshot,
         )
     except BaseException:
+        if markup_source is not None:
+            await asyncio.to_thread(delete_mask_file, f"{job_id}-markup.png")
         if mask_source is not None:
             await asyncio.to_thread(delete_mask_file, f"{job_id}.png")
         raise

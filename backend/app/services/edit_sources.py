@@ -83,7 +83,7 @@ def validate_edit_source_file_details(
             orientation_mask_size=orientation_mask_size,
         )
         return width, height, byte_size
-    except ValueError as e:
+    except (ValueError, OSError) as e:
         raise InvalidRequestError(str(e)) from e
 
 

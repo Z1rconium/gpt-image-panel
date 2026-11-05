@@ -46,6 +46,7 @@ class EditUploads:
     parts: tuple[EditUpload, ...]
     mask_part: EditUpload | None
     inline_variables: dict[str, object]
+    markup_part: EditUpload | None = None
 
 
 PreviewCallback = Callable[..., None]

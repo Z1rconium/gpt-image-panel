@@ -149,7 +149,7 @@ class AssistantRecommendParamsRequest(StrictRequestModel):
     current_model: Optional[str] = Field(default=None, max_length=200)
     current_size: Optional[str] = Field(default=None, max_length=40)
     current_quality: Optional[ImageQuality] = None
-    current_output_format: Optional[Literal["png", "jpeg", "webp"]] = None
+    current_output_format: Optional[Literal["png", "jpeg", "webp", "svg", "gif"]] = None
     current_n: Optional[int] = Field(default=None, ge=1, le=10)
 
 

@@ -1,3 +1,5 @@
+import io
+import subprocess
 import hashlib
 import logging
 import tempfile
@@ -6,6 +8,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from ..core.cdn import signed_media_url
+from ..core.svg_thumbnail import render_svg_thumbnail
 
 from ..core import settings as config
 from ..core.media import (
@@ -111,6 +114,13 @@ def _write_thumbnail_from_path(
     thumbnail_path: Path,
 ) -> bool:
     """Generate a thumbnail by opening the image file directly (no full read into memory)."""
+    if filename.lower().endswith(".svg"):
+        try:
+            raster = render_svg_thumbnail(image_path.read_bytes(), config.THUMBNAIL_MAX_SIDE)
+        except (ValueError, OSError, subprocess.SubprocessError) as exc:
+            logger.warning("Failed SVG thumbnail for %s: %s", filename, exc)
+            return False
+        return _render_thumbnail(lambda: Image.open(io.BytesIO(raster)), filename, thumbnail_path)
     return _render_thumbnail(lambda: Image.open(image_path), filename, thumbnail_path)
 
 

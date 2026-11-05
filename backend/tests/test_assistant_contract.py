@@ -146,7 +146,8 @@ def test_ai_assistant_health_timeout_returns_structured_504(client, monkeypatch)
     }
 
 
-def test_ai_assistant_prompt_tools_and_param_recommendations(client, monkeypatch):
+@pytest.mark.parametrize("current_output_format", ["png", "svg", "gif"])
+def test_ai_assistant_prompt_tools_and_param_recommendations(client, monkeypatch, current_output_format):
     settings = client.get("/api/settings").json()
     configured = client.post(
         "/api/settings",
@@ -258,7 +259,7 @@ def test_ai_assistant_prompt_tools_and_param_recommendations(client, monkeypatch
             "current_model": "gpt-image-2",
             "current_size": "1024x1024",
             "current_quality": "high",
-            "current_output_format": "png",
+            "current_output_format": current_output_format,
             "current_n": 1,
         },
     )
@@ -274,7 +275,7 @@ def test_ai_assistant_prompt_tools_and_param_recommendations(client, monkeypatch
             "current_model": "gpt-image-2",
             "current_size": "1024x1024",
             "current_quality": "high",
-            "current_output_format": "png",
+            "current_output_format": current_output_format,
             "current_n": 1,
         },
     )

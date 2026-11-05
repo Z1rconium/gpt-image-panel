@@ -35,6 +35,10 @@ class GalleryEntry(BaseModel):
     quality: Optional[str] = None
     output_format: Optional[str] = None
     output_compression: Optional[int] = None
+    complexity: Optional[str] = None
+    frame_count: Optional[int] = None
+    frame_duration_ms: Optional[int] = None
+    markup_applied: Optional[bool] = None
     background: Optional[str] = None
     response_format: Optional[str] = None
     n: Optional[int] = None

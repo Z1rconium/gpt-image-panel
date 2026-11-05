@@ -128,6 +128,9 @@ def build_template_variables(payload: GenerateRequest, *, prompt_guard: bool) ->
         "model": payload.model,
         "n": payload.n,
         "quality": payload.quality,
+        "complexity": payload.complexity,
+        "frame_count": payload.frame_count,
+        "frame_duration_ms": payload.frame_duration_ms,
         "output_format": payload.output_format,
         "background": background,
         **_size_variables(payload),
@@ -289,6 +292,9 @@ async def _submit_provider_request(
                         filename=part.filename,
                         content_type=part.content_type or "application/octet-stream",
                     )
+                if uploads.markup_part is not None and submit.files_markup:
+                    part = uploads.markup_part
+                    form.add_field(submit.files_markup, files.enter_context(part.temp_path.open("rb")), filename=part.filename, content_type="image/png")
                 if mask_field and uploads.mask_part is not None:
                     form.add_field(
                         mask_field,

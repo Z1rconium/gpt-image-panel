@@ -891,6 +891,7 @@ def test_edits_body_limit_matches_source_image_count(client):
     assert body_limit._max_body_for_path("/api/edits", "multipart/form-data") == (
         config.MAX_FILE_SIZE_MB * MAX_EDIT_SOURCE_IMAGES * 1024 * 1024
         + MAX_EDIT_MASK_BYTES
+        + min(config.MAX_FILE_SIZE_MB * 1024 * 1024, 50 * 1024 * 1024 - 1)
         + EDIT_MULTIPART_METADATA_OVERHEAD_BYTES
     )
 

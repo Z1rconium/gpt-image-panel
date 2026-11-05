@@ -26,6 +26,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --prefix=/install --require-hashes -r requirements.lock
 
 FROM ${PYTHON_BASE_IMAGE} AS runtime
+RUN apt-get update && apt-get install -y --no-install-recommends libcairo2 && rm -rf /var/lib/apt/lists/*
 
 RUN groupadd -g 1001 appgroup && \
     useradd -u 1001 -g appgroup -s /bin/bash -m appuser

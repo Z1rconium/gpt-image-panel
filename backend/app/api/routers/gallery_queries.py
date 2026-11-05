@@ -275,6 +275,9 @@ async def _image_file_response(filename: str, *, download: bool = False):
         raise HTTPException(status_code=404, detail="Image not found")
 
     media_type = image_content_type_for_filename(path.name)
+    security_headers = {"Cache-Control": IMMUTABLE_GALLERY_CACHE_CONTROL, "X-Content-Type-Options": "nosniff"}
+    if media_type == "image/svg+xml":
+        security_headers["Content-Security-Policy"] = "sandbox; default-src 'none'; style-src 'unsafe-inline'"
     if config.ENABLE_NGINX_ACCEL_REDIRECT:
         body = _x_accel_response(
             path,
@@ -282,7 +285,9 @@ async def _image_file_response(filename: str, *, download: bool = False):
             media_type=media_type,
             download=download,
         )
-        return empty_response(body)
+        response = empty_response(body)
+        response.headers.update(security_headers)
+        return response
 
     if download:
         extension = path.suffix.lstrip(".") or "png"
@@ -290,13 +295,13 @@ async def _image_file_response(filename: str, *, download: bool = False):
             path,
             media_type=media_type,
             filename=f"gpt-image-{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.{extension}",
-            headers={"Cache-Control": IMMUTABLE_GALLERY_CACHE_CONTROL},
+            headers=security_headers,
         )
 
     return FileResponse(
         path,
         media_type=media_type,
-        headers={"Cache-Control": IMMUTABLE_GALLERY_CACHE_CONTROL},
+        headers=security_headers,
     )
 
 

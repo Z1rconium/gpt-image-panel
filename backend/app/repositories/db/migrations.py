@@ -863,6 +863,13 @@ def _migration_agent_execution_snapshot(conn: sqlite3.Connection):
     if "execution_snapshot_json" not in columns:
         conn.execute("ALTER TABLE agent_turns ADD COLUMN execution_snapshot_json TEXT NOT NULL DEFAULT '{}'")
 
+def _migration_image_26_metadata(conn: sqlite3.Connection):
+    for table in ("gallery_entries", "generate_jobs"):
+        columns = _table_columns(conn, table)
+        for name, kind in (("complexity", "TEXT"), ("frame_count", "INTEGER"), ("frame_duration_ms", "INTEGER"), ("markup_applied", "INTEGER")):
+            if name not in columns:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {kind}")
+
 SCHEMA_MIGRATIONS = (
     (1, "baseline_legacy_schema", _migration_baseline_legacy_schema),
     (2, "gallery_filter_options", _migration_gallery_filter_options),
@@ -903,4 +910,5 @@ SCHEMA_MIGRATIONS = (
     (37, "agent_branches", _migration_agent_branches),
     (38, "agent_search", _migration_agent_search),
     (39, "agent_execution_snapshot", _migration_agent_execution_snapshot),
+    (40, "image_26_metadata", _migration_image_26_metadata),
 )

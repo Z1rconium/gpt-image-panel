@@ -10,7 +10,7 @@ from ..common import StrictRequestModel
 MAX_PROVIDER_CONFIG_BYTES = 16 * 1024
 
 
-EDIT_TEMPLATE_VARIABLES = TEMPLATE_VARIABLES | {"reference_images", "mask"}
+EDIT_TEMPLATE_VARIABLES = TEMPLATE_VARIABLES | {"reference_images", "mask", "markup"}
 
 
 APP_IMAGE_FORMATS: tuple[str, ...] = ("jpeg", "png", "webp")

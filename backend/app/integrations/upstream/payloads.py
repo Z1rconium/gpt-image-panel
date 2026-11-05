@@ -266,6 +266,10 @@ def _build_image_params(payload: GenerateRequest, *, prompt_guard: bool = False)
         "quality": payload.quality,
         "output_format": "png" if payload.background.startswith("chroma_") else payload.output_format,
     }
+    for key in ("complexity", "frame_count", "frame_duration_ms"):
+        value = getattr(payload, key)
+        if value is not None:
+            request_data[key] = value
     if payload.response_format is not None:
         request_data["response_format"] = payload.response_format
     if payload.output_format != "png" and payload.output_compression is not None:
@@ -306,6 +310,9 @@ def build_gallery_metadata(
     metadata: dict[str, Any] = {
         "model": payload.model,
         "quality": payload.quality,
+        "complexity": payload.complexity,
+        "frame_count": payload.frame_count,
+        "frame_duration_ms": payload.frame_duration_ms,
         "output_format": payload.output_format,
         "output_compression": payload.output_compression,
         "background": payload.background,
@@ -345,6 +352,8 @@ def build_responses_request_data(
 
 
 OUTPUT_FORMATS = {
+    "svg": {"extension": "svg", "media_type": "image/svg+xml"},
+    "gif": {"extension": "gif", "media_type": "image/gif"},
     "png": {"extension": "png", "media_type": "image/png"},
     "jpeg": {"extension": "jpg", "media_type": "image/jpeg"},
     "webp": {"extension": "webp", "media_type": "image/webp"},
@@ -352,6 +361,7 @@ OUTPUT_FORMATS = {
 
 
 DETECTED_FORMAT_EXTENSIONS = {
+    "svg": "svg",
     "avif": "avif",
     "bmp": "bmp",
     "gif": "gif",

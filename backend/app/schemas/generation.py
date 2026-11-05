@@ -3,11 +3,11 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from ..core.api_paths import DEFAULT_IMAGE_MODEL
-from ..core.image_models import MAX_PROMPT_CHARS, ImageQuality, is_image_25, validate_image_model_options
+from ..core.image_models import MAX_PROMPT_CHARS, ImageQuality, is_image_25, is_image_26, validate_image_model_options
 from ..core.validators import normalize_webhook_url
 from .common import ApiPath, GenerateJobStatusValue, StrictRequestModel
 
-def validate_image_size(size: str) -> str:
+def validate_image_size(size: str, *, animated: bool = False) -> str:
     if size == "auto":
         return size
 
@@ -26,7 +26,7 @@ def validate_image_size(size: str) -> str:
         raise ValueError("size width and height must be multiples of 16")
     if aspect > 3:
         raise ValueError("size aspect ratio must not exceed 3:1")
-    if pixels < 655360 or pixels > 8294400:
+    if not animated and (pixels < 655360 or pixels > 8294400):
         raise ValueError("size total pixels must be between 655360 and 8294400")
 
     return f"{width}x{height}"
@@ -38,7 +38,10 @@ class GenerateRequest(StrictRequestModel):
     model: str = Field(default=DEFAULT_IMAGE_MODEL, max_length=200)
     n: int = Field(default=1, ge=1, le=10)
     quality: ImageQuality = "auto"
-    output_format: Literal["png", "jpeg", "webp"] = "png"
+    output_format: Literal["png", "jpeg", "webp", "svg", "gif"] = "png"
+    complexity: Optional[Literal["low", "medium", "high"]] = None
+    frame_count: Optional[int] = Field(default=None, ge=2, le=64)
+    frame_duration_ms: Optional[int] = Field(default=None, ge=20, le=2000)
     output_compression: Optional[int] = Field(default=None, ge=0, le=100)
     background: Literal["auto", "opaque", "transparent", "chroma_green", "chroma_magenta"] = "auto"
     response_format: Optional[Literal["url", "b64_json"]] = None
@@ -52,7 +55,11 @@ class GenerateRequest(StrictRequestModel):
         # Call after resolving omitted model / response-format values from the preset.
         self.model = self.model.strip()
         validate_image_model_options(self.model, self.quality, api_path)
-        if is_image_25(self.model):
+        if self.complexity is not None and not is_image_26(self.model):
+            raise ValueError("complexity requires GPT Image 2.6")
+        if self.output_format in {"svg", "gif"} and not is_image_26(self.model):
+            raise ValueError("SVG/GIF requires GPT Image 2.6")
+        if is_image_25(self.model) or is_image_26(self.model):
             self.response_format = None
 
     @field_validator("prompt")
@@ -62,10 +69,6 @@ class GenerateRequest(StrictRequestModel):
             raise ValueError("prompt must not be empty")
         return value
 
-    @field_validator("size")
-    @classmethod
-    def validate_size(cls, value: str) -> str:
-        return validate_image_size(value)
 
     @field_validator("webhook_url")
     @classmethod
@@ -75,6 +78,20 @@ class GenerateRequest(StrictRequestModel):
 
     @model_validator(mode="after")
     def validate_output_options(self) -> "GenerateRequest":
+        self.size = validate_image_size(self.size, animated=self.output_format == "gif")
+        if self.output_format != "gif" and (self.frame_count is not None or self.frame_duration_ms is not None):
+            raise ValueError("frame fields are GIF-only")
+        if self.output_format in {"svg", "gif"}:
+            if self.stream or self.output_compression is not None or self.background.startswith("chroma_"):
+                raise ValueError("SVG/GIF does not support streaming, compression or chroma backgrounds")
+            if self.output_format == "svg" and self.n != 1:
+                raise ValueError("SVG requires n=1")
+            if self.output_format == "gif":
+                self.frame_count = self.frame_count or 9
+                self.frame_duration_ms = self.frame_duration_ms or 200
+                if self.frame_duration_ms % 10:
+                    raise ValueError("frame_duration_ms must be a multiple of 10")
+            return self
         if self.output_format == "png":
             self.output_compression = None
         elif self.output_compression is None:
@@ -93,6 +110,8 @@ class EditRequest(GenerateRequest):
 
     @model_validator(mode="after")
     def validate_edit_background(self) -> "EditRequest":
+        if self.output_format in {"svg", "gif"}:
+            raise ValueError("SVG/GIF are generation-only")
         if self.background in {"chroma_green", "chroma_magenta"}:
             raise ValueError("Local chroma removal is only available for image generation")
         return self
@@ -194,6 +213,10 @@ class GenerateJobStatus(GenerateJobResponse):
     quality: Optional[str] = None
     output_format: Optional[str] = None
     output_compression: Optional[int] = None
+    complexity: Optional[str] = None
+    frame_count: Optional[int] = None
+    frame_duration_ms: Optional[int] = None
+    markup_applied: Optional[bool] = None
     background: Optional[str] = None
     response_format: Optional[str] = None
     n: Optional[int] = None
