@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.9.1
+
+- Merged Prompt Optimizer settings into a single "AI Assistant" section sharing API connection and model settings while keeping all configuration options intact.
+- Unified disabled UI state: when AI Assistant is not enabled, all AI-dependent features (PromptForm optimize & plan edit, AI assistant panel, quick-optimize floating trigger, header reverse prompt, gallery batch AI analyze, lightbox describe & analyze, failed job diagnosis) are consistently rendered in a grayed-out disabled state.
+
 ## v1.9.0
 
 - Add GPT Image 2.6 Flare and Sunburst with independent complexity control, uploaded-markup edits, SVG and animated GIF generation, original-format downloads and gallery support. Existing default models and presets are retained.
