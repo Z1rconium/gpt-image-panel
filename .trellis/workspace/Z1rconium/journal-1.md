@@ -156,3 +156,25 @@ Implemented and locally accepted GPT Image 2.6 support. User authorized split co
 ### Status
 
 [OK] **Completed**
+
+
+## Session 6: Reference asset archive persistence
+<!-- trellis-session: v=2 fp=5863058ec9d51448 -->
+
+**Date**: 2026-11-06
+**Task**: Reference asset archive persistence
+**Branch**: `feat/reference-asset-library`
+
+### Summary
+
+Preserved asset collections in gallery archives; verified round trips, compatibility, limits and frontend integration.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6cf85a3` | feat(gallery): preserve asset packs in archives |
+
+### Status
+
+[OK] **Completed**
