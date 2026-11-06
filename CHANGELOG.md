@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.9.2
+
+- **UI refinement**: Styled the "API revised prompt" trace card and copy action in Lightbox, PreviewPanel, and JobHistory to grayed-out disabled states when AI Assistant is not enabled.
+- **Dead code & redundant logic cleanup**:
+  - Removed obsolete Prompt Optimizer health probe store states, drawer handlers, and unused translation keys left after unifying into the AI Assistant section.
+  - Cleaned up unreferenced test imports, fixtures, and local variables across Playwright E2E and performance specs.
+  - Cleaned up unused imports and variables in backend services, contract apps, and test contracts.
+
 ## v1.9.1
 
 - Merged Prompt Optimizer settings into a single "AI Assistant" section sharing API connection and model settings while keeping all configuration options intact.
