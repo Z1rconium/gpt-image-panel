@@ -2,13 +2,8 @@ import { expect, test } from '@playwright/test';
 import {
   PNG_BYTES,
   baseGalleryImages,
-  galleryResponse,
   job,
-  json,
   loadApp,
-  manyGalleryImages,
-  manyJobs,
-  mockApi,
   settingsResponse
 } from './fixtures/mockApi';
 
@@ -98,6 +93,12 @@ test('all AI modification controls are disabled when AI Assistant is not enabled
         enabled: false
       }
     },
+    galleryImages: [
+      {
+        ...baseGalleryImages[0],
+        revised_prompt: 'API rewritten prompt sample'
+      }
+    ],
     historyJobs: [
       {
         ...job,
@@ -129,12 +130,15 @@ test('all AI modification controls are disabled when AI Assistant is not enabled
   // Header Reverse prompt button
   await expect(page.getByRole('button', { name: 'Reverse prompt', exact: true })).toBeDisabled();
 
-  // Lightbox AI Describe and AI Analyze buttons
+  // Lightbox AI Describe, AI Analyze, and API revised prompt copy buttons
   await page.locator('img[alt="First gallery image"]').click();
   const lightbox = page.getByRole('dialog', { name: 'Image Details' });
   await expect(lightbox).toBeVisible();
   await expect(lightbox.getByRole('button', { name: 'Describe', exact: true })).toBeDisabled();
   await expect(lightbox.getByRole('button', { name: 'Analyze', exact: true })).toBeDisabled();
+  const revisedCard = lightbox.getByTestId('api-revised-prompt-card');
+  await expect(revisedCard).toHaveClass(/cursor-not-allowed/);
+  await expect(revisedCard.getByRole('button', { name: 'Copy', exact: true })).toBeDisabled();
   await lightbox.getByRole('button', { name: 'Close lightbox' }).click();
 
   // Gallery batch AI Analyze button

@@ -14,12 +14,13 @@
     diagnostics?: string[] | null;
   };
 
-  let { image, prompt, requestedSize, requestedQuality, presetName }: {
+  let { image, prompt, requestedSize, requestedQuality, presetName, aiAssistantEnabled = false }: {
     image: TraceImage;
     prompt: string;
     requestedSize?: string | null;
     requestedQuality?: string | null;
     presetName?: string | null;
+    aiAssistantEnabled?: boolean;
   } = $props();
 
   const diagnosticMessages = $derived(
@@ -115,9 +116,24 @@
         <div class="flex items-center justify-between gap-2"><strong>{$t.trace.originalPrompt}</strong><button type="button" class="control-focus text-emerald-700 dark:text-emerald-300" onclick={() => void copyText(prompt)}>{$t.trace.copy}</button></div>
         <p class="mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-words">{prompt}</p>
       </div>
-      <div class="min-w-0 rounded-md border border-emerald-500/30 bg-emerald-500/5 p-2">
-        <div class="flex items-center justify-between gap-2"><strong>{$t.trace.revisedPrompt}</strong><button type="button" class="control-focus text-emerald-700 dark:text-emerald-300" onclick={() => void copyText(image.revised_prompt || '')}>{$t.trace.copy}</button></div>
-        <p class="mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-words">{image.revised_prompt}</p>
+      <div
+        data-testid="api-revised-prompt-card"
+        class="min-w-0 rounded-md border p-2 transition-colors {aiAssistantEnabled ? 'border-emerald-500/30 bg-emerald-500/5' : 'cursor-not-allowed border-stone-300 bg-stone-100 text-stone-400 opacity-60 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-500'}"
+        title={!aiAssistantEnabled ? $t.aiAssistant.unavailable : undefined}
+      >
+        <div class="flex items-center justify-between gap-2">
+          <strong>{$t.trace.revisedPrompt}</strong>
+          <button
+            type="button"
+            disabled={!aiAssistantEnabled}
+            title={!aiAssistantEnabled ? $t.aiAssistant.unavailable : undefined}
+            class="control-focus {aiAssistantEnabled ? 'text-emerald-700 dark:text-emerald-300' : 'cursor-not-allowed text-stone-400 dark:text-zinc-500'}"
+            onclick={() => void copyText(image.revised_prompt || '')}
+          >
+            {$t.trace.copy}
+          </button>
+        </div>
+        <p class="mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-words {aiAssistantEnabled ? '' : 'text-stone-400 dark:text-zinc-500'}">{image.revised_prompt}</p>
       </div>
     </div>
   {/if}

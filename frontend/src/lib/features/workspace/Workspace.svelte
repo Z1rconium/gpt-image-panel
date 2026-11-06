@@ -1812,7 +1812,7 @@
       />
     {/if}
 
-    <PreviewPanel onRegenerate={regenerate} onClear={clearPreview} />
+    <PreviewPanel onRegenerate={regenerate} onClear={clearPreview} aiAssistantEnabled={aiAssistantAvailable} />
   {/if}
 
   {#if $galleryGridPanel.component}

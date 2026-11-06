@@ -312,7 +312,7 @@
                     {/each}
                   </div>
                 {/if}
-                <ImageTrace image={selectedJobImage} prompt={job.prompt || ''} requestedSize={job.size} requestedQuality={job.quality} presetName={job.api_preset_name} />
+                <ImageTrace image={selectedJobImage} prompt={job.prompt || ''} requestedSize={job.size} requestedQuality={job.quality} presetName={job.api_preset_name} aiAssistantEnabled={aiAssistantEnabled} />
               </div>
             {/if}
             {#if hasCostInfo(job)}

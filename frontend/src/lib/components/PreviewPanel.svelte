@@ -10,9 +10,10 @@
   interface Props {
     onRegenerate?: () => void;
     onClear?: () => void;
+    aiAssistantEnabled?: boolean;
   }
 
-  let { onRegenerate = () => {}, onClear = () => {} }: Props = $props();
+  let { onRegenerate = () => {}, onClear = () => {}, aiAssistantEnabled = false }: Props = $props();
 
   const loading = $derived($previewStore.loading);
   const error = $derived($previewStore.error);
@@ -419,7 +420,7 @@
       <div><dt class="text-stone-500 dark:text-zinc-400">{$t.common.duration}</dt><dd class="mt-1 text-stone-800 dark:text-zinc-200">{job.duration || '-'}</dd></div>
     </dl>
     {#if selectedImage}
-      <div class="mt-3"><ImageTrace image={selectedImage} prompt={job.prompt || prompt} requestedSize={job.size} requestedQuality={job.quality} presetName={job.api_preset_name} /></div>
+      <div class="mt-3"><ImageTrace image={selectedImage} prompt={job.prompt || prompt} requestedSize={job.size} requestedQuality={job.quality} presetName={job.api_preset_name} aiAssistantEnabled={aiAssistantEnabled} /></div>
     {/if}
   {/if}
 </section>
