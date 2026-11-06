@@ -3,7 +3,7 @@
   "name": "reference-asset-library",
   "title": "Reference Asset Library",
   "description": "可持久化参考资产库整体计划，复用集合作为资产包，支持编辑链路多参考图与Agent引用",
-  "status": "completed",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
@@ -11,7 +11,7 @@
   "creator": "Z1rconium",
   "assignee": "Z1rconium",
   "createdAt": "2026-11-06",
-  "completedAt": "2026-11-06",
+  "completedAt": null,
   "branch": "feat/reference-asset-library",
   "base_branch": "main",
   "worktree_path": null,
@@ -21,10 +21,11 @@
   "children": [
     "11-06-reference-asset-phase-1",
     "11-06-reference-asset-phase-2",
-    "11-06-reference-asset-phase-3"
+    "11-06-reference-asset-phase-3",
+    "11-06-reference-asset-phase-4"
   ],
   "parent": null,
   "relatedFiles": [],
-  "notes": "All phases (1, 2, 3) completed.",
+  "notes": "Phases 1–4 completed; phase 5 remains.",
   "meta": {}
 }

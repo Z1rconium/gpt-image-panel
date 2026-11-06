@@ -820,3 +820,16 @@ def test_agent_turn_snapshot_pins_model_and_rejects_moved_endpoint(client, monke
         assistant_runtime.resolve_agent_runtime(snapshot=moved)
     # Legacy turns (no snapshot) keep using live settings.
     assert assistant_runtime.resolve_agent_runtime(snapshot={}).assistant.model == "model-after-change"
+
+
+def test_agent_asset_attachment_context(client, monkeypatch):
+    from backend.app.repositories.gallery import collections
+    enable_agent(client)
+    _fake_gallery_entry('asset-contract', 'source', '1024x1024', 'asset-contract.png')
+    pack = collections.create_gallery_collection('Character', asset_alias='角色')
+    collections.add_gallery_collection_items(pack['id'], ['asset-contract'])
+    model = install_model(monkeypatch, [text_round('Done.')])
+    conversation_id = new_conversation(client)
+    _accepted, status = run_turn(client, conversation_id, 'Use @角色', attachments=[{'kind': 'asset', 'collection_id': pack['id']}])
+    assert status['status'] == 'completed'
+    assert '[asset @角色: <ref id="round-1-input-1"/>]' in model.calls[0]['items'][0].text

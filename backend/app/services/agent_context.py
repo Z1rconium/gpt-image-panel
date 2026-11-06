@@ -35,9 +35,20 @@ def _is_live(image: dict[str, Any]) -> bool:
     return image["status"] == "succeeded" and bool(image.get("image_id"))
 
 
-def format_user_text(text: str, attachments: Sequence[dict[str, Any]]) -> str:
+def format_user_text(text: str, attachments: Sequence[dict[str, Any]], blocks: Sequence[dict[str, Any]] = ()) -> str:
     lines = [rewrite_mentions_to_ref_tags(text)]
+    by_label = {image["ref_label"]: image for image in attachments}
+    grouped = set()
+    for block in blocks:
+        if block.get("type") != "asset_refs":
+            continue
+        refs = block.get("refs", [])
+        grouped.update(refs)
+        tags = [to_ref_tag(label) if label in by_label and _is_live(by_label[label]) else to_removed_ref_tag(label) for label in refs]
+        lines.append(f"[asset @{block['alias']}: {' '.join(tags)}]")
     for image in sorted(attachments, key=lambda item: item["image_index"]):
+        if image["ref_label"] in grouped:
+            continue
         tag = to_ref_tag(image["ref_label"]) if _is_live(image) else to_removed_ref_tag(image["ref_label"])
         lines.append(f"[attached: {tag}]")
     return "\n".join(line for line in lines if line)
@@ -83,7 +94,7 @@ def build_history_items(
                 image for image in image_refs
                 if image["role"] == "input" and image["message_id"] == user["id"]
             ]
-            items.append(UserItem(text=format_user_text(user["text"], attachments)))
+            items.append(UserItem(text=format_user_text(user["text"], attachments, user.get("blocks", []))))
         assistant = pair.get("assistant")
         if assistant is not None and round_no < current_round:
             outputs = [

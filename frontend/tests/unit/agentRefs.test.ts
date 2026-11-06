@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AgentImageRef } from '$lib/api/types/agent';
-import { applyMention, filterMentionOptions, findMentionQuery, splitMentions } from '$lib/utils/agentRefs';
+import { applyMention, filterAssetOptions, filterMentionOptions, findMentionQuery, mentionedAssetPacks, splitMentions } from '$lib/utils/agentRefs';
 
 function ref(round: number, index: number, overrides: Partial<AgentImageRef> = {}): AgentImageRef {
   return {
@@ -89,5 +89,14 @@ describe('splitMentions', () => {
     ]);
     expect(splitMentions('plain')).toEqual([{ type: 'text', value: 'plain' }]);
     expect(splitMentions('')).toEqual([]);
+  });
+});
+
+
+describe('asset mentions', () => {
+  it('suggests matching aliases and derives exact Unicode tokens without matching emails or prefixes', () => {
+    const packs = [{ id: 'a', asset_alias: '角色' }, { id: 'b', asset_alias: 'Hero' }, { id: 'c', asset_alias: null }] as Parameters<typeof filterAssetOptions>[0];
+    expect(filterAssetOptions(packs, 'he').map((p) => p.id)).toEqual(['b']);
+    expect(mentionedAssetPacks(packs, 'use @角色, @HERO and me@Hero.com @Heroic').map((p) => p.id)).toEqual(['a', 'b']);
   });
 });

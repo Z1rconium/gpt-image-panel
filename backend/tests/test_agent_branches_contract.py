@@ -157,3 +157,36 @@ def test_reference_isolation_aliases_and_selection_conflicts(tmp_path):
     with pytest.raises(repo.AgentTurnConflictError):
         repo.select_branch(other, original["id"], 0)
     assert repo.delete_conversation(conversation)
+
+
+def test_edit_with_asset_attachment_uses_source_snapshot(client, monkeypatch):
+    from backend.app.repositories.gallery import collections
+
+    enable_agent(client)
+    model = install_model(monkeypatch, [text_round('original'), text_round('edited')])
+    for image in ('snap-a', 'snap-b', 'snap-new', 'other-new'):
+        _fake_gallery_entry(image, 'source', '1024x1024', f'{image}.png')
+    pack = collections.create_gallery_collection('Snapshot', asset_alias='snapshot')
+    collections.add_gallery_collection_items(pack['id'], ['snap-a', 'snap-b'])
+    collections.reorder_gallery_collection_items(pack['id'], ['snap-b', 'snap-a'])
+    other = collections.create_gallery_collection('Other', asset_alias='other')
+    collections.add_gallery_collection_items(other['id'], ['other-new'])
+    conversation = new_conversation(client)
+    original, _ = run_turn(client, conversation, 'Use @snapshot', attachments=[{'kind': 'asset', 'collection_id': pack['id']}])
+    collections.remove_gallery_collection_items(pack['id'], ['snap-a', 'snap-b'])
+    collections.add_gallery_collection_items(pack['id'], ['snap-new'])
+    revision = detail(client, conversation)['conversation']['branch_revision']
+    edited, status = run_turn(client, conversation, 'Change @snapshot and @other', action='edit', source_turn_id=original['turn_id'], branch_revision=revision, attachments=[
+        {'kind': 'gallery', 'image_id': 'snap-b'}, {'kind': 'gallery', 'image_id': 'snap-a'},
+        {'kind': 'asset', 'collection_id': pack['id']}, {'kind': 'asset', 'collection_id': other['id']},
+    ])
+    assert status['status'] == 'completed'
+    current = detail(client, conversation)
+    refs = [r for r in current['image_refs'] if r['turn_id'] == edited['turn_id']]
+    assert [r['image_id'] for r in refs] == ['snap-b', 'snap-a', 'other-new']
+    blocks = next(m for m in current['messages'] if m['turn_id'] == edited['turn_id'] and m['role'] == 'user')['blocks']
+    assert [b['alias'] for b in blocks] == ['snapshot', 'other']
+    assert blocks[0]['refs'] == ['round-2-input-1', 'round-2-input-2']
+    text = model.calls[-1]['items'][0].text
+    assert text.count('[asset @snapshot:') == 1
+    assert '<ref id="round-2-input-3"/>' in text

@@ -51,7 +51,8 @@ export type AgentSource = {
   start_index: number | null; end_index: number | null; excerpt: string;
 };
 export type AgentSourcesBlock = { id: string; type: 'sources'; sources: AgentSource[] };
-export type AgentBlock = AgentTextBlock | AgentBatchParamsBlock | AgentImageTaskBlock | AgentErrorBlock | AgentSearchBlock | AgentSourcesBlock;
+export type AgentAssetRefsBlock = { id: string; type: 'asset_refs'; alias: string; collection_id: string | null; refs: string[]; explicit_refs?: string[] };
+export type AgentBlock = AgentAssetRefsBlock | AgentTextBlock | AgentBatchParamsBlock | AgentImageTaskBlock | AgentErrorBlock | AgentSearchBlock | AgentSourcesBlock;
 
 export type AgentConversationSummary = {
   id: string;
@@ -131,7 +132,7 @@ export type AgentTurnRequest = {
   source_turn_id?: string;
   branch_revision?: number;
   text: string;
-  attachments: { kind: 'gallery'; image_id: string }[];
+  attachments: ({ kind: 'gallery'; image_id: string } | { kind: 'asset'; collection_id: string })[];
   image_params: AgentImageParams;
   // Omitted: allowed, except web-search turns default to discuss/search only.
   allow_image_tools?: boolean;

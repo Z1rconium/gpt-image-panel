@@ -38,6 +38,11 @@ class AgentAttachment(StrictRequestModel):
     image_id: ShortId
 
 
+class AgentAssetAttachment(StrictRequestModel):
+    kind: Literal["asset"]
+    collection_id: ShortId
+
+
 class AgentImageParams(StrictRequestModel):
     size: str = Field(default="auto", max_length=40)
     quality: ImageQuality = "auto"
@@ -52,7 +57,7 @@ class AgentImageParams(StrictRequestModel):
 class AgentTurnRequest(StrictRequestModel):
     client_turn_id: str = Field(..., min_length=8, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
     text: str = Field(..., min_length=1, max_length=AGENT_TEXT_CEILING_CHARS)
-    attachments: list[AgentAttachment] = Field(
+    attachments: list[AgentAttachment | AgentAssetAttachment] = Field(
         default_factory=list, max_length=AGENT_ATTACHMENT_CEILING
     )
     image_params: AgentImageParams = Field(default_factory=AgentImageParams)
@@ -81,7 +86,7 @@ class AgentTurnRequest(StrictRequestModel):
 
     @field_validator("attachments")
     @classmethod
-    def validate_attachments(cls, value: list[AgentAttachment]) -> list[AgentAttachment]:
+    def validate_attachments(cls, value: list[AgentAttachment | AgentAssetAttachment]) -> list[AgentAttachment | AgentAssetAttachment]:
         if len(value) > config.AGENT_MAX_ATTACHMENTS_PER_MESSAGE:
             raise ValueError(
                 f"at most {config.AGENT_MAX_ATTACHMENTS_PER_MESSAGE} attachments are allowed"

@@ -60,6 +60,7 @@ export type AgentBlockGroup =
 export function groupAgentBlocks(blocks: AgentBlock[]): AgentBlockGroup[] {
   const groups: AgentBlockGroup[] = [];
   for (const block of blocks) {
+    if (block.type === 'asset_refs') continue;
     if (block.type === 'image_task') {
       const last = groups[groups.length - 1];
       if (last?.kind === 'images') {

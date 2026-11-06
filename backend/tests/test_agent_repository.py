@@ -193,3 +193,90 @@ def test_lost_owner_cannot_write_events_snapshots_or_images(tmp_path):
             message_id=turn["assistant_message_id"], round_no=1, item_id="image", prompt="fox", mode="generate", owner="old-owner")
     assert agent_repo.finish_turn(turn["id"], "failed", owner="old-owner")["status"] == "running"
     assert agent_repo.list_turn_events(turn["id"]) == []
+
+
+def test_asset_snapshot_and_regenerate(tmp_path):
+    from backend.app.repositories.gallery import collections
+    from backend.app.services.agent_context import build_history_items
+
+    _configure_runtime(tmp_path)
+    db_repo.verify_storage_writable()
+    for image in ('asset-a', 'asset-b'):
+        _fake_gallery_entry(image, 'source', '1024x1024', f'{image}.png')
+    pack = collections.create_gallery_collection('Pack', asset_alias='fox')
+    collections.add_gallery_collection_items(pack['id'], ['asset-a', 'asset-b'])
+    collections.reorder_gallery_collection_items(pack['id'], ['asset-b', 'asset-a'])
+    conversation = agent_repo.create_conversation()
+    turn, _ = _turn(conversation['id'], text='Use @fox', asset_collection_ids=[pack['id']])
+    refs = agent_repo.list_conversation_images(conversation['id'])
+    assert [r['image_id'] for r in refs] == ['asset-b', 'asset-a']
+    messages = agent_repo.list_messages(conversation['id'])
+    assert messages[0]['blocks'][0]['refs'] == ['round-1-input-1', 'round-1-input-2']
+    history = build_history_items(messages=messages, image_refs=refs, current_round=1)
+    assert '[asset @fox: <ref id="round-1-input-1"/> <ref id="round-1-input-2"/>]' in history[0].text
+    agent_repo.finish_turn(turn['id'], 'completed')
+    collections.reorder_gallery_collection_items(pack['id'], ['asset-a', 'asset-b'])
+    revision = agent_repo.get_conversation(conversation['id'])['branch_revision']
+    regenerated, _ = _turn(conversation['id'], 'turn-0002', action='regenerate', source_turn_id=turn['id'], branch_revision=revision)
+    refs = [r for r in agent_repo.list_conversation_images(conversation['id']) if r['turn_id'] == regenerated['id']]
+    assert [r['image_id'] for r in refs] == ['asset-b', 'asset-a']
+    messages = agent_repo.list_messages(conversation['id'])
+    assert messages[-2]['blocks'][0]['refs'] == ['round-2-input-1', 'round-2-input-2']
+    agent_repo.finish_turn(regenerated['id'], 'completed')
+    revision = agent_repo.get_conversation(conversation['id'])['branch_revision']
+    edited, _ = _turn(conversation['id'], 'turn-0003', text='Change @fox', action='edit', source_turn_id=regenerated['id'], branch_revision=revision, attachment_image_ids=['asset-b', 'asset-a'])
+    messages = agent_repo.list_messages(conversation['id'])
+    assert messages[-2]['blocks'][0]['refs'] == ['round-3-input-1', 'round-3-input-2']
+
+
+def test_asset_invalid_and_expansion_limit_are_atomic(tmp_path, monkeypatch):
+    from backend.app.repositories.gallery import collections
+    from backend.app.core import settings
+
+    _configure_runtime(tmp_path)
+    db_repo.verify_storage_writable()
+    for image in ('cap-a', 'cap-b'):
+        _fake_gallery_entry(image, 'source', '1024x1024', f'{image}.png')
+    pack = collections.create_gallery_collection('Pack', asset_alias='cap')
+    collections.add_gallery_collection_items(pack['id'], ['cap-a', 'cap-b'])
+    conversation = agent_repo.create_conversation()
+    monkeypatch.setattr(settings, 'AGENT_MAX_ATTACHMENTS_PER_MESSAGE', 1)
+    with pytest.raises(agent_repo.AgentAttachmentError, match='At most'):
+        _turn(conversation['id'], asset_collection_ids=[pack['id']])
+    with pytest.raises(agent_repo.AgentAttachmentError, match='no longer exists'):
+        _turn(conversation['id'], asset_collection_ids=['missing'])
+    assert agent_repo.list_messages(conversation['id']) == []
+
+
+def test_asset_excludes_whitespace_padded_unsupported_formats(tmp_path):
+    from backend.app.repositories.gallery import collections
+    from backend.app.repositories.db import _connect
+    _configure_runtime(tmp_path)
+    db_repo.verify_storage_writable()
+    for image in ('valid-a', 'invalid-a', 'invalid-b'):
+        _fake_gallery_entry(image, 'source', '1024x1024', f'{image}.png')
+    with _connect() as conn:
+        conn.execute("UPDATE gallery_entries SET output_format = ' GIF ' WHERE id = 'invalid-a'")
+        conn.execute("UPDATE gallery_entries SET filename = 'invalid-b.svg ' WHERE id = 'invalid-b'")
+        conn.commit()
+    pack = collections.create_gallery_collection('Filter', asset_alias='filter')
+    collections.add_gallery_collection_items(pack['id'], ['valid-a', 'invalid-a', 'invalid-b'])
+    conversation = agent_repo.create_conversation()
+    _turn(conversation['id'], asset_collection_ids=[pack['id']])
+    assert [item['image_id'] for item in agent_repo.list_conversation_images(conversation['id'])] == ['valid-a']
+
+
+def test_asset_snapshot_tracks_explicit_gallery_overlap(tmp_path):
+    from backend.app.repositories.gallery import collections
+    _configure_runtime(tmp_path)
+    db_repo.verify_storage_writable()
+    _fake_gallery_entry('overlap', 'source', '1024x1024', 'overlap.png')
+    pack = collections.create_gallery_collection('Overlap', asset_alias='overlap')
+    collections.add_gallery_collection_items(pack['id'], ['overlap'])
+    conversation = agent_repo.create_conversation()
+    turn, _ = _turn(conversation['id'], attachment_image_ids=['overlap'], asset_collection_ids=[pack['id']])
+    assert agent_repo.list_messages(conversation['id'])[0]['blocks'][0]['explicit_refs'] == ['round-1-input-1']
+    agent_repo.finish_turn(turn['id'], 'completed')
+    revision = agent_repo.get_conversation(conversation['id'])['branch_revision']
+    _turn(conversation['id'], 'turn-0002', action='regenerate', source_turn_id=turn['id'], branch_revision=revision)
+    assert agent_repo.list_messages(conversation['id'])[-2]['blocks'][0]['explicit_refs'] == ['round-2-input-1']

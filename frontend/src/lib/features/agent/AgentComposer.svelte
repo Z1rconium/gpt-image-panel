@@ -3,9 +3,10 @@
   import type { AgentImageParams, AgentImageRef } from '$lib/api/types/agent';
   import type { GalleryEntry } from '$lib/api/types/gallery';
   import { t } from '$lib/i18n';
+  import { galleryCollectionsStore } from '$lib/stores/galleryCollections';
   import { settingsStore } from '$lib/stores/settings';
   import { AGENT_MAX_ATTACHMENTS, type AgentSendInput } from '$lib/stores/agent';
-  import { applyMention, filterMentionOptions, findMentionQuery } from '$lib/utils/agentRefs';
+  import { applyMention, filterAssetOptions, filterMentionOptions, findMentionQuery, mentionedAssetPacks } from '$lib/utils/agentRefs';
   import { previewMediaUrl } from '$lib/utils/format';
   import AgentAttachDialog from './AgentAttachDialog.svelte';
 
@@ -65,8 +66,11 @@
   // Per-turn capability; with web search on, the server default is discuss/search only.
   let allowImageTools = $state(false);
 
+  $effect(() => { void galleryCollectionsStore.load().catch(() => {}); });
+  const assetPacks = $derived($galleryCollectionsStore.collections.filter((item) => item.asset_alias));
+  const mentionedAssets = $derived(mentionedAssetPacks(assetPacks, text));
   const mention = $derived(findMentionQuery(text, caret));
-  const options = $derived(mention ? filterMentionOptions(imageRefs, mention.query).slice(0, MAX_MENTION_OPTIONS) : []);
+  const options = $derived(mention ? [...filterAssetOptions(assetPacks, mention.query).map((item) => ({ kind: 'asset' as const, item })), ...filterMentionOptions(imageRefs, mention.query).map((item) => ({ kind: 'image' as const, item }))].slice(0, MAX_MENTION_OPTIONS) : []);
   const listOpen = $derived(Boolean(mention) && options.length > 0 && dismissedAt !== mention?.start);
   const searchEnabled = $derived(Boolean($settingsStore.settings?.ai_assistant.agent_web_search_enabled));
   const searchUnavailable = $derived(searchEnabled && (
@@ -99,9 +103,9 @@
       : $t.agent.attachmentLabel(ref.path_round_no ?? ref.round_no, ref.image_index);
   }
 
-  async function chooseOption(ref: AgentImageRef) {
+  async function chooseOption(option: (typeof options)[number]) {
     if (!mention) return;
-    const next = applyMention(text, mention, ref.ref_label);
+    const next = applyMention(text, mention, option.kind === 'asset' ? option.item.asset_alias! : option.item.ref_label);
     text = next.text;
     activeIndex = 0;
     await tick();
@@ -115,6 +119,7 @@
     const input: AgentSendInput = {
       text,
       attachmentIds: attachments.map((entry) => entry.id),
+      assetCollectionIds: mentionedAssets.map((item) => item.id),
       imageParams: { ...params },
       ...(searchEnabled ? { allowImageTools } : {})
     };
@@ -199,6 +204,13 @@
     </div>
   {/if}
 
+  {#if mentionedAssets.length}
+    <ul class="flex flex-wrap gap-2" aria-label="Asset packs">
+      {#each mentionedAssets as asset (asset.id)}
+        <li class="rounded-full bg-stone-100 px-3 py-1 text-sm dark:bg-zinc-800">@{asset.asset_alias}</li>
+      {/each}
+    </ul>
+  {/if}
   {#if attachments.length}
     <ul class="flex flex-wrap gap-2" aria-label={$t.agent.attachments}>
       {#each attachments as entry (entry.id)}
@@ -252,27 +264,26 @@
         aria-label={$t.agent.mentionList}
         class="app-surface absolute bottom-full left-0 z-20 mb-2 max-h-60 w-full max-w-sm overflow-y-auto p-1"
       >
-        {#each options as ref, index (ref.ref_label)}
+        {#each options as option, index (option.kind === 'asset' ? option.item.id : option.item.ref_label)}
           <li
             id="agent-mention-option-{index}"
             role="option"
             aria-selected={index === activeIndex}
-            aria-label={$t.agent.mentionOption(ref.ref_label)}
+            aria-label={option.kind === 'asset' ? `@${option.item.asset_alias}` : $t.agent.mentionOption(option.item.ref_label)}
             class="flex cursor-pointer items-center gap-3 rounded-md px-2 py-1.5 text-sm {index === activeIndex
               ? 'bg-stone-100 dark:bg-zinc-800'
               : ''}"
             onmousedown={(event) => {
               event.preventDefault();
-              void chooseOption(ref);
+              void chooseOption(option);
             }}
           >
-            {#if ref.filename}
-              <img src={previewMediaUrl({ filename: ref.filename })} alt="" class="h-9 w-9 rounded-sm object-cover" />
+            {#if option.kind === 'asset'}
+              <span class="min-w-0"><span class="block font-medium">{option.item.name}</span><span class="block font-mono text-xs">@{option.item.asset_alias}</span></span>
+            {:else}
+              {#if option.item.filename}<img src={previewMediaUrl({ filename: option.item.filename })} alt="" class="h-9 w-9 rounded-sm object-cover" />{/if}
+              <span class="min-w-0"><span class="block font-medium">{optionLabel(option.item)}</span><span class="block font-mono text-xs">@{option.item.ref_label}</span></span>
             {/if}
-            <span class="min-w-0">
-              <span class="block font-medium text-stone-900 dark:text-zinc-100">{optionLabel(ref)}</span>
-              <span class="block truncate font-mono text-[11px] text-stone-500 dark:text-zinc-500">@{ref.ref_label}</span>
-            </span>
           </li>
         {/each}
       </ul>

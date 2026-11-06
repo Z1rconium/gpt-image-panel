@@ -1,6 +1,7 @@
 """Agent turns: admission, leases, cancellation, completion and stale-turn sweeps."""
 
 import json
+import re
 from typing import Any, Sequence
 
 from ...core import settings as config
@@ -17,6 +18,7 @@ def create_turn(
     text: str,
     attachment_image_ids: Sequence[str],
     model: str,
+    asset_collection_ids: Sequence[str] = (),
     image_params: dict[str, Any],
     lease_expires_at: str,
     action: str = "continue",
@@ -50,15 +52,23 @@ def create_turn(
             if branch_revision is not None and branch_revision != conversation["branch_revision"]:
                 raise AgentTurnConflictError("The selected branch changed in another tab. Reload before continuing.")
             parent_id = conversation["selected_turn_id"]
+            regenerated_blocks = None
+            edited_source_blocks = []
             if action != "continue":
                 source = conn.execute("SELECT * FROM agent_turns WHERE id = ? AND conversation_id = ?", (source_turn_id, conversation_id)).fetchone()
                 selected_path = _path_ids(conn, conversation_id, parent_id)
                 if source is None or source["id"] not in selected_path:
                     raise AgentTurnConflictError("The source turn is not on the selected branch")
                 parent_id = source["parent_turn_id"]
+                if action == "edit":
+                    source_message = conn.execute("SELECT blocks_json FROM agent_messages WHERE id = ?", (source["user_message_id"],)).fetchone()
+                    edited_source_blocks = json.loads(source_message[0] or "[]")
                 if action == "regenerate":
-                    text = conn.execute("SELECT text FROM agent_messages WHERE id = ?", (source["user_message_id"],)).fetchone()[0]
-                    attachment_image_ids = [row[0] for row in conn.execute("SELECT image_id FROM agent_message_images WHERE turn_id = ? AND role = 'input'", (source["id"],))]
+                    original = conn.execute("SELECT text, blocks_json FROM agent_messages WHERE id = ?", (source["user_message_id"],)).fetchone()
+                    text = original[0]
+                    regenerated_blocks = json.loads(original[1] or "[]")
+                    asset_collection_ids = ()
+                    attachment_image_ids = [row[0] for row in conn.execute("SELECT image_id FROM agent_message_images WHERE turn_id = ? AND role = 'input' ORDER BY image_index", (source["id"],))]
                     if any(value is None for value in attachment_image_ids):
                         raise AgentAttachmentError("An original attachment was deleted; edit the message to choose new attachments")
                     image_params = json.loads(source["image_params_json"] or "{}")
@@ -90,6 +100,52 @@ def create_turn(
                 missing = [value for value in attachment_ids if value not in found]
                 if missing:
                     raise AgentAttachmentError("An attached gallery image no longer exists")
+
+            explicit_ids = set(attachment_ids)
+            asset_groups = []
+            snapshot_collection_ids = set()
+            if regenerated_blocks is None:
+                # An edited branch retains the original attachment snapshot, not a
+                # fresh read of a collection that may since have changed.
+                if edited_source_blocks:
+                    source_images = [row[0] for row in conn.execute("SELECT image_id FROM agent_message_images WHERE turn_id = ? AND role = 'input' ORDER BY image_index", (source_turn_id,))]
+                    for block in edited_source_blocks:
+                        if block.get("type") != "asset_refs" or not re.search(r"(?<!\S)@" + re.escape(block["alias"]) + r"(?![\w-])", text, re.IGNORECASE):
+                            continue
+                        indices = []
+                        for label in block["refs"]:
+                            old_index = int(label.rsplit("-", 1)[1]) - 1
+                            if old_index < len(source_images) and source_images[old_index] in attachment_ids:
+                                indices.append(attachment_ids.index(source_images[old_index]) + 1)
+                        if indices:
+                            asset_groups.append((block["alias"], indices, block.get("collection_id"), [attachment_ids.index(source_images[int(label.rsplit("-", 1)[1]) - 1]) + 1 for label in block.get("explicit_refs", []) if int(label.rsplit("-", 1)[1]) - 1 < len(source_images) and source_images[int(label.rsplit("-", 1)[1]) - 1] in attachment_ids]))
+                            if block.get("collection_id"):
+                                snapshot_collection_ids.add(block["collection_id"])
+                for collection_id in dict.fromkeys(asset_collection_ids):
+                    if collection_id in snapshot_collection_ids:
+                        continue
+                    collection = conn.execute("SELECT asset_alias FROM gallery_collections WHERE id = ?", (collection_id,)).fetchone()
+                    if collection is None or not collection["asset_alias"]:
+                        raise AgentAttachmentError("An asset pack no longer exists")
+                    rows = conn.execute("""SELECT e.id FROM gallery_collection_items i JOIN gallery_entries e ON e.id = i.image_id
+                        WHERE i.collection_id = ? AND lower(trim(COALESCE(e.output_format, ''))) NOT IN ('svg', 'gif')
+                        AND lower(trim(e.filename)) NOT LIKE '%.svg' AND lower(trim(e.filename)) NOT LIKE '%.gif'
+                        ORDER BY i.position IS NULL, i.position, i.added_at, i.image_id""", (collection_id,)).fetchall()
+                    indices = []
+                    for row in rows:
+                        image_id = row[0]
+                        if image_id not in attachment_ids:
+                            attachment_ids.append(image_id)
+                        indices.append(attachment_ids.index(image_id) + 1)
+                    if not indices:
+                        raise AgentAttachmentError("An asset pack has no supported images")
+                    asset_groups.append((collection["asset_alias"], indices, collection_id, [index for index in indices if attachment_ids[index - 1] in explicit_ids]))
+                if len(attachment_ids) > config.AGENT_MAX_ATTACHMENTS_PER_MESSAGE:
+                    raise AgentAttachmentError(f"At most {config.AGENT_MAX_ATTACHMENTS_PER_MESSAGE} images can be attached to one message")
+            else:
+                for block in regenerated_blocks:
+                    if block.get("type") == "asset_refs":
+                        asset_groups.append((block["alias"], [int(label.rsplit("-", 1)[1]) for label in block["refs"]], block.get("collection_id"), [int(label.rsplit("-", 1)[1]) for label in block.get("explicit_refs", [])]))
 
             round_no = int(
                 conn.execute(
@@ -132,15 +188,16 @@ def create_turn(
                     json_dumps_canonical(execution_snapshot or {}),
                 ),
             )
+            blocks = [{"id": _new_id(), "type": "asset_refs", "alias": alias, "collection_id": collection_id, "refs": [f"round-{round_no}-input-{index}" for index in indices], "explicit_refs": [f"round-{round_no}-input-{index}" for index in explicit_indices]} for alias, indices, collection_id, explicit_indices in asset_groups]
             conn.execute(
                 """
                 INSERT INTO agent_messages (
                     id, conversation_id, turn_id, seq, round_no, role, text,
                     blocks_json, status, created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, 'user', ?, '[]', 'complete', ?, ?)
+                VALUES (?, ?, ?, ?, ?, 'user', ?, ?, 'complete', ?, ?)
                 """,
-                (user_message_id, conversation_id, turn_id, seq + 1, round_no, text, now, now),
+                (user_message_id, conversation_id, turn_id, seq + 1, round_no, text, json_dumps_canonical(blocks), now, now),
             )
             conn.execute(
                 """

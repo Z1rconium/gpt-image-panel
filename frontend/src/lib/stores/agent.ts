@@ -19,6 +19,8 @@ import type {
 } from '$lib/api/types/agent';
 import { t } from '$lib/i18n';
 import { observeAgentTurn } from '$lib/utils/completionNotifications';
+import { assetMentionAliases } from '$lib/utils/agentRefs';
+import { galleryCollectionsStore } from './galleryCollections';
 import { isAbortError } from '$lib/utils/network';
 import {
   foldStreamBatch,
@@ -46,6 +48,7 @@ export type AgentSendInput = {
   action?: 'continue' | 'edit' | 'regenerate';
   sourceTurnId?: string;
   attachmentIds: string[];
+  assetCollectionIds?: string[];
   imageParams: AgentImageParams;
   allowImageTools?: boolean;
 };
@@ -334,7 +337,7 @@ function createAgentStore() {
         action: input.action ?? 'continue',
         source_turn_id: input.sourceTurnId,
         branch_revision: pendingSubmission.revision,
-        attachments: input.attachmentIds.slice(0, AGENT_MAX_ATTACHMENTS).map((imageId) => ({ kind: 'gallery', image_id: imageId })),
+        attachments: [...input.attachmentIds.slice(0, AGENT_MAX_ATTACHMENTS).map((imageId) => ({ kind: 'gallery' as const, image_id: imageId })), ...(input.assetCollectionIds ?? []).map((id) => ({ kind: 'asset' as const, collection_id: id }))],
         image_params: input.imageParams,
         ...(input.allowImageTools === undefined ? {} : { allow_image_tools: input.allowImageTools })
       });
@@ -456,12 +459,46 @@ function createAgentStore() {
   }
 
   async function fork(message: AgentMessage, text?: string) {
-    const inputs = state.imageRefs.filter((ref) => ref.message_id === message.id && ref.role === 'input');
+    const userMessage = state.messages.find((item) => item.turn_id === message.turn_id && item.role === 'user');
+    const inputs = state.imageRefs.filter((ref) => ref.message_id === userMessage?.id && ref.role === 'input');
+    let attachmentIds = inputs.flatMap((ref) => ref.image_id ? [ref.image_id] : []);
+    let assetCollectionIds: string[] = [];
+    if (text !== undefined && userMessage) {
+      const aliases = assetMentionAliases(text);
+      const groups = userMessage.blocks.filter((block) => block.type === 'asset_refs');
+      const knownAliases = new Set(groups.map((group) => group.alias.toLowerCase()));
+      const originalTokens = assetMentionAliases(userMessage.text);
+      const needsLookup = [...aliases].some((alias) =>
+        !knownAliases.has(alias) && !originalTokens.has(alias) &&
+        !/^round-\d+-(?:image|input)-\d+$/.test(alias) && !/^第?\d+轮图\d+$/.test(alias)
+      );
+      if (needsLookup) {
+        try {
+          await galleryCollectionsStore.load(true);
+        } catch (error) {
+          update((current) => ({ ...current, actionError: errorMessage(error, get(t).agent.errorLoadConversation) }));
+          return false;
+        }
+      }
+      const kept = groups.filter((group) => aliases.has(group.alias.toLowerCase()));
+      const keptLabels = new Set(kept.flatMap((group) => group.refs));
+      const explicitLabels = new Set(groups.flatMap((group) => group.explicit_refs ?? []));
+      const removedLabels = new Set(groups.filter((group) => !aliases.has(group.alias.toLowerCase())).flatMap((group) => group.refs));
+      attachmentIds = inputs.filter((ref) => !removedLabels.has(ref.ref_label) || keptLabels.has(ref.ref_label) || explicitLabels.has(ref.ref_label))
+        .flatMap((ref) => ref.image_id ? [ref.image_id] : []);
+      const snapshotIds = new Set(kept.map((group) => group.collection_id));
+      if (needsLookup) {
+        assetCollectionIds = get(galleryCollectionsStore).collections
+          .filter((item) => item.asset_alias && aliases.has(item.asset_alias.toLowerCase()) && !snapshotIds.has(item.id) && !originalTokens.has(item.asset_alias.toLowerCase()))
+          .map((item) => item.id);
+      }
+    }
     return send({
-      text: text ?? state.messages.find((item) => item.turn_id === message.turn_id && item.role === 'user')?.text ?? 'Regenerate',
+      text: text ?? userMessage?.text ?? 'Regenerate',
       action: text === undefined ? 'regenerate' : 'edit',
       sourceTurnId: message.turn_id,
-      attachmentIds: inputs.flatMap((ref) => ref.image_id ? [ref.image_id] : []),
+      attachmentIds,
+      assetCollectionIds,
       imageParams: { size: 'auto', quality: 'auto', output_format: 'png' }
     });
   }

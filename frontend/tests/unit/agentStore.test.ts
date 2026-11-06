@@ -15,6 +15,11 @@ const api = vi.hoisted(() => ({
   selectAgentBranch: vi.fn()
 }));
 
+const collections = vi.hoisted(() => ({ items: [] as { id: string; asset_alias: string }[], load: vi.fn() }));
+vi.mock('$lib/stores/galleryCollections', () => ({ galleryCollectionsStore: {
+  subscribe: (run: (value: unknown) => void) => { run({ collections: collections.items }); return () => {}; },
+  load: collections.load
+} }));
 vi.mock('$lib/api/agent', () => api);
 vi.mock('$lib/utils/completionNotifications', () => ({ observeAgentTurn: vi.fn() }));
 
@@ -76,6 +81,8 @@ function deferred<T>() {
 beforeEach(() => {
   vi.useFakeTimers();
   streams = [];
+  collections.items = [];
+  collections.load.mockReset().mockResolvedValue(undefined);
   for (const mock of Object.values(api)) mock.mockReset();
   api.listAgentConversations.mockResolvedValue({ items: [] });
   api.openAgentTurnEvents.mockImplementation((turnId: string, after: number, handlers: Handlers) => {
@@ -215,4 +222,31 @@ describe('agent store lifecycle', () => {
     expect(first.client_turn_id).toBe(second.client_turn_id);
     expect(second.allow_image_tools).toBe(true);
   });
+  it('edits asset mentions using retained snapshots and expands only newly mentioned packs', async () => {
+    collections.items = [{ id: 'kept', asset_alias: 'hero' }, { id: 'removed', asset_alias: 'old' }, { id: 'new', asset_alias: 'new' }];
+    const user = message('u', 't', 'user', 1, { text: '@hero @old', blocks: [
+      { id: 'b1', type: 'asset_refs', alias: 'hero', collection_id: 'kept', refs: ['round-1-input-1'] },
+      { id: 'b2', type: 'asset_refs', alias: 'old', collection_id: 'removed', refs: ['round-1-input-2', 'round-1-input-4'], explicit_refs: ['round-1-input-4'] }
+    ] });
+    const refs = [1, 2, 3, 4].map((index) => ({ ref_label: `round-1-input-${index}`, round_no: 1, image_index: index, role: 'input', image_id: `g${index}`, filename: `g${index}.png`, job_id: null, item_id: null, prompt: '', mode: 'generate', status: 'succeeded', error: null, deleted: false, message_id: 'u' })) as AgentConversationDetail['image_refs'];
+    api.getAgentConversation.mockResolvedValue(detail('c', [user], { image_refs: refs }));
+    api.startAgentTurn.mockResolvedValue({ turn_id: 'next', replayed: true });
+    await agentStore.open('c');
+    expect(await agentStore.fork(user, '@HERO @new')).toBe(true);
+    expect(api.startAgentTurn.mock.calls[0][1].attachments).toEqual([
+      { kind: 'gallery', image_id: 'g1' }, { kind: 'gallery', image_id: 'g3' }, { kind: 'gallery', image_id: 'g4' }, { kind: 'asset', collection_id: 'new' }
+    ]);
+  });
+
+  it('edits an ordinary message without loading collections even when that endpoint fails', async () => {
+    collections.load.mockRejectedValue(new Error('gallery unavailable'));
+    const user = message('u', 't', 'user', 1, { text: 'hello' });
+    api.getAgentConversation.mockResolvedValue(detail('c', [user]));
+    api.startAgentTurn.mockResolvedValue({ turn_id: 'next', replayed: true });
+    await agentStore.open('c');
+    expect(await agentStore.fork(user, 'revised @round-1-image-1')).toBe(true);
+    expect(collections.load).not.toHaveBeenCalled();
+    expect(api.startAgentTurn.mock.calls[0][1].attachments).toEqual([]);
+  });
+
 });

@@ -1,3 +1,4 @@
+import type { GalleryCollection } from '$lib/api/types/gallery';
 import type { AgentImageRef } from '$lib/api/types/agent';
 
 export type MentionQuery = { start: number; end: number; query: string };
@@ -62,4 +63,19 @@ export function splitMentions(text: string): MentionPart[] {
   }
   if (last < text.length) parts.push({ type: 'text', value: text.slice(last) });
   return parts;
+}
+
+/** Case-insensitive asset tokens, using the same boundaries as the composer. */
+export function assetMentionAliases(text: string): Set<string> {
+  return new Set(Array.from(text.matchAll(/(?:^|\s)@([\p{L}\p{N}_-]+)/gu), (match) => match[1].toLowerCase()));
+}
+
+export function filterAssetOptions(collections: GalleryCollection[], query: string): GalleryCollection[] {
+  const needle = query.toLowerCase();
+  return collections.filter((item) => item.asset_alias && item.asset_alias.toLowerCase().includes(needle));
+}
+
+export function mentionedAssetPacks(collections: GalleryCollection[], text: string): GalleryCollection[] {
+  const aliases = assetMentionAliases(text);
+  return collections.filter((item) => item.asset_alias && aliases.has(item.asset_alias.toLowerCase()));
 }
