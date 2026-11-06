@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.9.3
+
+- Add persistent reference asset packs with ordered gallery collections, multi-image edit references, Agent `@alias` mentions, and archive export and import.
+- Support GIF output for reference-image edits, dated GPT Image 2.6 model snapshots, and `safety_identifier`.
+
 ## v1.9.2
 
 - **UI refinement**: Styled the "API revised prompt" trace card and copy action in Lightbox, PreviewPanel, and JobHistory to grayed-out disabled states when AI Assistant is not enabled.
