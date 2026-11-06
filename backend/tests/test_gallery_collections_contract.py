@@ -284,3 +284,180 @@ def test_gallery_collection_assets_and_references(client):
     assert refs_with_new["skipped_unsupported"] == 2
     assert [img["id"] for img in refs_with_new["images"]] == ["ref-2", "ref-1", "ref-5"]
 
+
+
+def test_asset_archive_roundtrip_conflicts_and_order(client):
+    _fake_gallery_entry('archive-one', 'first', '1024x1024', 'archive-one.png')
+    _fake_gallery_entry('archive-two', 'second', '1024x1024', 'archive-two.png')
+    pack = _create_collection(client, 'Archive Pack')
+    assert client.patch(f"/api/gallery/collections/{pack['id']}", json={'asset_alias': 'A' * 32}).status_code == 200
+    assert client.post(f"/api/gallery/collections/{pack['id']}/items", json={'ids': ['archive-one', 'archive-two']}).status_code == 200
+    assert client.put(f"/api/gallery/collections/{pack['id']}/items/order", json={'ids': ['archive-two', 'archive-one']}).status_code == 200
+    _create_collection(client, 'Empty')
+
+    created = client.post('/api/gallery/export-jobs', json={})
+    finished = _wait_for_gallery_export_job(client, created.json()['job_id'])
+    assert finished['status'] == 'success', finished
+    archive = client.get(finished['download_url']).content
+    with zipfile.ZipFile(io.BytesIO(archive)) as zf:
+        metadata = json.loads(zf.read('metadata.json'))
+    saved = next(c for c in metadata['collections'] if c['id'] == pack['id'])
+    assert saved['asset_alias'] == 'A' * 32
+    assert saved['image_ids'] == ['archive-two', 'archive-one']
+    assert any(c['name'] == 'Empty' and c['image_ids'] == [] for c in metadata['collections'])
+
+    resp = _post_import_archive(client, archive)
+    assert resp.status_code == 202, resp.text
+    imported = _wait_for_gallery_import_job(client, resp.json()['job_id'])
+    assert imported['status'] == 'success', imported
+    collections = client.get('/api/gallery/collections').json()
+    restored = next(c for c in collections if c['name'] == 'Archive Pack (1)')
+    assert restored['asset_alias'] == 'A' * 30 + '_1'
+    assert any(c['name'] == 'Empty (1)' for c in collections)
+    refs = client.get(f"/api/gallery/collections/{restored['id']}/references").json()['images']
+    assert [r['prompt'] for r in refs] == ['second', 'first']
+    assert all(r['id'] not in {'archive-one', 'archive-two'} for r in refs)
+    original = client.get(f"/api/gallery/collections/{pack['id']}/references").json()['images']
+    assert [r['id'] for r in original] == ['archive-two', 'archive-one']
+
+
+def test_collection_archive_skips_missing_members_and_keeps_other_collections_unchanged(client):
+    _fake_gallery_entry('present', 'present', '1024x1024', 'present.png')
+    _fake_gallery_entry('missing', 'missing', '1024x1024', 'missing.png')
+    pack = _create_collection(client, 'Partial')
+    client.patch(f"/api/gallery/collections/{pack['id']}", json={'asset_alias': 'partial'})
+    client.post(f"/api/gallery/collections/{pack['id']}/items", json={'ids': ['present', 'missing']})
+    media.safe_image_path('missing.png').unlink()
+    job = client.post('/api/gallery/export-jobs', json={'collection_id': pack['id']}).json()
+    finished = _wait_for_gallery_export_job(client, job['job_id'])
+    archive = client.get(finished['download_url']).content
+    with zipfile.ZipFile(io.BytesIO(archive)) as zf:
+        metadata = json.loads(zf.read('metadata.json'))
+    assert metadata['collections'][0]['image_ids'] == ['present']
+    resp = _post_import_archive(client, archive)
+    assert _wait_for_gallery_import_job(client, resp.json()['job_id'])['status'] == 'success'
+    restored = next(c for c in client.get('/api/gallery/collections').json() if c['name'] == 'Partial (1)')
+    assert restored['image_count'] == 1
+
+
+def test_import_collection_invalid_metadata_fails_before_images(client):
+    metadata = {'images': [{'id': 'invalid-collection-image', 'filename': 'x.png', 'prompt': '', 'size': 'auto'}],
+                'collections': [{'name': 'Invalid', 'asset_alias': 'bad alias', 'image_ids': ['invalid-collection-image']}]}
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, 'w') as zf:
+        zf.writestr('metadata.json', json.dumps(metadata))
+        zf.writestr('images/x.png', PNG_BYTES)
+    response = _post_import_archive(client, archive.getvalue())
+    assert response.status_code == 202
+    assert _wait_for_gallery_import_job(client, response.json()['job_id'])['status'] == 'error'
+    assert gallery_queries.get_gallery_entry('invalid-collection-image') is None
+    assert client.get('/api/gallery/collections').json() == []
+
+
+def test_json_only_collection_import_resolves_unicode_casefold_conflict(client):
+    existing = _create_collection(client, 'Existing')
+    assert client.patch(f"/api/gallery/collections/{existing['id']}", json={'asset_alias': 'ÄBC'}).status_code == 200
+    metadata = {'images': [{'id': 'unicode-import', 'filename': 'x.png', 'prompt': 'x', 'size': 'auto'}],
+                'collections': [{'name': 'Existing', 'asset_alias': 'äbc', 'image_ids': ['unicode-import', 'not-in-archive']}]}
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, 'w') as zf:
+        zf.writestr('metadata.json', json.dumps(metadata))
+        zf.writestr('images/x.png', PNG_BYTES)
+    response = _post_import_archive(client, archive.getvalue())
+    result = _wait_for_gallery_import_job(client, response.json()['job_id'])
+    assert result['status'] == 'success', result
+    restored = next(c for c in client.get('/api/gallery/collections').json() if c['name'] == 'Existing (1)')
+    assert restored['asset_alias'] == 'äbc_1'
+    assert restored['image_count'] == 1
+
+
+def test_empty_asset_only_archive_roundtrip(client):
+    pack = _create_collection(client, 'Empty Asset')
+    assert client.patch(f"/api/gallery/collections/{pack['id']}", json={'asset_alias': 'empty'}).status_code == 200
+    for request in ({}, {'collection_id': pack['id']}):
+        created = client.post('/api/gallery/export-jobs', json=request)
+        assert created.status_code == 202, created.text
+        finished = _wait_for_gallery_export_job(client, created.json()['job_id'])
+        assert finished['status'] == 'success', finished
+        archive = client.get(finished['download_url']).content
+        with zipfile.ZipFile(io.BytesIO(archive)) as zf:
+            metadata = json.loads(zf.read('metadata.json'))
+        assert metadata['images'] == []
+        assert any(c['asset_alias'] == 'empty' and not c['image_ids'] for c in metadata['collections'])
+        response = _post_import_archive(client, archive)
+        assert response.status_code == 202, response.text
+        assert _wait_for_gallery_import_job(client, response.json()['job_id'])['status'] == 'success'
+    restored = client.get('/api/gallery/collections').json()
+    assert {c['asset_alias'] for c in restored} == {'empty', 'empty_1', 'empty_2'}
+
+    direct = client.post('/api/gallery/direct-export-jobs')
+    assert direct.status_code == 202, direct.text
+    assert client.get('/api/download-all', params={'export_job_id': direct.json()['job_id']}).status_code == 200
+
+
+def test_archive_default_preserved_without_overriding_target(client):
+    _fake_gallery_entry('default-image', 'default', '1024x1024', 'default-image.png')
+    original = _create_collection(client, 'Default pack')
+    client.patch(f"/api/gallery/collections/{original['id']}", json={'asset_alias': 'default_pack', 'is_default': True})
+    client.post(f"/api/gallery/collections/{original['id']}/items", json={'ids': ['default-image']})
+    created = client.post('/api/gallery/export-jobs', json={}).json()
+    finished = _wait_for_gallery_export_job(client, created['job_id'])
+    archive = client.get(finished['download_url']).content
+    with zipfile.ZipFile(io.BytesIO(archive)) as zf:
+        assert json.loads(zf.read('metadata.json'))['collections'][0]['is_default'] is True
+    response = _post_import_archive(client, archive)
+    assert _wait_for_gallery_import_job(client, response.json()['job_id'])['status'] == 'success'
+    collections = client.get('/api/gallery/collections').json()
+    assert [c['id'] for c in collections if c['is_default']] == [original['id']]
+    client.patch(f"/api/gallery/collections/{original['id']}", json={'is_default': False})
+    response = _post_import_archive(client, archive)
+    assert _wait_for_gallery_import_job(client, response.json()['job_id'])['status'] == 'success'
+    collections = client.get('/api/gallery/collections').json()
+    assert [c['name'] for c in collections if c['is_default']] == ['Default pack (2)']
+
+
+def test_archive_accepts_more_collections_than_image_limit(client):
+    metadata = {'images': [], 'collections': [
+        {'name': f'Pack {n}', 'asset_alias': f'pack_{n}', 'image_ids': []} for n in range(501)
+    ]}
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, 'w') as zf:
+        zf.writestr('metadata.json', json.dumps(metadata))
+    response = _post_import_archive(client, archive.getvalue())
+    assert response.status_code == 202, response.text
+    assert _wait_for_gallery_import_job(client, response.json()['job_id'])['status'] == 'success'
+    assert len(client.get('/api/gallery/collections').json()) == 501
+
+
+def test_archive_501_images_and_ordered_asset_pack_roundtrip(client):
+    ids = [f'bulk-{n:03}' for n in range(501)]
+    metadata = {
+        'images': [{'id': image_id, 'filename': f'{image_id}.png', 'prompt': image_id, 'size': 'auto'} for image_id in ids],
+        'collections': [{'name': 'Bulk', 'asset_alias': 'bulk', 'image_ids': list(reversed(ids))}],
+    }
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, 'w', compression=zipfile.ZIP_STORED) as zf:
+        zf.writestr('metadata.json', json.dumps(metadata))
+        for image_id in ids:
+            zf.writestr(f'images/{image_id}.png', PNG_BYTES)
+    response = _post_import_archive(client, archive.getvalue())
+    assert response.status_code == 202, response.text
+    result = _wait_for_gallery_import_job(client, response.json()['job_id'], timeout=60)
+    assert result['status'] == 'success', result
+    assert result['imported_count'] == 501
+
+    created = client.post('/api/gallery/export-jobs', json={}).json()
+    result = _wait_for_gallery_export_job(client, created['job_id'], timeout=60)
+    assert result['status'] == 'success', result
+    saved = client.get(result['download_url']).content
+    with zipfile.ZipFile(io.BytesIO(saved)) as zf:
+        exported = json.loads(zf.read('metadata.json'))
+    assert len(exported['images']) == 501
+    assert len(exported['collections'][0]['image_ids']) == 501
+    response = _post_import_archive(client, saved)
+    assert response.status_code == 202, response.text
+    result = _wait_for_gallery_import_job(client, response.json()['job_id'], timeout=60)
+    assert result['status'] == 'success', result
+    restored = next(c for c in client.get('/api/gallery/collections').json() if c['asset_alias'] == 'bulk_1')
+    references = client.get(f"/api/gallery/collections/{restored['id']}/references").json()['images']
+    assert [entry['prompt'] for entry in references] == list(reversed(ids))

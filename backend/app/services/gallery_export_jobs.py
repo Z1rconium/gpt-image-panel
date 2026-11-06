@@ -68,6 +68,7 @@ async def _gallery_zip_response(
     direct_export_job: dict | None = None,
     requested_count: int = 0,
     prepare_before_response: bool = False,
+    include_empty_collections: bool = False,
 ) -> StreamedBody:
     cleanup_direct_job = False
     if direct_export_job:
@@ -154,6 +155,7 @@ async def _gallery_zip_response(
                 skipped=skipped,
                 requested_count=requested_count,
                 progress=progress if direct_job_id else None,
+                include_empty_collections=include_empty_collections,
             )
             headers.setdefault("X-Gallery-Requested-Count", str(prepared_result.requested_count))
             headers.setdefault("X-Gallery-Exported-Count", str(prepared_result.exported_count))
@@ -202,6 +204,7 @@ async def _gallery_zip_response(
                     skipped=skipped,
                     requested_count=requested_count,
                     progress=progress if direct_job_id else None,
+                    include_empty_collections=include_empty_collections,
                 )
             if direct_job_id:
                 _publish_gallery_job_from_worker(
@@ -451,6 +454,7 @@ async def _run_gallery_export_job(job: dict) -> None:
             skipped=skipped,
             progress=progress,
             collection=(job.get("payload") or {}).get("collection"),
+            include_empty_collections=not (job.get("payload") or {}).get("filters") and not (job.get("payload") or {}).get("ids"),
         )
         await _publish_gallery_job(
             job_id,

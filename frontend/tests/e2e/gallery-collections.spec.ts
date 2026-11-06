@@ -105,3 +105,18 @@ test('lightbox chips toggle collection membership', async ({ page }) => {
   await landscapes.click();
   await expect(landscapes).toHaveAttribute('aria-pressed', 'true');
 });
+
+test('empty asset pack can be exported but empty ordinary collection cannot', async ({ page }) => {
+  await loadApp(page, { collections: [
+    { id: 'empty-asset', name: 'Empty asset', asset_alias: 'empty', position: 0, is_default: false, created_at: '', updated_at: '' },
+    { id: 'empty-plain', name: 'Empty plain', position: 1, is_default: false, created_at: '', updated_at: '' }
+  ], collectionItems: {} });
+  await page.getByRole('button', { name: 'Collections', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Manage collections' });
+  const assetDownload = dialog.getByRole('button', { name: 'Download Empty asset as ZIP' });
+  await expect(assetDownload).toBeEnabled();
+  await expect(dialog.getByRole('button', { name: 'Download Empty plain as ZIP' })).toBeDisabled();
+  const request = page.waitForRequest((req) => new URL(req.url()).pathname === '/api/gallery/export-jobs' && req.method() === 'POST');
+  await assetDownload.click();
+  expect((await request).postDataJSON()).toEqual({ collection_id: 'empty-asset' });
+});

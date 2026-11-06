@@ -10,6 +10,7 @@ from starlette.background import BackgroundTask
 from ...repositories.db.execution import run_db_operation
 from ...services.gallery_archive_import import (
     count_import_gallery_entries,
+    read_archive_collections,
     stream_upload_to_tempfile,
 )
 from ...services.gallery_archive_shared import import_archive_max_bytes
@@ -32,7 +33,7 @@ from ...repositories.gallery.queries import (
     get_gallery_entries_by_ids,
     iter_gallery_export_rows,
 )
-from ...repositories.gallery.collections import get_gallery_collection
+from ...repositories.gallery.collections import get_gallery_collection, export_gallery_collections
 from ...repositories.gallery.sync_state import count_gallery_r2_sync_rows
 from ...repositories.settings import load_r2_backup_settings
 from ...schemas.gallery import (
@@ -81,10 +82,13 @@ from ...services.gallery_maintenance import kick_gallery_job_dispatchers
 
 router = APIRouter()
 
+def _has_asset_collections() -> bool:
+    return any(item["asset_alias"] for item in export_gallery_collections())
+
 @router.post("/api/gallery/direct-export-jobs", response_model=GalleryExportJobStatus, status_code=202)
 async def create_gallery_direct_export_job():
     gallery_count = await run_db_operation(get_gallery_count)
-    if gallery_count == 0:
+    if gallery_count == 0 and not await run_db_operation(_has_asset_collections):
         raise HTTPException(status_code=404, detail="No images in gallery")
 
     job = await _reserve_gallery_export_direct_slot(
@@ -116,7 +120,7 @@ async def create_gallery_export_job(req: GalleryExportRequest | None = Body(defa
             raise HTTPException(status_code=404, detail="Collection not found")
         filters = {"collection_id": collection_id}
         requested_count = await run_db_operation(get_gallery_count, filters)
-        if requested_count <= 0:
+        if requested_count <= 0 and not collection.get("asset_alias"):
             raise HTTPException(status_code=404, detail="Collection is empty")
         filename_prefix = f"gpt-images-{collection_filename_slug(collection['name'])}"
         payload = {
@@ -146,7 +150,7 @@ async def create_gallery_export_job(req: GalleryExportRequest | None = Body(defa
         payload = {"ids": ids, "filename_prefix": filename_prefix}
     else:
         gallery_count = await run_db_operation(get_gallery_count)
-        if gallery_count == 0:
+        if gallery_count == 0 and not await run_db_operation(_has_asset_collections):
             raise HTTPException(status_code=404, detail="No images in gallery")
         requested_count = gallery_count
         filename_prefix = "gpt-images"
@@ -390,7 +394,7 @@ async def download_all_images(export_job_id: str = Query(...)):
     if direct_job.get("status") != "running" or direct_job.get("stage") != "queued":
         raise HTTPException(status_code=409, detail="Direct gallery export job is already active or finished")
 
-    if gallery_count == 0:
+    if gallery_count == 0 and not await run_db_operation(_has_asset_collections):
         await run_db_operation(update_gallery_job,
             export_job_id,
             {
@@ -426,6 +430,7 @@ async def download_all_images(export_job_id: str = Query(...)):
         reserve_export_slot=False,
         direct_export_job=direct_job,
         requested_count=gallery_count,
+        include_empty_collections=True,
     )
     return streaming_response(body)
 
@@ -473,7 +478,9 @@ async def import_gallery_archive(
             pass
         total_count = await run_db_operation(count_import_gallery_entries, temp_path)
         if total_count <= 0:
-            raise HTTPException(status_code=400, detail="No importable images found")
+            collections = await run_db_operation(read_archive_collections, temp_path)
+            if not collections or any(item["image_ids"] for item in collections):
+                raise HTTPException(status_code=400, detail="No importable images found")
         job = await _create_reserved_gallery_import_job(
             temp_path,
             total_count,

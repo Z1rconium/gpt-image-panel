@@ -49,14 +49,17 @@ function createGalleryCollectionsStore() {
 
   async function load(force = false) {
     if (!force && get({ subscribe }).loaded) return;
-    if (loadPromise) return loadPromise;
+    if (loadPromise) {
+      await loadPromise;
+      if (!force) return;
+    }
     update((current) => ({ ...current, loading: true }));
     loadPromise = (async () => {
       try {
         const collections = await apiFetch<GalleryCollection[]>('/api/gallery/collections', {}, 'loading collections');
         update(() => ({ collections, loaded: true, loading: false }));
       } catch (error) {
-        update((current) => ({ ...current, loading: false }));
+        update((current) => ({ ...current, loaded: false, loading: false }));
         throw error;
       } finally {
         loadPromise = null;

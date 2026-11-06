@@ -19,6 +19,7 @@ import { batchRequestBody, type GalleryLoadOptions, type GalleryNavigation, type
 import { nodeImageResult, type NodeImageResultItem } from '$lib/stores/nodeImage';
 import { abortError, waitForGalleryJob } from '$lib/stores/galleryJobEvents';
 import { downloadBlob, isAbortError } from '$lib/utils/network';
+import { galleryCollectionsStore } from '$lib/stores/galleryCollections';
 
 const STREAMING_ZIP_DOWNLOAD_BYTES_THRESHOLD = 64 * 1024 * 1024;
 const NODE_IMAGE_CANCEL_POLL_INTERVAL_MS = 250;
@@ -993,6 +994,7 @@ export function createDeferredGalleryActions(deps: GalleryActionDeps) {
         detail: get(t).gallery.refreshingAfterImport,
         progress: 100
       });
+      await galleryCollectionsStore.load(true).catch(() => {});
       await deps.loadGallery(1);
       showToast(get(t).messages.imported(finished.imported_count));
     } catch (error) {

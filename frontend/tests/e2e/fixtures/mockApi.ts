@@ -91,6 +91,7 @@ type NodeImageJobFixture = {
 type CollectionFixture = {
   id: string;
   name: string;
+  asset_alias?: string | null;
   position: number;
   is_default: boolean;
   created_at: string;

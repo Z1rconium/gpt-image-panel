@@ -166,3 +166,12 @@ describe('galleryCollectionsStore asset pack features', () => {
     );
   });
 });
+
+it('marks failed forced refresh stale so a later load retries', async () => {
+  api.apiFetch.mockReset().mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce([]);
+  await expect(galleryCollectionsStore.load(true)).rejects.toThrow('offline');
+  expect(get(galleryCollectionsStore).loaded).toBe(false);
+  await galleryCollectionsStore.load();
+  expect(api.apiFetch).toHaveBeenCalledTimes(2);
+  expect(get(galleryCollectionsStore).loaded).toBe(true);
+});

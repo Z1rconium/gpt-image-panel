@@ -95,7 +95,7 @@
             class="gallery-icon-action control-focus absolute left-1.5 top-1.5 border-stone-300 bg-white/90 text-stone-700 hover:bg-stone-100 disabled:opacity-30 dark:border-zinc-700 dark:bg-zinc-950/80 dark:text-zinc-300 dark:hover:bg-zinc-800"
             aria-label={$t.collections.downloadZip(collection.name)}
             title={$t.collections.downloadZip(collection.name)}
-            disabled={busy || !collection.image_count}
+            disabled={busy || (!collection.image_count && !collection.asset_alias)}
             onclick={() => void downloadZip(collection)}
           >
             <Download aria-hidden="true" />

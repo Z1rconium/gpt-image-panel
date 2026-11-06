@@ -16,6 +16,7 @@ This directory contains guidelines for backend development. Fill in each file wi
 |-------|-------------|--------|
 | [Directory Structure](./directory-structure.md) | Module organization and file layout | To fill |
 | [Database Guidelines](./database-guidelines.md) | ORM patterns, queries, migrations | To fill |
+| [Gallery Archives](./gallery-archives.md) | Collection archive and restore contracts | Documented |
 | [Agent Asset References](./agent-assets.md) | Agent attachment expansion and snapshot contracts | Documented |
 | [Image Generation](./image-generation.md) | Model admission, markup lifecycle, providers and SVG/GIF originals | Documented |
 | [DB Execution](./db-execution.md) | Executor accounting, SQLite policy owner and shutdown contracts | Documented |

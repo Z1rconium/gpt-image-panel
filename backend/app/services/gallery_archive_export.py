@@ -13,6 +13,7 @@ from ..core import settings as config
 from ..core.utils import utc_now
 from ..core.media import safe_image_path
 from ..schemas.gallery import GalleryEntry
+from ..repositories.gallery.collections import export_gallery_collections
 
 GalleryZipProgressCallback = Callable[[dict[str, Any]], None]
 from .gallery_archive_shared import (
@@ -103,12 +104,14 @@ def iter_gallery_zip_chunks(
     *,
     requested_count: int = 0,
     progress: GalleryZipProgressCallback | None = None,
+    include_empty_collections: bool = False,
 ) -> Generator[bytes, None, GalleryZipFileResult]:
     chunks, result = prepare_gallery_zip_chunks(
         entries,
         skipped=skipped,
         requested_count=requested_count,
         progress=progress,
+        include_empty_collections=include_empty_collections,
     )
     yield from chunks
     return result
@@ -120,12 +123,14 @@ def prepare_gallery_zip_chunks(
     *,
     requested_count: int = 0,
     progress: GalleryZipProgressCallback | None = None,
+    include_empty_collections: bool = False,
 ) -> tuple[Iterator[bytes], GalleryZipFileResult]:
     prepared = _prepare_gallery_zip_stream(
         entries,
         skipped=skipped,
         requested_count=requested_count,
         progress=progress,
+        include_empty_collections=include_empty_collections,
     )
     result = GalleryZipFileResult(
         requested_count=prepared.requested_count,
@@ -183,8 +188,11 @@ def _prepare_gallery_zip_stream(
     requested_count: int = 0,
     progress: GalleryZipProgressCallback | None = None,
     collection: dict[str, Any] | None = None,
+    include_empty_collections: bool = False,
 ) -> _PreparedGalleryZip:
     used_names: set[str] = set()
+    exported_ids: set[str] = set()
+    collections = export_gallery_collections()
     processed_count = 0
     exported_count = 0
     missing_count = 0
@@ -264,6 +272,7 @@ def _prepare_gallery_zip_stream(
                     name = unique_export_name(path, used_names)
                     metadata_entry = _resolve_export_metadata_for_entry(entry, path)
                     metadata_entry["filename"] = name
+                    exported_ids.add(str(metadata_entry.get("id") or ""))
                     if not first_image:
                         metadata_json.write(",")
                     first_image = False
@@ -290,6 +299,14 @@ def _prepare_gallery_zip_stream(
                     )
 
             metadata_json.write("]")
+            archive_collections = []
+            for item in collections:
+                ids = [image_id for image_id in item["image_ids"] if image_id in exported_ids]
+                if ids or include_empty_collections or (collection and item["id"] == collection.get("id")):
+                    archive_collections.append({**item, "image_ids": ids})
+            metadata_json.write(',"collections":' + _compact_json(archive_collections))
+            for item in archive_collections:
+                metadata_ndjson.write(_compact_json({"type": "collection", "collection": item}) + "\n")
             skipped_writer.close()
             if missing_count:
                 metadata_json.write(',"skipped":[')
@@ -327,6 +344,7 @@ def write_gallery_zip_file(
     skipped: Iterable[dict[str, Any]] | None = None,
     progress: GalleryZipProgressCallback | None = None,
     collection: dict[str, Any] | None = None,
+    include_empty_collections: bool = False,
 ) -> GalleryZipFileResult:
     """Write a ZIP archive to disk while reporting deterministic pack progress."""
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -339,6 +357,7 @@ def write_gallery_zip_file(
         requested_count=requested_count,
         progress=progress,
         collection=collection,
+        include_empty_collections=include_empty_collections,
     )
     bytes_written = 0
     last_emit_at = 0.0

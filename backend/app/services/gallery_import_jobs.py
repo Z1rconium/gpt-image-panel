@@ -14,7 +14,7 @@ from pathlib import Path
 
 
 
-from .gallery_archive_import import iter_import_gallery_entries
+from .gallery_archive_import import iter_import_gallery_entries, read_archive_collections
 from .job_queue import kick_thumbnail_dispatcher
 from ..core.utils import utc_now
 from ..core.errors import (
@@ -26,6 +26,7 @@ from ..repositories.coordination import (
     reserve_gallery_job_capacity,
 )
 from ..repositories.gallery.mutations import import_gallery_entries
+from ..repositories.gallery.collections import restore_gallery_collections
 from .gallery_common import (
     GALLERY_IMPORT_TERMINAL_STATUSES,
     MAX_ACTIVE_IMPORT_JOBS,
@@ -131,13 +132,18 @@ async def _run_gallery_import_job(job: dict) -> None:
             },
         )
 
-        def run_import() -> int:
-            return import_gallery_entries(
-                iter_import_gallery_entries(zip_path, progress=progress)
+        def run_import() -> tuple[int, bool]:
+            collections = read_archive_collections(zip_path)
+            image_id_map: dict[str, str] = {}
+            count = import_gallery_entries(
+                iter_import_gallery_entries(zip_path, progress=progress), image_id_map=image_id_map
             )
+            if count or (collections and all(not item["image_ids"] for item in collections)):
+                restore_gallery_collections(collections, image_id_map)
+            return count, bool(collections and all(not item["image_ids"] for item in collections))
 
-        imported_count = await run_db_operation(run_import)
-        if imported_count == 0:
+        imported_count, has_empty_collections = await run_db_operation(run_import)
+        if imported_count == 0 and not has_empty_collections:
             raise ValueError("No importable images found")
 
         processed_count = max(last_counts["processed_count"], requested_count)

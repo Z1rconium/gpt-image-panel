@@ -198,25 +198,28 @@ def _save_images_and_insert_gallery_entries(
 
 def import_gallery_entries(
     entries_data: Iterable[tuple[bytes, dict[str, Any]]],
+    *, image_id_map: dict[str, str] | None = None,
 ) -> int:
     total_imported = 0
     batch: list[tuple[bytes, dict[str, Any]]] = []
     for item in entries_data:
         batch.append(item)
         if len(batch) >= GALLERY_IMPORT_BATCH_SIZE:
-            total_imported += _import_gallery_entries_batch(batch)
+            total_imported += _import_gallery_entries_batch(batch, image_id_map=image_id_map)
             batch = []
     if batch:
-        total_imported += _import_gallery_entries_batch(batch)
+        total_imported += _import_gallery_entries_batch(batch, image_id_map=image_id_map)
     return total_imported
 
 
 def _import_gallery_entries_batch(
     entries_data: Iterable[tuple[bytes, dict[str, Any]]],
+    *, image_id_map: dict[str, str] | None = None,
 ) -> int:
     _ensure_database()
     prepared_files: list[_PreparedGalleryFile] = []
     normalized_entries: list[dict[str, Any]] = []
+    source_ids: list[str] = []
     try:
         for image_bytes, entry in entries_data:
             normalized = _normalize_gallery_entry(entry)
@@ -231,6 +234,7 @@ def _import_gallery_entries_batch(
             if prepared.thumbnail_filename:
                 normalized["thumbnail_filename"] = prepared.thumbnail_filename
             normalized_entries.append(normalized)
+            source_ids.append(str(entry.get("_archive_source_id") or ""))
 
         if not normalized_entries:
             return 0
@@ -248,6 +252,10 @@ def _import_gallery_entries_batch(
                             _insert_gallery_entries_on_conn(conn, normalized_entries)
 
             _promote_prepared_thumbnails(prepared_files)
+        if image_id_map is not None:
+            for source_id, entry in zip(source_ids, normalized_entries):
+                if source_id:
+                    image_id_map.setdefault(source_id, entry["id"])
         return len(normalized_entries)
     except BaseException:
         _cleanup_prepared_gallery_files(prepared_files)

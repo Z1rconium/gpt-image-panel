@@ -12,6 +12,7 @@ from typing import Any
 from ..runtime.blocking import run_file_operation
 
 from ..core.errors import InvalidRequestError
+from ..schemas.gallery import _normalize_asset_alias, _normalize_collection_name
 from ..core import settings as config
 from ..core.utils import utc_now
 from ..core.generated_media import validate_generated_image_bytes as validate_image_bytes
@@ -411,6 +412,7 @@ def _iter_zip_import_entries(
 
         entry = {
             **raw_entry,
+            "_archive_source_id": str(raw_entry.get("id") or ""),
             "id": image_id,
             "filename": filename,
             "created_at": str(raw_entry.get("created_at") or utc_now()),
@@ -418,3 +420,56 @@ def _iter_zip_import_entries(
         importable_count += 1
         _emit_import_progress(progress, processed_count, importable_count, skipped_count)
         yield image_bytes, entry
+
+
+def read_archive_collections(zip_path: Path) -> list[dict[str, Any]]:
+    """Read and validate optional collection records before importing images."""
+    try:
+        with zipfile.ZipFile(zip_path) as zf:
+            manifest = validate_import_zip_infos(zf)
+            source_ids = []
+            if manifest.use_ndjson:
+                raw_collections = []
+                with zf.open("metadata.ndjson") as stream:
+                    for line in stream:
+                        if not line.strip():
+                            continue
+                        try:
+                            record = json.loads(line)
+                        except (ValueError, UnicodeDecodeError) as exc:
+                            raise InvalidRequestError("metadata.ndjson is invalid") from exc
+                        if isinstance(record, dict) and record.get("type") == "collection":
+                            raw_collections.append(record.get("collection"))
+                        elif isinstance(record, dict) and record.get("type") == "image" and isinstance(record.get("image"), dict):
+                            source_ids.append(str(record["image"].get("id") or ""))
+            else:
+                metadata = _read_import_metadata_json(zf)
+                raw_collections = metadata.get("collections", [])
+                source_ids = [str(image.get("id") or "") for image in metadata.get("images", []) if isinstance(image, dict)]
+    except zipfile.BadZipFile as exc:
+        raise InvalidRequestError("Import file must be a valid ZIP") from exc
+    if not isinstance(raw_collections, list):
+        raise InvalidRequestError("Import collections must be a list")
+    nonempty_ids = [image_id for image_id in source_ids if image_id]
+    if raw_collections and len(nonempty_ids) != len(set(nonempty_ids)):
+        raise InvalidRequestError("Import metadata has ambiguous image IDs")
+    collections = []
+    has_default = False
+    for item in raw_collections:
+        if not isinstance(item, dict) or not isinstance(item.get("name"), str):
+            raise InvalidRequestError("Import collection is invalid")
+        alias = item.get("asset_alias")
+        ids = item.get("image_ids")
+        is_default = item.get("is_default", False)
+        if not isinstance(is_default, bool) or (is_default and has_default):
+            raise InvalidRequestError("Import collection default is invalid")
+        has_default = has_default or is_default
+        if (alias is not None and not isinstance(alias, str)) or not isinstance(ids, list) or len(ids) > config.IMPORT_MAX_ENTRIES or any(not isinstance(i, str) or not i for i in ids) or len(set(ids)) != len(ids):
+            raise InvalidRequestError("Import collection is invalid")
+        try:
+            name = _normalize_collection_name(item["name"])
+            alias = _normalize_asset_alias(alias)
+        except ValueError as exc:
+            raise InvalidRequestError("Import collection is invalid") from exc
+        collections.append({"name": name, "asset_alias": alias, "image_ids": ids, "is_default": is_default})
+    return collections

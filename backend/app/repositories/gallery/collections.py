@@ -390,3 +390,66 @@ def reorder_gallery_collection_items(
             )
             return _get_collection_on_conn(conn, collection_id)
 
+
+
+def export_gallery_collections() -> list[dict[str, Any]]:
+    """Snapshot collection names and ordered member IDs for archive export."""
+    _ensure_database()
+    with _connect() as conn:
+        collections = conn.execute(
+            "SELECT id, name, asset_alias, is_default FROM gallery_collections ORDER BY position, created_at, id"
+        ).fetchall()
+        members = conn.execute(
+            """SELECT collection_id, image_id FROM gallery_collection_items
+               ORDER BY collection_id, position IS NULL, position, added_at, image_id"""
+        ).fetchall()
+    by_collection: dict[str, list[str]] = {}
+    for row in members:
+        by_collection.setdefault(row['collection_id'], []).append(row['image_id'])
+    return [dict(row) | {'is_default': bool(row['is_default']), 'image_ids': by_collection.get(row['id'], [])} for row in collections]
+
+
+def restore_gallery_collections(collections: list[dict[str, Any]], image_ids: dict[str, str]) -> None:
+    """Restore all collection metadata together, without replacing existing collections."""
+    _ensure_database()
+    now = utc_now()
+    with _connect() as conn:
+        with _transaction(conn):
+            position = int(conn.execute('SELECT COALESCE(MAX(position), -1) + 1 FROM gallery_collections').fetchone()[0])
+            existing = conn.execute('SELECT name, asset_alias FROM gallery_collections').fetchall()
+            names = {row['name'].casefold() for row in existing}
+            aliases = {row['asset_alias'].casefold() for row in existing if row['asset_alias']}
+            has_default = bool(conn.execute('SELECT 1 FROM gallery_collections WHERE is_default = 1 LIMIT 1').fetchone())
+            for collection in collections:
+                original_name = collection['name']
+                name = original_name
+                suffix_number = 1
+                while name.casefold() in names:
+                    suffix = f' ({suffix_number})'
+                    name = original_name[:60-len(suffix)].rstrip() + suffix
+                    suffix_number += 1
+                original_alias = collection['asset_alias']
+                alias = original_alias
+                suffix_number = 1
+                while alias and alias.casefold() in aliases:
+                    suffix = f'_{suffix_number}'
+                    alias = original_alias[:32-len(suffix)] + suffix
+                    suffix_number += 1
+                names.add(name.casefold())
+                if alias:
+                    aliases.add(alias.casefold())
+                collection_id = uuid.uuid4().hex
+                is_default = bool(collection.get('is_default')) and not has_default
+                has_default = has_default or is_default
+                conn.execute('INSERT INTO gallery_collections (id, name, asset_alias, position, is_default, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                             (collection_id, name, alias, position, int(is_default), now, now))
+                position += 1
+                seen = set()
+                for old_id in collection['image_ids']:
+                    image_id = image_ids.get(old_id)
+                    if image_id is not None and image_id not in seen:
+                        seen.add(image_id)
+                        conn.execute('INSERT INTO gallery_collection_items (collection_id, image_id, added_at, position) VALUES (?, ?, ?, ?)',
+                                     (collection_id, image_id, now, len(seen) - 1))
+            if collections:
+                _invalidate_gallery_query_caches_on_conn(conn)
