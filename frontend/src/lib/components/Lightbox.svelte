@@ -679,40 +679,50 @@
           </div>
           <ImageCollections imageId={image.id} />
           <ImageTrace image={image} prompt={image.prompt} requestedSize={image.size} requestedQuality={image.quality} presetName={image.api_preset_name} />
-          {#if aiAssistantEnabled}
-            <section class="rounded-lg border border-stone-200 bg-stone-50/80 p-3 dark:border-zinc-800 dark:bg-zinc-950/50">
-              <div class="mb-3 flex items-center justify-between gap-3">
-                <h3 class="text-xs font-semibold text-stone-700 dark:text-zinc-300">{$t.aiAssistant.title}</h3>
-                {#if aiLoading}
-                  <span class="text-[11px] text-zinc-500">{$t.aiAssistant.working}</span>
+          <section class="rounded-lg border border-stone-200 bg-stone-50/80 p-3 dark:border-zinc-800 dark:bg-zinc-950/50 {aiAssistantEnabled ? '' : 'opacity-75'}">
+            <div class="mb-3 flex items-center justify-between gap-3">
+              <h3 class="text-xs font-semibold text-stone-700 dark:text-zinc-300">{$t.aiAssistant.title}</h3>
+              {#if aiLoading}
+                <span class="text-[11px] text-zinc-500">{$t.aiAssistant.working}</span>
+              {/if}
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                disabled={!aiAssistantEnabled || aiLoading || /\.svg$/i.test(image.filename)}
+                title={!aiAssistantEnabled ? $t.aiAssistant.unavailable : /\.svg$/i.test(image.filename) ? $t.promptForm.rasterOnly : undefined}
+                class="control-focus rounded-lg border px-2 py-2 text-xs transition-colors {aiAssistantEnabled ? 'border-zinc-700 text-zinc-300 hover:bg-zinc-800' : 'cursor-not-allowed border-stone-300 bg-stone-100 text-stone-400 opacity-60 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-600'} disabled:cursor-not-allowed disabled:opacity-50"
+                onclick={() => onAiDescribe(image)}
+              >
+                {$t.lightbox.aiDescribe}
+              </button>
+              <button
+                type="button"
+                disabled={!aiAssistantEnabled || aiLoading || /\.svg$/i.test(image.filename)}
+                title={!aiAssistantEnabled ? $t.aiAssistant.unavailable : /\.svg$/i.test(image.filename) ? $t.promptForm.rasterOnly : undefined}
+                class="control-focus rounded-lg border px-2 py-2 text-xs transition-colors {aiAssistantEnabled ? 'border-cyan-500/35 text-cyan-700 hover:bg-cyan-500/10 dark:text-cyan-200' : 'cursor-not-allowed border-stone-300 bg-stone-100 text-stone-400 opacity-60 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-600'} disabled:cursor-not-allowed disabled:opacity-50"
+                onclick={() => onAiAnalyze(image)}
+              >
+                {$t.lightbox.aiAnalyze}
+              </button>
+            </div>
+            {#if aiMetadata && aiMetadata.image_id === image.id && (aiMetadata.description || aiMetadata.prompt)}
+              <div class="mt-3 space-y-3 text-xs leading-5 text-stone-700 dark:text-zinc-300">
+                {#if aiMetadata.description}
+                  <div>
+                    <div class="mb-1 font-semibold text-stone-500 dark:text-zinc-500">{$t.lightbox.aiDescription}</div>
+                    <p class="whitespace-pre-wrap">{aiMetadata.description}</p>
+                  </div>
+                {/if}
+                {#if aiMetadata.prompt}
+                  <div>
+                    <div class="mb-1 font-semibold text-stone-500 dark:text-zinc-500">{$t.lightbox.aiPromptResult}</div>
+                    <p class="whitespace-pre-wrap">{aiMetadata.prompt}</p>
+                  </div>
                 {/if}
               </div>
-              <div class="grid grid-cols-2 gap-2">
-                <button type="button" disabled={aiLoading || /\.svg$/i.test(image.filename)} title={/\.svg$/i.test(image.filename) ? $t.promptForm.rasterOnly : undefined} class="control-focus rounded-lg border border-zinc-700 px-2 py-2 text-xs text-zinc-300 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50" onclick={() => onAiDescribe(image)}>
-                  {$t.lightbox.aiDescribe}
-                </button>
-                <button type="button" disabled={aiLoading || /\.svg$/i.test(image.filename)} title={/\.svg$/i.test(image.filename) ? $t.promptForm.rasterOnly : undefined} class="control-focus rounded-lg border border-cyan-500/35 px-2 py-2 text-xs text-cyan-700 hover:bg-cyan-500/10 disabled:cursor-not-allowed disabled:opacity-50 dark:text-cyan-200" onclick={() => onAiAnalyze(image)}>
-                  {$t.lightbox.aiAnalyze}
-                </button>
-              </div>
-              {#if aiMetadata && aiMetadata.image_id === image.id && (aiMetadata.description || aiMetadata.prompt)}
-                <div class="mt-3 space-y-3 text-xs leading-5 text-stone-700 dark:text-zinc-300">
-                  {#if aiMetadata.description}
-                    <div>
-                      <div class="mb-1 font-semibold text-stone-500 dark:text-zinc-500">{$t.lightbox.aiDescription}</div>
-                      <p class="whitespace-pre-wrap">{aiMetadata.description}</p>
-                    </div>
-                  {/if}
-                  {#if aiMetadata.prompt}
-                    <div>
-                      <div class="mb-1 font-semibold text-stone-500 dark:text-zinc-500">{$t.lightbox.aiPromptResult}</div>
-                      <p class="whitespace-pre-wrap">{aiMetadata.prompt}</p>
-                    </div>
-                  {/if}
-                </div>
-              {/if}
-            </section>
-          {/if}
+            {/if}
+          </section>
           <div class="grid grid-cols-2 gap-2 text-xs">
             <div class="rounded-lg border border-stone-200 bg-stone-50/80 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-950/50">
               <div class="text-stone-400 dark:text-zinc-600">{$t.common.size}</div>

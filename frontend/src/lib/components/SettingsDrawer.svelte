@@ -209,7 +209,8 @@
     draft.promptGuard = activePreset.prompt_guard ?? settings.prompt_guard ?? false;
     draft.upstreamSocks5Proxy = settings.has_upstream_socks5_proxy ? settings.upstream_socks5_proxy_masked : '';
     draft.webhookUrl = settings.has_webhook_url ? settings.webhook_url_masked : '';
-    draft.promptOptimizerEnabled = Boolean(settings.prompt_optimizer?.enabled);
+    const unifiedAiEnabled = Boolean(settings.ai_assistant?.enabled && settings.prompt_optimizer?.enabled);
+    draft.promptOptimizerEnabled = unifiedAiEnabled;
     draft.promptOptimizerApiUrl = settings.prompt_optimizer?.api_url || '';
     draft.promptOptimizerModel = settings.prompt_optimizer?.model || 'gpt-4o-mini';
     draft.promptOptimizerTimeoutSeconds = settings.prompt_optimizer?.timeout_seconds || 60;
@@ -219,7 +220,7 @@
       settings.prompt_optimizer?.api_key_env_var,
       settings.prompt_optimizer?.api_key_secret_id
     );
-    draft.aiAssistantEnabled = Boolean(settings.ai_assistant?.enabled);
+    draft.aiAssistantEnabled = unifiedAiEnabled;
     draft.aiAssistantVisionModel = settings.ai_assistant?.vision_model || settings.prompt_optimizer?.model || 'gpt-4o-mini';
     draft.agentEnabled = Boolean(settings.ai_assistant?.agent_enabled);
     draft.agentModel = settings.ai_assistant?.agent_model || '';
@@ -252,6 +253,10 @@
       settings.nodeimage?.api_key_env_var,
       settings.nodeimage?.api_key_secret_id
     );
+  });
+
+  $effect(() => {
+    draft.promptOptimizerEnabled = draft.aiAssistantEnabled;
   });
 
   $effect(() => {
@@ -582,12 +587,10 @@
         {r2HealthChecking}
         bind:nodeImageEnabled={draft.nodeImageEnabled}
         bind:nodeImageApiKey={draft.nodeImageApiKey}
-        bind:promptOptimizerEnabled={draft.promptOptimizerEnabled}
         bind:promptOptimizerApiUrl={draft.promptOptimizerApiUrl}
         bind:promptOptimizerModel={draft.promptOptimizerModel}
         bind:promptOptimizerTimeoutSeconds={draft.promptOptimizerTimeoutSeconds}
         bind:promptOptimizerApiKey={draft.promptOptimizerApiKey}
-        {promptOptimizerHealthChecking}
         bind:aiAssistantEnabled={draft.aiAssistantEnabled}
         bind:aiAssistantVisionModel={draft.aiAssistantVisionModel}
         bind:agentEnabled={draft.agentEnabled}
@@ -610,7 +613,6 @@
         {checkR2Health}
         {normalizePromptOptimizerTimeout}
         {openSystemPromptEditor}
-        {checkPromptOptimizerHealth}
         {checkAiAssistantHealth}
       />
 

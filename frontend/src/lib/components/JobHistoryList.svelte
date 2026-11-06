@@ -401,11 +401,12 @@
               </div>
             {/if}
             <div class="mt-4 flex flex-wrap justify-end gap-2">
-              {#if aiAssistantEnabled && isFailureJobStatus(job.status)}
+              {#if isFailureJobStatus(job.status)}
                 <button
                   type="button"
-                  class="control-focus rounded-lg border border-cyan-500/35 px-3 py-2 text-xs font-medium text-cyan-200 hover:bg-cyan-500/10 disabled:cursor-not-allowed disabled:opacity-40"
-                  disabled={diagnosingJobId === job.job_id}
+                  class="control-focus rounded-lg border px-3 py-2 text-xs font-medium transition-colors {aiAssistantEnabled ? 'border-cyan-500/35 text-cyan-200 hover:bg-cyan-500/10' : 'cursor-not-allowed border-stone-300 bg-stone-100 text-stone-400 opacity-60 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-600'} disabled:cursor-not-allowed disabled:opacity-40"
+                  disabled={!aiAssistantEnabled || diagnosingJobId === job.job_id}
+                  title={!aiAssistantEnabled ? $t.aiAssistant.unavailable : undefined}
                   onclick={() => onDiagnoseJob(job)}
                 >
                   {diagnosingJobId === job.job_id ? $t.jobs.diagnosing : $t.jobs.diagnose}

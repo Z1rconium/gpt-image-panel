@@ -12,9 +12,10 @@
   interface Props {
     onApplyPrompt?: (prompt: string) => void;
     enabled?: boolean;
+    visible?: boolean;
   }
 
-  let { onApplyPrompt = () => {}, enabled = true }: Props = $props();
+  let { onApplyPrompt = () => {}, enabled = true, visible = true }: Props = $props();
 
   type Phase = 'draft' | 'review';
   type FloatingPosition = {
@@ -61,7 +62,7 @@
   $effect(() => {
     // Untracked: the observer internally reads and re-clamps the floating
     // position, which must not become a dependency of this effect.
-    untrack(() => syncTriggerObserver(enabled, triggerButton));
+    untrack(() => syncTriggerObserver(visible, triggerButton));
   });
 
   function readStoredPosition(): FloatingPosition | null {
@@ -392,17 +393,19 @@
   });
 </script>
 
-{#if enabled}
+{#if visible}
   <button
     type="button"
     bind:this={triggerButton}
+    disabled={!enabled}
     data-testid="prompt-optimizer-assistant-trigger"
-    class:cursor-grabbing={dragging}
-    class="control-focus fixed bottom-4 right-3 z-40 inline-flex h-11 w-11 touch-none select-none items-center justify-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-600 px-0 text-sm font-semibold text-white shadow-[0_18px_36px_-24px_rgba(16,185,129,0.6)] transition-transform hover:bg-emerald-500 active:scale-[0.98] sm:bottom-6 sm:right-6 sm:w-auto sm:rounded-full sm:px-4"
+    class:cursor-grabbing={dragging && enabled}
+    class:cursor-not-allowed={!enabled}
+    class="control-focus fixed bottom-4 right-3 z-40 inline-flex h-11 w-11 touch-none select-none items-center justify-center gap-2 rounded-lg border text-sm font-semibold transition-transform active:scale-[0.98] sm:bottom-6 sm:right-6 sm:w-auto sm:rounded-full sm:px-4 {enabled ? 'border-emerald-500/30 bg-emerald-600 text-white shadow-[0_18px_36px_-24px_rgba(16,185,129,0.6)] hover:bg-emerald-500' : 'cursor-not-allowed border-stone-300 bg-stone-200/90 text-stone-400 shadow-none dark:border-zinc-700 dark:bg-zinc-800/90 dark:text-zinc-500'}"
     aria-haspopup="dialog"
     aria-expanded={open}
     aria-label={$t.promptOptimizerAssistant.open}
-    title={$t.promptOptimizerAssistant.open}
+    title={enabled ? $t.promptOptimizerAssistant.open : $t.aiAssistant.unavailable}
     style:left={floatingPosition ? `${floatingPosition.x}px` : null}
     style:top={floatingPosition ? `${floatingPosition.y}px` : null}
     style:right={floatingPosition ? 'auto' : null}

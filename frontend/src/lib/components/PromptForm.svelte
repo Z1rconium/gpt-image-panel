@@ -172,7 +172,7 @@
         <button
           type="button"
           disabled={optimizeDisabled}
-          class="control-focus rounded-lg border border-emerald-500/40 px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-500/10 disabled:cursor-not-allowed disabled:border-stone-300 disabled:text-emerald-700 disabled:opacity-60 dark:text-emerald-200 dark:disabled:border-zinc-700 dark:disabled:text-emerald-200"
+          class="control-focus rounded-lg border border-emerald-500/40 px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-500/10 disabled:cursor-not-allowed disabled:border-stone-300 disabled:bg-stone-100 disabled:text-stone-400 disabled:opacity-60 dark:border-emerald-500/30 dark:text-emerald-200 dark:disabled:border-zinc-700 dark:disabled:bg-zinc-800/50 dark:disabled:text-zinc-500"
           title={optimizerEnabled ? $t.promptForm.optimize : $t.promptForm.optimizerUnavailable}
           onclick={onOptimize}
         >
@@ -388,7 +388,8 @@
         <button
           type="button"
           disabled={loading || editPlanning || !editPlannerEnabled || !promptForm.prompt.trim()}
-          class="ui-button-secondary px-4"
+          class="ui-button-secondary px-4 disabled:cursor-not-allowed disabled:border-stone-300 disabled:bg-stone-100 disabled:text-stone-400 disabled:opacity-60 dark:disabled:border-zinc-700 dark:disabled:bg-zinc-800/50 dark:disabled:text-zinc-500"
+          title={!editPlannerEnabled ? $t.aiAssistant.unavailable : undefined}
           onclick={onPlanEdit}
         >
           {editPlanning ? $t.promptForm.planningEdit : $t.promptForm.planEdit}

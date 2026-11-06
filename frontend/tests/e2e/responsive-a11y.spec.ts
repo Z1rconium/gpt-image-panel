@@ -19,8 +19,8 @@ test('settings and prompt snippets fit a mobile viewport without horizontal over
 
   await page.getByRole('button', { name: 'Settings' }).click();
   const settingsDrawer = page.getByRole('dialog', { name: 'Settings' });
-  await settingsDrawer.getByRole('button', { name: 'Test Prompt Optimizer' }).click();
-  const healthResult = page.getByTestId('prompt-optimizer-health-result');
+  await settingsDrawer.getByRole('button', { name: 'Test AI Assistant' }).click();
+  const healthResult = page.getByTestId('ai-assistant-health-result');
   await expect(healthResult).toBeVisible();
   await expect(healthResult).toHaveCSS('background-color', 'rgb(236, 253, 245)');
   expect(await settingsDrawer.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);

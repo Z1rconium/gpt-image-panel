@@ -198,6 +198,18 @@ describe('buildSettingsPayload', () => {
     expect(hasSettingsChanges(draft, settings, activePreset)).toBe(true);
     expect(buildSettingsPayload(draft, settings).prompt_guard).toBe(true);
   });
+
+  it('synchronizes ai_assistant and prompt_optimizer enabled state in buildSettingsPayload', () => {
+    const disabledDraft = { ...pristineDraft(), aiAssistantEnabled: false };
+    const payload = buildSettingsPayload(disabledDraft, settings);
+    expect(payload.prompt_optimizer?.enabled).toBe(false);
+    expect(payload.ai_assistant?.enabled).toBe(false);
+
+    const enabledDraft = { ...pristineDraft(), aiAssistantEnabled: true };
+    const enabledPayload = buildSettingsPayload(enabledDraft, settings);
+    expect(enabledPayload.prompt_optimizer?.enabled).toBe(true);
+    expect(enabledPayload.ai_assistant?.enabled).toBe(true);
+  });
 });
 
 describe('agent settings', () => {

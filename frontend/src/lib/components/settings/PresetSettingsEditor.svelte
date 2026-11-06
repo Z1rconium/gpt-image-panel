@@ -10,7 +10,6 @@
   import { RESPONSE_FORMAT_OPTIONS } from '$lib/utils/promptForm';
   import AiAssistantSettingsSection from './AiAssistantSettingsSection.svelte';
   import NodeImageSettingsSection from './NodeImageSettingsSection.svelte';
-  import PromptOptimizerSettingsSection from './PromptOptimizerSettingsSection.svelte';
   import CustomProviderSection from './CustomProviderSection.svelte';
   import R2SettingsSection from './R2SettingsSection.svelte';
   import ImageModelPicker from '$lib/components/ImageModelPicker.svelte';
@@ -43,12 +42,10 @@
   export let r2HealthChecking = false;
   export let nodeImageEnabled = false;
   export let nodeImageApiKey = '';
-  export let promptOptimizerEnabled = false;
   export let promptOptimizerApiUrl = '';
   export let promptOptimizerModel = '';
   export let promptOptimizerTimeoutSeconds: number | string = 60;
   export let promptOptimizerApiKey = '';
-  export let promptOptimizerHealthChecking = false;
   export let aiAssistantEnabled = false;
   export let aiAssistantVisionModel = '';
   export let agentEnabled = false;
@@ -71,7 +68,6 @@
   export let checkR2Health: () => void = () => {};
   export let normalizePromptOptimizerTimeout: () => void = () => {};
   export let openSystemPromptEditor: () => void = () => {};
-  export let checkPromptOptimizerHealth: () => void = () => {};
   export let checkAiAssistantHealth: () => void = () => {};
 
   let dragIndex: number | null = null;
@@ -285,21 +281,13 @@
             bind:apiKey={nodeImageApiKey}
           />
 
-          <PromptOptimizerSettingsSection
-            bind:enabled={promptOptimizerEnabled}
-            bind:apiUrl={promptOptimizerApiUrl}
-            bind:model={promptOptimizerModel}
-            bind:timeoutSeconds={promptOptimizerTimeoutSeconds}
-            bind:apiKey={promptOptimizerApiKey}
-            healthChecking={promptOptimizerHealthChecking}
-            onNormalizeTimeout={normalizePromptOptimizerTimeout}
-            onOpenSystemPrompt={openSystemPromptEditor}
-            onCheck={checkPromptOptimizerHealth}
-          />
-
           <AiAssistantSettingsSection
             bind:enabled={aiAssistantEnabled}
+            bind:apiUrl={promptOptimizerApiUrl}
+            bind:model={promptOptimizerModel}
             bind:visionModel={aiAssistantVisionModel}
+            bind:timeoutSeconds={promptOptimizerTimeoutSeconds}
+            bind:apiKey={promptOptimizerApiKey}
             bind:agentEnabled
             bind:agentModel
             bind:agentMaxToolRounds
@@ -307,6 +295,8 @@
             bind:agentWebSearchEnabled
             bind:agentWebSearchSupported
             healthChecking={aiAssistantHealthChecking}
+            onNormalizeTimeout={normalizePromptOptimizerTimeout}
+            onOpenSystemPrompt={openSystemPromptEditor}
             onCheck={checkAiAssistantHealth}
           />
         </div>

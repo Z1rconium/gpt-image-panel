@@ -12,6 +12,7 @@
   export let jobsOpen = false;
   export let settingsOpen = false;
   export let preferencesOpen = false;
+  export let aiAssistantEnabled = true;
   export let agentAvailable = false;
   export let mode: 'studio' | 'agent' = 'studio';
   export let onModeChange: (mode: 'studio' | 'agent') => void = () => {};
@@ -121,14 +122,17 @@
       {/if}
       <button
         type="button"
-        class="mobile-touch-target control-focus inline-flex h-10 min-w-10 items-center justify-center rounded-lg border border-emerald-500/35 px-2 text-emerald-700 transition-colors hover:bg-emerald-500/10 dark:text-emerald-200"
-        title={$t.header.reversePrompt}
+        disabled={!aiAssistantEnabled}
+        class="mobile-touch-target control-focus inline-flex h-10 min-w-10 items-center justify-center rounded-lg border px-2 transition-colors {aiAssistantEnabled ? 'border-emerald-500/35 text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-200' : 'cursor-not-allowed border-stone-300 bg-stone-100 text-stone-400 opacity-60 dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-500'} disabled:cursor-not-allowed"
+        title={aiAssistantEnabled ? $t.header.reversePrompt : $t.imagePrompt.unavailable}
         aria-label={$t.header.reversePrompt}
         aria-controls="image-prompt-dialog"
         aria-expanded={imagePromptOpen}
         on:mouseenter={onPrefetchImagePrompt}
         on:focus={onPrefetchImagePrompt}
-        on:click={() => onOpenImagePrompt()}
+        on:click={() => {
+          if (aiAssistantEnabled) onOpenImagePrompt();
+        }}
       >
         <span class="text-sm font-semibold leading-none">{$t.header.reversePromptShort}</span>
       </button>

@@ -148,7 +148,7 @@ export function hasSettingsChanges(
     providerConfigChanged(draft.providerConfigText, activePreset?.provider_config) ||
     proxyValue !== currentProxyMask ||
     webhookValue !== currentWebhookMask ||
-    draft.promptOptimizerEnabled !== Boolean(settings?.prompt_optimizer?.enabled) ||
+    draft.aiAssistantEnabled !== Boolean(settings?.ai_assistant?.enabled && settings?.prompt_optimizer?.enabled) ||
     draft.promptOptimizerApiUrl !== (settings?.prompt_optimizer?.api_url || '') ||
     draft.promptOptimizerModel !== (settings?.prompt_optimizer?.model || 'gpt-4o-mini') ||
     draft.promptOptimizerTimeoutSeconds !== (settings?.prompt_optimizer?.timeout_seconds || 60) ||
@@ -257,7 +257,7 @@ export function buildSettingsPayload(draft: SettingsDraft, settings: SettingsRes
     upstream_socks5_proxy: proxyValue === currentProxyMask ? null : proxyValue,
     webhook_url: webhookValue === currentWebhookMask ? null : webhookValue,
     prompt_optimizer: {
-      enabled: draft.promptOptimizerEnabled,
+      enabled: draft.aiAssistantEnabled,
       api_url: draft.promptOptimizerApiUrl.trim(),
       model: draft.promptOptimizerModel.trim(),
       timeout_seconds: promptOptimizerTimeoutValue(draft.promptOptimizerTimeoutSeconds),

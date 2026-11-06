@@ -44,7 +44,9 @@ const BUDGETS = {
   // 14.0 -> 14.5 KiB: the Vite 8 / SvelteKit 3 toolchain emits +550 B gzip of
   // CSS for the same sources (14,222 -> 14,772 B, measured before/after the
   // upgrade); homepage JS drops by about 16 KiB gzip in the same upgrade.
-  mainCssGzipBytes: 14.5 * 1024,
+  // 14.5 -> 15.0 KiB: AI Assistant and Prompt Optimizer unified disabled UI
+  // styling across workspace controls (+100 B gzip).
+  mainCssGzipBytes: 15.0 * 1024,
   oglGzipBytes: 39.4 * 1024,
   oglReduction: 0.2
 };

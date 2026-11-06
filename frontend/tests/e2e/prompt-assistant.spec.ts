@@ -37,21 +37,7 @@ test('prompt helper tags append once and optimizer replaces prompt with undo', a
   await expect(prompt).toHaveValue('small cabin, high detail');
 });
 
-test('floating prompt optimizer stays hidden when unavailable', async ({ page }) => {
-  await loadApp(page, {
-    settings: {
-      ...settingsResponse,
-      prompt_optimizer: {
-        ...settingsResponse.prompt_optimizer,
-        enabled: false
-      }
-    }
-  });
-
-  await expect(page.getByTestId('prompt-optimizer-assistant-trigger')).toHaveCount(0);
-});
-
-test('AI Assistant controls use shared prompt optimizer API config', async ({ page }) => {
+test('floating prompt optimizer is visible but disabled when AI Assistant is not enabled', async ({ page }) => {
   await loadApp(page, {
     settings: {
       ...settingsResponse,
@@ -61,6 +47,27 @@ test('AI Assistant controls use shared prompt optimizer API config', async ({ pa
       },
       ai_assistant: {
         ...settingsResponse.ai_assistant,
+        enabled: false
+      }
+    }
+  });
+
+  const trigger = page.getByTestId('prompt-optimizer-assistant-trigger');
+  await expect(trigger).toBeVisible();
+  await expect(trigger).toBeDisabled();
+});
+
+test('AI Assistant controls use shared API config when enabled', async ({ page }) => {
+  await loadApp(page, {
+    settings: {
+      ...settingsResponse,
+      prompt_optimizer: {
+        ...settingsResponse.prompt_optimizer,
+        enabled: true
+      },
+      ai_assistant: {
+        ...settingsResponse.ai_assistant,
+        enabled: true,
         api_url: '',
         model: '',
         has_api_key: false
@@ -70,12 +77,88 @@ test('AI Assistant controls use shared prompt optimizer API config', async ({ pa
 
   await page.getByLabel('Instruction').fill('sunlit alley with a bicycle');
 
-  await expect(page.getByText('Enable AI Assistant and configure Prompt Optimizer in Settings')).toHaveCount(0);
+  await expect(page.getByText('Enable and configure AI Assistant in Settings')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Rewrite' })).toBeEnabled();
   await expect(page.getByTestId('ai-assistant-panel').getByRole('button', { name: 'Quick optimize' })).toBeDisabled();
   await expect(page.getByRole('button', { name: 'Check' })).toBeEnabled();
   await expect(page.getByRole('button', { name: 'Variants' })).toBeEnabled();
   await expect(page.getByRole('button', { name: 'Params' })).toBeEnabled();
+});
+
+test('all AI modification controls are disabled when AI Assistant is not enabled', async ({ page }) => {
+  await loadApp(page, {
+    settings: {
+      ...settingsResponse,
+      prompt_optimizer: {
+        ...settingsResponse.prompt_optimizer,
+        enabled: false
+      },
+      ai_assistant: {
+        ...settingsResponse.ai_assistant,
+        enabled: false
+      }
+    },
+    historyJobs: [
+      {
+        ...job,
+        id: 'failed-job-1',
+        status: 'error',
+        error: 'Generation failed'
+      }
+    ]
+  });
+
+  // PromptForm Optimize and Plan edit
+  await expect(page.getByRole('button', { name: 'Optimize', exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Plan edit', exact: true })).toBeDisabled();
+
+  // AiAssistantPanel instruction input and action buttons
+  const assistantPanel = page.getByTestId('ai-assistant-panel');
+  await expect(assistantPanel.getByLabel('Instruction')).toBeDisabled();
+  await expect(assistantPanel.getByRole('button', { name: 'Rewrite' })).toBeDisabled();
+  await expect(assistantPanel.getByRole('button', { name: 'Quick optimize' })).toBeDisabled();
+  await expect(assistantPanel.getByRole('button', { name: 'Check' })).toBeDisabled();
+  await expect(assistantPanel.getByRole('button', { name: 'Variants' })).toBeDisabled();
+  await expect(assistantPanel.getByRole('button', { name: 'Params' })).toBeDisabled();
+
+  // Floating Quick optimize capsule
+  const trigger = page.getByTestId('prompt-optimizer-assistant-trigger');
+  await expect(trigger).toBeVisible();
+  await expect(trigger).toBeDisabled();
+
+  // Header Reverse prompt button
+  await expect(page.getByRole('button', { name: 'Reverse prompt', exact: true })).toBeDisabled();
+
+  // Lightbox AI Describe and AI Analyze buttons
+  await page.locator('img[alt="First gallery image"]').click();
+  const lightbox = page.getByRole('dialog', { name: 'Image Details' });
+  await expect(lightbox).toBeVisible();
+  await expect(lightbox.getByRole('button', { name: 'Describe', exact: true })).toBeDisabled();
+  await expect(lightbox.getByRole('button', { name: 'Analyze', exact: true })).toBeDisabled();
+  await lightbox.getByRole('button', { name: 'Close lightbox' }).click();
+
+  // Gallery batch AI Analyze button
+  await page.getByRole('button', { name: 'Select', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'AI analyze', exact: true })).toBeDisabled();
+  await page.getByRole('button', { name: 'Cancel selection', exact: true }).click();
+
+  // Job History Diagnose button
+  await page.getByRole('button', { name: 'Job History', exact: true }).click();
+  const jobsDrawer = page.getByRole('dialog', { name: 'Job History' });
+  await expect(jobsDrawer).toBeVisible();
+  await jobsDrawer.getByRole('button', { name: 'History' }).click();
+  await expect(jobsDrawer.getByRole('button', { name: 'Diagnose', exact: true })).toBeDisabled();
+  await jobsDrawer.getByRole('button', { name: 'Close jobs' }).click();
+
+  // Settings drawer AI Assistant section inputs disabled when not enabled
+  await page.getByRole('button', { name: 'Settings' }).click();
+  const settingsDrawer = page.getByRole('dialog', { name: 'Settings' });
+  const assistantHeading = settingsDrawer.getByRole('heading', { name: 'AI Assistant', exact: true });
+  await expect(assistantHeading).toBeVisible();
+  await expect(settingsDrawer.getByLabel('Timeout seconds')).toBeDisabled();
+  await expect(settingsDrawer.getByLabel('Assistant vision engine')).toBeDisabled();
+  await expect(settingsDrawer.getByRole('button', { name: 'Edit System Prompt' })).toBeDisabled();
+  await expect(settingsDrawer.getByRole('button', { name: 'Test AI Assistant' })).toBeDisabled();
 });
 
 test('AI Assistant Quick optimize uses the prompt optimizer flow', async ({ page }) => {
@@ -493,7 +576,7 @@ test('reverse prompt explains incompatible generation presets after analysis', a
   );
 });
 
-test('reverse prompt remains discoverable and disables analysis when Assistant config is unavailable', async ({ page }) => {
+test('reverse prompt button is disabled when Assistant config is unavailable', async ({ page }) => {
   await loadApp(page, {
     settings: {
       ...settingsResponse,
@@ -504,12 +587,9 @@ test('reverse prompt remains discoverable and disables analysis when Assistant c
     }
   });
 
-  await page.getByRole('button', { name: 'Reverse prompt', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'Reverse prompt' });
-  await expect(dialog).toContainText('AI Assistant is unavailable');
-  await dialog.locator('input[type="file"]').setInputFiles({ name: 'local.png', mimeType: 'image/png', buffer: PNG_BYTES });
-  await expect(dialog.getByRole('img', { name: 'local.png' })).toBeVisible();
-  await expect(dialog.getByRole('button', { name: 'Reverse prompt', exact: true })).toBeDisabled();
+  const reversePromptButton = page.getByRole('button', { name: 'Reverse prompt', exact: true });
+  await expect(reversePromptButton).toBeVisible();
+  await expect(reversePromptButton).toBeDisabled();
 });
 
 test('reverse prompt header and dialog stay within a mobile viewport', async ({ page }) => {

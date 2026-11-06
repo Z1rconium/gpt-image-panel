@@ -226,10 +226,10 @@ test('settings and prompt snippets preserve dark surfaces for a dark system them
   await expect(settingsDrawer.getByLabel('Timeout seconds')).toHaveCSS('background-color', 'rgb(9, 9, 11)');
   await expect(settingsDrawer.getByLabel('Assistant vision engine')).toHaveCSS('background-color', 'rgb(9, 9, 11)');
   await expect(settingsDrawer.getByRole('heading', { name: 'R2 Backup' })).toHaveCSS('color', 'rgb(228, 228, 231)');
-  await settingsDrawer.getByRole('button', { name: 'Test Prompt Optimizer' }).click();
+  await settingsDrawer.getByRole('button', { name: 'Test AI Assistant' }).click();
   // Browsers may serialize the same palette color as rgb() or oklab().
   // Sample it in sRGB; translucent canvas pixels have 8-bit rounding error.
-  const healthColor = await page.getByTestId('prompt-optimizer-health-result').evaluate((element) => {
+  const healthColor = await page.getByTestId('ai-assistant-health-result').evaluate((element) => {
     const canvas = document.createElement('canvas');
     canvas.width = canvas.height = 1;
     const context = canvas.getContext('2d')!;
@@ -333,12 +333,12 @@ test('settings drawer tests and closes health results', async ({ page }) => {
   await page.getByRole('button', { name: 'Settings' }).click();
   const drawer = page.getByRole('dialog', { name: 'Settings' });
 
-  await drawer.getByRole('button', { name: 'Test Prompt Optimizer' }).click();
-  const optimizerHealth = page.getByTestId('prompt-optimizer-health-result');
-  await expect(optimizerHealth).toBeVisible();
-  await expect(optimizerHealth).toContainText('Prompt optimizer responded successfully with model gpt-4o-mini');
-  await optimizerHealth.getByRole('button', { name: 'Close' }).click();
-  await expect(optimizerHealth).toHaveCount(0);
+  await drawer.getByRole('button', { name: 'Test AI Assistant' }).click();
+  const assistantHealth = page.getByTestId('ai-assistant-health-result');
+  await expect(assistantHealth).toBeVisible();
+  await expect(assistantHealth).toContainText('AI Assistant responded successfully with model gpt-4o-mini');
+  await assistantHealth.getByRole('button', { name: 'Close' }).click();
+  await expect(assistantHealth).toHaveCount(0);
 
   await drawer.getByRole('button', { name: 'Health check' }).click();
   const presetHealth = page.getByTestId('preset-health-result');

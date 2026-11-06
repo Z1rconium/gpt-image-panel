@@ -1391,6 +1391,18 @@ async function mockApi(page: Page, options: MockOptions = {}) {
       );
       return;
     }
+    if (url.pathname === '/api/assistant/health' && request.method() === 'POST') {
+      await route.fulfill(
+        json({
+          status: 'ok',
+          message: 'AI Assistant responded successfully with model gpt-4o-mini',
+          model: 'gpt-4o-mini',
+          duration_ms: 13,
+          status_code: 200
+        })
+      );
+      return;
+    }
     if (url.pathname === '/api/prompt/optimizer-system-prompt' && request.method() === 'GET') {
       await route.fulfill(
         json({

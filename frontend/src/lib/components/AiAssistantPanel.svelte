@@ -45,7 +45,7 @@
   const effectiveInstruction = $derived(currentPrompt.trim() ? instruction.trim() : '');
   const panelBusy = $derived(loading || quickOptimizing);
   const actionDisabled = $derived(panelBusy || unavailable || !effectivePrompt);
-  const quickOptimizeDisabled = $derived(panelBusy || unavailable || !optimizerEnabled || !currentPrompt.trim());
+  const quickOptimizeDisabled = $derived(panelBusy || unavailable || !currentPrompt.trim());
   const quantity = $derived(normalizeSubmissionQuantity(promptForm.quantity));
   const activeContextDerivedKey = $derived(
     JSON.stringify({
@@ -215,7 +215,7 @@
   }
 </script>
 
-<section data-testid="ai-assistant-panel" class="app-section px-1 py-1 sm:px-0">
+<section data-testid="ai-assistant-panel" class="app-section px-1 py-1 sm:px-0 {unavailable ? 'opacity-75' : ''}">
   <div class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
     <div>
       <h2 class="text-sm font-semibold text-stone-950 dark:text-zinc-100">{$t.aiAssistant.title}</h2>
@@ -233,31 +233,55 @@
       <span class="mb-1.5 block text-xs font-medium text-stone-600 dark:text-zinc-400">{$t.aiAssistant.instruction}</span>
       <input
         bind:value={instruction}
-        class="control-focus w-full rounded-lg border border-stone-200 bg-stone-50 px-3 py-2.5 text-sm text-stone-900 focus:border-emerald-500 disabled:opacity-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100"
+        class="control-focus w-full rounded-lg border border-stone-200 bg-stone-50 px-3 py-2.5 text-sm text-stone-900 focus:border-emerald-500 disabled:cursor-not-allowed disabled:bg-stone-100 disabled:text-stone-400 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100 dark:disabled:bg-zinc-900 dark:disabled:text-zinc-500"
         placeholder={$t.aiAssistant.instructionPlaceholder}
         disabled={unavailable}
       />
     </label>
     <div class="grid grid-cols-2 gap-2 self-end sm:grid-cols-5">
-      <button type="button" disabled={actionDisabled} class="control-focus rounded-lg border border-emerald-500/40 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-500/10 disabled:cursor-not-allowed disabled:opacity-40 dark:text-emerald-200" onclick={runRewrite}>
+      <button
+        type="button"
+        disabled={actionDisabled}
+        title={unavailable ? $t.aiAssistant.unavailable : undefined}
+        class="control-focus rounded-lg border px-3 py-2 text-xs font-semibold transition-colors {actionDisabled ? 'cursor-not-allowed border-stone-300 bg-stone-100 text-stone-400 opacity-60 dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-500' : 'border-emerald-500/40 text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-200'}"
+        onclick={runRewrite}
+      >
         {$t.aiAssistant.rewrite}
       </button>
       <button
         type="button"
         disabled={quickOptimizeDisabled}
-        title={!optimizerEnabled ? $t.aiAssistant.quickOptimizeUnavailable : undefined}
-        class="control-focus rounded-lg border border-emerald-500/40 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-500/10 disabled:cursor-not-allowed disabled:opacity-40 dark:text-emerald-200"
+        title={unavailable ? $t.aiAssistant.unavailable : undefined}
+        class="control-focus rounded-lg border px-3 py-2 text-xs font-semibold transition-colors {quickOptimizeDisabled ? 'cursor-not-allowed border-stone-300 bg-stone-100 text-stone-400 opacity-60 dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-500' : 'border-emerald-500/40 text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-200'}"
         onclick={runQuickOptimize}
       >
         {$t.aiAssistant.quickOptimize}
       </button>
-      <button type="button" disabled={actionDisabled} class="control-focus rounded-lg border border-stone-300 px-3 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-100 disabled:cursor-not-allowed disabled:text-stone-400 disabled:opacity-60 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:disabled:text-zinc-500" onclick={runCheck}>
+      <button
+        type="button"
+        disabled={actionDisabled}
+        title={unavailable ? $t.aiAssistant.unavailable : undefined}
+        class="control-focus rounded-lg border px-3 py-2 text-xs font-semibold transition-colors {actionDisabled ? 'cursor-not-allowed border-stone-300 bg-stone-100 text-stone-400 opacity-60 dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-500' : 'border-stone-300 text-stone-700 hover:bg-stone-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800'}"
+        onclick={runCheck}
+      >
         {$t.aiAssistant.check}
       </button>
-      <button type="button" disabled={actionDisabled} class="control-focus rounded-lg border border-stone-300 px-3 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-100 disabled:cursor-not-allowed disabled:text-stone-400 disabled:opacity-60 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:disabled:text-zinc-500" onclick={runVariants}>
+      <button
+        type="button"
+        disabled={actionDisabled}
+        title={unavailable ? $t.aiAssistant.unavailable : undefined}
+        class="control-focus rounded-lg border px-3 py-2 text-xs font-semibold transition-colors {actionDisabled ? 'cursor-not-allowed border-stone-300 bg-stone-100 text-stone-400 opacity-60 dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-500' : 'border-stone-300 text-stone-700 hover:bg-stone-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800'}"
+        onclick={runVariants}
+      >
         {$t.aiAssistant.variants}
       </button>
-      <button type="button" disabled={actionDisabled} class="control-focus rounded-lg border border-stone-300 px-3 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800" onclick={runParams}>
+      <button
+        type="button"
+        disabled={actionDisabled}
+        title={unavailable ? $t.aiAssistant.unavailable : undefined}
+        class="control-focus rounded-lg border px-3 py-2 text-xs font-semibold transition-colors {actionDisabled ? 'cursor-not-allowed border-stone-300 bg-stone-100 text-stone-400 opacity-60 dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-500' : 'border-stone-300 text-stone-700 hover:bg-stone-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800'}"
+        onclick={runParams}
+      >
         {$t.aiAssistant.params}
       </button>
     </div>

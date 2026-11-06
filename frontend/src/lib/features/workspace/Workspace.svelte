@@ -191,12 +191,18 @@
         optimizerSettings.has_api_key
     )
   );
-  const optimizerAvailable = $derived(
-    Boolean(optimizerSettings?.enabled && promptOptimizerConfigAvailable)
+  const aiAssistantSettings = $derived($settingsStore.settings?.ai_assistant || null);
+  const aiAssistantAvailable = $derived(
+    Boolean(
+      aiAssistantSettings?.enabled &&
+        optimizerSettings?.enabled &&
+        promptOptimizerConfigAvailable &&
+        (aiAssistantSettings.vision_model.trim() || optimizerSettings?.model.trim())
+    )
   );
-  const optimizerAssistantEnabled = $derived(
-    optimizerAvailable &&
-      !$uiStore.settingsOpen &&
+  const optimizerAvailable = $derived(aiAssistantAvailable);
+  const optimizerAssistantVisible = $derived(
+    !$uiStore.settingsOpen &&
       !$uiStore.promptSnippetsOpen &&
       !$uiStore.imagePromptOpen &&
       !$uiStore.jobsOpen &&
@@ -208,14 +214,7 @@
       !$confirmStore.request &&
       !Boolean($lightboxStore.image)
   );
-  const aiAssistantSettings = $derived($settingsStore.settings?.ai_assistant || null);
-  const aiAssistantAvailable = $derived(
-    Boolean(
-      aiAssistantSettings?.enabled &&
-        promptOptimizerConfigAvailable &&
-        (aiAssistantSettings.vision_model.trim() || optimizerSettings?.model.trim())
-    )
-  );
+  const optimizerAssistantEnabled = $derived(aiAssistantAvailable);
   const agentAvailable = $derived(Boolean(aiAssistantAvailable && aiAssistantSettings?.agent_enabled));
   const r2BackupSettings = $derived($settingsStore.settings?.r2_backup || null);
   const r2BackupAvailable = $derived(
@@ -284,7 +283,7 @@
     promptForm.applyPresetDefaults($settingsStore.settings);
   });
   $effect(() => {
-    if (optimizerAssistantEnabled) void ensurePanel('optimizer', false);
+    if (optimizerAssistantVisible) void ensurePanel('optimizer', false);
   });
   // A mask discarded by a primary-image change happens inside the store; the
   // store only bumps a counter, so the warning lives here.
@@ -1588,6 +1587,7 @@
   imagePromptOpen={$uiStore.imagePromptOpen}
   jobsOpen={$uiStore.jobsOpen}
   settingsOpen={$uiStore.settingsOpen}
+  aiAssistantEnabled={aiAssistantAvailable}
   {agentAvailable}
   mode={$workspaceModeStore.mode}
   onModeChange={changeWorkspaceMode}
@@ -1710,7 +1710,7 @@
 />
 {/if}
 
-<main id="main-content" tabindex="-1" class:optimizer-gutter={optimizerAssistantEnabled} class="mx-auto max-w-5xl space-y-6 px-4 py-6 pb-28 sm:px-6 sm:pb-32">
+<main id="main-content" tabindex="-1" class:optimizer-gutter={optimizerAssistantVisible} class="mx-auto max-w-5xl space-y-6 px-4 py-6 pb-28 sm:px-6 sm:pb-32">
   <ToastHost toast={$toastStore} />
 
   {#if $workspaceModeStore.mode === 'agent'}
@@ -1847,6 +1847,7 @@
 {#if $optimizerPanel.component}
 {@const Panel = $optimizerPanel.component}
 <Panel
+  visible={optimizerAssistantVisible}
   enabled={optimizerAssistantEnabled}
   onApplyPrompt={applyOptimizedPrompt}
 />

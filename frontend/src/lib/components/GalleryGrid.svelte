@@ -486,9 +486,15 @@
             {operationStatus?.kind === 'nodeimage_upload' ? $t.gallery.uploadingToNodeImage : $t.gallery.uploadSelectedToNodeImage}
           </button>
         {/if}
-        {#if canAiAnalyze}
-          <button type="button" class="control-focus rounded-lg border border-stone-300 px-2.5 py-2 text-xs text-stone-700 hover:bg-stone-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800" disabled={!hasSelection || busy} onclick={onBatchAiAnalyze}>{operationStatus?.kind === 'ai_analyze' ? $t.gallery.aiAnalyzing : $t.gallery.aiAnalyzeSelected}</button>
-        {/if}
+        <button
+          type="button"
+          class="control-focus rounded-lg border px-2.5 py-2 text-xs transition-colors {canAiAnalyze ? 'border-stone-300 text-stone-700 hover:bg-stone-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800' : 'cursor-not-allowed border-stone-300 bg-stone-100 text-stone-400 opacity-60 dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-500'} disabled:cursor-not-allowed disabled:opacity-40"
+          disabled={!canAiAnalyze || !hasSelection || busy}
+          title={!canAiAnalyze ? $t.aiAssistant.unavailable : undefined}
+          onclick={onBatchAiAnalyze}
+        >
+          {operationStatus?.kind === 'ai_analyze' ? $t.gallery.aiAnalyzing : $t.gallery.aiAnalyzeSelected}
+        </button>
         {#if collections.length}
           <select
             class="form-select control-focus min-h-9 rounded-lg py-1.5 text-xs disabled:opacity-40"
