@@ -50,6 +50,7 @@ class GenerateRequest(StrictRequestModel):
     api_preset_id: Optional[str] = Field(default=None, max_length=128)
     stream: bool = False
     partial_images: int = Field(default=2, ge=1, le=3)
+    safety_identifier: Optional[str] = Field(default=None, max_length=128)
 
     def normalize_model_options(self, api_path: str) -> None:
         # Call after resolving omitted model / response-format values from the preset.
@@ -75,6 +76,14 @@ class GenerateRequest(StrictRequestModel):
     def validate_webhook_url(cls, value: Optional[str]) -> Optional[str]:
         normalized = normalize_webhook_url(value)
         return normalized or None
+
+    @field_validator("safety_identifier")
+    @classmethod
+    def validate_safety_identifier(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        trimmed = value.strip()
+        return trimmed or None
 
     @model_validator(mode="after")
     def validate_output_options(self) -> "GenerateRequest":
@@ -221,6 +230,7 @@ class GenerateJobStatus(GenerateJobResponse):
     markup_applied: Optional[bool] = None
     background: Optional[str] = None
     response_format: Optional[str] = None
+    safety_identifier: Optional[str] = None
     n: Optional[int] = None
     completed_count: Optional[int] = Field(default=None, ge=0)
     success_count: Optional[int] = Field(default=None, ge=0)

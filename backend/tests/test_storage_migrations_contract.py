@@ -816,3 +816,18 @@ def test_api_preset_provider_migration_adds_defaulted_columns(tmp_path):
     assert columns["provider_config"]["notnull"] == 0
     assert legacy["provider_kind"] == "openai"
     assert legacy["provider_config"] is None
+
+
+def test_safety_identifier_migration_adds_columns_to_jobs_and_gallery(tmp_path):
+    _configure_runtime(tmp_path)
+    db_repo.verify_storage_writable()
+    with db_repo._connect() as conn:
+        migration_row = conn.execute("SELECT name FROM schema_migrations WHERE version = 41").fetchone()
+        assert migration_row is not None
+        assert migration_row["name"] == "safety_identifier"
+
+        gallery_cols = {row["name"] for row in conn.execute("PRAGMA table_info(gallery_entries)")}
+        job_cols = {row["name"] for row in conn.execute("PRAGMA table_info(generate_jobs)")}
+        assert "safety_identifier" in gallery_cols
+        assert "safety_identifier" in job_cols
+

@@ -266,8 +266,8 @@ def _build_image_params(payload: GenerateRequest, *, prompt_guard: bool = False)
         "quality": payload.quality,
         "output_format": "png" if payload.background.startswith("chroma_") else payload.output_format,
     }
-    for key in ("complexity", "frame_count", "frame_duration_ms"):
-        value = getattr(payload, key)
+    for key in ("complexity", "frame_count", "frame_duration_ms", "safety_identifier"):
+        value = getattr(payload, key, None)
         if value is not None:
             request_data[key] = value
     if payload.response_format is not None:
@@ -317,6 +317,7 @@ def build_gallery_metadata(
         "output_compression": payload.output_compression,
         "background": payload.background,
         "response_format": payload.response_format,
+        "safety_identifier": payload.safety_identifier,
         "n": payload.n,
         "api_path": api_path,
         "api_preset_name": api_preset_name,

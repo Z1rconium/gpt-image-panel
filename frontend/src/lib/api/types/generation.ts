@@ -18,4 +18,5 @@ export type GenerateRequestBody = {
   api_preset_id?: string | null;
   stream?: boolean;
   partial_images?: number;
+  safety_identifier?: string | null;
 };

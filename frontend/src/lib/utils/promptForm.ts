@@ -60,7 +60,8 @@ export function jobToPromptForm(job: GenerateJobStatus, fallbackModel = DEFAULT_
     responseFormat: normalizeResponseFormat(job.response_format),
     stream: Boolean(job.streaming),
     partialImages: job.partial_images ?? initialPromptFormState.partialImages,
-    pasteBack: job.paste_back ?? initialPromptFormState.pasteBack
+    pasteBack: job.paste_back ?? initialPromptFormState.pasteBack,
+    safetyIdentifier: job.safety_identifier ?? ''
   };
 }
 
@@ -85,7 +86,8 @@ export function galleryEntryToPromptForm(
     responseFormat: normalizeResponseFormat(image.response_format),
     stream: initialPromptFormState.stream,
     partialImages: initialPromptFormState.partialImages,
-    pasteBack: initialPromptFormState.pasteBack
+    pasteBack: initialPromptFormState.pasteBack,
+    safetyIdentifier: image.safety_identifier ?? ''
   };
 }
 

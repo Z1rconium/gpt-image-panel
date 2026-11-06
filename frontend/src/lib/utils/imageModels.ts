@@ -7,9 +7,13 @@ const IMAGE_25_MODELS = new Set([
   'gpt-image-2.5-flare', 'gpt-image-2.5-flare-2026-09-08',
   'gpt-image-2.5-sunburst', 'gpt-image-2.5-sunburst-2026-09-08'
 ]);
+const IMAGE_26_MODELS = new Set([
+  'gpt-image-2.6-flare', 'gpt-image-2.6-flare-2026-11-04',
+  'gpt-image-2.6-sunburst', 'gpt-image-2.6-sunburst-2026-11-04'
+]);
 
 export function isImage26(model: string | null | undefined): boolean {
-  return ['gpt-image-2.6-flare', 'gpt-image-2.6-sunburst'].includes((model || '').trim());
+  return IMAGE_26_MODELS.has((model || '').trim());
 }
 
 export function isImage25(model: string | null | undefined): boolean {

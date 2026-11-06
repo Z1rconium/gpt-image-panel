@@ -1,6 +1,6 @@
 <script lang="ts">
   import { t } from '$lib/i18n';
-  import { IMAGE_MODEL_PRESETS, isImage25 } from '$lib/utils/imageModels';
+  import { IMAGE_MODEL_PRESETS, isImage25, isImage26 } from '$lib/utils/imageModels';
 
   export let value = 'gpt-image-2';
   export let disabled = false;
@@ -35,7 +35,7 @@
   {#if custom}
     <input bind:value {disabled} title={value} aria-label={label || $t.common.model} placeholder="gpt-image-2.5-flare-2026-09-08" class="ui-field mt-2 w-full px-3 py-2 font-mono text-sm" />
   {/if}
-  {#if isImage25(value)}
+  {#if isImage25(value) || isImage26(value)}
     <p class="mt-1 text-xs text-stone-500 dark:text-zinc-400">{value.includes('flare') ? $t.promptForm.flareHint : $t.promptForm.sunburstHint}</p>
   {/if}
 </div>

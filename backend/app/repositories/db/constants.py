@@ -46,6 +46,7 @@ GALLERY_COLUMNS = (
     "mask_coverage",
     "paste_back",
     "paste_back_scale",
+    "safety_identifier",
 )
 REQUIRED_GALLERY_COLUMNS = {"id", "prompt", "size", "filename", "created_at"}
 _GALLERY_INTERNAL_COLUMNS = {"sort_seq"}
@@ -110,6 +111,7 @@ GENERATE_JOB_COLUMNS = (
     "unit_statuses_json",
     "agent_turn_id",
     "agent_conversation_id",
+    "safety_identifier",
 )
 IMAGE_JOB_UNIT_COLUMNS = (
     "unit_id",

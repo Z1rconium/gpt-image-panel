@@ -35,7 +35,8 @@ const fullForm: PromptFormState = {
   prompt: '  keep whitespace  ', apiPath: '/v1/responses', size: '1536x1024', model: 'stored-model',
   quality: 'xhigh', outputFormat: 'webp', outputCompression: '0', background: 'chroma_magenta',
   complexity: null, frameCount: 9, frameDurationMs: 200,
-  quantity: 3, responseFormat: 'b64_json', stream: false, partialImages: 2, pasteBack: true
+  quantity: 3, responseFormat: 'b64_json', stream: false, partialImages: 2, pasteBack: true,
+  safetyIdentifier: ''
 };
 
 type NormalizedParameters = Partial<Pick<GalleryEntry, 'n' | 'quality' | 'output_format' | 'response_format' | 'background' | 'output_compression'>>;

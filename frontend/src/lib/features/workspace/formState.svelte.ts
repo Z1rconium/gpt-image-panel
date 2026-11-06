@@ -33,6 +33,7 @@ class PromptFormController {
   stream = $state(initialPromptFormState.stream);
   partialImages = $state(initialPromptFormState.partialImages);
   pasteBack = $state(typeof localStorage === 'undefined' ? true : localStorage.getItem('maskEditor.pasteBack') !== 'false');
+  safetyIdentifier = $state<string>('');
 
   #lastPresetId = '';
   #presetDefaultModel = initialPromptFormState.model;
@@ -62,7 +63,8 @@ class PromptFormController {
       responseFormat: this.responseFormat,
       stream: this.stream,
       partialImages: this.partialImages,
-      pasteBack: this.pasteBack
+      pasteBack: this.pasteBack,
+      safetyIdentifier: this.safetyIdentifier
     };
   }
 
@@ -83,6 +85,7 @@ class PromptFormController {
     if (updates.stream !== undefined) this.stream = updates.stream;
     if (updates.partialImages !== undefined) this.partialImages = updates.partialImages;
     if (updates.pasteBack !== undefined) this.pasteBack = updates.pasteBack;
+    if (updates.safetyIdentifier !== undefined) this.safetyIdentifier = updates.safetyIdentifier;
   }
 
   replace(next: PromptFormState) {

@@ -215,6 +215,7 @@ def build_pending_job(
         "partial_images": getattr(req, "partial_images", None) if getattr(req, "stream", False) else None,
         "mask_applied": bool(mask_applied),
         "paste_back": req.paste_back if isinstance(req, EditRequest) and mask_applied else None,
+        "safety_identifier": getattr(req, "safety_identifier", None),
     }
 
 
@@ -361,6 +362,7 @@ def build_edit_request_from_form(
     complexity: str | None = None,
     frame_count: int | None = None,
     frame_duration_ms: int | None = None,
+    safety_identifier: str | None = None,
 ) -> EditRequest:
     try:
         return EditRequest(
@@ -379,6 +381,7 @@ def build_edit_request_from_form(
             webhook_url=webhook_url,
             paste_back=paste_back,
             api_preset_id=api_preset_id or None,
+            safety_identifier=safety_identifier,
         )
     except ValueError as e:
         raise UnprocessableRequestError(str(e)) from e

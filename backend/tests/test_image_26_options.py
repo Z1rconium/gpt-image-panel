@@ -6,7 +6,12 @@ from backend.app.schemas.generation import GenerateRequest, EditRequest
 from backend.app.integrations.upstream.payloads import _build_image_params
 
 
-@pytest.mark.parametrize('model', ['gpt-image-2.6-flare', 'gpt-image-2.6-sunburst'])
+@pytest.mark.parametrize('model', [
+    'gpt-image-2.6-flare',
+    'gpt-image-2.6-flare-2026-11-04',
+    'gpt-image-2.6-sunburst',
+    'gpt-image-2.6-sunburst-2026-11-04',
+])
 def test_image_26_gif_wire(model):
     request = GenerateRequest(prompt='animate', model=model, output_format='gif', size='32x32', complexity='low', quality='max')
     data = _build_image_params(request)
@@ -259,3 +264,80 @@ def test_special_format_recovery_keeps_implicit_partial_default(output_format):
     assert recovered.partial_images == 2
     data = _build_image_params(recovered)
     assert 'partial_images' not in data
+
+
+def test_safety_identifier_wire_and_validation():
+    from backend.app.services.job_queue import build_request_payload, rebuild_request
+    from backend.app.integrations.upstream.payloads import build_gallery_metadata
+
+    # 1. Trims whitespace
+    req = GenerateRequest(prompt='x', safety_identifier='  user_hash_123  ')
+    assert req.safety_identifier == 'user_hash_123'
+    data = _build_image_params(req)
+    assert data['safety_identifier'] == 'user_hash_123'
+
+    # 2. Empty string becomes None and is omitted from wire params
+    req_empty = GenerateRequest(prompt='x', safety_identifier='   ')
+    assert req_empty.safety_identifier is None
+    assert 'safety_identifier' not in _build_image_params(req_empty)
+
+    # 3. Exceeding 128 characters raises ValidationError
+    with pytest.raises(ValidationError):
+        GenerateRequest(prompt='x', safety_identifier='a' * 129)
+
+    # 4. Preserved across queue snapshot and recovery
+    snapshot = build_request_payload(req)
+    assert snapshot['safety_identifier'] == 'user_hash_123'
+    recovered = rebuild_request('generation', snapshot)
+    assert recovered.safety_identifier == 'user_hash_123'
+
+    # 5. Included in gallery metadata
+    metadata = build_gallery_metadata(req, '/v1/images/generations', 'Default')
+    assert metadata['safety_identifier'] == 'user_hash_123'
+
+    # 6. EditRequest inherits safety_identifier
+    edit_req = EditRequest(prompt='x', safety_identifier='edit_user_456')
+    assert edit_req.safety_identifier == 'edit_user_456'
+    assert _build_image_params(edit_req)['safety_identifier'] == 'edit_user_456'
+
+
+def test_safety_identifier_reaches_job_and_gallery_http(client, monkeypatch):
+    from backend.tests.test_image_26_acceptance_contract import png, wire
+    from backend.tests.support.contract import _wait_for_job
+
+    wire(monkeypatch, png('RGB', 'green'))
+    resp = client.post('/api/generate', json={
+        'prompt': 'safe test',
+        'model': 'gpt-image-2.6-flare-2026-11-04',
+        'safety_identifier': 'tenant_user_789',
+    })
+    assert resp.status_code == 202, resp.text
+    job_id = resp.json()['job_id']
+    job = _wait_for_job(client, job_id)
+    assert job['status'] == 'success'
+    assert job['safety_identifier'] == 'tenant_user_789'
+    assert job['model'] == 'gpt-image-2.6-flare-2026-11-04'
+
+    entry = client.get(f"/api/gallery/{job['image_id']}").json()
+    assert entry['safety_identifier'] == 'tenant_user_789'
+
+
+def test_safety_identifier_reaches_edit_form_http(client, monkeypatch):
+    from backend.tests.test_image_26_acceptance_contract import png, wire
+    from backend.tests.support.contract import _wait_for_job
+
+    session = wire(monkeypatch, png('RGB', 'blue'))
+    resp = client.post('/api/edits', data={
+        'prompt': 'edit with safety',
+        'model': 'gpt-image-2.6-sunburst-2026-11-04',
+        'safety_identifier': 'edit_safety_user_999',
+    }, files={
+        'image': ('primary.png', png('RGB', 'white'), 'image/png'),
+    })
+    assert resp.status_code == 202, resp.text
+    job_id = resp.json()['job_id']
+    job = _wait_for_job(client, job_id)
+    assert job['status'] == 'success'
+    assert job['safety_identifier'] == 'edit_safety_user_999'
+    assert session.forms[0]['safety_identifier'] == 'edit_safety_user_999'
+

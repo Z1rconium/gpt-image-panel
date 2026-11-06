@@ -870,6 +870,12 @@ def _migration_image_26_metadata(conn: sqlite3.Connection):
             if name not in columns:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {kind}")
 
+def _migration_safety_identifier(conn: sqlite3.Connection):
+    for table in ("gallery_entries", "generate_jobs"):
+        columns = _table_columns(conn, table)
+        if "safety_identifier" not in columns:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN safety_identifier TEXT")
+
 SCHEMA_MIGRATIONS = (
     (1, "baseline_legacy_schema", _migration_baseline_legacy_schema),
     (2, "gallery_filter_options", _migration_gallery_filter_options),
@@ -911,4 +917,5 @@ SCHEMA_MIGRATIONS = (
     (38, "agent_search", _migration_agent_search),
     (39, "agent_execution_snapshot", _migration_agent_execution_snapshot),
     (40, "image_26_metadata", _migration_image_26_metadata),
+    (41, "safety_identifier", _migration_safety_identifier),
 )

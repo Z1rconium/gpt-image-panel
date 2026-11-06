@@ -35,6 +35,7 @@ export type GalleryEntry = {
   output_compression?: number | null;
   background?: string | null;
   response_format?: string | null;
+  safety_identifier?: string | null;
   n?: number | null;
   api_path?: string | null;
   api_preset_name?: string | null;

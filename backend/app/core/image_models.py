@@ -13,7 +13,12 @@ IMAGE_25_MODELS = frozenset({
 })
 
 
-IMAGE_26_MODELS = frozenset({"gpt-image-2.6-flare", "gpt-image-2.6-sunburst"})
+IMAGE_26_MODELS = frozenset({
+    "gpt-image-2.6-flare",
+    "gpt-image-2.6-flare-2026-11-04",
+    "gpt-image-2.6-sunburst",
+    "gpt-image-2.6-sunburst-2026-11-04",
+})
 
 
 def is_image_26(model: str | None) -> bool:

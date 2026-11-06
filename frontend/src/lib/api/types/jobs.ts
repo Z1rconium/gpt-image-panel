@@ -83,6 +83,7 @@ export type GenerateJobStatus = GenerateJobResponse & {
   output_compression?: number | null;
   background?: string | null;
   response_format?: string | null;
+  safety_identifier?: string | null;
   n?: number | null;
   completed_count?: number | null;
   success_count?: number | null;

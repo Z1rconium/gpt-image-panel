@@ -70,6 +70,7 @@ def edit_request_from_form(
     webhook_url: str | None = Form(None),
     paste_back: str | None = Form(None),
     api_preset_id: str | None = Form(None),
+    safety_identifier: str | None = Form(None),
 ) -> EditRequest:
     return build_edit_request_from_form(
         prompt=prompt,
@@ -87,6 +88,7 @@ def edit_request_from_form(
         webhook_url=webhook_url,
         paste_back=parse_optional_form_bool("paste_back", paste_back),
         api_preset_id=api_preset_id,
+        safety_identifier=safety_identifier,
     )
 
 

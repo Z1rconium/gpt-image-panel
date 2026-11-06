@@ -133,6 +133,7 @@ def build_template_variables(payload: GenerateRequest, *, prompt_guard: bool) ->
         "frame_duration_ms": payload.frame_duration_ms,
         "output_format": payload.output_format,
         "background": background,
+        "safety_identifier": payload.safety_identifier,
         **_size_variables(payload),
     }
 

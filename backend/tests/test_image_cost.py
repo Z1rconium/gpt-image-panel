@@ -90,6 +90,26 @@ def test_estimate_image_cost_uses_builtin_rate_for_known_model():
     assert cost["estimated_cost_usd"] == pytest.approx(5.0 + 40.0)
 
 
+@pytest.mark.parametrize("model", [
+    "gpt-image-2.6-flare",
+    "gpt-image-2.6-flare-2026-11-04",
+    "gpt-image-2.6-sunburst",
+    "gpt-image-2.6-sunburst-2026-11-04",
+])
+def test_estimate_image_cost_supports_image_26_and_snapshots(model):
+    usage = image_cost.normalize_usage(
+        {
+            "input_tokens_details": {"text_tokens": 1_000_000, "image_tokens": 1_000_000},
+            "output_tokens_details": {"image_tokens": 1_000_000},
+        }
+    )
+    cost = image_cost.estimate_image_cost(model, usage)
+    assert cost["rate_source"] == "builtin"
+    assert cost["complete"] is True
+    # 5.0 (text) + 8.0 (image_in) + 30.0 (image_out) = 43.0 USD
+    assert cost["estimated_cost_usd"] == pytest.approx(43.0)
+
+
 def test_estimate_image_cost_env_override_takes_priority_over_builtin(monkeypatch):
     monkeypatch.setattr(
         image_cost.config,

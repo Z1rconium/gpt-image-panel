@@ -26,7 +26,9 @@ COST_DECIMAL_PLACES = Decimal("0.000001")
 # because these models only output images.
 _IMAGE_2_SERIES_MODELS = (
     "gpt-image-2.6-flare",
+    "gpt-image-2.6-flare-2026-11-04",
     "gpt-image-2.6-sunburst",
+    "gpt-image-2.6-sunburst-2026-11-04",
     "gpt-image-2",
     "gpt-image-2-2026-04-21",
     "gpt-image-2.5-flare",

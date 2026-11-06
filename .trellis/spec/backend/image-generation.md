@@ -5,8 +5,9 @@
 This contract covers admission through upstream requests, recoverable image units,
 job/gallery metadata and original-file delivery. Extend the existing pipeline;
 keep `gpt-image-2` as the default and preserve custom models and saved presets.
-Verified model additions are exactly `gpt-image-2.6-flare` and
-`gpt-image-2.6-sunburst`; do not invent snapshots or pluralized model IDs.
+Verified model additions are `gpt-image-2.6-flare` and
+`gpt-image-2.6-sunburst` along with official dated snapshots `gpt-image-2.6-flare-2026-11-04`
+and `gpt-image-2.6-sunburst-2026-11-04`; do not invent pluralized model IDs.
 
 ## Entry points and signatures
 
@@ -49,8 +50,8 @@ JPEG or WebP, each strictly below 50 MiB. The legacy raw-mask EXIF exception
 applies only to masks, not markup. Account for markup bytes in both HTTP body
 limits and pending-source reservations.
 
-Persist nullable `complexity`, `frame_count`, `frame_duration_ms` and
-`markup_applied` in job and gallery rows, unit request snapshots, API/SSE and
+Persist nullable `complexity`, `frame_count`, `frame_duration_ms`,
+`markup_applied` and `safety_identifier` in job and gallery rows, unit request snapshots, API/SSE and
 archive metadata. A markup source has role `markup`. Its recoverable original
 is `{job_id}-markup.png` under the existing mask asset directory. Preserve
 owned files during startup GC and remove them with deleted jobs. Temporary

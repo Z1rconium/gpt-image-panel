@@ -41,6 +41,7 @@ class GalleryEntry(BaseModel):
     markup_applied: Optional[bool] = None
     background: Optional[str] = None
     response_format: Optional[str] = None
+    safety_identifier: Optional[str] = None
     n: Optional[int] = None
     api_path: Optional[str] = None
     api_preset_name: Optional[str] = None

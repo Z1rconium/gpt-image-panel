@@ -43,6 +43,7 @@ export type PromptFormState = {
   stream: boolean;
   partialImages: number;
   pasteBack: boolean;
+  safetyIdentifier?: string;
 };
 
 export const DEFAULT_QUANTITY = 1;
@@ -82,7 +83,8 @@ export const initialPromptFormState: PromptFormState = {
   responseFormat: 'url',
   stream: false,
   partialImages: 2,
-  pasteBack: true
+  pasteBack: true,
+  safetyIdentifier: ''
 };
 
 function buildRequestBody(form: PromptFormState): GenerateRequestBody {
@@ -131,6 +133,10 @@ function buildRequestBody(form: PromptFormState): GenerateRequestBody {
   if (form.stream && !special) {
     body.stream = true;
     body.partial_images = Math.min(Math.max(Math.round(form.partialImages) || 2, 1), 3);
+  }
+
+  if (form.safetyIdentifier?.trim()) {
+    body.safety_identifier = form.safetyIdentifier.trim();
   }
 
   return body;
