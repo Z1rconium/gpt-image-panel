@@ -385,7 +385,7 @@ const zh: Translation = {
     complexityHigh: '高',
     frameCount: '帧数',
     frameDuration: '每帧时长（毫秒）',
-    mediaReset: '已重置不兼容的输出设置。SVG/GIF 仅支持生成，不支持流式、压缩或本地色键；SVG 限一张。',
+    mediaReset: '已重置不兼容的输出设置。SVG 仅支持生成，GIF 不能与编辑蒙版同时使用；两者都不支持流式、压缩或本地色键，SVG 限一张。',
 
     customModel: '自定义模型 / 日期快照',
     flareHint: '适合快速、高质量的日常生成',

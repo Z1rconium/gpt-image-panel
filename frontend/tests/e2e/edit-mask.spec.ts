@@ -75,6 +75,28 @@ test('painting a mask applies it to the primary card', async ({ page }) => {
   await expect(page.getByRole('status')).toContainText('Selection saved');
 });
 
+test('applying a mask drops GIF output because GIF edits cannot be masked', async ({ page }) => {
+  await loadApp(page);
+  await page
+    .locator('section')
+    .filter({ has: page.locator('#prompt') })
+    .getByRole('combobox', { name: 'Model', exact: true })
+    .selectOption('gpt-image-2.6-flare');
+  await uploadPrimary(page);
+  const format = page.getByRole('combobox', { name: 'Format', exact: true });
+  await format.selectOption('gif');
+  await expect(format).toHaveValue('gif');
+
+  await openMaskEditor(page);
+  await paintStroke(page);
+  await page.getByRole('button', { name: 'Save selection' }).click();
+  await expect(page.getByText(/^Repaint \d+\.\d%$/)).toBeVisible();
+
+  await expect(format).toHaveValue('png');
+  await expect(format.locator('option[value="gif"]')).toHaveCount(0);
+  await expect(page.getByText(/GIF cannot be combined with an edit mask/)).toBeVisible();
+});
+
 test('adding another reference image keeps the applied mask', async ({ page }) => {
   await loadApp(page);
   await uploadPrimary(page);

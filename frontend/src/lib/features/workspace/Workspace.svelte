@@ -97,6 +97,7 @@
   const handledTerminalJobIds = new Set<string>();
 
   const hasEditSource = $derived(editSourceCount($editSourceStore) > 0);
+  const hasEditMask = $derived(Boolean($editSourceStore.mask));
   const editSources = $derived.by(() => {
     const state = $editSourceStore;
     const primaryId = primaryEditSourceId(state);
@@ -1722,6 +1723,7 @@
       editPlanning={$assistantStore.editPlanLoading}
       onSubmit={submitPrompt}
       {hasEditSource}
+      {hasEditMask}
       onPlanEdit={planEdit}
       onOptimize={optimizePrompt}
       onAppendPromptTag={appendPromptTag}

@@ -17,6 +17,7 @@
     editPlannerEnabled?: boolean;
     editPlanning?: boolean;
     hasEditSource?: boolean;
+    hasEditMask?: boolean;
     editSource?: Snippet;
     onSubmit?: () => void;
     onOpenSize?: () => void;
@@ -32,6 +33,7 @@
     editPlannerEnabled = false,
     editPlanning = false,
     hasEditSource = false,
+    hasEditMask = false,
     editSource,
     onSubmit = () => {},
     onOpenSize = () => {},
@@ -47,7 +49,9 @@
   let mediaReset = $state(false);
   $effect(() => {
     if (specialMedia) {
-      if (!image26 || hasEditSource) { promptForm.outputFormat = 'png'; mediaReset = true; return; }
+      // SVG is generation-only; GIF may animate a reference image but not a masked edit.
+      const unsupportedForEdit = promptForm.outputFormat === 'svg' ? hasEditSource : hasEditMask;
+      if (!image26 || unsupportedForEdit) { promptForm.outputFormat = 'png'; mediaReset = true; return; }
       if (promptForm.stream || promptForm.outputCompression || promptForm.background.startsWith('chroma_') || (promptForm.outputFormat === 'svg' && Number(promptForm.quantity) !== 1)) mediaReset = true;
       promptForm.stream = false;
       promptForm.outputCompression = '';
@@ -270,7 +274,7 @@
               <option value="png">png</option>
               <option value="jpeg">jpeg</option>
               <option value="webp">webp</option>
-              {#if image26 && !hasEditSource}{#if !providerMapped || providerCaps?.formats.includes('svg')}<option value="svg">svg</option>{/if}{#if !providerMapped || (providerCaps?.animation && providerCaps?.formats.includes('gif'))}<option value="gif">gif</option>{/if}{/if}
+              {#if image26}{#if !hasEditSource && (!providerMapped || providerCaps?.formats.includes('svg'))}<option value="svg">svg</option>{/if}{#if !hasEditMask && (!providerMapped || (providerCaps?.animation && providerCaps?.formats.includes('gif')))}<option value="gif">gif</option>{/if}{/if}
             </select>
           </label>
 

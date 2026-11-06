@@ -359,6 +359,8 @@ def build_edit_request_from_form(
     paste_back: bool | None = None,
     api_preset_id: str | None = None,
     complexity: str | None = None,
+    frame_count: int | None = None,
+    frame_duration_ms: int | None = None,
 ) -> EditRequest:
     try:
         return EditRequest(
@@ -369,6 +371,8 @@ def build_edit_request_from_form(
             quality=quality,
             complexity=complexity,
             output_format=output_format,
+            frame_count=frame_count,
+            frame_duration_ms=frame_duration_ms,
             output_compression=output_compression,
             background=background,
             response_format=response_format,
@@ -579,6 +583,9 @@ async def queue_edit_job(
     agent_conversation_id: str | None = None,
     preset_snapshot: dict | None = None,
 ) -> GenerateJobResponse:
+    if mask_source is not None and req.output_format == "gif":
+        # Reject before the retry copy of the mask is written to MASKS_DIR.
+        raise UnprocessableRequestError("GIF output does not support edit masks")
     job_id = str(uuid.uuid4())
     if mask_source is not None:
         if req.paste_back is None:

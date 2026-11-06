@@ -383,7 +383,7 @@ const en = {
     complexityHigh: 'High',
     frameCount: 'Frames',
     frameDuration: 'Frame duration (ms)',
-    mediaReset: 'Incompatible output settings were reset. SVG/GIF support generation only, without streaming, compression or local chroma; SVG requires one image.',
+    mediaReset: 'Incompatible output settings were reset. SVG supports generation only and GIF cannot be combined with an edit mask; neither supports streaming, compression or local chroma, and SVG requires one image.',
 
     customModel: 'Custom model / snapshot',
     flareHint: 'Fast, high-quality everyday generation',

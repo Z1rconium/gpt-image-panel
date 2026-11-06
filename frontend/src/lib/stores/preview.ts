@@ -136,9 +136,12 @@ function buildRequestBody(form: PromptFormState): GenerateRequestBody {
   return body;
 }
 
-function submissionError(body: GenerateRequestBody, edit = false): string {
+function submissionError(body: GenerateRequestBody, edit = false, hasMask = false): string {
   const messages = get(t);
-  if ((body.output_format === 'svg' || body.output_format === 'gif') && (edit || !isImage26(body.model))) return messages.promptForm.mediaReset;
+  const special = body.output_format === 'svg' || body.output_format === 'gif';
+  if (special && !isImage26(body.model)) return messages.promptForm.mediaReset;
+  // SVG is generation-only; GIF edits are fine until a mask is drawn.
+  if (edit && (body.output_format === 'svg' || (body.output_format === 'gif' && hasMask))) return messages.promptForm.mediaReset;
   if (body.output_format === 'gif' && (!Number.isInteger(body.frame_count) || Number(body.frame_count) < 2 || Number(body.frame_count) > 64 || !Number.isInteger(body.frame_duration_ms) || Number(body.frame_duration_ms) < 20 || Number(body.frame_duration_ms) > 2000 || Number(body.frame_duration_ms) % 10 !== 0)) return messages.promptForm.invalidFrames;
   if (!body.prompt) return messages.messages.promptRequired;
   if (promptLength(body.prompt) > MAX_PROMPT_CHARS) return messages.promptForm.promptTooLong;
@@ -281,7 +284,7 @@ function createPreviewStore() {
 
     const body = buildRequestBody(form);
     if (body.background === 'chroma_green' || body.background === 'chroma_magenta') body.background = 'auto';
-    const error = submissionError(body, true);
+    const error = submissionError(body, true, Boolean(editSource.mask));
     if (error) {
       setError(error);
       return false;

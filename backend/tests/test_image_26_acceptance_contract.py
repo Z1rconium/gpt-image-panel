@@ -112,6 +112,97 @@ def png(mode, color):
     return out.getvalue()
 
 
+def _gif_edit_request(client, primary, *, from_gallery=False, extra_files=None, **overrides):
+    data = {'prompt': 'animate the reference', 'model': 'gpt-image-2.6-flare', 'output_format': 'gif',
+            'frame_count': '2', 'frame_duration_ms': '100', **overrides}
+    data = {key: value for key, value in data.items() if value is not None}
+    files = dict(extra_files or {})
+    endpoint = '/api/edits'
+    if from_gallery:
+        gallery_mutations.add_to_gallery_sync(
+            image_id='gif-primary', prompt='primary', size='1024x1024',
+            filename='gif-primary.png', image_bytes=primary,
+            metadata={'model': 'gpt-image-2', 'output_format': 'png'},
+        )
+        endpoint += '/from-gallery/gif-primary'
+    else:
+        files['image'] = ('primary.png', primary, 'image/png')
+    return client.post(endpoint, data=data, files=files or None)
+
+
+@pytest.mark.parametrize('from_gallery', [False, True])
+def test_gif_edit_sends_animation_params_and_reaches_gallery(client, monkeypatch, from_gallery):
+    original = animation()
+    session = wire(monkeypatch, original)
+    accepted = _gif_edit_request(client, png('RGB', 'white'), from_gallery=from_gallery)
+    assert accepted.status_code == 202, accepted.text
+    job = _wait_for_job(client, accepted.json()['job_id'])
+    assert job['status'] == 'success', job
+    assert job['operation'] == 'edit'
+    assert job['output_format'] == 'gif' and job['mask_applied'] is False
+    assert job['frame_count'] == 2 and job['frame_duration_ms'] == 100
+    assert len(session.forms) == 1
+    sent = session.forms[0]
+    assert sent['output_format'] == 'gif'
+    assert sent['frame_count'] == '2' and sent['frame_duration_ms'] == '100'
+    assert not {'mask', 'stream', 'partial_images', 'output_compression', 'response_format'} & sent.keys()
+    entry = client.get(f"/api/gallery/{job['image_id']}").json()
+    assert entry['filename'].endswith('.gif') and entry['output_format'] == 'gif'
+    assert entry['frame_count'] == 2 and entry['frame_duration_ms'] == 100
+    downloaded = client.get('/api/download/' + entry['filename'])
+    assert downloaded.status_code == 200 and downloaded.content == original
+
+
+def test_gif_edit_defaults_frames_when_omitted(client, monkeypatch):
+    session = wire(monkeypatch, animation())
+    accepted = client.post('/api/edits', data={
+        'prompt': 'animate the reference', 'model': 'gpt-image-2.6-flare', 'output_format': 'gif',
+    }, files={'image': ('primary.png', png('RGB', 'white'), 'image/png')})
+    assert accepted.status_code == 202, accepted.text
+    assert _wait_for_job(client, accepted.json()['job_id'])['status'] == 'success'
+    assert session.forms[0]['frame_count'] == '9' and session.forms[0]['frame_duration_ms'] == '200'
+
+
+def test_gif_edit_with_mask_is_rejected_before_upstream(client, monkeypatch):
+    session = wire(monkeypatch, animation())
+    response = _gif_edit_request(client, png('RGB', 'white'), extra_files={
+        'mask': ('mask.png', png('RGBA', (0, 0, 0, 0)), 'image/png'),
+    })
+    assert response.status_code == 422
+    assert 'GIF' in response.text and 'mask' in response.text
+    assert session.forms == []
+
+
+@pytest.mark.parametrize('overrides, expected', [
+    ({'frame_count': '1'}, 'frame_count'),
+    ({'frame_duration_ms': '25'}, 'multiple of 10'),
+    ({'output_format': 'png'}, 'GIF-only'),
+])
+def test_gif_edit_validates_frame_fields(client, monkeypatch, overrides, expected):
+    session = wire(monkeypatch, animation())
+    response = _gif_edit_request(client, png('RGB', 'white'), **overrides)
+    assert response.status_code == 422
+    assert expected in response.text
+    assert session.forms == []
+
+
+def test_gif_edit_requires_image_26(client, monkeypatch):
+    session = wire(monkeypatch, animation())
+    response = _gif_edit_request(client, png('RGB', 'white'), model='gpt-image-2')
+    assert response.status_code == 422
+    assert 'GPT Image 2.6' in response.text
+    assert session.forms == []
+
+
+def test_svg_edit_is_still_generation_only(client, monkeypatch):
+    session = wire(monkeypatch, SVG_BYTES)
+    response = _gif_edit_request(client, png('RGB', 'white'), output_format='svg', frame_count=None,
+                                 frame_duration_ms=None)
+    assert response.status_code == 422
+    assert 'SVG' in response.text
+    assert session.forms == []
+
+
 @pytest.mark.parametrize('from_gallery', [False, True])
 def test_uploaded_markup_wire_history_restore_and_delete(client, monkeypatch, from_gallery):
     primary = png('RGB', 'white')

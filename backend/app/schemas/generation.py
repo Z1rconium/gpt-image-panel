@@ -110,8 +110,10 @@ class EditRequest(GenerateRequest):
 
     @model_validator(mode="after")
     def validate_edit_background(self) -> "EditRequest":
-        if self.output_format in {"svg", "gif"}:
-            raise ValueError("SVG/GIF are generation-only")
+        # GIF edits are allowed (reference image -> animation); a mask is not part
+        # of this schema, so the "no mask" half of that rule lives in queue_edit_job.
+        if self.output_format == "svg":
+            raise ValueError("SVG is generation-only")
         if self.background in {"chroma_green", "chroma_magenta"}:
             raise ValueError("Local chroma removal is only available for image generation")
         return self

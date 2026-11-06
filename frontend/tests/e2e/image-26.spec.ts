@@ -24,6 +24,30 @@ for (const model of ['gpt-image-2.6-flare', 'gpt-image-2.6-sunburst']) {
   });
 }
 
+test('reference-image edit can output a GIF with frame controls, but never SVG', async ({ page }) => {
+  await loadApp(page);
+  await page.locator('section').filter({ has: page.locator('#prompt') }).getByRole('combobox', { name: 'Model', exact: true }).selectOption('gpt-image-2.6-flare');
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8CQAgAEZQFkLBpE3wAAAABJRU5ErkJggg==', 'base64');
+  await page.getByLabel('Upload edit image').setInputFiles({ name: 'source.png', mimeType: 'image/png', buffer: png });
+  const format = page.getByRole('combobox', { name: 'Format', exact: true });
+  await expect(format.locator('option[value="gif"]')).toHaveCount(1);
+  await expect(format.locator('option[value="svg"]')).toHaveCount(0);
+  await format.selectOption('gif');
+  await expect(format).toHaveValue('gif');
+  const frames = page.getByRole('spinbutton', { name: 'Frames', exact: true });
+  await expect(frames).toHaveValue('9');
+  await frames.fill('4');
+  await page.getByRole('textbox', { name: 'Prompt', exact: true }).fill('Make the bird flap its wings');
+  const submitted = page.waitForRequest(r => new URL(r.url()).pathname === '/api/edits' && r.method() === 'POST');
+  await page.getByRole('button', { name: 'Edits', exact: true }).click();
+  const body = (await submitted).postDataBuffer()?.toString() || '';
+  expect(body).toMatch(/name="output_format"\r\n\r\ngif\r\n/);
+  expect(body).toMatch(/name="frame_count"\r\n\r\n4\r\n/);
+  expect(body).toMatch(/name="frame_duration_ms"\r\n\r\n200\r\n/);
+  expect(body).not.toContain('name="mask"');
+  expect(body).not.toContain('name="stream"');
+});
+
 test('markup uploads separately with overlay and no paste-back', async ({ page }) => {
   await loadApp(page);
   await page.locator('section').filter({ has: page.locator('#prompt') }).getByRole('combobox', { name: 'Model', exact: true }).selectOption('gpt-image-2.6-flare');
