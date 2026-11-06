@@ -19,6 +19,7 @@ from ...services.edit_sources import (
     cleanup_edit_sources,
     copy_edit_source_stream_to_temp,
     read_gallery_edit_source,
+    read_gallery_reference_edit_sources,
 )
 from ...services.job_queue import (
     EditImageSource,
@@ -112,6 +113,33 @@ def mask_dimensions(mask: EditImageSource | None) -> tuple[int, int] | None:
 
 
 
+
+
+def extract_reference_image_ids(form: FormData) -> list[str]:
+    ids: list[str] = []
+    for field in ("reference_image_id", "reference_image_id[]"):
+        for value in form.getlist(field):
+            if isinstance(value, str):
+                trimmed = value.strip()
+                if trimmed:
+                    ids.append(trimmed)
+    return ids
+
+
+def pre_validate_edit_source_count(
+    *,
+    has_gallery_primary: bool,
+    uploads_count: int,
+    reference_ids_count: int,
+):
+    total = (1 if has_gallery_primary else 0) + uploads_count + reference_ids_count
+    if total > MAX_EDIT_SOURCE_IMAGES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"At most {MAX_EDIT_SOURCE_IMAGES} edit source images are supported.",
+        )
+    if total == 0:
+        raise HTTPException(status_code=422, detail="Upload image is required.")
 
 
 def validate_edit_source_count(sources: list[EditImageSource]):
@@ -286,12 +314,35 @@ async def edit_image(
     # nothing and the mask itself is still decoded exactly once.
     markup = await read_upload_edit_markup(form)
     mask = await read_upload_edit_mask(form)
+    ref_ids = extract_reference_image_ids(form)
+    raw_uploads = [
+        v
+        for k in ("image", "image[]")
+        for v in form.getlist(k)
+        if isinstance(v, StarletteUploadFile)
+    ]
+    pre_validate_edit_source_count(
+        has_gallery_primary=False,
+        uploads_count=len(raw_uploads),
+        reference_ids_count=len(ref_ids),
+    )
     sources: list[EditImageSource] = []
     try:
-        sources = await read_upload_edit_sources(
-            form,
-            orientation_mask_size=mask_dimensions(mask),
-        )
+        if raw_uploads:
+            upload_sources = await read_upload_edit_sources(
+                form,
+                orientation_mask_size=mask_dimensions(mask),
+            )
+            sources.extend(upload_sources)
+            reference_sources = await read_gallery_reference_edit_sources(ref_ids)
+            sources.extend(reference_sources)
+        else:
+            reference_sources = await read_gallery_reference_edit_sources(
+                ref_ids,
+                orientation_mask_size=mask_dimensions(mask),
+            )
+            sources.extend(reference_sources)
+
         if not sources:
             raise HTTPException(status_code=422, detail="Upload image is required.")
         validate_edit_source_count(sources)
@@ -328,19 +379,35 @@ async def edit_image_from_gallery(
     form = await request.form()
     markup = await read_upload_edit_markup(form)
     mask = await read_upload_edit_mask(form)
-    upload_sources: list[EditImageSource] = []
+    ref_ids = extract_reference_image_ids(form)
+    raw_uploads = [
+        v
+        for k in ("image", "image[]")
+        for v in form.getlist(k)
+        if isinstance(v, StarletteUploadFile)
+    ]
+    pre_validate_edit_source_count(
+        has_gallery_primary=True,
+        uploads_count=len(raw_uploads),
+        reference_ids_count=len(ref_ids),
+    )
+    sources: list[EditImageSource] = []
     try:
         # Uploads here are reference images; the gallery entry is the primary
         # the mask must match, so only it gets the orientation check.
-        upload_sources = await read_upload_edit_sources(form)
         gallery_source = await read_gallery_edit_source(
             image_id,
             orientation_mask_size=mask_dimensions(mask),
         )
+        sources.append(gallery_source)
+        upload_sources = await read_upload_edit_sources(form)
+        sources.extend(upload_sources)
+        reference_sources = await read_gallery_reference_edit_sources(ref_ids)
+        sources.extend(reference_sources)
     except BaseException:
-        cleanup_edit_sources([*upload_sources, *([mask] if mask is not None else []), *([markup] if markup is not None else [])])
+        cleanup_edit_sources([*sources, *([mask] if mask is not None else []), *([markup] if markup is not None else [])])
         raise
-    sources = [gallery_source, *upload_sources]
+
     try:
         validate_edit_source_count(sources)
         await validate_uploaded_markup(markup, sources[0], req)

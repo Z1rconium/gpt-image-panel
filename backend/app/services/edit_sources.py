@@ -1,6 +1,7 @@
 """Edit-source staging shared by the edit routes and the agent tools."""
 
 import asyncio
+from dataclasses import replace
 import hashlib
 import os
 import tempfile
@@ -247,4 +248,74 @@ async def read_gallery_edit_source(
             cleanup_edit_sources([source])
         except Exception:
             pass
+        raise
+
+
+async def read_gallery_reference_edit_source(
+    image_id: str,
+    *,
+    orientation_mask_size: tuple[int, int] | None = None,
+) -> EditImageSource:
+    entry = await run_db_operation(
+        get_gallery_entry,
+        image_id,
+        metric_name="get_gallery_reference_edit_source",
+    )
+    if not entry:
+        raise NotFoundError(f"Gallery entry not found: {image_id}")
+
+    filename = entry.filename or ""
+    suffix = Path(filename).suffix.lower()
+    if suffix in (".svg", ".gif"):
+        raise InvalidRequestError(f"SVG and GIF images cannot be used as reference images: {image_id}")
+
+    path = safe_image_path(filename)
+    if not path or not path.exists():
+        raise NotFoundError(f"Gallery image file not found: {image_id}")
+
+    image_content_type = image_content_type_for_filename(path.name)
+    if image_content_type in ("image/svg+xml", "image/gif"):
+        raise InvalidRequestError(f"SVG and GIF images cannot be used as reference images: {image_id}")
+
+    task = asyncio.create_task(run_image_operation(
+        copy_edit_source_file_to_temp,
+        path,
+        path.name,
+        image_content_type,
+        empty_detail="Gallery reference image is empty",
+        too_large_detail=f"Gallery reference image is too large. Max size is {config.MAX_FILE_SIZE_MB} MB.",
+        read_error_detail="Failed to read gallery reference image",
+        metric_name="copy_validate_gallery_reference_edit_source",
+        orientation_mask_size=orientation_mask_size,
+        gallery_image_id=image_id,
+    ))
+    try:
+        source = await asyncio.shield(task)
+        return replace(source, role="reference")
+    except asyncio.CancelledError:
+        try:
+            source = await asyncio.shield(task)
+            cleanup_edit_sources([source])
+        except Exception:
+            pass
+        raise
+
+
+async def read_gallery_reference_edit_sources(
+    reference_ids: list[str],
+    *,
+    orientation_mask_size: tuple[int, int] | None = None,
+) -> list[EditImageSource]:
+    sources: list[EditImageSource] = []
+    try:
+        for index, ref_id in enumerate(reference_ids):
+            mask_size = orientation_mask_size if index == 0 else None
+            source = await read_gallery_reference_edit_source(
+                ref_id,
+                orientation_mask_size=mask_size,
+            )
+            sources.append(source)
+        return sources
+    except BaseException:
+        cleanup_edit_sources(sources)
         raise

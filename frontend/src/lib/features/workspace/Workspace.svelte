@@ -118,6 +118,12 @@
         label: source.label,
         previewUrl: source.previewUrl,
         kind: 'upload' as const
+      })),
+      ...(state.galleryReferences || []).map((ref) => ({
+        id: ref.id,
+        label: ref.label || ref.previewLabel,
+        previewUrl: ref.previewUrl,
+        kind: 'gallery_reference' as const
       }))
     ].map((source) => ({
       ...source,
@@ -138,8 +144,12 @@
       };
     }
     const first = state.files[0];
-    return first
-      ? { id: first.id, label: first.label, previewUrl: first.previewUrl, width: first.width, height: first.height }
+    if (first) {
+      return { id: first.id, label: first.label, previewUrl: first.previewUrl, width: first.width, height: first.height };
+    }
+    const firstRef = state.galleryReferences?.[0];
+    return firstRef
+      ? { id: firstRef.id, label: firstRef.label || firstRef.previewLabel, previewUrl: firstRef.previewUrl, width: firstRef.width, height: firstRef.height }
       : null;
   });
   const activeEditMask = $derived(isMaskValid($editSourceStore) ? $editSourceStore.mask : null);
@@ -674,7 +684,7 @@
       const previousSize = promptForm.size;
       const plan = await assistantStore.planEdit({
         goal,
-        source_count: $editSourceStore.files.length + ($editSourceStore.selectedGalleryImageId ? 1 : 0),
+        source_count: editSourceCount($editSourceStore),
         has_mask: Boolean(activeEditMask),
         current_prompt: promptForm.prompt,
         target_size: promptForm.size
@@ -974,6 +984,13 @@
       if (await ensurePanel('editPreview')) setUi('editPreviewOpen', true);
       return;
     }
+    const ref = ($editSourceStore.galleryReferences || []).find((source) => source.id === sourceId || source.imageId === sourceId);
+    if (ref) {
+      editPreviewUrl = ref.previewUrl;
+      editPreviewLabel = ref.previewLabel || ref.label;
+      if (await ensurePanel('editPreview')) setUi('editPreviewOpen', true);
+      return;
+    }
     if ($editSourceStore.selectedGalleryImageId === sourceId && $editSourceStore.galleryPreviewUrl) {
       editPreviewUrl = $editSourceStore.galleryPreviewUrl;
       editPreviewLabel = $editSourceStore.galleryPreviewLabel || $editSourceStore.galleryLabel;
@@ -1119,8 +1136,9 @@
   function removeEditSource(sourceId: string) {
     const upload = $editSourceStore.files.find((source) => source.id === sourceId);
     const isGallery = $editSourceStore.selectedGalleryImageId === sourceId;
-    const label = upload?.label || (isGallery ? $editSourceStore.galleryLabel || $editSourceStore.galleryPreviewLabel : '');
-    const previewUrl = upload?.previewUrl || (isGallery ? $editSourceStore.galleryPreviewUrl : '');
+    const ref = ($editSourceStore.galleryReferences || []).find((source) => source.id === sourceId || source.imageId === sourceId);
+    const label = upload?.label || (isGallery ? $editSourceStore.galleryLabel || $editSourceStore.galleryPreviewLabel : (ref ? ref.label || ref.previewLabel : ''));
+    const previewUrl = upload?.previewUrl || (isGallery ? $editSourceStore.galleryPreviewUrl : (ref ? ref.previewUrl : ''));
     if (!editSourceStore.remove(sourceId)) return;
     if (previewUrl && editPreviewUrl === previewUrl) closeEditPreview();
     showToast($t.messages.editSourceRemoved(label));

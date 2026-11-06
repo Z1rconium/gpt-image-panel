@@ -9,7 +9,7 @@
     id: string;
     label: string;
     previewUrl: string;
-    kind: 'upload' | 'gallery';
+    kind: 'upload' | 'gallery' | 'gallery_reference';
     isPrimary?: boolean;
     maskCoverage?: number | null;
     maskOrigin?: EditMaskOrigin | null;
@@ -158,7 +158,7 @@
               <span class="block truncate text-xs font-medium text-stone-800 dark:text-zinc-200" title={source.label}>{source.label}</span>
               <span class="mt-0.5 flex flex-wrap items-center gap-1">
                 <span class="inline-block rounded-sm bg-stone-100 px-1.5 py-0.5 text-[10px] font-medium text-stone-600 dark:bg-zinc-800 dark:text-zinc-400">
-                  {source.kind === 'gallery' ? $t.promptForm.gallerySourceBadge : $t.promptForm.uploadSourceBadge}
+                  {source.kind === 'upload' ? $t.promptForm.uploadSourceBadge : $t.promptForm.gallerySourceBadge}
                 </span>
                 {#if source.isPrimary}
                   <span class="inline-block rounded-sm bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-300">

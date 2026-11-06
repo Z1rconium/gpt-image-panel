@@ -63,6 +63,17 @@ export type EditMarkup = {
   editorState?: MarkupEditorState;
 };
 
+export type EditGalleryReferenceSource = {
+  id: string;
+  imageId: string;
+  filename?: string;
+  label: string;
+  previewUrl: string;
+  previewLabel: string;
+  width: number;
+  height: number;
+};
+
 export type EditSourceState = {
   files: EditUploadSource[];
   selectedGalleryImageId: string;
@@ -74,6 +85,7 @@ export type EditSourceState = {
   // same "unknown, decode if you need it" contract as EditUploadSource above.
   galleryWidth: number;
   galleryHeight: number;
+  galleryReferences: EditGalleryReferenceSource[];
   markup?: EditMarkup | null;
   mask: EditMask | null;
 };
@@ -87,6 +99,7 @@ export const initialEditSourceState: EditSourceState = {
   galleryPreviewLabel: '',
   galleryWidth: 0,
   galleryHeight: 0,
+  galleryReferences: [],
   markup: null,
   mask: null
 };
@@ -101,7 +114,12 @@ export const editMaskDiscards = writable(0);
 export const editMarkupDiscards = writable(0);
 
 export function primaryEditSourceId(source: EditSourceState) {
-  return source.selectedGalleryImageId || source.files[0]?.id || '';
+  return (
+    source.selectedGalleryImageId ||
+    source.files[0]?.id ||
+    source.galleryReferences?.[0]?.id ||
+    ''
+  );
 }
 
 export function isMaskValid(source: EditSourceState) {
@@ -165,7 +183,11 @@ async function probeImageSize(file: File): Promise<{ width: number; height: numb
 }
 
 export function editSourceCount(source: EditSourceState) {
-  return source.files.length + (source.selectedGalleryImageId ? 1 : 0);
+  return (
+    source.files.length +
+    (source.selectedGalleryImageId ? 1 : 0) +
+    (source.galleryReferences?.length || 0)
+  );
 }
 
 function createEditSourceStore() {
@@ -229,7 +251,7 @@ function createEditSourceStore() {
       revokeEditSourceUrls(state);
       if (state.mask) editMaskDiscards.update((count) => count + 1);
       revokeMaskUrl(state.mask);
-      set({ ...initialEditSourceState, files: [] });
+      set({ ...initialEditSourceState, files: [], galleryReferences: [] });
       if (input) input.value = '';
     },
     handleFile(event: Event, setError: (message: string) => void, input?: HTMLInputElement) {
@@ -284,6 +306,56 @@ function createEditSourceStore() {
         });
       });
     },
+    addGalleryReferences(
+      items: EditGalleryReferenceSource[],
+      setError?: (message: string) => void
+    ) {
+      const validItems = items.filter(
+        (item) => !/\.(svg|gif)$/i.test(item.filename || item.label || '')
+      );
+      const invalidCount = items.length - validItems.length;
+      if (!validItems.length) {
+        if (items.length && setError) setError(get(t).messages.imageUploadRequired);
+        return 0;
+      }
+      const current = state;
+      const availableSlots = MAX_EDIT_SOURCE_IMAGES - editSourceCount(current);
+      if (availableSlots <= 0) {
+        if (setError) setError(get(t).messages.editSourceLimit(MAX_EDIT_SOURCE_IMAGES));
+        return 0;
+      }
+      const accepted = validItems.slice(0, availableSlots);
+      const overLimitCount = validItems.length - accepted.length;
+      if (invalidCount > 0 && setError) setError(get(t).messages.imageUploadRequired);
+      if (overLimitCount > 0 && setError)
+        setError(get(t).messages.editSourceSomeSkipped(MAX_EDIT_SOURCE_IMAGES));
+
+      update((source) =>
+        dropStaleMask({
+          ...source,
+          galleryReferences: [...(source.galleryReferences || []), ...accepted]
+        })
+      );
+      return accepted.length;
+    },
+    removeGalleryReference(idOrImageId: string) {
+      update((source) =>
+        dropStaleMask({
+          ...source,
+          galleryReferences: (source.galleryReferences || []).filter(
+            (item) => item.id !== idOrImageId && item.imageId !== idOrImageId
+          )
+        })
+      );
+    },
+    clearGalleryReferences() {
+      update((source) =>
+        dropStaleMask({
+          ...source,
+          galleryReferences: []
+        })
+      );
+    },
     remove(sourceId: string) {
       const upload = state.files.find((source) => source.id === sourceId);
       if (upload) {
@@ -307,6 +379,20 @@ function createEditSourceStore() {
             galleryPreviewLabel: '',
             galleryWidth: 0,
             galleryHeight: 0
+          })
+        );
+        return true;
+      }
+      const refItem = (state.galleryReferences || []).find(
+        (source) => source.id === sourceId || source.imageId === sourceId
+      );
+      if (refItem) {
+        update((source) =>
+          dropStaleMask({
+            ...source,
+            galleryReferences: (source.galleryReferences || []).filter(
+              (item) => item.id !== refItem.id
+            )
           })
         );
         return true;

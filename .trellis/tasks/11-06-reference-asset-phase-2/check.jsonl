@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/backend/testing.md", "reason": "Contract testing standards and test patterns"}
+{"file": ".trellis/spec/backend/image-generation.md", "reason": "Verify source count and raster restrictions"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Frontend type check and component quality guidelines"}

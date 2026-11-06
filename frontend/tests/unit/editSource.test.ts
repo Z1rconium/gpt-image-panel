@@ -251,3 +251,156 @@ describe('markup editor state (browser-only, optional)', () => {
     expect(revokeSpy).toHaveBeenCalledWith('blob:gone');
   });
 });
+
+describe('gallery references (Phase 2)', () => {
+  it('adds and removes gallery references while updating source count', () => {
+    expect(editSourceCount(get(editSourceStore))).toBe(0);
+    editSourceStore.addGalleryReferences([
+      {
+        id: 'ref-1',
+        imageId: 'img-1',
+        label: 'Ref 1',
+        previewUrl: 'blob:ref-1',
+        previewLabel: 'Ref 1',
+        width: 100,
+        height: 100
+      },
+      {
+        id: 'ref-2',
+        imageId: 'img-2',
+        label: 'Ref 2',
+        previewUrl: 'blob:ref-2',
+        previewLabel: 'Ref 2',
+        width: 100,
+        height: 100
+      }
+    ]);
+    expect(editSourceCount(get(editSourceStore))).toBe(2);
+    expect(get(editSourceStore).galleryReferences).toHaveLength(2);
+
+    // Remove by imageId or id
+    editSourceStore.remove('ref-1');
+    expect(editSourceCount(get(editSourceStore))).toBe(1);
+    expect(get(editSourceStore).galleryReferences[0].id).toBe('ref-2');
+
+    editSourceStore.remove('img-2');
+    expect(editSourceCount(get(editSourceStore))).toBe(0);
+  });
+
+  it('preserves existing mask when adding or removing gallery references', () => {
+    editSourceStore.addFiles([makeFile('primary.png')], () => {});
+    const primaryId = get(editSourceStore).files[0].id;
+    editSourceStore.setMask(makeMask(primaryId, 'blob:mask'));
+    expect(isMaskValid(get(editSourceStore))).toBe(true);
+
+    // Adding gallery references must NOT discard the mask
+    editSourceStore.addGalleryReferences([
+      {
+        id: 'ref-1',
+        imageId: 'img-1',
+        label: 'Ref 1',
+        previewUrl: 'blob:ref-1',
+        previewLabel: 'Ref 1',
+        width: 200,
+        height: 200
+      }
+    ]);
+    expect(isMaskValid(get(editSourceStore))).toBe(true);
+    expect(get(editMaskDiscards)).toBe(0);
+
+    // Removing gallery reference must NOT discard the mask
+    editSourceStore.remove('ref-1');
+    expect(isMaskValid(get(editSourceStore))).toBe(true);
+    expect(get(editMaskDiscards)).toBe(0);
+  });
+
+  it('filters out SVG and GIF files when adding gallery references', () => {
+    const errorSpy = vi.fn();
+    const count = editSourceStore.addGalleryReferences(
+      [
+        {
+          id: 'ref-svg',
+          imageId: 'img-svg',
+          filename: 'icon.svg',
+          label: 'SVG',
+          previewUrl: 'blob:svg',
+          previewLabel: 'SVG',
+          width: 0,
+          height: 0
+        },
+        {
+          id: 'ref-gif',
+          imageId: 'img-gif',
+          filename: 'anim.gif',
+          label: 'GIF',
+          previewUrl: 'blob:gif',
+          previewLabel: 'GIF',
+          width: 0,
+          height: 0
+        },
+        {
+          id: 'ref-valid',
+          imageId: 'img-valid',
+          filename: 'valid.png',
+          label: 'Valid',
+          previewUrl: 'blob:valid',
+          previewLabel: 'Valid',
+          width: 50,
+          height: 50
+        }
+      ],
+      errorSpy
+    );
+    expect(count).toBe(1);
+    expect(get(editSourceStore).galleryReferences).toHaveLength(1);
+    expect(get(editSourceStore).galleryReferences[0].id).toBe('ref-valid');
+    expect(errorSpy).toHaveBeenCalled();
+  });
+
+  it('enforces total capacity limit of 16 across uploads, gallery primary and references', () => {
+    // Add 1 primary gallery and 10 uploads
+    editSourceStore.setGallerySource('gal-primary', 'Gal', 'blob:gal', 'gal');
+    editSourceStore.addFiles(
+      Array.from({ length: 10 }, (_, i) => makeFile(`up-${i}.png`)),
+      () => {}
+    );
+    expect(editSourceCount(get(editSourceStore))).toBe(11);
+
+    // Try adding 7 references (total would be 18 > 16)
+    const errorSpy = vi.fn();
+    const added = editSourceStore.addGalleryReferences(
+      Array.from({ length: 7 }, (_, i) => ({
+        id: `ref-${i}`,
+        imageId: `img-${i}`,
+        label: `Ref ${i}`,
+        previewUrl: `blob:ref-${i}`,
+        previewLabel: `Ref ${i}`,
+        width: 10,
+        height: 10
+      })),
+      errorSpy
+    );
+    // Only 5 should be accepted (11 + 5 = 16)
+    expect(added).toBe(5);
+    expect(editSourceCount(get(editSourceStore))).toBe(16);
+    expect(errorSpy).toHaveBeenCalled();
+  });
+
+  it('clear() empties galleryReferences as well', () => {
+    editSourceStore.addGalleryReferences([
+      {
+        id: 'ref-1',
+        imageId: 'img-1',
+        label: 'Ref 1',
+        previewUrl: 'blob:ref-1',
+        previewLabel: 'Ref 1',
+        width: 10,
+        height: 10
+      }
+    ]);
+    expect(editSourceCount(get(editSourceStore))).toBe(1);
+    editSourceStore.clear();
+    expect(editSourceCount(get(editSourceStore))).toBe(0);
+    expect(get(editSourceStore).galleryReferences).toEqual([]);
+  });
+});

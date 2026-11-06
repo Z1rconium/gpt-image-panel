@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/api-routes.md", "reason": "API routes structure, error handling, and validation rules"}
+{"file": ".trellis/spec/backend/image-generation.md", "reason": "Edit source handling, image limits, and SVG/GIF exclusion"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "Frontend store state updates, reactivity, and mask retention"}
+{"file": ".trellis/spec/frontend/forms-and-api.md", "reason": "FormData construction and apiFetch guidelines"}

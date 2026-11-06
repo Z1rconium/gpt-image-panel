@@ -318,6 +318,11 @@ function createPreviewStore() {
     editSource.files.forEach((source) => {
       formData.append(uploadFieldName, source.file, source.file.name);
     });
+    if (editSource.galleryReferences?.length) {
+      editSource.galleryReferences.forEach((ref) => {
+        formData.append('reference_image_id', ref.imageId);
+      });
+    }
     if (editSource.markup) formData.append('markup', editSource.markup.blob, 'markup.png');
     if (editSource.mask) {
       formData.append('mask', editSource.mask.blob, 'mask.png');
