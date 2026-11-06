@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { loadApp, PNG_BYTES } from './fixtures/mockApi';
+import { loadApp } from './fixtures/mockApi';
 
 for (const model of ['gpt-image-2.6-flare', 'gpt-image-2.6-sunburst']) {
   test(`${model} scalar wire and special output controls`, async ({ page }) => {

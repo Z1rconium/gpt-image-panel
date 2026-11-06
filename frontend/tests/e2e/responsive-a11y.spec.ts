@@ -1,15 +1,7 @@
 import { expect, test } from '@playwright/test';
 import {
-  PNG_BYTES,
-  baseGalleryImages,
-  galleryResponse,
-  job,
-  json,
   loadApp,
-  manyGalleryImages,
-  manyJobs,
-  mockApi,
-  settingsResponse
+  mockApi
 } from './fixtures/mockApi';
 
 test('settings and prompt snippets fit a mobile viewport without horizontal overflow', async ({ page }) => {

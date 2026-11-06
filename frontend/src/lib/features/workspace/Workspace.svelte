@@ -560,14 +560,6 @@
     void settingsStore.checkR2Health(body);
   }
 
-  function checkPromptOptimizerHealth() {
-    void settingsStore.checkPromptOptimizerHealth();
-  }
-
-  function clearPromptOptimizerHealth() {
-    settingsStore.clearPromptOptimizerHealth();
-  }
-
   function checkAiAssistantHealth(body: AIAssistantSettingsInput) {
     void settingsStore.checkAiAssistantHealth(body);
   }
@@ -1631,8 +1623,6 @@
   healthChecking={$settingsActivityStore.healthChecking}
   r2Health={$settingsActivityStore.r2Health}
   r2HealthChecking={$settingsActivityStore.r2HealthChecking}
-  promptOptimizerHealth={$settingsActivityStore.promptOptimizerHealth}
-  promptOptimizerHealthChecking={$settingsActivityStore.promptOptimizerHealthChecking}
   aiAssistantHealth={$settingsActivityStore.aiAssistantHealth}
   aiAssistantHealthChecking={$settingsActivityStore.aiAssistantHealthChecking}
   onClose={() => closeUiPanel('settings', 'settingsOpen')}
@@ -1651,8 +1641,6 @@
   onHealthCheck={checkPresetHealth}
   onClearPresetHealth={clearPresetHealth}
   onR2HealthCheck={checkR2Health}
-  onPromptOptimizerHealthCheck={checkPromptOptimizerHealth}
-  onClearPromptOptimizerHealth={clearPromptOptimizerHealth}
   onAiAssistantHealthCheck={checkAiAssistantHealth}
   onClearAiAssistantHealth={clearAiAssistantHealth}
   onLoadPromptOptimizerSystemPrompt={loadPromptOptimizerSystemPrompt}

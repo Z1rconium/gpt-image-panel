@@ -13,7 +13,6 @@ import pytest
 from backend.tests.support.contract import (
     PNG_BYTES,
     _fake_gallery_entry,
-    client,
     config,
     gallery_queries_router,
     settings_repo,
@@ -125,7 +124,7 @@ def test_single_nodeimage_upload_preserves_missing_and_unreadable_file_errors(
         "1024x1024",
         "node-missing-file.png",
     )
-    unreadable = _fake_gallery_entry(
+    _fake_gallery_entry(
         "node-unreadable-file",
         "unreadable",
         "1024x1024",

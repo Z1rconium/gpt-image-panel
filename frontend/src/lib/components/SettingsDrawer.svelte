@@ -1,7 +1,7 @@
 <script lang="ts">
   import { t } from '$lib/i18n';
   import type { ResponseFormatDefault } from '$lib/api/types/common';
-  import type { AIAssistantSettingsInput, ApiPreset, AssistantHealthResponse, OverallConfigItem, OverallConfigResponse, OverallConfigUpdateRequest, PromptOptimizerHealthResponse, PresetHealthResponse, PromptOptimizerSystemPromptResponse, R2BackupSettingsInput, R2HealthResponse, SettingsInput, SettingsResponse } from '$lib/api/types/settings';
+  import type { AIAssistantSettingsInput, ApiPreset, AssistantHealthResponse, OverallConfigItem, OverallConfigResponse, OverallConfigUpdateRequest, PresetHealthResponse, PromptOptimizerSystemPromptResponse, R2BackupSettingsInput, R2HealthResponse, SettingsInput, SettingsResponse } from '$lib/api/types/settings';
   import { confirmStore } from '$lib/stores/confirm';
   import type { SettingsPrefill } from '$lib/utils/settingsPrefill';
   import { normalizeResponseFormat } from '$lib/utils/promptForm';
@@ -34,8 +34,6 @@
     healthChecking?: boolean;
     r2Health?: R2HealthResponse | null;
     r2HealthChecking?: boolean;
-    promptOptimizerHealth?: PromptOptimizerHealthResponse | null;
-    promptOptimizerHealthChecking?: boolean;
     aiAssistantHealth?: AssistantHealthResponse | null;
     aiAssistantHealthChecking?: boolean;
     onClose?: () => void;
@@ -49,8 +47,6 @@
     onHealthCheck?: (presetId: string) => Promise<void> | void;
     onClearPresetHealth?: () => void;
     onR2HealthCheck?: (body: R2BackupSettingsInput) => Promise<void> | void;
-    onPromptOptimizerHealthCheck?: () => Promise<void> | void;
-    onClearPromptOptimizerHealth?: () => void;
     onAiAssistantHealthCheck?: (body: AIAssistantSettingsInput) => Promise<void> | void;
     onClearAiAssistantHealth?: () => void;
     onLoadPromptOptimizerSystemPrompt?: () => Promise<PromptOptimizerSystemPromptResponse>;
@@ -72,8 +68,6 @@
     healthChecking = false,
     r2Health = null,
     r2HealthChecking = false,
-    promptOptimizerHealth = null,
-    promptOptimizerHealthChecking = false,
     aiAssistantHealth = null,
     aiAssistantHealthChecking = false,
     onClose = () => {},
@@ -87,8 +81,6 @@
     onHealthCheck = () => {},
     onClearPresetHealth = () => {},
     onR2HealthCheck = () => {},
-    onPromptOptimizerHealthCheck = () => {},
-    onClearPromptOptimizerHealth = () => {},
     onAiAssistantHealthCheck = () => {},
     onClearAiAssistantHealth = () => {},
     onLoadPromptOptimizerSystemPrompt = async () => ({
@@ -309,10 +301,6 @@
     draft.r2SyncIntervalHours = r2SyncIntervalHoursValue(draft.r2SyncIntervalHours);
   }
 
-  function closePromptOptimizerHealth() {
-    onClearPromptOptimizerHealth();
-  }
-
   function closeAiAssistantHealth() {
     onClearAiAssistantHealth();
   }
@@ -361,10 +349,6 @@
 
   async function checkR2Health() {
     await onR2HealthCheck(r2BackupPayload(settingsDraft));
-  }
-
-  async function checkPromptOptimizerHealth() {
-    await onPromptOptimizerHealthCheck();
   }
 
   async function checkAiAssistantHealth() {
@@ -619,9 +603,7 @@
       <div class="space-y-3 border-t border-stone-200 p-5 dark:border-zinc-800">
         <HealthResults
           {health}
-          {promptOptimizerHealth}
           {aiAssistantHealth}
-          {closePromptOptimizerHealth}
           {closeAiAssistantHealth}
           {closePresetHealth}
         />

@@ -1,5 +1,3 @@
-import urllib.parse
-
 import aiohttp
 
 from backend.app.integrations import turnstile as turnstile_client
@@ -2679,7 +2677,6 @@ def test_api_settings_reload_skips_a_write_that_finished_during_the_read(client,
     from backend.app.runtime.state import state
 
     presets.load_api_settings()
-    stored = list(state.api_presets)
     real_load = presets.load_settings
 
     def racing_load():

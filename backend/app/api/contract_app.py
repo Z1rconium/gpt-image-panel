@@ -5,6 +5,8 @@ from .middleware import register_exception_handlers, register_middleware
 from .routers import routers
 from ..integrations.upstream import generation as proxy
 
+__all__ = ["app", "proxy"]
+
 
 register_middleware(app)
 register_exception_handlers(app)

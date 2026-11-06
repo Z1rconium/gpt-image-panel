@@ -8,7 +8,7 @@ from backend.app.integrations.agent_client import AgentClientError, Finish, Text
 from backend.app.integrations.agent_search import SearchStatus, SourceCitation, safe_source_url
 from backend.tests.support.contract import _assistant_runtime_payload
 from backend.app.repositories import agent as agent_repo
-from backend.tests.test_agent_contract import detail, enable_agent, install_model, new_conversation, parse_sse, run_turn, start_turn, text_round, wait_turn
+from backend.tests.test_agent_contract import detail, install_model, new_conversation, parse_sse, run_turn, start_turn, text_round, wait_turn
 
 
 def enable_search(client, *, supported=True, enabled=True, responses=True, max_rounds=4):

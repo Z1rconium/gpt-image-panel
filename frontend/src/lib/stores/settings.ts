@@ -2,7 +2,7 @@ import { get, writable } from 'svelte/store';
 import { apiFetch } from '$lib/api/client';
 import { t } from '$lib/i18n';
 import { confirmStore } from '$lib/stores/confirm';
-import type { AIAssistantSettingsInput, AssistantHealthResponse, OverallConfigResponse, OverallConfigUpdateRequest, PresetExportPackage, PresetHealthResponse, PresetImportInstruction, PresetImportPreviewResponse, PromptOptimizerHealthResponse, PromptOptimizerSystemPromptResponse, ProviderMappingPromptResponse, ProviderMappingValidateResponse, R2BackupSettingsInput, R2HealthResponse, SettingsInput, SettingsResponse } from '$lib/api/types/settings';
+import type { AIAssistantSettingsInput, AssistantHealthResponse, OverallConfigResponse, OverallConfigUpdateRequest, PresetExportPackage, PresetHealthResponse, PresetImportInstruction, PresetImportPreviewResponse, PromptOptimizerSystemPromptResponse, ProviderMappingPromptResponse, ProviderMappingValidateResponse, R2BackupSettingsInput, R2HealthResponse, SettingsInput, SettingsResponse } from '$lib/api/types/settings';
 import type { ToastVariant } from '$lib/stores/ui';
 
 type ShowToast = (message: string, variant?: ToastVariant) => void;
@@ -17,8 +17,6 @@ export type SettingsActivityState = {
   health: PresetHealthResponse | null;
   r2HealthChecking: boolean;
   r2Health: R2HealthResponse | null;
-  promptOptimizerHealthChecking: boolean;
-  promptOptimizerHealth: PromptOptimizerHealthResponse | null;
   aiAssistantHealthChecking: boolean;
   aiAssistantHealth: AssistantHealthResponse | null;
 };
@@ -33,8 +31,6 @@ const initialSettingsActivityState: SettingsActivityState = {
   health: null,
   r2HealthChecking: false,
   r2Health: null,
-  promptOptimizerHealthChecking: false,
-  promptOptimizerHealth: null,
   aiAssistantHealthChecking: false,
   aiAssistantHealth: null
 };
@@ -62,14 +58,6 @@ function createSettingsActivityStore() {
     update((state) => ({ ...state, r2Health }));
   }
 
-  function setPromptOptimizerHealthChecking(promptOptimizerHealthChecking: boolean) {
-    update((state) => ({ ...state, promptOptimizerHealthChecking }));
-  }
-
-  function setPromptOptimizerHealth(promptOptimizerHealth: PromptOptimizerHealthResponse | null) {
-    update((state) => ({ ...state, promptOptimizerHealth }));
-  }
-
   function setAiAssistantHealthChecking(aiAssistantHealthChecking: boolean) {
     update((state) => ({ ...state, aiAssistantHealthChecking }));
   }
@@ -80,10 +68,6 @@ function createSettingsActivityStore() {
 
   function clearHealth() {
     update((state) => ({ ...state, health: null }));
-  }
-
-  function clearPromptOptimizerHealth() {
-    update((state) => ({ ...state, promptOptimizerHealth: null }));
   }
 
   function clearAiAssistantHealth() {
@@ -101,12 +85,9 @@ function createSettingsActivityStore() {
     setHealth,
     setR2HealthChecking,
     setR2Health,
-    setPromptOptimizerHealthChecking,
-    setPromptOptimizerHealth,
     setAiAssistantHealthChecking,
     setAiAssistantHealth,
     clearHealth,
-    clearPromptOptimizerHealth,
     clearAiAssistantHealth,
     reset
   };
@@ -227,7 +208,6 @@ function createSettingsStore() {
   function clearDerivedHealth() {
     settingsActivityStore.clearHealth();
     settingsActivityStore.setR2Health(null);
-    settingsActivityStore.clearPromptOptimizerHealth();
     settingsActivityStore.clearAiAssistantHealth();
   }
 
@@ -333,24 +313,6 @@ function createSettingsStore() {
     }
   }
 
-  async function checkPromptOptimizerHealth() {
-    settingsActivityStore.setPromptOptimizerHealthChecking(true);
-    try {
-      const promptOptimizerHealth = await apiFetch<PromptOptimizerHealthResponse>(
-        '/api/prompt/optimizer-health',
-        { method: 'POST' },
-        'checking prompt optimizer health'
-      );
-      settingsActivityStore.setPromptOptimizerHealth(promptOptimizerHealth);
-    } finally {
-      settingsActivityStore.setPromptOptimizerHealthChecking(false);
-    }
-  }
-
-  function clearPromptOptimizerHealth() {
-    settingsActivityStore.clearPromptOptimizerHealth();
-  }
-
   async function checkAiAssistantHealth(body?: AIAssistantSettingsInput) {
     settingsActivityStore.setAiAssistantHealthChecking(true);
     try {
@@ -437,8 +399,6 @@ function createSettingsStore() {
     loadProviderMappingPrompt,
     validateProviderMapping,
     checkR2Health,
-    checkPromptOptimizerHealth,
-    clearPromptOptimizerHealth,
     checkAiAssistantHealth,
     clearAiAssistantHealth,
     loadPromptOptimizerSystemPrompt,

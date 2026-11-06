@@ -1,13 +1,7 @@
 import { expect, test } from '@playwright/test';
 import {
-  PNG_BYTES,
-  baseGalleryImages,
-  galleryResponse,
-  job,
   json,
   loadApp,
-  manyGalleryImages,
-  manyJobs,
   mockApi,
   settingsResponse
 } from './fixtures/mockApi';

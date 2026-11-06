@@ -1,15 +1,10 @@
 import { expect, test, type Page } from '@playwright/test';
 import {
   PNG_BYTES,
-  baseGalleryImages,
-  galleryResponse,
   job,
-  json,
   loadApp,
   manyGalleryImages,
-  manyJobs,
-  mockApi,
-  settingsResponse
+  manyJobs
 } from './fixtures/mockApi';
 
 async function dispatchImagePaste(page: Page, targetSelector: string, fileNames: string[]) {
@@ -605,7 +600,6 @@ test('dragged image files become edit sources and prompt drops remain native', a
   await expect(page.getByRole('button', { name: 'Preview dropped.png' })).toBeVisible();
   await expect(page.getByRole('status')).toContainText('Reference image added from drag and drop');
 
-  const prompt = page.getByRole('textbox', { name: 'Prompt', exact: true });
   const promptDropAllowed = await dispatchImageDrop(page, '#prompt', [{ name: 'prompt-drop.png', type: 'image/png' }]);
   expect(promptDropAllowed).toBe(true);
   await expect(page.getByRole('button', { name: 'Preview prompt-drop.png' })).toHaveCount(0);

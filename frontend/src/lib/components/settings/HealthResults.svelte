@@ -2,17 +2,14 @@
   import { t } from '$lib/i18n';
   import type {
     AssistantHealthResponse,
-    PresetHealthResponse,
-    PromptOptimizerHealthResponse
+    PresetHealthResponse
   } from '$lib/api/types/settings';
   import type { PresetHealthStatus } from '$lib/api/types/common';
 
   import { healthBadgeClass, healthPanelClass, healthStatusLabel } from '$lib/utils/health';
 
   export let health: PresetHealthResponse | null = null;
-  export let promptOptimizerHealth: PromptOptimizerHealthResponse | null = null;
   export let aiAssistantHealth: AssistantHealthResponse | null = null;
-  export let closePromptOptimizerHealth: () => void = () => {};
   export let closeAiAssistantHealth: () => void = () => {};
   export let closePresetHealth: () => void = () => {};
 
@@ -51,35 +48,6 @@
             </div>
             <div class="mt-2 rounded-md border border-stone-200 bg-white/70 p-2 text-stone-700 dark:border-zinc-800 dark:bg-zinc-950/50 dark:text-zinc-300">
               {aiAssistantHealth.message}
-            </div>
-          </div>
-        {/if}
-        {#if promptOptimizerHealth}
-          <div class={`rounded-lg border p-3 text-xs ${healthPanelClass(promptOptimizerHealth.status)}`} data-testid="prompt-optimizer-health-result">
-            <div class="flex items-center justify-between gap-3">
-              <div class="min-w-0">
-                <span class="font-semibold">{$t.settings.promptOptimizerHealth}</span>
-                <div class="mt-1 text-[11px] text-inherit/70">
-                  {promptOptimizerHealth.model}
-                  {#if promptOptimizerHealth.duration_ms}{' '}- {promptOptimizerHealth.duration_ms} ms{/if}
-                </div>
-              </div>
-              <div class="flex items-center gap-2">
-                <span class={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${healthBadgeClass(promptOptimizerHealth.status)}`}>
-                  {healthStatusLabel(promptOptimizerHealth.status)}
-                </span>
-                <button
-                  type="button"
-                  class="mobile-touch-target control-focus rounded-lg p-1.5 text-inherit/70 hover:bg-black/10 hover:text-inherit"
-                  aria-label={$t.common.close}
-                  on:click={closePromptOptimizerHealth}
-                >
-                  x
-                </button>
-              </div>
-            </div>
-            <div class="mt-2 rounded-md border border-stone-200 bg-white/70 p-2 text-stone-700 dark:border-zinc-800 dark:bg-zinc-950/50 dark:text-zinc-300">
-              {promptOptimizerHealth.message}
             </div>
           </div>
         {/if}

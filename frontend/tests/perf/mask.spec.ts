@@ -57,7 +57,6 @@ test.describe('mask editor performance', () => {
   });
 
   test('a long diagonal stroke paints without long tasks', async ({ page }, testInfo) => {
-    const size = 4096;
     await loadApp(page);
     await page
       .getByLabel('Upload edit image')
@@ -207,7 +206,6 @@ test.describe('mask editor performance', () => {
     // worker pass — with it on, "Edit area" can sit on a pending "…" readout
     // well past a short wait while 20 scattered strokes work through the
     // debounced worker queue, which is a real but unrelated cost.
-    const size = 4096;
     await disableRegionProcessing(page);
     await loadApp(page);
     await page

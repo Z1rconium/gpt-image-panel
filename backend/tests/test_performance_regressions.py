@@ -21,7 +21,7 @@ from backend.app.core.media import validate_image_bytes
 from backend.app.repositories import thumbnail_jobs as thumbnail_jobs_repo
 from backend.app.repositories.db.execution import close_blocking_executors, run_db_operation, run_db_operation_in_current_thread
 from backend.app.runtime.blocking import run_image_operation, upstream_memory_lease
-from backend.app.services import gallery_jobs, webhook_service
+from backend.app.services import webhook_service
 from backend.app.services import gallery_job_shared
 
 

@@ -4,7 +4,6 @@ import asyncio
 import sys
 import threading
 import time
-from pathlib import Path
 
 import pytest
 from PIL import Image
