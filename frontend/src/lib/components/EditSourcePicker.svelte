@@ -1,5 +1,6 @@
 <script lang="ts">
   import Brush from 'lucide-svelte/icons/brush';
+  import Package from 'lucide-svelte/icons/package';
   import Upload from 'lucide-svelte/icons/upload';
   import X from 'lucide-svelte/icons/x';
   import { t } from '$lib/i18n';
@@ -21,6 +22,7 @@
   export let onClear: () => void = () => {};
   export let onEditMask: (sourceId: string) => void = () => {};
   export let onRemoveMask: () => void = () => {};
+  export let onOpenAssetPack: (() => void) | undefined = undefined;
   export let maskSupported = true;
   export let pasteBack = true;
   export let onPasteBackChange: (enabled: boolean) => void = () => {};
@@ -83,9 +85,21 @@
 </script>
 
 <div>
-  <p class="mb-1.5 text-xs font-medium text-stone-600 dark:text-zinc-400">
-    {$t.promptForm.editSourceDropLabel}
-  </p>
+  <div class="mb-1.5 flex items-center justify-between gap-2">
+    <p class="text-xs font-medium text-stone-600 dark:text-zinc-400">
+      {$t.promptForm.editSourceDropLabel}
+    </p>
+    {#if onOpenAssetPack}
+      <button
+        type="button"
+        class="control-focus inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-medium text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-400 dark:hover:bg-emerald-500/15"
+        on:click={onOpenAssetPack}
+      >
+        <Package size={13} strokeWidth={2} aria-hidden="true" />
+        <span>{$t.collections.addFromAssetPack}</span>
+      </button>
+    {/if}
+  </div>
   <div
     class={`min-w-0 rounded-xl border-2 border-dashed p-3 transition-all ${
       isDraggingFiles

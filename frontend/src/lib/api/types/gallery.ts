@@ -55,8 +55,16 @@ export type GalleryCollection = {
   image_count: number;
   cover_image_id?: string | null;
   cover_filename?: string | null;
+  asset_alias?: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type GalleryCollectionReferencesResponse = {
+  collection: GalleryCollection;
+  images: GalleryEntry[];
+  total_count: number;
+  skipped_unsupported: number;
 };
 
 export type GalleryCollectionItemsResponse = {

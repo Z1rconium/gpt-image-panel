@@ -3,6 +3,7 @@ import { apiFetch } from '$lib/api/client';
 import type {
   GalleryCollection,
   GalleryCollectionItemsResponse,
+  GalleryCollectionReferencesResponse,
   GalleryImageCollectionsResponse
 } from '$lib/api/types/gallery';
 import { galleryStore } from '$lib/stores/gallery';
@@ -94,6 +95,17 @@ function createGalleryCollectionsStore() {
     return collection;
   }
 
+  async function setAlias(id: string, alias: string | null) {
+    const normalized = alias && alias.trim() ? alias.trim() : null;
+    const collection = await apiFetch<GalleryCollection>(
+      `/api/gallery/collections/${encodeURIComponent(id)}`,
+      jsonRequest('PATCH', { asset_alias: normalized }),
+      'updating collection alias'
+    );
+    replaceCollection(collection);
+    return collection;
+  }
+
   async function remove(id: string) {
     await apiFetch(`/api/gallery/collections/${encodeURIComponent(id)}`, { method: 'DELETE' }, 'deleting collection');
     update((current) => ({ ...current, collections: current.collections.filter((item) => item.id !== id) }));
@@ -155,7 +167,39 @@ function createGalleryCollectionsStore() {
     return result.collection_ids;
   }
 
-  return { subscribe, load, create, rename, setDefault, remove, reorder, addItems, removeItems, imageCollectionIds };
+  async function loadReferences(id: string) {
+    return apiFetch<GalleryCollectionReferencesResponse>(
+      `/api/gallery/collections/${encodeURIComponent(id)}/references`,
+      {},
+      'loading collection references'
+    );
+  }
+
+  async function reorderItems(id: string, ids: string[]) {
+    const collection = await apiFetch<GalleryCollection>(
+      `/api/gallery/collections/${encodeURIComponent(id)}/items/order`,
+      jsonRequest('PUT', { ids }),
+      'reordering collection items'
+    );
+    replaceCollection(collection);
+    return collection;
+  }
+
+  return {
+    subscribe,
+    load,
+    create,
+    rename,
+    setDefault,
+    setAlias,
+    remove,
+    reorder,
+    addItems,
+    removeItems,
+    imageCollectionIds,
+    loadReferences,
+    reorderItems
+  };
 }
 
 export const galleryCollectionsStore = createGalleryCollectionsStore();

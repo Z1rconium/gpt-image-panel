@@ -50,6 +50,7 @@ export const agentViewPanel = createLazyComponent(() => import('$lib/features/ag
 // a background prefetch), so they stay out of the homepage graph.
 export const nodeImageResultPanel = createLazyComponent(() => import('$lib/components/NodeImageResultDialog.svelte'));
 export const editGalleryDialogPanel = createLazyComponent(() => import('$lib/components/EditGalleryDialog.svelte'));
+export const assetPackPickerDialogPanel = createLazyComponent(() => import('$lib/components/gallery/AssetPackPickerDialog.svelte'));
 
 // The gallery grid sits below the fold; defer its (icon- and branch-heavy)
 // module until after the first paint.

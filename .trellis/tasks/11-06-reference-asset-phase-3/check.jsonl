@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Frontend quality checks and bundle size verification"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "TypeScript contract alignment"}

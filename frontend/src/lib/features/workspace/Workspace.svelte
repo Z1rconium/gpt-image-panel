@@ -27,7 +27,7 @@
   import { accessStore } from '$lib/stores/access';
   import { assistantStore, isAbortError } from '$lib/stores/assistant';
   import { confirmStore } from '$lib/stores/confirm';
-  import { editMarkupDiscards, editMaskDiscards, editSourceCount, editSourceStore, isMaskValid, MAX_EDIT_SOURCE_IMAGES, primaryEditSourceId, type EditMask } from '$lib/stores/editSource';
+  import { editMarkupDiscards, editMaskDiscards, editSourceCount, editSourceStore, isMaskValid, MAX_EDIT_SOURCE_IMAGES, primaryEditSourceId, type EditGalleryReferenceSource, type EditMask } from '$lib/stores/editSource';
   import { galleryActivityStore, galleryStore } from '$lib/stores/gallery';
   import { jobsStore } from '$lib/stores/jobs';
   import type { JobMaskFetch } from '$lib/features/workspace/jobMaskRestore';
@@ -51,6 +51,7 @@
   import {
     agentViewPanel,
     aiAssistantPanel,
+    assetPackPickerDialogPanel,
     editGalleryDialogPanel,
     editPreviewPanel,
     galleryGridPanel,
@@ -89,6 +90,7 @@
   let editPicker: EditSourcePicker | undefined = $state();
   let galleryEditImage = $state<GalleryEntry | null>(null);
   let galleryEditDialogOpen = $state(false);
+  let assetPackPickerOpen = $state(false);
   let editPreviewUrl = $state('');
   let editPreviewLabel = $state('');
   let jobDiagnoses = $state<Record<string, AssistantJobDiagnoseResponse>>({});
@@ -975,6 +977,17 @@
     if (addedCount > 0) showToast($t.messages.editSourceFromDropAdded);
   }
 
+  function handleAddAssetPackReferences(refs: EditGalleryReferenceSource[]) {
+    const addedCount = editSourceStore.addGalleryReferences(refs, previewStore.setError);
+    if (addedCount > 0) {
+      if (addedCount < refs.length) {
+        showToast($t.collections.referencesTruncated(addedCount));
+      } else {
+        showToast($t.collections.referencesAdded(addedCount));
+      }
+    }
+  }
+
   async function openEditPreview(sourceId: string) {
     rememberPanelFocus('editPreview');
     const upload = $editSourceStore.files.find((source) => source.id === sourceId);
@@ -1758,6 +1771,10 @@
           onClear={clearEditSource}
           onEditMask={openMaskEditor}
           onRemoveMask={removeEditMask}
+          onOpenAssetPack={() => {
+            void assetPackPickerDialogPanel.prefetch();
+            assetPackPickerOpen = true;
+          }}
           pasteBack={promptForm.pasteBack}
           onPasteBackChange={(enabled: boolean) => {
             promptForm.pasteBack = enabled;
@@ -1936,6 +1953,15 @@
     image={galleryEditImage}
     onChoose={applyGalleryEditChoice}
     onClose={closeGalleryEditDialog}
+  />
+{/if}
+
+{#if $assetPackPickerDialogPanel.component}
+  {@const Panel = $assetPackPickerDialogPanel.component}
+  <Panel
+    open={assetPackPickerOpen}
+    onClose={() => { assetPackPickerOpen = false; }}
+    onAdd={handleAddAssetPackReferences}
   />
 {/if}
 
