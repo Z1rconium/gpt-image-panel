@@ -1,0 +1,28 @@
+{
+  "id": "reference-asset-library",
+  "name": "reference-asset-library",
+  "title": "Reference Asset Library",
+  "description": "可持久化参考资产库整体计划，复用集合作为资产包，支持编辑链路多参考图与Agent引用",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "Z1rconium",
+  "assignee": "Z1rconium",
+  "createdAt": "2026-11-06",
+  "completedAt": null,
+  "branch": "feat/reference-asset-library",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "11-06-reference-asset-phase-1"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

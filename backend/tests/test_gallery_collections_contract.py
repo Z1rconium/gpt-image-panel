@@ -1,3 +1,5 @@
+from PIL import Image
+
 from backend.tests.support.contract import *  # noqa: F403
 
 
@@ -153,3 +155,132 @@ def test_gallery_collection_export_job_zips_members(client):
         metadata = json.loads(zf.read("metadata.json"))
     assert metadata["collection"] == {"id": album["id"], "name": album["name"]}
     assert [image["id"] for image in metadata["images"]] == ["zip-col-2"]
+
+
+def test_gallery_collection_assets_and_references(client):
+    album = _create_collection(client, "Alice Character")
+    assert album["asset_alias"] is None
+
+    # Invalid alias validations
+    assert client.patch(f"/api/gallery/collections/{album['id']}", json={"asset_alias": "alice bot"}).status_code == 422
+    assert client.patch(f"/api/gallery/collections/{album['id']}", json={"asset_alias": "alice@character"}).status_code == 422
+    assert client.patch(f"/api/gallery/collections/{album['id']}", json={"asset_alias": "a" * 33}).status_code == 422
+    assert client.patch(f"/api/gallery/collections/{album['id']}", json={"asset_alias": "round-1"}).status_code == 422
+    assert client.patch(f"/api/gallery/collections/{album['id']}", json={"asset_alias": "round-2-image-1"}).status_code == 422
+    assert client.patch(f"/api/gallery/collections/{album['id']}", json={"asset_alias": "第1轮图1"}).status_code == 422
+    assert client.patch(f"/api/gallery/collections/{album['id']}", json={"asset_alias": "1轮图2"}).status_code == 422
+
+    # Valid alias with Unicode
+    patched = client.patch(f"/api/gallery/collections/{album['id']}", json={"asset_alias": "艾莉丝_01"})
+    assert patched.status_code == 200
+    assert patched.json()["asset_alias"] == "艾莉丝_01"
+
+    # Valid English alias
+    patched = client.patch(f"/api/gallery/collections/{album['id']}", json={"asset_alias": "alice-v1"})
+    assert patched.status_code == 200
+    assert patched.json()["asset_alias"] == "alice-v1"
+
+    # Case-insensitive collision
+    bob = _create_collection(client, "Bob Character")
+    conflict = client.patch(f"/api/gallery/collections/{bob['id']}", json={"asset_alias": "ALICE-V1"})
+    assert conflict.status_code == 409
+
+    # Clear alias with null
+    cleared = client.patch(f"/api/gallery/collections/{album['id']}", json={"asset_alias": None})
+    assert cleared.status_code == 200
+    assert cleared.json()["asset_alias"] is None
+
+    # Set alias and verify omitting field preserves it
+    patched = client.patch(f"/api/gallery/collections/{album['id']}", json={"asset_alias": "alice"})
+    assert patched.json()["asset_alias"] == "alice"
+    preserved = client.patch(f"/api/gallery/collections/{album['id']}", json={"name": "Alice Character Pack"})
+    assert preserved.status_code == 200
+    assert preserved.json()["asset_alias"] == "alice"
+    assert preserved.json()["name"] == "Alice Character Pack"
+
+    # References endpoint 404 for missing collection
+    assert client.get("/api/gallery/collections/missing-col/references").status_code == 404
+
+    # Prepare entries: 2 PNGs, 1 SVG, 1 GIF
+    _fake_gallery_entry("ref-1", "alice front", "1024x1024", "ref-1.png")
+    _fake_gallery_entry("ref-2", "alice side", "1024x1024", "ref-2.png")
+
+    svg_bytes = b'<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024"><circle cx="512" cy="512" r="300" fill="coral"/></svg>'
+    gallery_mutations.add_to_gallery_sync(
+        image_id="ref-3",
+        prompt="alice vector",
+        size="1024x1024",
+        filename="ref-3.svg",
+        metadata={
+            "model": "gpt-image-2",
+            "quality": "auto",
+            "output_format": "svg",
+            "n": 1,
+            "api_path": "/v1/images/generations",
+            "api_preset_name": "Default",
+        },
+        image_bytes=svg_bytes,
+    )
+
+    out = io.BytesIO()
+    Image.new("RGB", (32, 32), "red").save(
+        out, "GIF", save_all=True, append_images=[Image.new("RGB", (32, 32), "blue")],
+        duration=[100, 200], loop=0,
+    )
+    gif_bytes = out.getvalue()
+    gallery_mutations.add_to_gallery_sync(
+        image_id="ref-4",
+        prompt="alice animated",
+        size="1024x1024",
+        filename="ref-4.gif",
+        metadata={
+            "model": "gpt-image-2",
+            "quality": "auto",
+            "output_format": "gif",
+            "n": 1,
+            "api_path": "/v1/images/generations",
+            "api_preset_name": "Default",
+        },
+        image_bytes=gif_bytes,
+    )
+
+    client.post(
+        f"/api/gallery/collections/{album['id']}/items",
+        json={"ids": ["ref-1", "ref-2", "ref-3", "ref-4"]},
+    )
+
+    refs_resp = client.get(f"/api/gallery/collections/{album['id']}/references")
+    assert refs_resp.status_code == 200
+    refs_data = refs_resp.json()
+    assert refs_data["collection"]["id"] == album["id"]
+    assert refs_data["collection"]["asset_alias"] == "alice"
+    assert refs_data["total_count"] == 4
+    assert refs_data["skipped_unsupported"] == 2
+    assert [img["id"] for img in refs_data["images"]] == ["ref-1", "ref-2"]
+
+    # Items order endpoint
+    assert client.put("/api/gallery/collections/missing-col/items/order", json={"ids": ["ref-1"]}).status_code == 404
+    assert client.put(f"/api/gallery/collections/{album['id']}/items/order", json={"ids": ["ref-1"]}).status_code == 422
+    assert client.put(f"/api/gallery/collections/{album['id']}/items/order", json={"ids": ["ref-1", "ref-2", "ref-3", "ref-4", "extra"]}).status_code == 422
+    assert client.put(f"/api/gallery/collections/{album['id']}/items/order", json={"ids": ["ref-1", "ref-1", "ref-2", "ref-3"]}).status_code == 422
+
+    # Reorder members: ref-2, ref-4, ref-3, ref-1
+    reorder_resp = client.put(
+        f"/api/gallery/collections/{album['id']}/items/order",
+        json={"ids": ["ref-2", "ref-4", "ref-3", "ref-1"]},
+    )
+    assert reorder_resp.status_code == 200
+
+    # References endpoint now reflects ref-2 before ref-1
+    refs_after_order = client.get(f"/api/gallery/collections/{album['id']}/references").json()
+    assert [img["id"] for img in refs_after_order["images"]] == ["ref-2", "ref-1"]
+
+    # Adding a new member ref-5 without explicit position places it at the end
+    _fake_gallery_entry("ref-5", "alice back", "1024x1024", "ref-5.png")
+    client.post(f"/api/gallery/collections/{album['id']}/items", json={"ids": ["ref-5"]})
+
+    refs_with_new = client.get(f"/api/gallery/collections/{album['id']}/references").json()
+    assert refs_with_new["total_count"] == 5
+    assert refs_with_new["skipped_unsupported"] == 2
+    assert [img["id"] for img in refs_with_new["images"]] == ["ref-2", "ref-1", "ref-5"]
+

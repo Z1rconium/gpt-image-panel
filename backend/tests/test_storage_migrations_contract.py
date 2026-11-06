@@ -831,3 +831,37 @@ def test_safety_identifier_migration_adds_columns_to_jobs_and_gallery(tmp_path):
         assert "safety_identifier" in gallery_cols
         assert "safety_identifier" in job_cols
 
+
+def test_gallery_collection_assets_migration(tmp_path):
+    _configure_runtime(tmp_path)
+    db_repo.verify_storage_writable()
+    with db_repo._connect() as conn:
+        migration_row = conn.execute("SELECT name FROM schema_migrations WHERE version = 42").fetchone()
+        assert migration_row is not None
+        assert migration_row["name"] == "gallery_collection_assets"
+
+        col_cols = {row["name"] for row in conn.execute("PRAGMA table_info(gallery_collections)")}
+        assert "asset_alias" in col_cols
+
+        item_cols = {row["name"] for row in conn.execute("PRAGMA table_info(gallery_collection_items)")}
+        assert "position" in item_cols
+
+        indexes = {row["name"] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'index'")}
+        assert "idx_gallery_collections_asset_alias" in indexes
+        assert "idx_gallery_collection_items_order" in indexes
+
+        with db_repo._transaction(conn):
+            conn.execute(
+                "INSERT INTO gallery_collections(id, name, asset_alias, created_at, updated_at) VALUES('col-a', 'Col A', 'alice', 't', 't')"
+            )
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(
+                    "INSERT INTO gallery_collections(id, name, asset_alias, created_at, updated_at) VALUES('col-b', 'Col B', 'ALICE', 't', 't')"
+                )
+            conn.execute(
+                "INSERT INTO gallery_collections(id, name, asset_alias, created_at, updated_at) VALUES('col-c', 'Col C', NULL, 't', 't')"
+            )
+            conn.execute(
+                "INSERT INTO gallery_collections(id, name, asset_alias, created_at, updated_at) VALUES('col-d', 'Col D', NULL, 't', 't')"
+            )
+

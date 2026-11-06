@@ -14,16 +14,24 @@ from ..db import (
     _transaction,
     _unique_sqlite_values,
 )
+from .queries import get_gallery_entries_by_ids
 
 
 class GalleryCollectionNameConflictError(ValueError):
     """Raised when a collection name is already used (case-insensitive)."""
 
 
+class GalleryCollectionAliasConflictError(ValueError):
+    """Raised when an asset alias is already used (case-insensitive)."""
+
+
+_UNSET = object()
+
 _COLLECTION_SELECT_SQL = """
     SELECT
         c.id,
         c.name,
+        c.asset_alias,
         c.position,
         c.is_default,
         c.created_at,
@@ -57,6 +65,7 @@ def _collection_from_row(row: sqlite3.Row) -> dict[str, Any]:
     return {
         "id": row["id"],
         "name": row["name"],
+        "asset_alias": row["asset_alias"],
         "position": int(row["position"] or 0),
         "is_default": bool(row["is_default"]),
         "image_count": int(row["image_count"] or 0),
@@ -80,6 +89,14 @@ def _name_taken_on_conn(conn: sqlite3.Connection, name: str, *, exclude_id: str 
     return row is not None
 
 
+def _alias_taken_on_conn(conn: sqlite3.Connection, alias: str, *, exclude_id: str | None = None) -> bool:
+    row = conn.execute(
+        "SELECT id FROM gallery_collections WHERE asset_alias = ? COLLATE NOCASE AND id != ?",
+        (alias, exclude_id or ""),
+    ).fetchone()
+    return row is not None
+
+
 def list_gallery_collections() -> list[dict[str, Any]]:
     _ensure_database()
     with _connect() as conn:
@@ -93,7 +110,7 @@ def get_gallery_collection(collection_id: str) -> dict[str, Any] | None:
         return _get_collection_on_conn(conn, collection_id)
 
 
-def create_gallery_collection(name: str) -> dict[str, Any]:
+def create_gallery_collection(name: str, *, asset_alias: str | None = None) -> dict[str, Any]:
     _ensure_database()
     now = utc_now()
     collection_id = uuid.uuid4().hex
@@ -101,14 +118,16 @@ def create_gallery_collection(name: str) -> dict[str, Any]:
         with _transaction(conn):
             if _name_taken_on_conn(conn, name):
                 raise GalleryCollectionNameConflictError("A collection with this name already exists")
+            if asset_alias is not None and _alias_taken_on_conn(conn, asset_alias):
+                raise GalleryCollectionAliasConflictError("A collection with this asset alias already exists")
             row = conn.execute("SELECT COALESCE(MAX(position), -1) FROM gallery_collections").fetchone()
             position = int(row[0]) + 1 if row else 0
             conn.execute(
                 """
-                INSERT INTO gallery_collections (id, name, position, is_default, created_at, updated_at)
-                VALUES (?, ?, ?, 0, ?, ?)
+                INSERT INTO gallery_collections (id, name, asset_alias, position, is_default, created_at, updated_at)
+                VALUES (?, ?, ?, ?, 0, ?, ?)
                 """,
-                (collection_id, name, position, now, now),
+                (collection_id, name, asset_alias, position, now, now),
             )
             return _get_collection_on_conn(conn, collection_id)  # type: ignore[return-value]
 
@@ -118,6 +137,7 @@ def update_gallery_collection(
     *,
     name: str | None = None,
     is_default: bool | None = None,
+    asset_alias: str | None | object = _UNSET,
 ) -> dict[str, Any] | None:
     _ensure_database()
     with _connect() as conn:
@@ -132,6 +152,19 @@ def update_gallery_collection(
                     "UPDATE gallery_collections SET name = ?, updated_at = ? WHERE id = ?",
                     (name, now, collection_id),
                 )
+            if asset_alias is not _UNSET:
+                if asset_alias is not None:
+                    if _alias_taken_on_conn(conn, asset_alias, exclude_id=collection_id):
+                        raise GalleryCollectionAliasConflictError("A collection with this asset alias already exists")
+                    conn.execute(
+                        "UPDATE gallery_collections SET asset_alias = ?, updated_at = ? WHERE id = ?",
+                        (asset_alias, now, collection_id),
+                    )
+                else:
+                    conn.execute(
+                        "UPDATE gallery_collections SET asset_alias = NULL, updated_at = ? WHERE id = ?",
+                        (now, collection_id),
+                    )
             if is_default is True:
                 conn.execute(
                     "UPDATE gallery_collections SET is_default = 0, updated_at = ? WHERE is_default = 1 AND id != ?",
@@ -275,3 +308,85 @@ def get_gallery_image_collection_ids(image_id: str) -> list[str]:
             (image_id,),
         ).fetchall()
     return [str(row["collection_id"]) for row in rows]
+
+
+def list_collection_reference_entries(collection_id: str) -> dict[str, Any] | None:
+    """Fetch valid raster reference images for a collection in unified order.
+
+    Order: ORDER BY items.position IS NULL, items.position ASC, items.added_at ASC, items.image_id ASC.
+    SVG and GIF entries are excluded and reported via skipped_unsupported.
+    Returns None if the collection does not exist.
+    """
+    _ensure_database()
+    with _connect() as conn:
+        collection = _get_collection_on_conn(conn, collection_id)
+        if collection is None:
+            return None
+        rows = conn.execute(
+            """
+            SELECT items.image_id
+            FROM gallery_collection_items AS items
+            WHERE items.collection_id = ?
+            ORDER BY items.position IS NULL, items.position ASC, items.added_at ASC, items.image_id ASC
+            """,
+            (collection_id,),
+        ).fetchall()
+        ordered_ids = [str(row["image_id"]) for row in rows]
+
+    all_entries = get_gallery_entries_by_ids(ordered_ids)
+    valid_entries: list[Any] = []
+    skipped_unsupported = 0
+    for entry in all_entries:
+        format_lower = (entry.output_format or "").strip().lower()
+        filename_lower = (entry.filename or "").strip().lower()
+        if format_lower in {"svg", "gif"} or filename_lower.endswith((".svg", ".gif")):
+            skipped_unsupported += 1
+        else:
+            valid_entries.append(entry)
+
+    return {
+        "collection": collection,
+        "images": valid_entries,
+        "total_count": len(ordered_ids),
+        "skipped_unsupported": skipped_unsupported,
+    }
+
+
+def reorder_gallery_collection_items(
+    collection_id: str,
+    ids: Sequence[str],
+) -> dict[str, Any] | None:
+    """Rewrite item positions for a collection.
+
+    Returns None if collection not found or ids is not exactly the current member set.
+    """
+    _ensure_database()
+    with _connect() as conn:
+        with _transaction(conn):
+            if _get_collection_on_conn(conn, collection_id) is None:
+                return None
+            existing = {
+                str(row["image_id"])
+                for row in conn.execute(
+                    "SELECT image_id FROM gallery_collection_items WHERE collection_id = ?",
+                    (collection_id,),
+                ).fetchall()
+            }
+            if len(ids) != len(existing) or set(ids) != existing:
+                return None
+            now = utc_now()
+            for position, image_id in enumerate(ids):
+                conn.execute(
+                    """
+                    UPDATE gallery_collection_items
+                    SET position = ?
+                    WHERE collection_id = ? AND image_id = ?
+                    """,
+                    (position, collection_id, image_id),
+                )
+            conn.execute(
+                "UPDATE gallery_collections SET updated_at = ? WHERE id = ?",
+                (now, collection_id),
+            )
+            return _get_collection_on_conn(conn, collection_id)
+

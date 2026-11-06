@@ -876,6 +876,27 @@ def _migration_safety_identifier(conn: sqlite3.Connection):
         if "safety_identifier" not in columns:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN safety_identifier TEXT")
 
+def _migration_gallery_collection_assets(conn: sqlite3.Connection):
+    columns = _table_columns(conn, "gallery_collections")
+    if "asset_alias" not in columns:
+        conn.execute("ALTER TABLE gallery_collections ADD COLUMN asset_alias TEXT")
+        conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_gallery_collections_asset_alias
+                ON gallery_collections(asset_alias COLLATE NOCASE)
+                WHERE asset_alias IS NOT NULL
+            """
+        )
+    item_columns = _table_columns(conn, "gallery_collection_items")
+    if "position" not in item_columns:
+        conn.execute("ALTER TABLE gallery_collection_items ADD COLUMN position INTEGER")
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_gallery_collection_items_order
+                ON gallery_collection_items(collection_id, position)
+            """
+        )
+
 SCHEMA_MIGRATIONS = (
     (1, "baseline_legacy_schema", _migration_baseline_legacy_schema),
     (2, "gallery_filter_options", _migration_gallery_filter_options),
@@ -918,4 +939,5 @@ SCHEMA_MIGRATIONS = (
     (39, "agent_execution_snapshot", _migration_agent_execution_snapshot),
     (40, "image_26_metadata", _migration_image_26_metadata),
     (41, "safety_identifier", _migration_safety_identifier),
+    (42, "gallery_collection_assets", _migration_gallery_collection_assets),
 )

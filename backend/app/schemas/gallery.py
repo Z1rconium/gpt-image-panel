@@ -1,3 +1,4 @@
+import re
 from typing import Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -144,6 +145,7 @@ class GalleryBatchFavoriteRequest(GalleryBatchRequest):
 class GalleryCollection(BaseModel):
     id: str
     name: str
+    asset_alias: Optional[str] = None
     position: int = 0
     is_default: bool = False
     image_count: int = 0
@@ -164,6 +166,25 @@ def _normalize_collection_name(value: Optional[str]) -> Optional[str]:
     return name
 
 
+_ALIAS_DISALLOWED_PREFIX_RE = re.compile(r"^(?:round-\d+|第?\d+轮图)", re.IGNORECASE)
+_ALIAS_CHAR_RE = re.compile(r"^[\w-]+$", re.UNICODE)
+
+
+def _normalize_asset_alias(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    alias = value.strip()
+    if not alias:
+        return None
+    if len(alias) > 32:
+        raise ValueError("Asset alias must be at most 32 characters")
+    if not _ALIAS_CHAR_RE.match(alias):
+        raise ValueError("Asset alias may only contain letters, numbers, underscores, and hyphens")
+    if _ALIAS_DISALLOWED_PREFIX_RE.match(alias):
+        raise ValueError("Asset alias must not conflict with round references")
+    return alias
+
+
 class GalleryCollectionCreateRequest(StrictRequestModel):
     name: str = Field(..., max_length=200)
 
@@ -176,11 +197,17 @@ class GalleryCollectionCreateRequest(StrictRequestModel):
 class GalleryCollectionUpdateRequest(StrictRequestModel):
     name: Optional[str] = Field(default=None, max_length=200)
     is_default: Optional[bool] = None
+    asset_alias: Optional[str] = Field(default=None, max_length=32)
 
     @field_validator("name")
     @classmethod
     def validate_name(cls, value: Optional[str]) -> Optional[str]:
         return _normalize_collection_name(value)
+
+    @field_validator("asset_alias")
+    @classmethod
+    def validate_asset_alias(cls, value: Optional[str]) -> Optional[str]:
+        return _normalize_asset_alias(value)
 
 
 class GalleryCollectionOrderRequest(StrictRequestModel):
@@ -192,6 +219,24 @@ class GalleryCollectionOrderRequest(StrictRequestModel):
         if len(set(value)) != len(value):
             raise ValueError("ids must not contain duplicates")
         return value
+
+
+class GalleryCollectionItemsOrderRequest(StrictRequestModel):
+    ids: list[ShortId] = Field(default_factory=list, max_length=1000)
+
+    @field_validator("ids")
+    @classmethod
+    def validate_ids(cls, value: list[str]) -> list[str]:
+        if len(set(value)) != len(value):
+            raise ValueError("ids must not contain duplicates")
+        return value
+
+
+class GalleryCollectionReferencesResponse(BaseModel):
+    collection: GalleryCollection
+    images: list[GalleryEntry]
+    total_count: int
+    skipped_unsupported: int
 
 
 class GalleryCollectionItemsResponse(BaseModel):

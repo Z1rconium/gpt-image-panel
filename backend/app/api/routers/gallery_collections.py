@@ -9,16 +9,20 @@ import asyncio
 from fastapi import APIRouter, HTTPException, Response
 
 from ...repositories.gallery.collections import (
+    GalleryCollectionAliasConflictError,
     GalleryCollectionNameConflictError,
+    _UNSET,
     add_gallery_collection_items,
     add_gallery_collection_items_by_filters,
     create_gallery_collection,
     delete_gallery_collection,
     get_gallery_collection,
     get_gallery_image_collection_ids,
+    list_collection_reference_entries,
     list_gallery_collections,
     remove_gallery_collection_items,
     remove_gallery_collection_items_by_filters,
+    reorder_gallery_collection_items,
     reorder_gallery_collections,
     update_gallery_collection,
 )
@@ -28,8 +32,10 @@ from ...schemas.gallery import (
     GalleryBatchRequest,
     GalleryCollection,
     GalleryCollectionCreateRequest,
+    GalleryCollectionItemsOrderRequest,
     GalleryCollectionItemsResponse,
     GalleryCollectionOrderRequest,
+    GalleryCollectionReferencesResponse,
     GalleryCollectionUpdateRequest,
     GalleryImageCollectionsResponse,
 )
@@ -68,16 +74,36 @@ async def reorder_collections(req: GalleryCollectionOrderRequest):
 
 @router.patch("/api/gallery/collections/{collection_id}", response_model=GalleryCollection)
 async def update_collection(collection_id: str, req: GalleryCollectionUpdateRequest):
+    alias_arg = req.asset_alias if "asset_alias" in req.model_fields_set else _UNSET
     try:
-        collection = await run_db_operation(update_gallery_collection,
+        collection = await run_db_operation(
+            update_gallery_collection,
             collection_id,
             name=req.name,
             is_default=req.is_default,
+            asset_alias=alias_arg,
         )
-    except GalleryCollectionNameConflictError as e:
+    except (GalleryCollectionNameConflictError, GalleryCollectionAliasConflictError) as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
     if collection is None:
         raise HTTPException(status_code=404, detail="Collection not found")
+    return collection
+
+
+@router.get("/api/gallery/collections/{collection_id}/references", response_model=GalleryCollectionReferencesResponse)
+async def get_collection_references(collection_id: str):
+    data = await run_db_operation(list_collection_reference_entries, collection_id)
+    if data is None:
+        raise HTTPException(status_code=404, detail="Collection not found")
+    return data
+
+
+@router.put("/api/gallery/collections/{collection_id}/items/order", response_model=GalleryCollection)
+async def reorder_collection_items(collection_id: str, req: GalleryCollectionItemsOrderRequest):
+    await _require_collection(collection_id)
+    collection = await run_db_operation(reorder_gallery_collection_items, collection_id, req.ids)
+    if collection is None:
+        raise HTTPException(status_code=422, detail="ids must list every collection item exactly once")
     return collection
 
 
