@@ -4,10 +4,12 @@ import {
   defaultGalleryFilters,
   galleryFiltersToSelectionPayload,
   gallerySearchBody,
+  galleryThumbnailPendingState,
   pendingImageMatchesFilters,
   sameGalleryFilters
 } from '$lib/features/gallery/query';
-import type { GalleryEntry } from '$lib/api/types/gallery';
+import { isGifFilename, isGifMedia, previewMediaUrl } from '$lib/utils/format';
+import type { GalleryEntry, GalleryResponse } from '$lib/api/types/gallery';
 
 function entry(overrides: Partial<GalleryEntry> = {}): GalleryEntry {
   return {
@@ -142,5 +144,51 @@ describe('collection filter', () => {
 
   it('never treats a pending image as a collection member', () => {
     expect(pendingImageMatchesFilters(entry(), { ...defaultGalleryFilters, collectionId: 'album-1' })).toBe(false);
+  });
+});
+
+describe('GIF media format detection and preview URL', () => {
+  it('detects GIF filenames correctly', () => {
+    expect(isGifFilename('animation.gif')).toBe(true);
+    expect(isGifFilename('UPPERCASE.GIF')).toBe(true);
+    expect(isGifFilename('photo.png')).toBe(false);
+    expect(isGifFilename(null)).toBe(false);
+    expect(isGifFilename('')).toBe(false);
+  });
+
+  it('detects GIF media by format, filename or image_url', () => {
+    expect(isGifMedia({ filename: 'anim.gif' })).toBe(true);
+    expect(isGifMedia({ output_format: 'gif', filename: 'anim.bin' })).toBe(true);
+    expect(isGifMedia({ output_format: 'GIF' })).toBe(true);
+    expect(isGifMedia({ image_url: '/api/image/anim.gif' })).toBe(true);
+    expect(isGifMedia({ filename: 'photo.webp', output_format: 'webp' })).toBe(false);
+    expect(isGifMedia(null)).toBe(false);
+  });
+
+  it('routes GIF previewMediaUrl to imageUrl and others to thumbnailUrl', () => {
+    expect(previewMediaUrl({ filename: 'anim.gif', thumbnail_url: '/api/thumb/anim.gif' }))
+      .toBe('/api/image/anim.gif');
+    expect(previewMediaUrl({ filename: 'photo.png', thumbnail_url: '/api/thumb/photo.png' }))
+      .toBe('/api/thumb/photo.png');
+  });
+
+  it('excludes GIF entries from galleryThumbnailPendingState', () => {
+    const gallery: GalleryResponse = {
+      images: [
+        entry({ id: 'gif-1', filename: 'anim.gif', thumbnail_status: 'queued' }),
+        entry({ id: 'png-1', filename: 'photo.png', thumbnail_status: 'queued' })
+      ],
+      total: 2,
+      total_bytes: 0,
+      page: 1,
+      page_size: 9,
+      total_pages: 1,
+      has_prev: false,
+      has_next: false,
+      filter_options: { models: [], presets: [], sizes: [] }
+    };
+    const state = galleryThumbnailPendingState(gallery, defaultGalleryFilters);
+    expect(state).not.toBeNull();
+    expect(state?.pendingIds).toEqual(['png-1']);
   });
 });

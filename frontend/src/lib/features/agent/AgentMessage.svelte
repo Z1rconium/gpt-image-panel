@@ -3,7 +3,7 @@
   import { t } from '$lib/i18n';
   import { groupAgentBlocks } from '$lib/utils/agentBlocks';
   import { splitMentions } from '$lib/utils/agentRefs';
-  import { thumbnailUrl } from '$lib/utils/format';
+  import { previewMediaUrl } from '$lib/utils/format';
   import AgentImageTask from './AgentImageTask.svelte';
   import AgentMarkdown from './AgentMarkdown.svelte';
   import AgentSources from './AgentSources.svelte';
@@ -81,7 +81,7 @@
                   aria-label={$t.agent.openImage($t.agent.attachmentLabel(attachment.path_round_no ?? attachment.round_no, attachment.image_index))}
                   onclick={() => attachment.image_id && onOpenImage(attachment.image_id)}
                 >
-                  <img src={thumbnailUrl(attachment.filename)} alt="" loading="lazy" class="aspect-square w-full object-cover" />
+                  <img src={previewMediaUrl({ filename: attachment.filename })} alt="" loading="lazy" class="aspect-square w-full object-cover" />
                 </button>
               {:else}
                 <div class="flex aspect-square w-full items-center justify-center rounded-md border border-dashed border-stone-300 p-1 text-center text-[10px] text-stone-500 dark:border-zinc-700 dark:text-zinc-400">

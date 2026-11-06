@@ -6,7 +6,7 @@
   import { settingsStore } from '$lib/stores/settings';
   import { AGENT_MAX_ATTACHMENTS, type AgentSendInput } from '$lib/stores/agent';
   import { applyMention, filterMentionOptions, findMentionQuery } from '$lib/utils/agentRefs';
-  import { thumbnailUrl } from '$lib/utils/format';
+  import { previewMediaUrl } from '$lib/utils/format';
   import AgentAttachDialog from './AgentAttachDialog.svelte';
 
   let {
@@ -203,7 +203,7 @@
     <ul class="flex flex-wrap gap-2" aria-label={$t.agent.attachments}>
       {#each attachments as entry (entry.id)}
         <li class="relative w-14">
-          <img src={thumbnailUrl(entry.filename, entry.thumbnail_url)} alt="" class="aspect-square w-full rounded-md border border-stone-300 object-cover dark:border-zinc-700" />
+          <img src={previewMediaUrl(entry)} alt="" class="aspect-square w-full rounded-md border border-stone-300 object-cover dark:border-zinc-700" />
           <button
             type="button"
             class="control-focus absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full border border-stone-300 bg-white text-xs text-stone-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
@@ -267,7 +267,7 @@
             }}
           >
             {#if ref.filename}
-              <img src={thumbnailUrl(ref.filename)} alt="" class="h-9 w-9 rounded-sm object-cover" />
+              <img src={previewMediaUrl({ filename: ref.filename })} alt="" class="h-9 w-9 rounded-sm object-cover" />
             {/if}
             <span class="min-w-0">
               <span class="block font-medium text-stone-900 dark:text-zinc-100">{optionLabel(ref)}</span>

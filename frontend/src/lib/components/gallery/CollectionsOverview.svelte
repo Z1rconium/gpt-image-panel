@@ -3,7 +3,7 @@
   import { t } from '$lib/i18n';
   import { galleryActivityStore, galleryStore } from '$lib/stores/gallery';
   import { uiStore } from '$lib/stores/ui';
-  import { thumbnailUrl } from '$lib/utils/format';
+  import { imageUrl, isGifFilename, thumbnailUrl } from '$lib/utils/format';
   import Download from 'lucide-svelte/icons/download';
   import FolderOpen from 'lucide-svelte/icons/folder-open';
 
@@ -22,7 +22,9 @@
 
   function coverSrc(collection: GalleryCollection) {
     if (!collection.cover_filename || failedCoverIds.includes(collection.cover_filename)) return '';
-    return thumbnailUrl(collection.cover_filename);
+    return isGifFilename(collection.cover_filename)
+      ? imageUrl(collection.cover_filename)
+      : thumbnailUrl(collection.cover_filename);
   }
 
   function handleCoverError(collection: GalleryCollection) {

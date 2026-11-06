@@ -25,6 +25,32 @@ export function filenameFromImageUrl(url: string) {
   return decodeURIComponent(url.split('/').pop() || '');
 }
 
+export function isGifFilename(filename?: string | null): boolean {
+  if (!filename) return false;
+  return /\.gif$/i.test(filename.trim());
+}
+
+export type MediaLike = {
+  filename?: string | null;
+  output_format?: string | null;
+  image_url?: string | null;
+  thumbnail_url?: string | null;
+};
+
+export function isGifMedia(media?: MediaLike | null): boolean {
+  if (!media) return false;
+  if (media.output_format?.trim().toLowerCase() === 'gif') return true;
+  return isGifFilename(media.filename) || isGifFilename(media.image_url);
+}
+
+export function previewMediaUrl(media: MediaLike): string {
+  const filename = media.filename || filenameFromImageUrl(media.image_url || '') || '';
+  if (isGifMedia(media)) {
+    return imageUrl(filename, media.image_url);
+  }
+  return thumbnailUrl(filename, media.thumbnail_url);
+}
+
 export function formatBytes(totalBytes: number) {
   if (!Number.isFinite(totalBytes) || totalBytes <= 0) return '';
   return `${(totalBytes / (1024 * 1024)).toFixed(1)} MB`;

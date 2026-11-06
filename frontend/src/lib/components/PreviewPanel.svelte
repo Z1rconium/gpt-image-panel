@@ -3,7 +3,7 @@
   import type { GenerateJobImage, GenerateJobStatus } from '$lib/api/types/jobs';
   import { t } from '$lib/i18n';
   import { previewStore, type PreviewCompareSource } from '$lib/stores/preview';
-  import { displayImageSize, downloadUrl, filenameFromImageUrl, formatLocalTime, stageLabel, statusLabel, thumbnailUrl } from '$lib/utils/format';
+  import { displayImageSize, downloadUrl, filenameFromImageUrl, formatLocalTime, isGifFilename, stageLabel, statusLabel, thumbnailUrl } from '$lib/utils/format';
   import { canRunExposure, runExposure, type ExposureHandle } from '$lib/webgl/exposureScene';
   import ImageTrace from '$lib/components/ImageTrace.svelte';
 
@@ -66,7 +66,7 @@
           image_id: image.image_id || imageFilename || `${currentJob?.job_id || 'image'}-${index}`,
           image_url,
           filename: imageFilename,
-          thumb_url: imageFilename ? thumbnailUrl(imageFilename) : image_url,
+          thumb_url: imageFilename ? (isGifFilename(imageFilename) ? image_url : thumbnailUrl(imageFilename)) : image_url,
           image_width: image.image_width ?? null,
           image_height: image.image_height ?? null,
           sent_prompt: image.sent_prompt ?? null,
@@ -88,7 +88,7 @@
         image_id: currentJob?.image_id || fallbackFilename || fallbackUrl,
         image_url: fallbackUrl,
         filename: imageFilename,
-        thumb_url: imageFilename ? thumbnailUrl(imageFilename) : fallbackUrl,
+        thumb_url: imageFilename ? (isGifFilename(imageFilename) ? fallbackUrl : thumbnailUrl(imageFilename)) : fallbackUrl,
         image_width: currentJob?.image_width ?? null,
         image_height: currentJob?.image_height ?? null
       }

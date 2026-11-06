@@ -28,7 +28,7 @@
   import Star from 'lucide-svelte/icons/star';
   import Trash2 from 'lucide-svelte/icons/trash-2';
   import X from 'lucide-svelte/icons/x';
-  import { displayImageSize, formatBytes, thumbnailUrl } from '$lib/utils/format';
+  import { displayImageSize, formatBytes, imageUrl, isGifMedia, thumbnailUrl } from '$lib/utils/format';
 
   interface Props {
     canSyncR2?: boolean;
@@ -367,9 +367,16 @@
     action();
   }
 
+  function galleryMediaUrl(image: GalleryEntry) {
+    if (isGifMedia(image)) {
+      return imageUrl(image.filename, image.image_url);
+    }
+    return thumbnailUrl(image.filename, image.thumbnail_url);
+  }
+
   function galleryImageSrc(image: GalleryEntry) {
     if (!thumbnailReady(image)) return THUMBNAIL_PLACEHOLDER_SRC;
-    const src = thumbnailUrl(image.filename, image.thumbnail_url);
+    const src = galleryMediaUrl(image);
     return failedThumbnailUrls.get(image.id) === src ? THUMBNAIL_PLACEHOLDER_SRC : src;
   }
 
@@ -385,6 +392,7 @@
   }
 
   function thumbnailReady(image: GalleryEntry) {
+    if (isGifMedia(image)) return true;
     return !image.thumbnail_status || image.thumbnail_status === 'ready';
   }
 
@@ -397,7 +405,7 @@
 
   function handleThumbnailError(image: GalleryEntry) {
     if (!thumbnailReady(image)) return;
-    failedThumbnailUrls = new Map(failedThumbnailUrls).set(image.id, thumbnailUrl(image.filename, image.thumbnail_url));
+    failedThumbnailUrls = new Map(failedThumbnailUrls).set(image.id, galleryMediaUrl(image));
   }
 
   function isImageSelected(image: GalleryEntry) {
@@ -600,6 +608,11 @@
                   {isImageSelected(image) ? '✓' : ''}
                 </span>
                 <span class="sr-only">{isImageSelected(image) ? $t.gallery.selectedCount(1) : $t.gallery.select}</span>
+              {/if}
+              {#if isGifMedia(image)}
+                <span class="gallery-gif-badge pointer-events-none absolute right-2 top-2 z-10 rounded-md bg-stone-950/75 px-1.5 py-0.5 text-xs font-semibold text-white shadow-xs">
+                  GIF
+                </span>
               {/if}
               <picture class="block h-full w-full">
                 <img

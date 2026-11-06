@@ -2,7 +2,7 @@
   import Overlay from '$lib/components/Overlay.svelte';
   import type { GalleryEntry } from '$lib/api/types/gallery';
   import { t } from '$lib/i18n';
-  import { thumbnailUrl } from '$lib/utils/format';
+  import { previewMediaUrl } from '$lib/utils/format';
 
   let {
     open,
@@ -77,7 +77,7 @@
                 data-autofocus={index === 0 ? '' : undefined}
                 onchange={() => toggle(image.id)}
               />
-              <img src={thumbnailUrl(image.filename, image.thumbnail_url)} alt={image.prompt.slice(0, 120)} loading="lazy" class="aspect-square w-full object-cover" />
+              <img src={previewMediaUrl(image)} alt={image.prompt.slice(0, 120)} loading="lazy" class="aspect-square w-full object-cover" />
             </label>
           </li>
         {/each}

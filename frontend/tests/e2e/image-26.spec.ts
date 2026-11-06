@@ -105,15 +105,37 @@ for (const format of ['svg', 'gif']) {
     const { baseGalleryImages } = await import('./fixtures/mockApi');
     const bytes = format === 'svg' ? Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="64" height="64" fill="#23965f"/><circle cx="32" cy="32" r="22" fill="#f5553c"/></svg>') : animatedGif64();
     const filename = `original.${format}`;
-    await loadApp(page, { galleryImages: [{ ...baseGalleryImages[0], filename, image_width: 64, image_height: 64, size: '64x64', image_url: `/api/image/${filename}`, thumbnail_url: `/api/image/${filename}`, output_format: format }] });
+    await loadApp(page, {
+      galleryImages: [
+        {
+          ...baseGalleryImages[0],
+          filename,
+          image_width: 64,
+          image_height: 64,
+          size: '64x64',
+          image_url: `/api/image/${filename}`,
+          thumbnail_url: format === 'gif' ? `/api/thumb/${filename}` : `/api/image/${filename}`,
+          output_format: format
+        }
+      ]
+    });
     await page.route(`**/api/image/${filename}*`, route => route.fulfill({ status: 200, contentType: format === 'svg' ? 'image/svg+xml' : 'image/gif', headers: { 'Content-Disposition': `attachment; filename="${filename}"` }, body: bytes }));
     await page.route(`**/api/download/${filename}`, route => route.fulfill({ status: 200, contentType: format === 'svg' ? 'image/svg+xml' : 'image/gif', body: bytes }));
     // Reload to ensure image requests use the original media route.
     await page.reload();
     const card = page.locator('.gallery-card').first();
     await expect(card.getByRole('button', { name: 'Edit', exact: true })).toBeDisabled();
+    if (format === 'gif') {
+      await expect(card.locator('.gallery-gif-badge')).toBeVisible();
+      await expect(card.locator('.gallery-gif-badge')).toHaveText('GIF');
+    } else {
+      await expect(card.locator('.gallery-gif-badge')).toHaveCount(0);
+    }
     const img = card.locator('img').first();
     await expect(img).toBeVisible();
+    if (format === 'gif') {
+      await expect(img).toHaveAttribute('src', `/api/image/${filename}`);
+    }
     await expect.poll(() => img.evaluate((node: HTMLImageElement) => node.naturalWidth)).toBeGreaterThan(0);
     await page.screenshot({ path: `/tmp/gpt-image-26-${format}-preview.png`, fullPage: true });
     await img.click();
