@@ -1,7 +1,17 @@
 import { get, writable } from 'svelte/store';
 import { apiFetch } from '$lib/api/client';
 import { t } from '$lib/i18n';
-import { MAX_EDIT_SOURCE_IMAGES, editSourceCount, editSourceStore, isMaskValid, type EditSourceState } from '$lib/stores/editSource';
+import {
+  MAX_EDIT_SOURCE_IMAGES,
+  editSourceCount,
+  editSourceStore,
+  galleryPrimarySource,
+  galleryReferenceSources,
+  isMaskValid,
+  primaryEditSource,
+  uploadSources,
+  type EditSourceState
+} from '$lib/stores/editSource';
 import type { ApiPath, ResponseFormatDefault } from '$lib/api/types/common';
 import type { GenerateRequestBody } from '$lib/api/types/generation';
 import type { GeneratePreviewEvent, GenerateJobResponse, GenerateJobStatus } from '$lib/api/types/jobs';
@@ -163,14 +173,14 @@ function submissionError(body: GenerateRequestBody, edit = false, hasMask = fals
 
 function comparisonSourceForEdit(source: EditSourceState): PreviewCompareSource | null {
   if (!source.mask) return null;
-  if (source.selectedGalleryImageId) {
-    if (!source.galleryPreviewUrl) return null;
-    return { kind: 'gallery', url: source.galleryPreviewUrl, label: source.galleryPreviewLabel || source.galleryLabel };
+  const primary = primaryEditSource(source);
+  if (primary?.kind === 'gallery_primary') {
+    if (!primary.previewUrl) return null;
+    return { kind: 'gallery', url: primary.previewUrl, label: primary.previewLabel || primary.label };
   }
-  const upload = source.files[0];
   // The source store may revoke its preview URL after submission. Keep the
   // File and let PreviewPanel own a separate, short-lived comparison URL.
-  return upload ? { kind: 'upload', file: upload.file, label: upload.label } : null;
+  return primary?.kind === 'upload' ? { kind: 'upload', file: primary.file, label: primary.label } : null;
 }
 
 function createPreviewStore() {
@@ -279,7 +289,10 @@ function createPreviewStore() {
       setError(get(t).messages.editSourceLimit(MAX_EDIT_SOURCE_IMAGES));
       return false;
     }
-    if (editSource.markup && (editSource.mask || editSource.markup.sourceId !== (editSource.selectedGalleryImageId || editSource.files[0]?.id))) {
+    // Markup can only sit on a gallery primary or an upload, never on a bare reference.
+    const primary = primaryEditSource(editSource);
+    const markupSourceId = primary && primary.kind !== 'gallery_reference' ? primary.id : undefined;
+    if (editSource.markup && (editSource.mask || editSource.markup.sourceId !== markupSourceId)) {
       setError(get(t).promptForm.invalidMarkup);
       return false;
     }
@@ -310,19 +323,17 @@ function createPreviewStore() {
       }
     });
 
-    let endpoint = '/api/edits';
-    if (editSource.selectedGalleryImageId) {
-      endpoint = `/api/edits/from-gallery/${encodeURIComponent(editSource.selectedGalleryImageId)}`;
-    }
+    const galleryPrimary = galleryPrimarySource(editSource);
+    const endpoint = galleryPrimary
+      ? `/api/edits/from-gallery/${encodeURIComponent(galleryPrimary.imageId)}`
+      : '/api/edits';
     const uploadFieldName = sourceCount > 1 ? 'image[]' : 'image';
-    editSource.files.forEach((source) => {
+    uploadSources(editSource).forEach((source) => {
       formData.append(uploadFieldName, source.file, source.file.name);
     });
-    if (editSource.galleryReferences?.length) {
-      editSource.galleryReferences.forEach((ref) => {
-        formData.append('reference_image_id', ref.imageId);
-      });
-    }
+    galleryReferenceSources(editSource).forEach((ref) => {
+      formData.append('reference_image_id', ref.imageId);
+    });
     if (editSource.markup) formData.append('markup', editSource.markup.blob, 'markup.png');
     if (editSource.mask) {
       formData.append('mask', editSource.mask.blob, 'mask.png');

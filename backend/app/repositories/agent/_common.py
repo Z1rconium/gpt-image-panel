@@ -150,6 +150,54 @@ def _message_from_row(row: sqlite3.Row) -> dict[str, Any]:
     }
 
 
+def _attach_asset_ref_blocks(conn: sqlite3.Connection, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Give user messages their ``asset_refs`` blocks, built from the relational rows.
+
+    The API shape is unchanged (``refs`` / ``explicit_refs`` are input image
+    labels). Any ``asset_refs`` entry still sitting in a legacy ``blocks_json``
+    is dropped here: the migration backfilled it into the tables, which are the
+    only source of truth.
+    """
+    user_ids = [message["id"] for message in messages if message["role"] == "user"]
+    groups: dict[str, dict[str, dict[str, Any]]] = {}
+    if user_ids:
+        marks = ",".join("?" for _ in user_ids)
+        rows = conn.execute(
+            f"""
+            SELECT r.id AS ref_id, r.message_id, r.alias, r.collection_id,
+                   i.ref_label, a.explicit
+            FROM agent_message_asset_refs r
+            LEFT JOIN agent_message_asset_ref_images a ON a.asset_ref_id = r.id
+            LEFT JOIN agent_message_images i ON i.id = a.input_image_row_id
+            WHERE r.message_id IN ({marks})
+            ORDER BY r.message_id, r.position, a.position
+            """,
+            user_ids,
+        ).fetchall()
+        for row in rows:
+            block = groups.setdefault(row["message_id"], {}).setdefault(
+                row["ref_id"],
+                {
+                    "id": row["ref_id"],
+                    "type": "asset_refs",
+                    "alias": row["alias"],
+                    "collection_id": row["collection_id"],
+                    "refs": [],
+                    "explicit_refs": [],
+                },
+            )
+            if row["ref_label"] is not None:
+                block["refs"].append(row["ref_label"])
+                if row["explicit"]:
+                    block["explicit_refs"].append(row["ref_label"])
+    for message in messages:
+        if message["role"] != "user":
+            continue
+        kept = [block for block in message["blocks"] if not (isinstance(block, dict) and block.get("type") == "asset_refs")]
+        message["blocks"] = [*groups.get(message["id"], {}).values(), *kept]
+    return messages
+
+
 def _image_from_row(row: sqlite3.Row) -> dict[str, Any]:
     return {
         "id": row["id"],

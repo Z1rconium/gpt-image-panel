@@ -2,8 +2,10 @@
 Migrations are additive: new columns are nullable and existing rows are
 never rebuilt."""
 
+import json
 import logging
 import sqlite3
+import uuid
 
 from ...core import settings as config
 from ...core.api_paths import default_model_for_api_path
@@ -897,6 +899,101 @@ def _migration_gallery_collection_assets(conn: sqlite3.Connection):
             """
         )
 
+def _migration_agent_asset_refs(conn: sqlite3.Connection):
+    # Asset pack mentions were stored as ``asset_refs`` blocks in
+    # agent_messages.blocks_json, with members spelled as ``round-N-input-K``
+    # labels. They now live in relational rows keyed by the input image row.
+    # collection_id deliberately has no foreign key: a deleted or changed pack
+    # must not alter the snapshot an earlier turn was built from.
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS agent_message_asset_refs (
+            id TEXT PRIMARY KEY,
+            conversation_id TEXT NOT NULL,
+            turn_id TEXT NOT NULL,
+            message_id TEXT NOT NULL,
+            position INTEGER NOT NULL,
+            alias TEXT NOT NULL,
+            collection_id TEXT,
+            FOREIGN KEY(conversation_id) REFERENCES agent_conversations(id) ON DELETE CASCADE,
+            FOREIGN KEY(turn_id) REFERENCES agent_turns(id) ON DELETE CASCADE,
+            FOREIGN KEY(message_id) REFERENCES agent_messages(id) ON DELETE CASCADE,
+            UNIQUE(message_id, position)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS agent_message_asset_ref_images (
+            asset_ref_id TEXT NOT NULL,
+            input_image_row_id TEXT NOT NULL,
+            position INTEGER NOT NULL,
+            explicit INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (asset_ref_id, input_image_row_id),
+            FOREIGN KEY(asset_ref_id) REFERENCES agent_message_asset_refs(id) ON DELETE CASCADE,
+            FOREIGN KEY(input_image_row_id) REFERENCES agent_message_images(id) ON DELETE CASCADE
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_agent_asset_refs_message ON agent_message_asset_refs(message_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_agent_asset_ref_images_row ON agent_message_asset_ref_images(input_image_row_id)"
+    )
+    _backfill_agent_asset_refs(conn)
+
+def _backfill_agent_asset_refs(conn: sqlite3.Connection):
+    """Copy legacy ``asset_refs`` blocks into the relational tables.
+
+    blocks_json is left untouched (readers ignore its asset_refs entries), and
+    every insert is OR IGNORE, so a repeated run changes nothing.
+    """
+    legacy = conn.execute(
+        "SELECT id, conversation_id, turn_id, blocks_json FROM agent_messages "
+        "WHERE role = 'user' AND blocks_json LIKE '%asset_refs%'"
+    ).fetchall()
+    for message_id, conversation_id, turn_id, blocks_json in legacy:
+        try:
+            blocks = json.loads(blocks_json or "[]")
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(blocks, list):
+            continue
+        position = 0
+        for block in blocks:
+            if not isinstance(block, dict) or block.get("type") != "asset_refs":
+                continue
+            ref_id = str(block.get("id") or uuid.uuid4().hex)
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO agent_message_asset_refs
+                    (id, conversation_id, turn_id, message_id, position, alias, collection_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (ref_id, conversation_id, turn_id, message_id, position, str(block.get("alias") or ""), block.get("collection_id")),
+            )
+            position += 1
+            explicit = {label for label in block.get("explicit_refs") or [] if isinstance(label, str)}
+            member_position = 0
+            for label in block.get("refs") or []:
+                image = conn.execute(
+                    "SELECT id FROM agent_message_images WHERE conversation_id = ? AND ref_label = ? AND role = 'input'",
+                    (conversation_id, label),
+                ).fetchone()
+                if image is None:
+                    logger.warning("Skipping asset ref member %s: no matching input image in conversation %s", label, conversation_id)
+                    continue
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO agent_message_asset_ref_images
+                        (asset_ref_id, input_image_row_id, position, explicit)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (ref_id, image[0], member_position, int(label in explicit)),
+                )
+                member_position += 1
+
 SCHEMA_MIGRATIONS = (
     (1, "baseline_legacy_schema", _migration_baseline_legacy_schema),
     (2, "gallery_filter_options", _migration_gallery_filter_options),
@@ -940,4 +1037,5 @@ SCHEMA_MIGRATIONS = (
     (40, "image_26_metadata", _migration_image_26_metadata),
     (41, "safety_identifier", _migration_safety_identifier),
     (42, "gallery_collection_assets", _migration_gallery_collection_assets),
+    (43, "agent_asset_refs", _migration_agent_asset_refs),
 )

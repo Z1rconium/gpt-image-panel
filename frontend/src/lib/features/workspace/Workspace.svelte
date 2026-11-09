@@ -27,7 +27,7 @@
   import { accessStore } from '$lib/stores/access';
   import { assistantStore, isAbortError } from '$lib/stores/assistant';
   import { confirmStore } from '$lib/stores/confirm';
-  import { editMarkupDiscards, editMaskDiscards, editSourceCount, editSourceStore, isMaskValid, MAX_EDIT_SOURCE_IMAGES, primaryEditSourceId, type EditGalleryReferenceSource, type EditMask } from '$lib/stores/editSource';
+  import { editMarkupDiscards, editMaskDiscards, editSourceCount, editSourceStore, findEditSource, galleryPrimarySource, isMaskValid, MAX_EDIT_SOURCE_IMAGES, primaryEditSource as selectPrimaryEditSource, primaryEditSourceId, primaryRestoreSource, type EditGalleryReferenceSource, type EditMask } from '$lib/stores/editSource';
   import { galleryActivityStore, galleryStore } from '$lib/stores/gallery';
   import { jobsStore } from '$lib/stores/jobs';
   import type { JobMaskFetch } from '$lib/features/workspace/jobMaskRestore';
@@ -104,54 +104,21 @@
     const state = $editSourceStore;
     const primaryId = primaryEditSourceId(state);
     const mask = state.mask;
-    return [
-      ...(state.selectedGalleryImageId
-        ? [
-            {
-              id: state.selectedGalleryImageId,
-              label: state.galleryLabel || state.galleryPreviewLabel,
-              previewUrl: state.galleryPreviewUrl,
-              kind: 'gallery' as const
-            }
-          ]
-        : []),
-      ...state.files.map((source) => ({
-        id: source.id,
-        label: source.label,
-        previewUrl: source.previewUrl,
-        kind: 'upload' as const
-      })),
-      ...(state.galleryReferences || []).map((ref) => ({
-        id: ref.id,
-        label: ref.label || ref.previewLabel,
-        previewUrl: ref.previewUrl,
-        kind: 'gallery_reference' as const
-      }))
-    ].map((source) => ({
-      ...source,
+    return state.sources.map((source) => ({
+      id: source.id,
+      label: source.label || source.previewLabel,
+      previewUrl: source.previewUrl,
+      // The picker keeps its own vocabulary: the gallery primary is just 'gallery'.
+      kind: source.kind === 'gallery_primary' ? ('gallery' as const) : source.kind,
       isPrimary: source.id === primaryId,
       maskCoverage: mask && mask.sourceId === source.id ? mask.coverage : null,
       maskOrigin: mask && mask.sourceId === source.id ? mask.origin : null
     }));
   });
   const primaryEditSource = $derived.by(() => {
-    const state = $editSourceStore;
-    if (state.selectedGalleryImageId) {
-      return {
-        id: state.selectedGalleryImageId,
-        label: state.galleryLabel || state.galleryPreviewLabel,
-        previewUrl: state.galleryPreviewUrl,
-        width: state.galleryWidth,
-        height: state.galleryHeight
-      };
-    }
-    const first = state.files[0];
-    if (first) {
-      return { id: first.id, label: first.label, previewUrl: first.previewUrl, width: first.width, height: first.height };
-    }
-    const firstRef = state.galleryReferences?.[0];
-    return firstRef
-      ? { id: firstRef.id, label: firstRef.label || firstRef.previewLabel, previewUrl: firstRef.previewUrl, width: firstRef.width, height: firstRef.height }
+    const first = selectPrimaryEditSource($editSourceStore);
+    return first
+      ? { id: first.id, label: first.label || first.previewLabel, previewUrl: first.previewUrl, width: first.width, height: first.height }
       : null;
   });
   const activeEditMask = $derived(isMaskValid($editSourceStore) ? $editSourceStore.mask : null);
@@ -990,25 +957,11 @@
 
   async function openEditPreview(sourceId: string) {
     rememberPanelFocus('editPreview');
-    const upload = $editSourceStore.files.find((source) => source.id === sourceId);
-    if (upload) {
-      editPreviewUrl = upload.previewUrl;
-      editPreviewLabel = upload.previewLabel;
-      if (await ensurePanel('editPreview')) setUi('editPreviewOpen', true);
-      return;
-    }
-    const ref = ($editSourceStore.galleryReferences || []).find((source) => source.id === sourceId || source.imageId === sourceId);
-    if (ref) {
-      editPreviewUrl = ref.previewUrl;
-      editPreviewLabel = ref.previewLabel || ref.label;
-      if (await ensurePanel('editPreview')) setUi('editPreviewOpen', true);
-      return;
-    }
-    if ($editSourceStore.selectedGalleryImageId === sourceId && $editSourceStore.galleryPreviewUrl) {
-      editPreviewUrl = $editSourceStore.galleryPreviewUrl;
-      editPreviewLabel = $editSourceStore.galleryPreviewLabel || $editSourceStore.galleryLabel;
-      if (await ensurePanel('editPreview')) setUi('editPreviewOpen', true);
-    }
+    const source = findEditSource($editSourceStore, sourceId);
+    if (!source?.previewUrl) return;
+    editPreviewUrl = source.previewUrl;
+    editPreviewLabel = source.previewLabel || source.label;
+    if (await ensurePanel('editPreview')) setUi('editPreviewOpen', true);
   }
 
   function closeEditPreview() {
@@ -1147,11 +1100,9 @@
   }
 
   function removeEditSource(sourceId: string) {
-    const upload = $editSourceStore.files.find((source) => source.id === sourceId);
-    const isGallery = $editSourceStore.selectedGalleryImageId === sourceId;
-    const ref = ($editSourceStore.galleryReferences || []).find((source) => source.id === sourceId || source.imageId === sourceId);
-    const label = upload?.label || (isGallery ? $editSourceStore.galleryLabel || $editSourceStore.galleryPreviewLabel : (ref ? ref.label || ref.previewLabel : ''));
-    const previewUrl = upload?.previewUrl || (isGallery ? $editSourceStore.galleryPreviewUrl : (ref ? ref.previewUrl : ''));
+    const source = findEditSource($editSourceStore, sourceId);
+    const label = source ? source.label || source.previewLabel : '';
+    const previewUrl = source?.previewUrl ?? '';
     if (!editSourceStore.remove(sourceId)) return;
     if (previewUrl && editPreviewUrl === previewUrl) closeEditPreview();
     showToast($t.messages.editSourceRemoved(label));
@@ -1166,8 +1117,9 @@
   async function batchDeleteGallery() {
     await galleryStore.batchDelete(showToast, (ids) => {
       if ($lightboxStore.image && ids.includes($lightboxStore.image.id)) closeLightbox();
-      if ($editSourceStore.selectedGalleryImageId && ids.includes($editSourceStore.selectedGalleryImageId)) {
-        editSourceStore.clearGallerySource($editSourceStore.selectedGalleryImageId);
+      const galleryPrimary = galleryPrimarySource($editSourceStore);
+      if (galleryPrimary && ids.includes(galleryPrimary.imageId)) {
+        editSourceStore.clearGallerySource(galleryPrimary.imageId);
         closeEditPreview();
       }
     });
@@ -1243,7 +1195,7 @@
         if ($lightboxStore.image?.id === image.id) closeLightbox();
       },
       () => {
-        if ($editSourceStore.selectedGalleryImageId === image.id) {
+        if (galleryPrimarySource($editSourceStore)?.imageId === image.id) {
           editSourceStore.clearGallerySource(image.id);
           closeEditPreview();
         }
@@ -1254,7 +1206,7 @@
   async function deleteAllImages() {
     await galleryStore.deleteAll(showToast, () => {
       closeLightbox();
-      editSourceStore.clearGallerySource($editSourceStore.selectedGalleryImageId);
+      editSourceStore.clearGallerySource();
       closeEditPreview();
       clearPreview();
     });
@@ -1357,7 +1309,7 @@
       void generateImage(options);
       return;
     }
-    if (!$editSourceStore.files.length && !$editSourceStore.selectedGalleryImageId) {
+    if (!primaryRestoreSource($editSourceStore)) {
       previewStore.setError($t.messages.editRetryNeedsSource);
       showToast($t.messages.editRetryNeedsSource, 'error');
       return;
@@ -1365,10 +1317,11 @@
     editSourceStore.removeMarkup();
     if (job.markup_applied) {
       editSourceStore.removeMask();
-      const source = $editSourceStore;
+      const restoreSource = primaryRestoreSource($editSourceStore);
       try {
+        if (!restoreSource) throw new Error('no restorable primary source');
         const { fetchJobMaskBlob } = await import('$lib/features/workspace/jobMaskRestore');
-        const fetched = await fetchJobMaskBlob(job.job_id, source.selectedGalleryImageId ? { galleryImageId: source.selectedGalleryImageId } : { file: source.files[0].file }, 'markup');
+        const fetched = await fetchJobMaskBlob(job.job_id, restoreSource, 'markup');
         await attachMarkup(fetched.blob, { origin: 'restored' });
       } catch {
         previewStore.setError($t.promptForm.markupRestoreFailed);
@@ -1405,15 +1358,9 @@
         import('$lib/features/mask/maskImage')
       ]);
       maskHelpers = helpers;
-      const state = $editSourceStore;
-      const upload = state.files[0];
-      if (!state.selectedGalleryImageId && !upload) return 'missing';
-      fetched = await fetchJobMaskBlob(
-        job.job_id,
-        state.selectedGalleryImageId
-          ? { galleryImageId: state.selectedGalleryImageId }
-          : { file: upload.file }
-      );
+      const restoreSource = primaryRestoreSource($editSourceStore);
+      if (!restoreSource) return 'missing';
+      fetched = await fetchJobMaskBlob(job.job_id, restoreSource);
     } catch (error) {
       if (error instanceof ApiError && error.status === 409) return 'mismatch';
       return 'missing';

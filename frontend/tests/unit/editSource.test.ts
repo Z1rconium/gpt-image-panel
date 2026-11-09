@@ -5,9 +5,14 @@ import {
   editMaskDiscards,
   editSourceCount,
   editSourceStore,
+  findEditSource,
+  galleryPrimarySource,
+  galleryReferenceSources,
   initialEditSourceState,
   isMaskValid,
   primaryEditSourceId,
+  primaryRestoreSource,
+  uploadSources,
   type EditMask
 } from '$lib/stores/editSource';
 
@@ -26,6 +31,11 @@ function makeMask(sourceId: string, previewUrl: string): EditMask {
     origin: 'painted'
   };
 }
+
+const uploads = () => uploadSources(get(editSourceStore));
+const galleryRefs = () => galleryReferenceSources(get(editSourceStore));
+const galleryPrimary = () => galleryPrimarySource(get(editSourceStore));
+const ids = () => get(editSourceStore).sources.map((item) => item.id);
 
 let revokeSpy = vi.fn<(url: string) => void>();
 
@@ -46,7 +56,7 @@ describe('edit source primary selection', () => {
   it('uses the first upload until a gallery image takes over', () => {
     expect(primaryEditSourceId(get(editSourceStore))).toBe('');
     editSourceStore.addFiles([makeFile('a.png')], () => {});
-    const uploaded = get(editSourceStore).files[0].id;
+    const uploaded = uploads()[0].id;
     expect(primaryEditSourceId(get(editSourceStore))).toBe(uploaded);
 
     editSourceStore.setGallerySource('gallery-1', 'Gallery', 'blob:gallery', 'gallery');
@@ -56,7 +66,7 @@ describe('edit source primary selection', () => {
 
   it('treats a mask as valid only for the primary source', () => {
     editSourceStore.addFiles([makeFile('a.png')], () => {});
-    const primaryId = get(editSourceStore).files[0].id;
+    const primaryId = uploads()[0].id;
     editSourceStore.setMask(makeMask(primaryId, 'blob:mask'));
     expect(isMaskValid(get(editSourceStore))).toBe(true);
 
@@ -68,14 +78,14 @@ describe('edit source primary selection', () => {
 describe('mask binding', () => {
   it('keeps the mask when a reference image is added or removed', () => {
     editSourceStore.addFiles([makeFile('a.png')], () => {});
-    const primaryId = get(editSourceStore).files[0].id;
+    const primaryId = uploads()[0].id;
     editSourceStore.setMask(makeMask(primaryId, 'blob:mask'));
 
     editSourceStore.addFiles([makeFile('b.png')], () => {});
-    expect(get(editSourceStore).files).toHaveLength(2);
+    expect(uploads()).toHaveLength(2);
     expect(isMaskValid(get(editSourceStore))).toBe(true);
 
-    const referenceId = get(editSourceStore).files[1].id;
+    const referenceId = uploads()[1].id;
     editSourceStore.remove(referenceId);
     expect(isMaskValid(get(editSourceStore))).toBe(true);
     expect(get(editSourceStore).mask?.sourceId).toBe(primaryId);
@@ -84,7 +94,7 @@ describe('mask binding', () => {
 
   it('drops the mask and counts a discard when the primary upload is removed', () => {
     editSourceStore.addFiles([makeFile('a.png'), makeFile('b.png')], () => {});
-    const [primary, reference] = get(editSourceStore).files;
+    const [primary, reference] = uploads();
     editSourceStore.setMask(makeMask(primary.id, 'blob:mask'));
 
     editSourceStore.remove(reference.id);
@@ -107,7 +117,7 @@ describe('mask binding', () => {
 
   it('counts a discard when every source is cleared', () => {
     editSourceStore.addFiles([makeFile('a.png')], () => {});
-    const primaryId = get(editSourceStore).files[0].id;
+    const primaryId = uploads()[0].id;
     editSourceStore.setMask(makeMask(primaryId, 'blob:mask'));
 
     editSourceStore.clear();
@@ -120,36 +130,34 @@ describe('mask binding', () => {
 describe('edit source sizes (F6)', () => {
   it('records a gallery primary size and clears it when the gallery source is dropped', () => {
     editSourceStore.setGallerySource('gallery-1', 'Gallery', 'blob:gallery', 'gallery', undefined, 64, 32);
-    expect(get(editSourceStore).galleryWidth).toBe(64);
-    expect(get(editSourceStore).galleryHeight).toBe(32);
+    expect(galleryPrimary()).toMatchObject({ width: 64, height: 32 });
 
     editSourceStore.clearGallerySource('gallery-1');
-    expect(get(editSourceStore).galleryWidth).toBe(0);
-    expect(get(editSourceStore).galleryHeight).toBe(0);
+    expect(galleryPrimary()).toBeNull();
+    expect(editSourceCount(get(editSourceStore))).toBe(0);
   });
 
   it('defaults an unspecified gallery size to 0 (unknown)', () => {
     editSourceStore.setGallerySource('gallery-1', 'Gallery', 'blob:gallery', 'gallery');
-    expect(get(editSourceStore).galleryWidth).toBe(0);
-    expect(get(editSourceStore).galleryHeight).toBe(0);
+    expect(galleryPrimary()).toMatchObject({ width: 0, height: 0 });
   });
 
   it('starts an upload at width/height 0 and patches it via updateUploadSize', () => {
     editSourceStore.addFiles([makeFile('a.png')], () => {});
-    const uploadId = get(editSourceStore).files[0].id;
-    expect(get(editSourceStore).files[0].width).toBe(0);
-    expect(get(editSourceStore).files[0].height).toBe(0);
+    const uploadId = uploads()[0].id;
+    expect(uploads()[0].width).toBe(0);
+    expect(uploads()[0].height).toBe(0);
 
     editSourceStore.updateUploadSize(uploadId, 128, 96);
-    expect(get(editSourceStore).files[0].width).toBe(128);
-    expect(get(editSourceStore).files[0].height).toBe(96);
+    expect(uploads()[0].width).toBe(128);
+    expect(uploads()[0].height).toBe(96);
   });
 });
 
 describe('mask lifecycle', () => {
   it('revokes the previous mask preview when replaced or removed', () => {
     editSourceStore.addFiles([makeFile('a.png')], () => {});
-    const primaryId = get(editSourceStore).files[0].id;
+    const primaryId = uploads()[0].id;
 
     editSourceStore.setMask(makeMask(primaryId, 'blob:first'));
     editSourceStore.setMask(makeMask(primaryId, 'blob:second'));
@@ -231,7 +239,7 @@ describe('markup editor state (browser-only, optional)', () => {
 
   it('counts a discard only when a primary change drops the markup, not for reference changes', () => {
     editSourceStore.addFiles([makeFile('primary.png'), makeFile('reference.png')], () => {});
-    const [primary, reference] = get(editSourceStore).files;
+    const [primary, reference] = uploads();
     editSourceStore.setMarkup({ sourceId: primary.id, blob: makeFile('markup.png'), width: 8, height: 8, previewUrl: 'blob:markup', origin: 'painted', editorState: state() });
     editSourceStore.remove(reference.id);
     editSourceStore.addFiles([makeFile('another.png')], () => {});
@@ -276,12 +284,12 @@ describe('gallery references (Phase 2)', () => {
       }
     ]);
     expect(editSourceCount(get(editSourceStore))).toBe(2);
-    expect(get(editSourceStore).galleryReferences).toHaveLength(2);
+    expect(galleryRefs()).toHaveLength(2);
 
     // Remove by imageId or id
     editSourceStore.remove('ref-1');
     expect(editSourceCount(get(editSourceStore))).toBe(1);
-    expect(get(editSourceStore).galleryReferences[0].id).toBe('ref-2');
+    expect(galleryRefs()[0].id).toBe('ref-2');
 
     editSourceStore.remove('img-2');
     expect(editSourceCount(get(editSourceStore))).toBe(0);
@@ -289,7 +297,7 @@ describe('gallery references (Phase 2)', () => {
 
   it('preserves existing mask when adding or removing gallery references', () => {
     editSourceStore.addFiles([makeFile('primary.png')], () => {});
-    const primaryId = get(editSourceStore).files[0].id;
+    const primaryId = uploads()[0].id;
     editSourceStore.setMask(makeMask(primaryId, 'blob:mask'));
     expect(isMaskValid(get(editSourceStore))).toBe(true);
 
@@ -352,8 +360,8 @@ describe('gallery references (Phase 2)', () => {
       errorSpy
     );
     expect(count).toBe(1);
-    expect(get(editSourceStore).galleryReferences).toHaveLength(1);
-    expect(get(editSourceStore).galleryReferences[0].id).toBe('ref-valid');
+    expect(galleryRefs()).toHaveLength(1);
+    expect(galleryRefs()[0].id).toBe('ref-valid');
     expect(errorSpy).toHaveBeenCalled();
   });
 
@@ -386,7 +394,7 @@ describe('gallery references (Phase 2)', () => {
     expect(errorSpy).toHaveBeenCalled();
   });
 
-  it('clear() empties galleryReferences as well', () => {
+  it('clear() empties gallery references as well', () => {
     editSourceStore.addGalleryReferences([
       {
         id: 'ref-1',
@@ -401,6 +409,130 @@ describe('gallery references (Phase 2)', () => {
     expect(editSourceCount(get(editSourceStore))).toBe(1);
     editSourceStore.clear();
     expect(editSourceCount(get(editSourceStore))).toBe(0);
-    expect(get(editSourceStore).galleryReferences).toEqual([]);
+    expect(get(editSourceStore).sources).toEqual([]);
+  });
+});
+
+describe('unified sources array', () => {
+  const ref = (id: string, imageId = `img-${id}`) => ({
+    id,
+    imageId,
+    filename: `${id}.png`,
+    label: id,
+    previewUrl: `blob:${id}`,
+    previewLabel: id,
+    width: 10,
+    height: 10
+  });
+
+  it('keeps sources in canonical order whatever order they were added in', () => {
+    editSourceStore.addGalleryReferences([ref('ref-1')]);
+    editSourceStore.addFiles([makeFile('a.png')], () => {});
+    editSourceStore.addGalleryReferences([ref('ref-2')]);
+    editSourceStore.setGallerySource('gal', 'Gal', 'blob:gal', 'gal');
+    editSourceStore.addFiles([makeFile('b.png')], () => {});
+
+    const { sources } = get(editSourceStore);
+    expect(sources.map((item) => item.kind)).toEqual([
+      'gallery_primary',
+      'upload',
+      'upload',
+      'gallery_reference',
+      'gallery_reference'
+    ]);
+    expect(sources.filter((item) => item.kind === 'upload').map((item) => (item as { file: File }).file.name)).toEqual(['a.png', 'b.png']);
+    expect(sources.slice(3).map((item) => item.id)).toEqual(['ref-1', 'ref-2']);
+    expect(primaryEditSourceId(get(editSourceStore))).toBe('gal');
+  });
+
+  it('falls back to the first upload, then the first reference, as the primary', () => {
+    editSourceStore.addGalleryReferences([ref('ref-1')]);
+    expect(primaryEditSourceId(get(editSourceStore))).toBe('ref-1');
+    editSourceStore.addFiles([makeFile('a.png')], () => {});
+    expect(primaryEditSourceId(get(editSourceStore))).toBe(uploads()[0].id);
+  });
+
+  it('moves the primary (and drops the mask) when an upload overtakes a reference-only selection', () => {
+    editSourceStore.addGalleryReferences([ref('ref-1')]);
+    editSourceStore.setMask(makeMask('ref-1', 'blob:mask'));
+    editSourceStore.addFiles([makeFile('a.png')], () => {});
+    expect(get(editSourceStore).mask).toBeNull();
+    expect(get(editMaskDiscards)).toBe(1);
+  });
+
+  it('replaces the gallery primary instead of adding a second one', () => {
+    editSourceStore.setGallerySource('gal-1', 'One', 'blob:1', 'one');
+    editSourceStore.setGallerySource('gal-2', 'Two', 'blob:2', 'two');
+    expect(get(editSourceStore).sources).toHaveLength(1);
+    expect(galleryPrimary()?.id).toBe('gal-2');
+    expect(galleryPrimary()?.imageId).toBe('gal-2');
+  });
+
+  it('replacing the gallery primary when full is allowed, adding a new one is not', () => {
+    editSourceStore.setGallerySource('gal-1', 'One', 'blob:1', 'one');
+    editSourceStore.addFiles(Array.from({ length: 15 }, (_, i) => makeFile(`u-${i}.png`)), () => {});
+    expect(editSourceCount(get(editSourceStore))).toBe(16);
+    expect(editSourceStore.setGallerySource('gal-2', 'Two', 'blob:2', 'two')).toBe(true);
+    expect(galleryPrimary()?.id).toBe('gal-2');
+
+    editSourceStore.clearGallerySource();
+    editSourceStore.addFiles([makeFile('last.png')], () => {});
+    const errorSpy = vi.fn();
+    expect(editSourceStore.setGallerySource('gal-3', 'Three', 'blob:3', 'three', errorSpy)).toBe(false);
+    expect(errorSpy).toHaveBeenCalled();
+    expect(galleryPrimary()).toBeNull();
+  });
+
+  it('clearGallerySource ignores a different id but clears the primary when no id is given', () => {
+    editSourceStore.setGallerySource('gal-1', 'One', 'blob:1', 'one');
+    editSourceStore.clearGallerySource('someone-else');
+    expect(galleryPrimary()?.id).toBe('gal-1');
+    editSourceStore.clearGallerySource();
+    expect(galleryPrimary()).toBeNull();
+  });
+
+  it('clearGallerySource leaves references and uploads alone', () => {
+    editSourceStore.addFiles([makeFile('a.png')], () => {});
+    editSourceStore.addGalleryReferences([ref('ref-1')]);
+    editSourceStore.setGallerySource('gal-1', 'One', 'blob:1', 'one');
+    editSourceStore.clearGallerySource('gal-1');
+    expect(get(editSourceStore).sources.map((item) => item.kind)).toEqual(['upload', 'gallery_reference']);
+  });
+
+  it('removes a gallery reference by image id, but only revokes object URLs for uploads', () => {
+    editSourceStore.addFiles([makeFile('a.png')], () => {});
+    const uploadUrl = uploads()[0].previewUrl;
+    editSourceStore.addGalleryReferences([ref('ref-1', 'img-shared')]);
+    revokeSpy.mockClear();
+
+    expect(editSourceStore.remove('img-shared')).toBe(true);
+    expect(revokeSpy).not.toHaveBeenCalled();
+    expect(editSourceStore.remove('unknown')).toBe(false);
+    expect(editSourceStore.remove(uploads()[0].id)).toBe(true);
+    expect(revokeSpy).toHaveBeenCalledWith(uploadUrl);
+    expect(ids()).toEqual([]);
+  });
+
+  it('findEditSource prefers an exact id over a reference image id', () => {
+    editSourceStore.setGallerySource('img-shared', 'Primary', 'blob:p', 'p');
+    editSourceStore.addGalleryReferences([ref('ref-1', 'img-shared')]);
+    expect(findEditSource(get(editSourceStore), 'img-shared')?.kind).toBe('gallery_primary');
+    expect(findEditSource(get(editSourceStore), 'ref-1')?.kind).toBe('gallery_reference');
+    expect(findEditSource(get(editSourceStore), 'nope')).toBeNull();
+  });
+
+  it('exposes a restorable identity only for a gallery primary or an upload primary', () => {
+    expect(primaryRestoreSource(get(editSourceStore))).toBeNull();
+    editSourceStore.addGalleryReferences([ref('ref-1')]);
+    expect(primaryRestoreSource(get(editSourceStore))).toBeNull();
+    editSourceStore.addFiles([makeFile('a.png')], () => {});
+    expect(primaryRestoreSource(get(editSourceStore))).toEqual({ file: uploads()[0].file });
+    editSourceStore.setGallerySource('gal-1', 'One', 'blob:1', 'one');
+    expect(primaryRestoreSource(get(editSourceStore))).toEqual({ galleryImageId: 'gal-1' });
+  });
+
+  it('records the gallery filename so the original can be read without a lookup', () => {
+    editSourceStore.setGallerySource('gal-1', 'One', 'blob:1', 'one', undefined, 8, 6, 'one.jpg');
+    expect(galleryPrimary()).toMatchObject({ filename: 'one.jpg', width: 8, height: 6 });
   });
 });

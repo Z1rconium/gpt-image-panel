@@ -6,7 +6,7 @@ from typing import Any
 
 from ...core.utils import utc_now
 from ..db import _connect, _ensure_database, _transaction
-from ._common import AgentAttachmentError, AgentTurnConflictError, _CONVERSATION_SELECT_SQL, _IMAGE_SELECT_SQL, _conversation_from_row, _image_from_row, _message_from_row
+from ._common import AgentAttachmentError, AgentTurnConflictError, _CONVERSATION_SELECT_SQL, _IMAGE_SELECT_SQL, _attach_asset_ref_blocks, _conversation_from_row, _image_from_row, _message_from_row
 
 
 def _path_ids(conn: sqlite3.Connection, conversation_id: str, head: str | None) -> list[str]:
@@ -96,7 +96,7 @@ def branch_snapshot(conversation_id: str, *, before_seq: int | None = None, limi
                     where += " AND seq < ?"
                     params.append(before_seq)
                 raw = conn.execute(f"SELECT * FROM agent_messages WHERE {where} ORDER BY seq DESC LIMIT ?", [*params, max(1, limit)]).fetchall()
-                messages = [{**_message_from_row(row), "path_round_no": depths[row["turn_id"]]} for row in reversed(raw)]
+                messages = _attach_asset_ref_blocks(conn, [{**_message_from_row(row), "path_round_no": depths[row["turn_id"]]} for row in reversed(raw)])
                 message_ids = [row["id"] for row in raw]
                 if message_ids:
                     marks = ",".join("?" for _ in message_ids)

@@ -1,5 +1,5 @@
 import { apiFetch, apiFetchRaw, DEFAULT_API_TIMEOUT_MS } from '$lib/api/client';
-import { primaryEditSourceId, type EditSourceState } from '$lib/stores/editSource';
+import { primaryEditSource, type EditSourceState } from '$lib/stores/editSource';
 
 // One place that turns the current primary edit source into its original,
 // upright pixels. The markup validator and the markup editor both go through
@@ -7,7 +7,7 @@ import { primaryEditSourceId, type EditSourceState } from '$lib/stores/editSourc
 //
 // - Uploads decode the File the user picked.
 // - Gallery sources always decode the authenticated same-origin original
-//   (/api/image/<filename>), never `galleryPreviewUrl`, which may be a CDN
+//   (/api/image/<filename>), never the source's `previewUrl`, which may be a CDN
 //   thumbnail with different dimensions. Gallery size metadata can also hold
 //   raw (pre-EXIF) dimensions, so it is never used as the coordinate basis.
 
@@ -28,25 +28,25 @@ function withTimeout(signal?: AbortSignal): AbortSignal {
 }
 
 export async function fetchPrimaryImageBlob(state: EditSourceState, signal?: AbortSignal): Promise<PrimaryImageBlob> {
-  const sourceId = primaryEditSourceId(state);
-  if (!sourceId) throw new PrimaryImageError();
-  if (state.selectedGalleryImageId) {
+  const primary = primaryEditSource(state);
+  if (!primary) throw new PrimaryImageError();
+  if (primary.kind === 'gallery_primary') {
     const filename =
-      state.galleryFilename ||
+      primary.filename ||
       (
         await apiFetch<{ filename: string }>(
-          `/api/gallery/${encodeURIComponent(state.selectedGalleryImageId)}`,
+          `/api/gallery/${encodeURIComponent(primary.imageId)}`,
           { signal },
           'loading markup primary image'
         )
       ).filename;
     const response = await apiFetchRaw(`/api/image/${encodeURIComponent(filename)}`, { signal: withTimeout(signal) });
     if (!response.ok) throw new PrimaryImageError();
-    return { sourceId, blob: await response.blob() };
+    return { sourceId: primary.id, blob: await response.blob() };
   }
-  const primary = state.files[0];
-  if (!primary) throw new PrimaryImageError();
-  return { sourceId, blob: primary.file };
+  // A bare gallery reference has no local file and is never an editable primary.
+  if (primary.kind !== 'upload') throw new PrimaryImageError();
+  return { sourceId: primary.id, blob: primary.file };
 }
 
 /** Decodes with default orientation handling, i.e. the upright image the backend sends upstream. */

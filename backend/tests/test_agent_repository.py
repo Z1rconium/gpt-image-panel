@@ -280,3 +280,92 @@ def test_asset_snapshot_tracks_explicit_gallery_overlap(tmp_path):
     revision = agent_repo.get_conversation(conversation['id'])['branch_revision']
     _turn(conversation['id'], 'turn-0002', action='regenerate', source_turn_id=turn['id'], branch_revision=revision)
     assert agent_repo.list_messages(conversation['id'])[-2]['blocks'][0]['explicit_refs'] == ['round-2-input-1']
+
+
+def _asset_turn_with_overlap(tmp_path):
+    from backend.app.repositories.gallery import collections
+
+    _configure_runtime(tmp_path)
+    db_repo.verify_storage_writable()
+    for image in ('ref-a', 'ref-b', 'ref-c'):
+        _fake_gallery_entry(image, 'source', '1024x1024', f'{image}.png')
+    pack = collections.create_gallery_collection('Pack', asset_alias='fox')
+    collections.add_gallery_collection_items(pack['id'], ['ref-a', 'ref-b'])
+    conversation = agent_repo.create_conversation()
+    turn, _ = _turn(conversation['id'], text='Use @fox', attachment_image_ids=['ref-b', 'ref-c'], asset_collection_ids=[pack['id']])
+    return conversation, turn, pack
+
+
+def test_asset_refs_are_stored_relationally_and_blocks_are_synthesized(tmp_path):
+    conversation, turn, pack = _asset_turn_with_overlap(tmp_path)
+    with db_repo._connect() as conn:
+        stored = conn.execute("SELECT blocks_json FROM agent_messages WHERE id = ?", (turn['user_message_id'],)).fetchone()[0]
+        members = conn.execute(
+            """
+            SELECT i.ref_label, a.explicit FROM agent_message_asset_ref_images a
+            JOIN agent_message_images i ON i.id = a.input_image_row_id ORDER BY a.position
+            """
+        ).fetchall()
+    assert stored == '[]'
+    # Explicit attachments come first (ref-b, ref-c); the pack then appends ref-a.
+    assert [(row[0], row[1]) for row in members] == [('round-1-input-3', 0), ('round-1-input-1', 1)]
+    block = agent_repo.list_messages(conversation['id'])[0]['blocks'][0]
+    assert block['type'] == 'asset_refs' and block['alias'] == 'fox' and block['collection_id'] == pack['id']
+    assert block['refs'] == ['round-1-input-3', 'round-1-input-1']
+    assert block['explicit_refs'] == ['round-1-input-1']
+
+
+def test_legacy_asset_blocks_in_blocks_json_are_not_duplicated(tmp_path):
+    import json
+
+    conversation, turn, _ = _asset_turn_with_overlap(tmp_path)
+    block = agent_repo.list_messages(conversation['id'])[0]['blocks'][0]
+    with db_repo._connect() as conn:
+        conn.execute("UPDATE agent_messages SET blocks_json = ? WHERE id = ?", (json.dumps([block]), turn['user_message_id']))
+        conn.commit()
+    assert agent_repo.list_messages(conversation['id'])[0]['blocks'] == [block]
+    assert agent_repo.get_message(turn['user_message_id'])['blocks'] == [block]
+    assert agent_repo.branch_snapshot(conversation['id'])['messages'][0]['blocks'] == [block]
+
+
+def test_asset_backfill_restores_legacy_blocks_and_is_idempotent(tmp_path):
+    import json
+    from backend.app.repositories.db import migrations
+
+    conversation, turn, _ = _asset_turn_with_overlap(tmp_path)
+    expected = agent_repo.list_messages(conversation['id'])[0]['blocks'][0]
+    legacy = {**expected, 'refs': [*expected['refs'], 'round-9-input-9']}
+    with db_repo._connect() as conn:
+        conn.execute("DELETE FROM agent_message_asset_refs")
+        conn.execute("UPDATE agent_messages SET blocks_json = ? WHERE id = ?", (json.dumps([legacy]), turn['user_message_id']))
+        conn.commit()
+        for _ in range(2):
+            migrations._backfill_agent_asset_refs(conn)
+        conn.commit()
+        counts = (
+            conn.execute("SELECT COUNT(*) FROM agent_message_asset_refs").fetchone()[0],
+            conn.execute("SELECT COUNT(*) FROM agent_message_asset_ref_images").fetchone()[0],
+        )
+    assert counts == (1, 2)
+    assert agent_repo.list_messages(conversation['id'])[0]['blocks'] == [expected]
+
+
+def test_asset_edit_drops_members_whose_gallery_image_was_deleted(tmp_path):
+    conversation, turn, _ = _asset_turn_with_overlap(tmp_path)
+    agent_repo.finish_turn(turn['id'], 'completed')
+    with db_repo._connect() as conn:
+        conn.execute("DELETE FROM gallery_entries WHERE id = 'ref-a'")
+        conn.commit()
+    revision = agent_repo.get_conversation(conversation['id'])['branch_revision']
+    _turn(conversation['id'], 'turn-0002', text='Change @fox', action='edit', source_turn_id=turn['id'], branch_revision=revision, attachment_image_ids=['ref-b', 'ref-c'])
+    block = agent_repo.list_messages(conversation['id'])[-2]['blocks'][0]
+    assert block['refs'] == ['round-2-input-1']
+    assert block['explicit_refs'] == ['round-2-input-1']
+
+
+def test_deleting_a_conversation_removes_asset_ref_rows(tmp_path):
+    conversation, _, _ = _asset_turn_with_overlap(tmp_path)
+    assert agent_repo.delete_conversation(conversation['id']) is True
+    with db_repo._connect() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM agent_message_asset_refs").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM agent_message_asset_ref_images").fetchone()[0] == 0

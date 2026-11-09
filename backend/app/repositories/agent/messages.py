@@ -5,7 +5,7 @@ from typing import Any, Sequence
 
 from ...core.utils import utc_now
 from ..db import _connect, _ensure_database, _transaction
-from ._common import _IMAGE_SELECT_SQL, _image_from_row, _message_from_row, _new_id, _require_owner
+from ._common import _IMAGE_SELECT_SQL, _attach_asset_ref_blocks, _image_from_row, _message_from_row, _new_id, _require_owner
 from .turns import LEGACY_IMAGE_WAIT_TIMEOUT_ERROR
 
 
@@ -34,14 +34,14 @@ def list_messages(
             f"SELECT * FROM agent_messages WHERE {where} ORDER BY seq DESC LIMIT ?",
             params,
         ).fetchall()
-    return [_message_from_row(row) for row in reversed(rows)]
+        return _attach_asset_ref_blocks(conn, [_message_from_row(row) for row in reversed(rows)])
 
 
 def get_message(message_id: str) -> dict[str, Any] | None:
     _ensure_database()
     with _connect() as conn:
         row = conn.execute("SELECT * FROM agent_messages WHERE id = ?", (message_id,)).fetchone()
-    return _message_from_row(row) if row else None
+        return _attach_asset_ref_blocks(conn, [_message_from_row(row)])[0] if row else None
 
 
 def update_message_content(message_id: str, *, text: str, blocks: list[dict[str, Any]], owner: str | None = None) -> None:

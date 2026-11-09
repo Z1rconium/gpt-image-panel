@@ -5,8 +5,8 @@
   import { galleryActivityStore, galleryStore } from '$lib/stores/gallery';
   import { galleryCollectionsStore, moveCollectionId } from '$lib/stores/galleryCollections';
   import { uiStore } from '$lib/stores/ui';
+  import CollectionMemberOrder from './CollectionMemberOrder.svelte';
   import ArrowDown from 'lucide-svelte/icons/arrow-down';
-  import ArrowLeft from 'lucide-svelte/icons/arrow-left';
   import ArrowUp from 'lucide-svelte/icons/arrow-up';
   import AtSign from 'lucide-svelte/icons/at-sign';
   import Check from 'lucide-svelte/icons/check';
@@ -16,7 +16,7 @@
   import Pencil from 'lucide-svelte/icons/pencil';
   import Trash2 from 'lucide-svelte/icons/trash-2';
   import X from 'lucide-svelte/icons/x';
-  import type { GalleryCollection, GalleryEntry } from '$lib/api/types/gallery';
+  import type { GalleryCollection } from '$lib/api/types/gallery';
 
   interface Props {
     open?: boolean;
@@ -33,9 +33,6 @@
   let aliasValue = $state('');
   let aliasError = $state('');
   let managingMembersCollection = $state<GalleryCollection | null>(null);
-  let memberImages = $state<GalleryEntry[]>([]);
-  let loadingMembers = $state(false);
-  let unsupportedSkipped = $state(0);
   let dragIndex = $state<number | null>(null);
   let overIndex = $state<number | null>(null);
   let busy = $state(false);
@@ -47,7 +44,6 @@
       editingAliasId = '';
       aliasError = '';
       managingMembersCollection = null;
-      memberImages = [];
       void galleryCollectionsStore.load(true).catch(showError);
     }
   });
@@ -148,44 +144,6 @@
     });
   }
 
-  async function openMemberOrder(collection: GalleryCollection) {
-    managingMembersCollection = collection;
-    loadingMembers = true;
-    memberImages = [];
-    unsupportedSkipped = 0;
-    try {
-      const res = await galleryCollectionsStore.loadReferences(collection.id);
-      memberImages = res.images;
-      unsupportedSkipped = res.skipped_unsupported;
-    } catch (e) {
-      showError(e);
-      managingMembersCollection = null;
-    } finally {
-      loadingMembers = false;
-    }
-  }
-
-  function closeMemberOrder() {
-    managingMembersCollection = null;
-    memberImages = [];
-  }
-
-  async function moveMember(fromIndex: number, toIndex: number) {
-    if (!managingMembersCollection || fromIndex === toIndex) return;
-    if (fromIndex < 0 || toIndex < 0 || fromIndex >= memberImages.length || toIndex >= memberImages.length) return;
-    const next = [...memberImages];
-    const [moved] = next.splice(fromIndex, 1);
-    next.splice(toIndex, 0, moved);
-    memberImages = next;
-    await run(async () => {
-      await galleryCollectionsStore.reorderItems(
-        managingMembersCollection!.id,
-        next.map((img) => img.id)
-      );
-      uiStore.showToast($t.collections.itemOrderUpdated, 'status');
-    });
-  }
-
   function move(fromIndex: number, toIndex: number) {
     const currentIds = collections.map((item) => item.id);
     const ids = moveCollectionId(currentIds, fromIndex, toIndex);
@@ -222,96 +180,11 @@
 
 <Overlay {open} {onClose} closeLabel={$t.common.close} labelledBy="collections-dialog-title" z={80} maxWidthClass="max-w-xl" panelClass="p-5" backdropBlur>
   {#if managingMembersCollection}
-    <div class="mb-4 flex items-start justify-between gap-3">
-      <div class="flex items-center gap-2">
-        <button
-          type="button"
-          class="control-focus rounded-lg p-1.5 text-stone-500 hover:bg-stone-100 hover:text-stone-950 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
-          onclick={closeMemberOrder}
-          title={$t.collections.manageTitle}
-          aria-label={$t.collections.manageTitle}
-        >
-          <ArrowLeft class="h-4 w-4" />
-        </button>
-        <div>
-          <h2 id="collections-dialog-title" class="text-base font-semibold text-stone-950 dark:text-zinc-100">
-            {$t.collections.memberOrderTitle(managingMembersCollection.name)}
-          </h2>
-          <p class="mt-0.5 text-xs text-stone-500 dark:text-zinc-500">
-            {$t.collections.memberOrderSubtitle}
-          </p>
-        </div>
-      </div>
-      <button
-        type="button"
-        class="control-focus rounded-lg p-1.5 text-stone-500 hover:bg-stone-100 hover:text-stone-950 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
-        aria-label={$t.common.close}
-        onclick={onClose}
-      >
-        <X class="h-4 w-4" />
-      </button>
-    </div>
-
-    {#if unsupportedSkipped > 0}
-      <div class="mb-3 rounded-lg border border-amber-300/80 bg-amber-50 p-2.5 text-xs text-amber-800 dark:border-amber-700/60 dark:bg-amber-950/40 dark:text-amber-200">
-        {$t.collections.unsupportedImagesNotice(unsupportedSkipped)}
-      </div>
-    {/if}
-
-    {#if loadingMembers}
-      <p class="rounded-lg border border-dashed border-stone-300 px-3 py-8 text-center text-xs text-stone-500 dark:border-zinc-700 dark:text-zinc-500">
-        {$t.gallery.loading}
-      </p>
-    {:else if !memberImages.length}
-      <p class="rounded-lg border border-dashed border-stone-300 px-3 py-8 text-center text-xs text-stone-500 dark:border-zinc-700 dark:text-zinc-500">
-        {$t.collections.emptyMembers}
-      </p>
-    {:else}
-      <ul class="max-h-[55dvh] space-y-1.5 overflow-y-auto pr-1">
-        {#each memberImages as img, index (img.id)}
-          <li class="flex items-center gap-2.5 rounded-lg border border-stone-200 bg-white p-2 dark:border-zinc-800 dark:bg-zinc-950/60">
-            <span class="shrink-0 rounded bg-stone-100 px-1.5 py-0.5 text-xs font-mono font-medium text-stone-600 dark:bg-zinc-800 dark:text-zinc-400">
-              #{index + 1}
-            </span>
-            <img
-              src={img.thumbnail_url || img.image_url}
-              alt=""
-              class="h-10 w-10 shrink-0 rounded object-cover border border-stone-200 dark:border-zinc-800 bg-stone-100 dark:bg-zinc-900"
-            />
-            <div class="min-w-0 flex-1">
-              <p class="truncate text-xs font-medium text-stone-800 dark:text-zinc-200">
-                {img.prompt || img.filename}
-              </p>
-              <p class="truncate font-mono text-[10px] text-stone-400 dark:text-zinc-500">
-                {img.id}
-              </p>
-            </div>
-            <div class="flex shrink-0 items-center gap-1">
-              <button
-                type="button"
-                class="gallery-icon-action control-focus border-stone-300 text-stone-600 hover:bg-stone-100 disabled:opacity-30 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                aria-label={$t.collections.moveUp(img.filename)}
-                title={$t.collections.moveUp(img.filename)}
-                disabled={busy || index === 0}
-                onclick={() => moveMember(index, index - 1)}
-              >
-                <ArrowUp class="h-3.5 w-3.5" aria-hidden="true" />
-              </button>
-              <button
-                type="button"
-                class="gallery-icon-action control-focus border-stone-300 text-stone-600 hover:bg-stone-100 disabled:opacity-30 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                aria-label={$t.collections.moveDown(img.filename)}
-                title={$t.collections.moveDown(img.filename)}
-                disabled={busy || index === memberImages.length - 1}
-                onclick={() => moveMember(index, index + 1)}
-              >
-                <ArrowDown class="h-3.5 w-3.5" aria-hidden="true" />
-              </button>
-            </div>
-          </li>
-        {/each}
-      </ul>
-    {/if}
+    <CollectionMemberOrder
+      collection={managingMembersCollection}
+      onBack={() => { managingMembersCollection = null; }}
+      {onClose}
+    />
   {:else}
     <div class="mb-4 flex items-start justify-between gap-3">
       <div>
@@ -475,7 +348,7 @@
               <button type="button" class="gallery-icon-action control-focus border-stone-300 text-stone-600 hover:bg-stone-100 disabled:opacity-30 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800" aria-label={$t.collections.moveDown(collection.name)} title={$t.collections.moveDown(collection.name)} disabled={busy || index === collections.length - 1} onclick={() => move(index, index + 1)}><ArrowDown aria-hidden="true" /></button>
               <button type="button" class="gallery-icon-action control-focus border-stone-300 text-stone-600 hover:bg-stone-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800" aria-label={$t.collections.renameLabel(collection.name)} title={$t.collections.renameLabel(collection.name)} onclick={() => startRename(collection.id, collection.name)}><Pencil aria-hidden="true" /></button>
               <button type="button" class="gallery-icon-action control-focus border-stone-300 text-stone-600 hover:bg-stone-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800" aria-label={$t.collections.assetAlias} title={$t.collections.assetAlias} onclick={() => startEditAlias(collection.id, collection.asset_alias || '')}><AtSign aria-hidden="true" /></button>
-              <button type="button" class="gallery-icon-action control-focus border-stone-300 text-stone-600 hover:bg-stone-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800" aria-label={$t.collections.manageMembers} title={$t.collections.manageMembers} onclick={() => void openMemberOrder(collection)}><ListOrdered aria-hidden="true" /></button>
+              <button type="button" class="gallery-icon-action control-focus border-stone-300 text-stone-600 hover:bg-stone-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800" aria-label={$t.collections.manageMembers} title={$t.collections.manageMembers} onclick={() => { managingMembersCollection = collection; }}><ListOrdered aria-hidden="true" /></button>
               <button type="button" class="gallery-icon-action control-focus border-stone-300 text-stone-600 hover:bg-stone-100 disabled:opacity-30 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800" aria-label={$t.collections.downloadZip(collection.name)} title={$t.collections.downloadZip(collection.name)} disabled={busy || (!collection.image_count && !collection.asset_alias) || Boolean($galleryActivityStore.operationStatus)} onclick={() => downloadCollection(collection.id, collection.image_count)}><Download aria-hidden="true" /></button>
               <button type="button" class="gallery-icon-action control-focus border-red-500/40 text-red-700 hover:bg-red-500/10 dark:text-red-300" aria-label={$t.collections.deleteLabel(collection.name)} title={$t.collections.deleteLabel(collection.name)} disabled={busy} onclick={() => void deleteCollection(collection.id, collection.name)}><Trash2 aria-hidden="true" /></button>
             </div>

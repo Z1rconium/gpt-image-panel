@@ -33,7 +33,7 @@ from ...repositories.gallery.queries import (
     get_gallery_entries_by_ids,
     iter_gallery_export_rows,
 )
-from ...repositories.gallery.collections import get_gallery_collection, export_gallery_collections
+from ...repositories.gallery.collections import get_gallery_collection, has_asset_collections
 from ...repositories.gallery.sync_state import count_gallery_r2_sync_rows
 from ...repositories.settings import load_r2_backup_settings
 from ...schemas.gallery import (
@@ -82,13 +82,10 @@ from ...services.gallery_maintenance import kick_gallery_job_dispatchers
 
 router = APIRouter()
 
-def _has_asset_collections() -> bool:
-    return any(item["asset_alias"] for item in export_gallery_collections())
-
 @router.post("/api/gallery/direct-export-jobs", response_model=GalleryExportJobStatus, status_code=202)
 async def create_gallery_direct_export_job():
     gallery_count = await run_db_operation(get_gallery_count)
-    if gallery_count == 0 and not await run_db_operation(_has_asset_collections):
+    if gallery_count == 0 and not await run_db_operation(has_asset_collections):
         raise HTTPException(status_code=404, detail="No images in gallery")
 
     job = await _reserve_gallery_export_direct_slot(
@@ -150,7 +147,7 @@ async def create_gallery_export_job(req: GalleryExportRequest | None = Body(defa
         payload = {"ids": ids, "filename_prefix": filename_prefix}
     else:
         gallery_count = await run_db_operation(get_gallery_count)
-        if gallery_count == 0 and not await run_db_operation(_has_asset_collections):
+        if gallery_count == 0 and not await run_db_operation(has_asset_collections):
             raise HTTPException(status_code=404, detail="No images in gallery")
         requested_count = gallery_count
         filename_prefix = "gpt-images"
@@ -394,7 +391,7 @@ async def download_all_images(export_job_id: str = Query(...)):
     if direct_job.get("status") != "running" or direct_job.get("stage") != "queued":
         raise HTTPException(status_code=409, detail="Direct gallery export job is already active or finished")
 
-    if gallery_count == 0 and not await run_db_operation(_has_asset_collections):
+    if gallery_count == 0 and not await run_db_operation(has_asset_collections):
         await run_db_operation(update_gallery_job,
             export_job_id,
             {

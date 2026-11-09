@@ -865,3 +865,21 @@ def test_gallery_collection_assets_migration(tmp_path):
                 "INSERT INTO gallery_collections(id, name, asset_alias, created_at, updated_at) VALUES('col-d', 'Col D', NULL, 't', 't')"
             )
 
+
+
+def test_agent_asset_refs_migration(tmp_path):
+    _configure_runtime(tmp_path)
+    db_repo.verify_storage_writable()
+    with db_repo._connect() as conn:
+        name = conn.execute("SELECT name FROM schema_migrations WHERE version = 43").fetchone()["name"]
+        tables = {row["name"] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+        indexes = {row["name"] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'index'")}
+        member_fks = {
+            (row["table"], row["on_delete"])
+            for row in conn.execute("PRAGMA foreign_key_list(agent_message_asset_ref_images)")
+        }
+    assert name == "agent_asset_refs"
+    assert {"agent_message_asset_refs", "agent_message_asset_ref_images"}.issubset(tables)
+    assert {"idx_agent_asset_refs_message", "idx_agent_asset_ref_images_row"}.issubset(indexes)
+    assert ("agent_message_images", "CASCADE") in member_fks
+    assert ("agent_message_asset_refs", "CASCADE") in member_fks

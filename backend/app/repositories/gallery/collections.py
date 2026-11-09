@@ -97,6 +97,16 @@ def _alias_taken_on_conn(conn: sqlite3.Connection, alias: str, *, exclude_id: st
     return row is not None
 
 
+def has_asset_collections() -> bool:
+    """Return True if at least one collection has an asset alias configured."""
+    _ensure_database()
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM gallery_collections WHERE asset_alias IS NOT NULL AND trim(asset_alias) != '' LIMIT 1"
+        ).fetchone()
+        return row is not None
+
+
 def list_gallery_collections() -> list[dict[str, Any]]:
     _ensure_database()
     with _connect() as conn:
@@ -310,6 +320,42 @@ def get_gallery_image_collection_ids(image_id: str) -> list[str]:
     return [str(row["collection_id"]) for row in rows]
 
 
+UNSUPPORTED_REFERENCE_FORMATS = frozenset({"svg", "gif"})
+UNSUPPORTED_REFERENCE_EXTENSIONS = (".svg", ".gif")
+
+
+def is_supported_reference_format(output_format: str | None, filename: str | None = None) -> bool:
+    fmt = (output_format or "").strip().lower()
+    if fmt in UNSUPPORTED_REFERENCE_FORMATS:
+        return False
+    name = (filename or "").strip().lower()
+    if any(name.endswith(ext) for ext in UNSUPPORTED_REFERENCE_EXTENSIONS):
+        return False
+    return True
+
+
+def list_collection_reference_image_ids_on_conn(
+    conn: sqlite3.Connection,
+    collection_id: str,
+) -> list[str]:
+    """Fetch ordered image IDs of supported raster reference images for a collection on an open connection."""
+    rows = conn.execute(
+        """
+        SELECT e.id, e.output_format, e.filename
+        FROM gallery_collection_items AS i
+        JOIN gallery_entries AS e ON e.id = i.image_id
+        WHERE i.collection_id = ?
+        ORDER BY i.position IS NULL, i.position ASC, i.added_at ASC, i.image_id ASC
+        """,
+        (collection_id,),
+    ).fetchall()
+    return [
+        str(row["id"])
+        for row in rows
+        if is_supported_reference_format(row["output_format"], row["filename"])
+    ]
+
+
 def list_collection_reference_entries(collection_id: str) -> dict[str, Any] | None:
     """Fetch valid raster reference images for a collection in unified order.
 
@@ -337,12 +383,10 @@ def list_collection_reference_entries(collection_id: str) -> dict[str, Any] | No
     valid_entries: list[Any] = []
     skipped_unsupported = 0
     for entry in all_entries:
-        format_lower = (entry.output_format or "").strip().lower()
-        filename_lower = (entry.filename or "").strip().lower()
-        if format_lower in {"svg", "gif"} or filename_lower.endswith((".svg", ".gif")):
-            skipped_unsupported += 1
-        else:
+        if is_supported_reference_format(entry.output_format, entry.filename):
             valid_entries.append(entry)
+        else:
+            skipped_unsupported += 1
 
     return {
         "collection": collection,
