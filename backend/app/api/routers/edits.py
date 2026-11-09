@@ -302,12 +302,12 @@ async def validate_edit_mask(mask: EditImageSource, primary: EditImageSource) ->
 
 
 
-@router.post("/api/edits", response_model=GenerateJobResponse, status_code=202)
-async def edit_image(
-    request: Request,
-    req: EditRequest = Depends(edit_request_from_form),
-):
-    form = await request.form()
+async def _stage_and_queue_edit(
+    req: EditRequest,
+    form: FormData,
+    *,
+    gallery_primary_id: str | None = None,
+) -> GenerateJobResponse:
     # The mask is streamed to disk before the sources because its size decides
     # whether an EXIF-oriented primary is rotated upright (see
     # `validate_edit_source_file_details`); the header read for that costs
@@ -321,30 +321,49 @@ async def edit_image(
         for v in form.getlist(k)
         if isinstance(v, StarletteUploadFile)
     ]
+    has_gallery_primary = gallery_primary_id is not None
     pre_validate_edit_source_count(
-        has_gallery_primary=False,
+        has_gallery_primary=has_gallery_primary,
         uploads_count=len(raw_uploads),
         reference_ids_count=len(ref_ids),
     )
+
     sources: list[EditImageSource] = []
+    mask_dim = mask_dimensions(mask)
     try:
-        if raw_uploads:
-            upload_sources = await read_upload_edit_sources(
-                form,
-                orientation_mask_size=mask_dimensions(mask),
+        if has_gallery_primary:
+            # Uploads here are reference images; the gallery entry is the primary
+            # the mask must match, so only it gets the orientation check.
+            gallery_source = await read_gallery_edit_source(
+                gallery_primary_id,
+                orientation_mask_size=mask_dim,
             )
-            sources.extend(upload_sources)
-            reference_sources = await read_gallery_reference_edit_sources(ref_ids)
-            sources.extend(reference_sources)
+            sources.append(gallery_source)
+            if raw_uploads:
+                sources.extend(await read_upload_edit_sources(form))
+            if ref_ids:
+                sources.extend(await read_gallery_reference_edit_sources(ref_ids))
         else:
-            reference_sources = await read_gallery_reference_edit_sources(
-                ref_ids,
-                orientation_mask_size=mask_dimensions(mask),
-            )
-            sources.extend(reference_sources)
+            if raw_uploads:
+                sources.extend(
+                    await read_upload_edit_sources(
+                        form,
+                        orientation_mask_size=mask_dim,
+                    )
+                )
+                if ref_ids:
+                    sources.extend(await read_gallery_reference_edit_sources(ref_ids))
+            else:
+                sources.extend(
+                    await read_gallery_reference_edit_sources(
+                        ref_ids,
+                        orientation_mask_size=mask_dim,
+                    )
+                )
 
         if not sources:
             raise HTTPException(status_code=422, detail="Upload image is required.")
+
         validate_edit_source_count(sources)
         await validate_uploaded_markup(markup, sources[0], req)
         mask_coverage = None
@@ -353,6 +372,7 @@ async def edit_image(
             mask_info = await validate_edit_mask(mask, sources[0])
             mask_coverage = mask_info.transparent_ratio
             mask_optimized_png = mask_info.optimized_png
+
         return await queue_edit_job(
             req=req,
             image_sources=sources,
@@ -364,6 +384,15 @@ async def edit_image(
     except BaseException:
         cleanup_edit_sources([*sources, *([mask] if mask else []), *([markup] if markup else [])])
         raise
+
+
+@router.post("/api/edits", response_model=GenerateJobResponse, status_code=202)
+async def edit_image(
+    request: Request,
+    req: EditRequest = Depends(edit_request_from_form),
+):
+    form = await request.form()
+    return await _stage_and_queue_edit(req, form)
 
 
 @router.post(
@@ -377,54 +406,4 @@ async def edit_image_from_gallery(
     req: EditRequest = Depends(edit_request_from_form),
 ):
     form = await request.form()
-    markup = await read_upload_edit_markup(form)
-    mask = await read_upload_edit_mask(form)
-    ref_ids = extract_reference_image_ids(form)
-    raw_uploads = [
-        v
-        for k in ("image", "image[]")
-        for v in form.getlist(k)
-        if isinstance(v, StarletteUploadFile)
-    ]
-    pre_validate_edit_source_count(
-        has_gallery_primary=True,
-        uploads_count=len(raw_uploads),
-        reference_ids_count=len(ref_ids),
-    )
-    sources: list[EditImageSource] = []
-    try:
-        # Uploads here are reference images; the gallery entry is the primary
-        # the mask must match, so only it gets the orientation check.
-        gallery_source = await read_gallery_edit_source(
-            image_id,
-            orientation_mask_size=mask_dimensions(mask),
-        )
-        sources.append(gallery_source)
-        upload_sources = await read_upload_edit_sources(form)
-        sources.extend(upload_sources)
-        reference_sources = await read_gallery_reference_edit_sources(ref_ids)
-        sources.extend(reference_sources)
-    except BaseException:
-        cleanup_edit_sources([*sources, *([mask] if mask is not None else []), *([markup] if markup is not None else [])])
-        raise
-
-    try:
-        validate_edit_source_count(sources)
-        await validate_uploaded_markup(markup, sources[0], req)
-        mask_coverage = None
-        mask_optimized_png = None
-        if mask is not None:
-            mask_info = await validate_edit_mask(mask, gallery_source)
-            mask_coverage = mask_info.transparent_ratio
-            mask_optimized_png = mask_info.optimized_png
-        return await queue_edit_job(
-            req=req,
-            image_sources=sources,
-            mask_source=mask,
-            markup_source=markup,
-            mask_coverage=mask_coverage,
-            mask_optimized_png=mask_optimized_png,
-        )
-    except BaseException:
-        cleanup_edit_sources([*sources, *([mask] if mask else []), *([markup] if markup else [])])
-        raise
+    return await _stage_and_queue_edit(req, form, gallery_primary_id=image_id)

@@ -7,6 +7,7 @@ from typing import Any, Sequence
 from ...core import settings as config
 from ...core.utils import json_dumps_canonical, utc_now
 from ..db import _connect, _ensure_database, _transaction
+from ..gallery.collections import list_collection_reference_image_ids_on_conn
 from ._common import AgentAttachmentError, AgentConversationLimitError, AgentTurnConflictError, TERMINAL_TURN_STATUSES, _MESSAGE_STATUS_FOR_TURN, _new_id, _require_owner, _title_from_text, _turn_from_row
 from .branches import _branch_text, _path_ids
 
@@ -127,13 +128,9 @@ def create_turn(
                     collection = conn.execute("SELECT asset_alias FROM gallery_collections WHERE id = ?", (collection_id,)).fetchone()
                     if collection is None or not collection["asset_alias"]:
                         raise AgentAttachmentError("An asset pack no longer exists")
-                    rows = conn.execute("""SELECT e.id FROM gallery_collection_items i JOIN gallery_entries e ON e.id = i.image_id
-                        WHERE i.collection_id = ? AND lower(trim(COALESCE(e.output_format, ''))) NOT IN ('svg', 'gif')
-                        AND lower(trim(e.filename)) NOT LIKE '%.svg' AND lower(trim(e.filename)) NOT LIKE '%.gif'
-                        ORDER BY i.position IS NULL, i.position, i.added_at, i.image_id""", (collection_id,)).fetchall()
+                    image_ids = list_collection_reference_image_ids_on_conn(conn, collection_id)
                     indices = []
-                    for row in rows:
-                        image_id = row[0]
+                    for image_id in image_ids:
                         if image_id not in attachment_ids:
                             attachment_ids.append(image_id)
                         indices.append(attachment_ids.index(image_id) + 1)

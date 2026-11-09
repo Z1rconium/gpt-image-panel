@@ -10,6 +10,7 @@ from pathlib import Path
 from ..core import settings as config
 from ..core.errors import DomainError, InvalidRequestError, NotFoundError
 from ..core.media import IMAGE_FILE_EXTENSIONS, image_content_type_for_filename, safe_image_path
+from ..repositories.gallery.collections import is_supported_reference_format
 from ..repositories.gallery.queries import get_gallery_entry
 from ..repositories.image_files import validate_and_normalize_image_file
 from ..repositories.db.execution import run_db_operation
@@ -265,8 +266,7 @@ async def read_gallery_reference_edit_source(
         raise NotFoundError(f"Gallery entry not found: {image_id}")
 
     filename = entry.filename or ""
-    suffix = Path(filename).suffix.lower()
-    if suffix in (".svg", ".gif"):
+    if not is_supported_reference_format(getattr(entry, "output_format", None), filename):
         raise InvalidRequestError(f"SVG and GIF images cannot be used as reference images: {image_id}")
 
     path = safe_image_path(filename)
