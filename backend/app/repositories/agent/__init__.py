@@ -14,6 +14,7 @@ from ._common import (
     _CONVERSATION_SELECT_SQL,
     _IMAGE_SELECT_SQL,
     _MESSAGE_STATUS_FOR_TURN,
+    _attach_asset_ref_blocks,
     _conversation_from_row,
     _image_from_row,
     _message_from_row,

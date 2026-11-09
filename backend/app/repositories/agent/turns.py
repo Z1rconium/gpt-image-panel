@@ -2,6 +2,8 @@
 
 import json
 import re
+import sqlite3
+from dataclasses import dataclass, field
 from typing import Any, Sequence
 
 from ...core import settings as config
@@ -10,6 +12,84 @@ from ..db import _connect, _ensure_database, _transaction
 from ..gallery.collections import list_collection_reference_image_ids_on_conn
 from ._common import AgentAttachmentError, AgentConversationLimitError, AgentTurnConflictError, TERMINAL_TURN_STATUSES, _MESSAGE_STATUS_FOR_TURN, _new_id, _require_owner, _title_from_text, _turn_from_row
 from .branches import _branch_text, _path_ids
+
+
+@dataclass
+class _AssetGroup:
+    """One asset pack mention on a user message, keyed by gallery image id.
+
+    ``image_ids`` keeps the pack order captured when the snapshot was taken;
+    ``explicit_image_ids`` are the members the user also attached directly.
+    """
+
+    alias: str
+    collection_id: str | None
+    image_ids: list[str]
+    explicit_image_ids: set[str] = field(default_factory=set)
+
+
+def _load_asset_groups(conn: sqlite3.Connection, message_id: str) -> list[_AssetGroup]:
+    """Read a message's saved asset snapshot; members whose image was deleted are dropped."""
+    groups: dict[str, _AssetGroup] = {}
+    for row in conn.execute(
+        """
+        SELECT r.id AS ref_id, r.alias, r.collection_id, i.image_id, a.explicit
+        FROM agent_message_asset_refs r
+        LEFT JOIN agent_message_asset_ref_images a ON a.asset_ref_id = r.id
+        LEFT JOIN agent_message_images i ON i.id = a.input_image_row_id
+        WHERE r.message_id = ?
+        ORDER BY r.position, a.position
+        """,
+        (message_id,),
+    ):
+        group = groups.setdefault(row["ref_id"], _AssetGroup(row["alias"], row["collection_id"], []))
+        if row["image_id"] is not None:
+            group.image_ids.append(row["image_id"])
+            if row["explicit"]:
+                group.explicit_image_ids.add(row["image_id"])
+    return list(groups.values())
+
+
+def _resolve_asset_groups(
+    conn: sqlite3.Connection,
+    *,
+    text: str,
+    attachment_ids: list[str],
+    explicit_ids: set[str],
+    asset_collection_ids: Sequence[str],
+    source_groups: Sequence[_AssetGroup],
+) -> list[_AssetGroup]:
+    """Decide which asset groups a new message carries, extending ``attachment_ids`` in place.
+
+    An edited branch retains the original snapshot of every pack that is still
+    mentioned, not a fresh read of a collection that may since have changed;
+    only newly selected packs are expanded from their current order.
+    """
+    groups: list[_AssetGroup] = []
+    snapshot_collection_ids: set[str] = set()
+    for source in source_groups:
+        if not re.search(r"(?<!\S)@" + re.escape(source.alias) + r"(?![\w-])", text, re.IGNORECASE):
+            continue
+        kept = [image_id for image_id in source.image_ids if image_id in attachment_ids]
+        if not kept:
+            continue
+        groups.append(_AssetGroup(source.alias, source.collection_id, kept, {image_id for image_id in kept if image_id in source.explicit_image_ids}))
+        if source.collection_id:
+            snapshot_collection_ids.add(source.collection_id)
+    for collection_id in dict.fromkeys(asset_collection_ids):
+        if collection_id in snapshot_collection_ids:
+            continue
+        collection = conn.execute("SELECT asset_alias FROM gallery_collections WHERE id = ?", (collection_id,)).fetchone()
+        if collection is None or not collection["asset_alias"]:
+            raise AgentAttachmentError("An asset pack no longer exists")
+        image_ids = list(dict.fromkeys(list_collection_reference_image_ids_on_conn(conn, collection_id)))
+        if not image_ids:
+            raise AgentAttachmentError("An asset pack has no supported images")
+        attachment_ids.extend(image_id for image_id in image_ids if image_id not in attachment_ids)
+        groups.append(_AssetGroup(collection["asset_alias"], collection_id, image_ids, {image_id for image_id in image_ids if image_id in explicit_ids}))
+    if len(attachment_ids) > config.AGENT_MAX_ATTACHMENTS_PER_MESSAGE:
+        raise AgentAttachmentError(f"At most {config.AGENT_MAX_ATTACHMENTS_PER_MESSAGE} images can be attached to one message")
+    return groups
 
 
 def create_turn(
@@ -53,21 +133,18 @@ def create_turn(
             if branch_revision is not None and branch_revision != conversation["branch_revision"]:
                 raise AgentTurnConflictError("The selected branch changed in another tab. Reload before continuing.")
             parent_id = conversation["selected_turn_id"]
-            regenerated_blocks = None
-            edited_source_blocks = []
+            regenerating = False
+            source_groups: list[_AssetGroup] = []
             if action != "continue":
                 source = conn.execute("SELECT * FROM agent_turns WHERE id = ? AND conversation_id = ?", (source_turn_id, conversation_id)).fetchone()
                 selected_path = _path_ids(conn, conversation_id, parent_id)
                 if source is None or source["id"] not in selected_path:
                     raise AgentTurnConflictError("The source turn is not on the selected branch")
                 parent_id = source["parent_turn_id"]
-                if action == "edit":
-                    source_message = conn.execute("SELECT blocks_json FROM agent_messages WHERE id = ?", (source["user_message_id"],)).fetchone()
-                    edited_source_blocks = json.loads(source_message[0] or "[]")
+                source_groups = _load_asset_groups(conn, source["user_message_id"])
                 if action == "regenerate":
-                    original = conn.execute("SELECT text, blocks_json FROM agent_messages WHERE id = ?", (source["user_message_id"],)).fetchone()
-                    text = original[0]
-                    regenerated_blocks = json.loads(original[1] or "[]")
+                    regenerating = True
+                    text = conn.execute("SELECT text FROM agent_messages WHERE id = ?", (source["user_message_id"],)).fetchone()[0]
                     asset_collection_ids = ()
                     attachment_image_ids = [row[0] for row in conn.execute("SELECT image_id FROM agent_message_images WHERE turn_id = ? AND role = 'input' ORDER BY image_index", (source["id"],))]
                     if any(value is None for value in attachment_image_ids):
@@ -102,47 +179,15 @@ def create_turn(
                 if missing:
                     raise AgentAttachmentError("An attached gallery image no longer exists")
 
-            explicit_ids = set(attachment_ids)
-            asset_groups = []
-            snapshot_collection_ids = set()
-            if regenerated_blocks is None:
-                # An edited branch retains the original attachment snapshot, not a
-                # fresh read of a collection that may since have changed.
-                if edited_source_blocks:
-                    source_images = [row[0] for row in conn.execute("SELECT image_id FROM agent_message_images WHERE turn_id = ? AND role = 'input' ORDER BY image_index", (source_turn_id,))]
-                    for block in edited_source_blocks:
-                        if block.get("type") != "asset_refs" or not re.search(r"(?<!\S)@" + re.escape(block["alias"]) + r"(?![\w-])", text, re.IGNORECASE):
-                            continue
-                        indices = []
-                        for label in block["refs"]:
-                            old_index = int(label.rsplit("-", 1)[1]) - 1
-                            if old_index < len(source_images) and source_images[old_index] in attachment_ids:
-                                indices.append(attachment_ids.index(source_images[old_index]) + 1)
-                        if indices:
-                            asset_groups.append((block["alias"], indices, block.get("collection_id"), [attachment_ids.index(source_images[int(label.rsplit("-", 1)[1]) - 1]) + 1 for label in block.get("explicit_refs", []) if int(label.rsplit("-", 1)[1]) - 1 < len(source_images) and source_images[int(label.rsplit("-", 1)[1]) - 1] in attachment_ids]))
-                            if block.get("collection_id"):
-                                snapshot_collection_ids.add(block["collection_id"])
-                for collection_id in dict.fromkeys(asset_collection_ids):
-                    if collection_id in snapshot_collection_ids:
-                        continue
-                    collection = conn.execute("SELECT asset_alias FROM gallery_collections WHERE id = ?", (collection_id,)).fetchone()
-                    if collection is None or not collection["asset_alias"]:
-                        raise AgentAttachmentError("An asset pack no longer exists")
-                    image_ids = list_collection_reference_image_ids_on_conn(conn, collection_id)
-                    indices = []
-                    for image_id in image_ids:
-                        if image_id not in attachment_ids:
-                            attachment_ids.append(image_id)
-                        indices.append(attachment_ids.index(image_id) + 1)
-                    if not indices:
-                        raise AgentAttachmentError("An asset pack has no supported images")
-                    asset_groups.append((collection["asset_alias"], indices, collection_id, [index for index in indices if attachment_ids[index - 1] in explicit_ids]))
-                if len(attachment_ids) > config.AGENT_MAX_ATTACHMENTS_PER_MESSAGE:
-                    raise AgentAttachmentError(f"At most {config.AGENT_MAX_ATTACHMENTS_PER_MESSAGE} images can be attached to one message")
-            else:
-                for block in regenerated_blocks:
-                    if block.get("type") == "asset_refs":
-                        asset_groups.append((block["alias"], [int(label.rsplit("-", 1)[1]) for label in block["refs"]], block.get("collection_id"), [int(label.rsplit("-", 1)[1]) for label in block.get("explicit_refs", [])]))
+            # A regenerated turn replays the saved snapshot verbatim.
+            asset_groups = source_groups if regenerating else _resolve_asset_groups(
+                conn,
+                text=text,
+                attachment_ids=attachment_ids,
+                explicit_ids=set(attachment_ids),
+                asset_collection_ids=asset_collection_ids,
+                source_groups=source_groups,
+            )
 
             round_no = int(
                 conn.execute(
@@ -185,7 +230,6 @@ def create_turn(
                     json_dumps_canonical(execution_snapshot or {}),
                 ),
             )
-            blocks = [{"id": _new_id(), "type": "asset_refs", "alias": alias, "collection_id": collection_id, "refs": [f"round-{round_no}-input-{index}" for index in indices], "explicit_refs": [f"round-{round_no}-input-{index}" for index in explicit_indices]} for alias, indices, collection_id, explicit_indices in asset_groups]
             conn.execute(
                 """
                 INSERT INTO agent_messages (
@@ -194,7 +238,7 @@ def create_turn(
                 )
                 VALUES (?, ?, ?, ?, ?, 'user', ?, ?, 'complete', ?, ?)
                 """,
-                (user_message_id, conversation_id, turn_id, seq + 1, round_no, text, json_dumps_canonical(blocks), now, now),
+                (user_message_id, conversation_id, turn_id, seq + 1, round_no, text, "[]", now, now),
             )
             conn.execute(
                 """
@@ -206,7 +250,9 @@ def create_turn(
                 """,
                 (assistant_message_id, conversation_id, turn_id, seq + 2, round_no, now, now),
             )
+            input_row_ids: dict[str, str] = {}
             for index, image_id in enumerate(attachment_ids, start=1):
+                input_row_ids[image_id] = _new_id()
                 conn.execute(
                     """
                     INSERT INTO agent_message_images (
@@ -216,7 +262,7 @@ def create_turn(
                     VALUES (?, ?, ?, ?, ?, ?, 'input', ?, ?, '', 'generate', 'succeeded', ?)
                     """,
                     (
-                        _new_id(),
+                        input_row_ids[image_id],
                         conversation_id,
                         turn_id,
                         user_message_id,
@@ -226,6 +272,22 @@ def create_turn(
                         image_id,
                         now,
                     ),
+                )
+            for position, group in enumerate(asset_groups):
+                asset_ref_id = _new_id()
+                conn.execute(
+                    """
+                    INSERT INTO agent_message_asset_refs (id, conversation_id, turn_id, message_id, position, alias, collection_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (asset_ref_id, conversation_id, turn_id, user_message_id, position, group.alias, group.collection_id),
+                )
+                conn.executemany(
+                    "INSERT INTO agent_message_asset_ref_images (asset_ref_id, input_image_row_id, position, explicit) VALUES (?, ?, ?, ?)",
+                    [
+                        (asset_ref_id, input_row_ids[image_id], member_position, int(image_id in group.explicit_image_ids))
+                        for member_position, image_id in enumerate(group.image_ids)
+                    ],
                 )
             title = conversation["title"]
             if int(conversation["title_is_auto"]) and not title:
