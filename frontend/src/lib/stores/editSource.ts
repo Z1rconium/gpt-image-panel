@@ -9,18 +9,20 @@ import type { MarkupEditorState } from '$lib/features/markup/markupDocument';
 
 export const MAX_EDIT_SOURCE_IMAGES = 16;
 
-export type EditUploadSource = {
+type EditSourceBase = {
   id: string;
-  file: File;
   label: string;
   previewUrl: string;
   previewLabel: string;
-  // 0 until the async size probe in addFiles() resolves; callers that need
-  // the size (e.g. restoreMaskFromJob's primary/mask dimension check) treat 0
-  // as "unknown" and fall back to decoding the file themselves.
+  // 0 means unknown: for uploads until the async size probe in addFiles()
+  // resolves, for gallery entries when the row predates image_width/height.
+  // Callers that need the size (e.g. restoreMaskFromJob's primary/mask
+  // dimension check) fall back to decoding the image themselves.
   width: number;
   height: number;
 };
+
+export type EditUploadSource = EditSourceBase & { kind: 'upload'; file: File };
 
 export type EditMaskOrigin = 'painted' | 'uploaded' | 'restored';
 
@@ -63,6 +65,7 @@ export type EditMarkup = {
   editorState?: MarkupEditorState;
 };
 
+// What callers hand to addGalleryReferences(); the store stamps the kind.
 export type EditGalleryReferenceSource = {
   id: string;
   imageId: string;
@@ -74,32 +77,29 @@ export type EditGalleryReferenceSource = {
   height: number;
 };
 
+// `gallery_primary` is the single gallery image an edit starts from (its id is
+// the gallery image id, and it selects the /from-gallery endpoint);
+// `gallery_reference` images only ride along as extra references.
+export type EditGallerySource = EditSourceBase & {
+  kind: 'gallery_primary' | 'gallery_reference';
+  imageId: string;
+  filename?: string;
+};
+
+export type EditSource = EditUploadSource | EditGallerySource;
+
+// `sources` is always in canonical order: the gallery primary (at most one),
+// then uploads, then gallery references, each group in insertion order. That is
+// also the order the request is built in, and it makes the primary image
+// simply `sources[0]`. Only editSourceStore's commit() may reorder it.
 export type EditSourceState = {
-  files: EditUploadSource[];
-  selectedGalleryImageId: string;
-  galleryFilename?: string;
-  galleryLabel: string;
-  galleryPreviewUrl: string;
-  galleryPreviewLabel: string;
-  // 0 when the gallery entry predates image_width/image_height (legacy rows);
-  // same "unknown, decode if you need it" contract as EditUploadSource above.
-  galleryWidth: number;
-  galleryHeight: number;
-  galleryReferences: EditGalleryReferenceSource[];
+  sources: EditSource[];
   markup?: EditMarkup | null;
   mask: EditMask | null;
 };
 
 export const initialEditSourceState: EditSourceState = {
-  files: [],
-  selectedGalleryImageId: '',
-  galleryFilename: '',
-  galleryLabel: '',
-  galleryPreviewUrl: '',
-  galleryPreviewLabel: '',
-  galleryWidth: 0,
-  galleryHeight: 0,
-  galleryReferences: [],
+  sources: [],
   markup: null,
   mask: null
 };
@@ -113,13 +113,53 @@ export const editMaskDiscards = writable(0);
 // Same idea for the markup layer, which is also bound to the primary image.
 export const editMarkupDiscards = writable(0);
 
+export function primaryEditSource(source: EditSourceState): EditSource | null {
+  return source.sources[0] ?? null;
+}
+
 export function primaryEditSourceId(source: EditSourceState) {
-  return (
-    source.selectedGalleryImageId ||
-    source.files[0]?.id ||
-    source.galleryReferences?.[0]?.id ||
-    ''
+  return primaryEditSource(source)?.id ?? '';
+}
+
+export function galleryPrimarySource(source: EditSourceState): EditGallerySource | null {
+  const found = source.sources.find((item) => item.kind === 'gallery_primary');
+  return found?.kind === 'gallery_primary' ? found : null;
+}
+
+export function uploadSources(source: EditSourceState): EditUploadSource[] {
+  return source.sources.filter((item): item is EditUploadSource => item.kind === 'upload');
+}
+
+export function galleryReferenceSources(source: EditSourceState): EditGallerySource[] {
+  return source.sources.filter(
+    (item): item is EditGallerySource => item.kind === 'gallery_reference'
   );
+}
+
+export function editSourceCount(source: EditSourceState) {
+  return source.sources.length;
+}
+
+/** Matches a source by id, then falls back to a gallery reference's image id. */
+export function findEditSource(source: EditSourceState, idOrImageId: string): EditSource | null {
+  return (
+    source.sources.find((item) => item.id === idOrImageId) ??
+    source.sources.find((item) => item.kind === 'gallery_reference' && item.imageId === idOrImageId) ??
+    null
+  );
+}
+
+/**
+ * The identity the server can verify when restoring a job's mask or markup:
+ * the gallery primary or the first upload. A bare reference has none.
+ */
+export function primaryRestoreSource(
+  source: EditSourceState
+): { galleryImageId: string } | { file: File } | null {
+  const primary = primaryEditSource(source);
+  if (primary?.kind === 'gallery_primary') return { galleryImageId: primary.imageId };
+  if (primary?.kind === 'upload') return { file: primary.file };
+  return null;
 }
 
 export function isMaskValid(source: EditSourceState) {
@@ -132,7 +172,18 @@ export function isImageFile(file: File): boolean {
 }
 
 function revokeEditSourceUrls(source: EditSourceState) {
-  source.files.forEach((upload) => URL.revokeObjectURL(upload.previewUrl));
+  uploadSources(source).forEach((upload) => URL.revokeObjectURL(upload.previewUrl));
+}
+
+const SOURCE_KIND_ORDER: Record<EditSource['kind'], number> = {
+  gallery_primary: 0,
+  upload: 1,
+  gallery_reference: 2
+};
+
+// Array.prototype.sort is stable, so insertion order survives within a kind.
+function normalizeSources(sources: EditSource[]): EditSource[] {
+  return [...sources].sort((a, b) => SOURCE_KIND_ORDER[a.kind] - SOURCE_KIND_ORDER[b.kind]);
 }
 
 function revokeMaskUrl(mask: EditMask | null) {
@@ -159,6 +210,7 @@ function makeUploadSource(file: File): EditUploadSource {
   const objectUrl = URL.createObjectURL(file);
   nextEditSourceId += 1;
   return {
+    kind: 'upload',
     id: `upload-${Date.now()}-${nextEditSourceId}`,
     file,
     label: file.name,
@@ -182,14 +234,6 @@ async function probeImageSize(file: File): Promise<{ width: number; height: numb
   }
 }
 
-export function editSourceCount(source: EditSourceState) {
-  return (
-    source.files.length +
-    (source.selectedGalleryImageId ? 1 : 0) +
-    (source.galleryReferences?.length || 0)
-  );
-}
-
 function createEditSourceStore() {
   const { subscribe, set, update } = writable<EditSourceState>(initialEditSourceState);
   let state = initialEditSourceState;
@@ -197,6 +241,17 @@ function createEditSourceStore() {
   subscribe((value) => {
     state = value;
   });
+
+  // The single write path for `sources`: put the result in canonical order and
+  // drop the mask/markup if the primary image moved. Returning the same array
+  // from `transform` means "nothing changed" and leaves the state untouched.
+  function commit(transform: (sources: EditSource[]) => EditSource[]) {
+    update((source) => {
+      const next = transform(source.sources);
+      if (next === source.sources) return source;
+      return dropStaleMask({ ...source, sources: normalizeSources(next) });
+    });
+  }
 
   function addFiles(files: File[], setError: (message: string) => void) {
     const validFiles = files.filter(isImageFile);
@@ -219,12 +274,7 @@ function createEditSourceStore() {
     if (overLimitCount > 0) setError(get(t).messages.editSourceSomeSkipped(MAX_EDIT_SOURCE_IMAGES));
 
     const nextUploads = acceptedFiles.map(makeUploadSource);
-    update((source) =>
-      dropStaleMask({
-        ...source,
-        files: [...source.files, ...nextUploads]
-      })
-    );
+    commit((sources) => [...sources, ...nextUploads]);
     for (const upload of nextUploads) {
       void probeImageSize(upload.file).then((size) => {
         if (size) updateUploadSize(upload.id, size.width, size.height);
@@ -234,10 +284,19 @@ function createEditSourceStore() {
   }
 
   function updateUploadSize(sourceId: string, width: number, height: number) {
-    update((source) => ({
-      ...source,
-      files: source.files.map((item) => (item.id === sourceId ? { ...item, width, height } : item))
-    }));
+    commit((sources) =>
+      sources.some((item) => item.kind === 'upload' && item.id === sourceId)
+        ? sources.map((item) =>
+            item.kind === 'upload' && item.id === sourceId ? { ...item, width, height } : item
+          )
+        : sources
+    );
+  }
+
+  function dropSources(matches: (item: EditSource) => boolean) {
+    commit((sources) =>
+      sources.some(matches) ? sources.filter((item) => !matches(item)) : sources
+    );
   }
 
   return {
@@ -251,7 +310,7 @@ function createEditSourceStore() {
       revokeEditSourceUrls(state);
       if (state.mask) editMaskDiscards.update((count) => count + 1);
       revokeMaskUrl(state.mask);
-      set({ ...initialEditSourceState, files: [], galleryReferences: [] });
+      set({ ...initialEditSourceState, sources: [] });
       if (input) input.value = '';
     },
     handleFile(event: Event, setError: (message: string) => void, input?: HTMLInputElement) {
@@ -272,39 +331,31 @@ function createEditSourceStore() {
       filename = ''
     ) {
       const current = state;
-      if (!current.selectedGalleryImageId && editSourceCount(current) >= MAX_EDIT_SOURCE_IMAGES) {
+      if (!galleryPrimarySource(current) && editSourceCount(current) >= MAX_EDIT_SOURCE_IMAGES) {
         setError?.(get(t).messages.editSourceLimit(MAX_EDIT_SOURCE_IMAGES));
         return false;
       }
 
-      update((source) =>
-        dropStaleMask({
-          ...source,
-          selectedGalleryImageId: imageId,
-          galleryFilename: filename,
-          galleryLabel: label,
-          galleryPreviewUrl: previewUrl,
-          galleryPreviewLabel: previewLabel,
-          galleryWidth: width,
-          galleryHeight: height
-        })
-      );
+      // Replaces any previous gallery primary rather than adding a second one.
+      commit((sources) => [
+        ...sources.filter((item) => item.kind !== 'gallery_primary'),
+        {
+          kind: 'gallery_primary',
+          id: imageId,
+          imageId,
+          filename,
+          label,
+          previewUrl,
+          previewLabel,
+          width,
+          height
+        }
+      ]);
       return true;
     },
+    // Without an id (or with an empty one) this clears whatever primary is set.
     clearGallerySource(imageId?: string) {
-      update((source) => {
-        if (imageId && source.selectedGalleryImageId !== imageId) return source;
-        return dropStaleMask({
-          ...source,
-          selectedGalleryImageId: '',
-          galleryFilename: '',
-          galleryLabel: '',
-          galleryPreviewUrl: '',
-          galleryPreviewLabel: '',
-          galleryWidth: 0,
-          galleryHeight: 0
-        });
-      });
+      dropSources((item) => item.kind === 'gallery_primary' && (!imageId || item.id === imageId));
     },
     addGalleryReferences(
       items: EditGalleryReferenceSource[],
@@ -330,74 +381,29 @@ function createEditSourceStore() {
       if (overLimitCount > 0 && setError)
         setError(get(t).messages.editSourceSomeSkipped(MAX_EDIT_SOURCE_IMAGES));
 
-      update((source) =>
-        dropStaleMask({
-          ...source,
-          galleryReferences: [...(source.galleryReferences || []), ...accepted]
-        })
-      );
+      commit((sources) => [
+        ...sources,
+        ...accepted.map((item): EditGallerySource => ({ ...item, kind: 'gallery_reference' }))
+      ]);
       return accepted.length;
     },
     removeGalleryReference(idOrImageId: string) {
-      update((source) =>
-        dropStaleMask({
-          ...source,
-          galleryReferences: (source.galleryReferences || []).filter(
-            (item) => item.id !== idOrImageId && item.imageId !== idOrImageId
-          )
-        })
+      dropSources(
+        (item) =>
+          item.kind === 'gallery_reference' &&
+          (item.id === idOrImageId || item.imageId === idOrImageId)
       );
     },
     clearGalleryReferences() {
-      update((source) =>
-        dropStaleMask({
-          ...source,
-          galleryReferences: []
-        })
-      );
+      dropSources((item) => item.kind === 'gallery_reference');
     },
+    // Accepts a source id, or the image id of a gallery reference.
     remove(sourceId: string) {
-      const upload = state.files.find((source) => source.id === sourceId);
-      if (upload) {
-        URL.revokeObjectURL(upload.previewUrl);
-        update((source) =>
-          dropStaleMask({
-            ...source,
-            files: source.files.filter((item) => item.id !== sourceId)
-          })
-        );
-        return true;
-      }
-      if (state.selectedGalleryImageId === sourceId) {
-        update((source) =>
-          dropStaleMask({
-            ...source,
-            selectedGalleryImageId: '',
-            galleryFilename: '',
-          galleryLabel: '',
-            galleryPreviewUrl: '',
-            galleryPreviewLabel: '',
-            galleryWidth: 0,
-            galleryHeight: 0
-          })
-        );
-        return true;
-      }
-      const refItem = (state.galleryReferences || []).find(
-        (source) => source.id === sourceId || source.imageId === sourceId
-      );
-      if (refItem) {
-        update((source) =>
-          dropStaleMask({
-            ...source,
-            galleryReferences: (source.galleryReferences || []).filter(
-              (item) => item.id !== refItem.id
-            )
-          })
-        );
-        return true;
-      }
-      return false;
+      const target = findEditSource(state, sourceId);
+      if (!target) return false;
+      if (target.kind === 'upload') URL.revokeObjectURL(target.previewUrl);
+      dropSources((item) => item === target);
+      return true;
     },
     setMarkup(markup: EditMarkup) {
       if (state.markup) URL.revokeObjectURL(state.markup.previewUrl);

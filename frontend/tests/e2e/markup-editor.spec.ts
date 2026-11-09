@@ -467,7 +467,7 @@ test.describe('markup editor workflow', () => {
       const store = await import(/* @vite-ignore */ storeModule);
       let state: any;
       store.editSourceStore.subscribe((value: unknown) => (state = value))();
-      const id = state.files[0].id;
+      const id = state.sources.filter((item: any) => item.kind === 'upload')[0].id;
       const canvas = document.createElement('canvas');
       canvas.width = 256;
       canvas.height = 256;
@@ -822,7 +822,7 @@ async function storeSnapshot(page: Page) {
     let state: any;
     store.editSourceStore.subscribe((value: unknown) => (state = value))();
     return {
-      files: state.files.length,
+      files: state.sources.filter((item: any) => item.kind === 'upload').length,
       hasMarkup: Boolean(state.markup),
       markupOrigin: state.markup?.origin ?? null,
       hasEditorState: Boolean(state.markup?.editorState),
@@ -878,7 +878,7 @@ test.describe('markup session lifecycle', () => {
       const store = await import(/* @vite-ignore */ storeModule);
       let state: any;
       store.editSourceStore.subscribe((value: unknown) => (state = value))();
-      store.editSourceStore.remove(state.files[1].id);
+      store.editSourceStore.remove(state.sources.filter((item: any) => item.kind === 'upload')[1].id);
     }, STORE_MODULE);
     await expect(editorDialog(page)).toBeVisible();
     expect(await storeSnapshot(page)).toMatchObject({ files: 1, hasMarkup: true });
@@ -924,7 +924,7 @@ test.describe('markup session lifecycle', () => {
       canvas.width = 256;
       canvas.height = 256;
       const blob = await new Promise<Blob>((resolve) => canvas.toBlob((b) => resolve(b!), 'image/png'));
-      store.editSourceStore.setMask({ sourceId: state.files[0].id, blob, width: 256, height: 256, coverage: 0.2, previewUrl: URL.createObjectURL(blob), origin: 'painted' });
+      store.editSourceStore.setMask({ sourceId: state.sources.filter((item: any) => item.kind === 'upload')[0].id, blob, width: 256, height: 256, coverage: 0.2, previewUrl: URL.createObjectURL(blob), origin: 'painted' });
     }, STORE_MODULE);
     await openEditor(page);
     await dragOnImage(page, [40, 128], [216, 128]);

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { initialEditSourceState, type EditSourceState } from '$lib/stores/editSource';
+import { initialEditSourceState, uploadSources, type EditGallerySource, type EditSourceState } from '$lib/stores/editSource';
 import {
   decodePrimaryBlob,
   fetchPrimaryImageBlob,
@@ -10,8 +10,9 @@ import {
 
 const upload = (width = 0, height = 0): EditSourceState => ({
   ...initialEditSourceState,
-  files: [
+  sources: [
     {
+      kind: 'upload',
       id: 'upload-1',
       file: new File([new Uint8Array([1, 2, 3])], 'a.png', { type: 'image/png' }),
       label: 'a.png',
@@ -23,14 +24,22 @@ const upload = (width = 0, height = 0): EditSourceState => ({
   ]
 });
 
-const gallery = (overrides: Partial<EditSourceState> = {}): EditSourceState => ({
+const gallery = (overrides: Partial<EditGallerySource> = {}): EditSourceState => ({
   ...initialEditSourceState,
-  selectedGalleryImageId: 'gallery-1',
-  galleryFilename: 'original.jpg',
-  galleryPreviewUrl: 'https://cdn.invalid/thumb?sig=secret',
-  galleryWidth: 64,
-  galleryHeight: 48,
-  ...overrides
+  sources: [
+    {
+      kind: 'gallery_primary',
+      id: 'gallery-1',
+      imageId: 'gallery-1',
+      filename: 'original.jpg',
+      label: 'Gallery',
+      previewUrl: 'https://cdn.invalid/thumb?sig=secret',
+      previewLabel: 'Gallery',
+      width: 64,
+      height: 48,
+      ...overrides
+    }
+  ]
 });
 
 let fetchMock: ReturnType<typeof vi.fn>;
@@ -57,7 +66,7 @@ describe('primary image source', () => {
     const state = upload();
     const result = await fetchPrimaryImageBlob(state);
     expect(result.sourceId).toBe('upload-1');
-    expect(result.blob).toBe(state.files[0].file);
+    expect(result.blob).toBe(uploadSources(state)[0].file);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -74,7 +83,7 @@ describe('primary image source', () => {
     fetchMock
       .mockResolvedValueOnce(new Response(JSON.stringify({ filename: 'looked up.png' }), { status: 200, headers: { 'content-type': 'application/json' } }))
       .mockResolvedValueOnce(new Response(new Uint8Array([1]), { status: 200 }));
-    await fetchPrimaryImageBlob(gallery({ galleryFilename: '' }));
+    await fetchPrimaryImageBlob(gallery({ filename: '' }));
     expect(fetchMock.mock.calls[0][0]).toBe('/api/gallery/gallery-1');
     expect(fetchMock.mock.calls[1][0]).toBe('/api/image/looked%20up.png');
   });
@@ -88,7 +97,7 @@ describe('primary image source', () => {
 
 describe('primary image decoding', () => {
   it('reports the decoded (upright) size, not the stored metadata, and releases the bitmap', async () => {
-    const size = await readPrimaryDimensions(gallery({ galleryWidth: 400, galleryHeight: 300 }));
+    const size = await readPrimaryDimensions(gallery({ width: 400, height: 300 }));
     expect(size).toEqual({ sourceId: 'gallery-1', width: 300, height: 400 });
     expect(closed).toBe(1);
   });
