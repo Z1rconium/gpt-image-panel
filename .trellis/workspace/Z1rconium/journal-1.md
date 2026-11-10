@@ -222,7 +222,7 @@ Audited the completed codebase-simplification task against the tree, re-ran the 
 
 ### Next Steps
 
-- 10-29-simplify-docker-config is still in_progress and needs the same audit-and-close treatment.
+- 10-29-simplify-docker-config was audited and archived in Session 8 (see below).
 - Local e2e needs PLAYWRIGHT_BROWSERS_PATH pointing at a writable dir; the default ms-playwright cache is not writable here.
 
 
