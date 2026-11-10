@@ -254,9 +254,9 @@ Audited the shipped Docker configuration simplification against the current tree
 
 ### Testing
 
-- [OK] [OK] Focused config/SSRF/secret suite: 32 passed, 1 skipped (Docker-dependent Compose resolution test).
-- [OK] [OK] Full backend suite: 1303 passed, 23 skipped; the single failure is the local libcairo path issue, unrelated and passing with DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib.
-- [OK] [OK] ruff --select F401,F841 (CI rule set) on touched modules: all checks passed; git diff --check clean.
+- [OK] Focused config/SSRF/secret suite: 32 passed, 1 skipped (Docker-dependent Compose resolution test).
+- [OK] Full backend suite: 1303 passed, 23 skipped; the single failure is the local libcairo path issue, unrelated and passing with DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib.
+- [OK] ruff --select F401,F841 (CI rule set) on touched modules: all checks passed; git diff --check clean.
 
 ### Status
 
