@@ -178,3 +178,49 @@ Preserved asset collections in gallery archives; verified round trips, compatibi
 ### Status
 
 [OK] **Completed**
+
+
+## Session 7: Codebase simplification P0/P1/P2: verify and close
+<!-- trellis-session: v=2 fp=1255a32602451f35 -->
+
+**Date**: 2026-11-10
+**Task**: Codebase simplification P0/P1/P2: verify and close
+**Branch**: `main`
+
+### Summary
+
+Audited the completed codebase-simplification task against the tree, re-ran the full backend, contract, frontend unit, svelte-check and focused Playwright suites, then ticked the implement checklist, archived the task and recorded this journal.
+
+### Main Changes
+
+- P0-1: has_asset_collections() replaces the full export_gallery_collections() existence check in gallery_tasks.py (b0890eb).
+- P0-2: is_supported_reference_format() and list_collection_reference_image_ids_on_conn() centralize the SVG/GIF exclusion; turns.py and edit_sources.py reuse them (b0890eb).
+- P1-1: edits.py routes delegate to one _stage_and_queue_edit() helper with unchanged 202/400/422 contract (b0890eb).
+- P1-2: member ordering split out of CollectionsDialog into CollectionMemberOrder.svelte (b0890eb).
+- P2-1: EditSourceState flattened to {sources, markup, mask} with a single commit() and selector API (82b7e09).
+- P2-2: asset pack references persisted in agent_message_asset_refs/_ref_images via migration 43 with backfill; API blocks synthesized by _attach_asset_ref_blocks (40a3a3f).
+- Closed the loop: implement.md checklist ticked with a verification record, task archived to archive/2026-11.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b0890eb` | refactor: simplify asset pack checks, edits pipeline and collections dialog |
+| `40a3a3f` | refactor(agent): persist asset pack references as structured rows |
+| `82b7e09` | refactor(frontend): flatten edit source state into a unified sources array |
+
+### Testing
+
+- [OK] [OK] Backend: 1303 passed, 23 skipped; the single failure (SVG thumbnail) is the local libcairo path and passes with DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib.
+- [OK] [OK] Contract suite: 732 passed. Focused P0/P1/P2 files: 148 passed.
+- [OK] [OK] Frontend: 27 unit files / 449 tests passed; svelte-check 0 errors, 0 warnings.
+- [OK] [OK] Playwright markup-editor + gallery-collections + agent-asset-mentions: 56 passed.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 10-29-simplify-docker-config is still in_progress and needs the same audit-and-close treatment.
+- Local e2e needs PLAYWRIGHT_BROWSERS_PATH pointing at a writable dir; the default ms-playwright cache is not writable here.
