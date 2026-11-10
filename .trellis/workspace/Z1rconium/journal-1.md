@@ -224,3 +224,45 @@ Audited the completed codebase-simplification task against the tree, re-ran the 
 
 - 10-29-simplify-docker-config is still in_progress and needs the same audit-and-close treatment.
 - Local e2e needs PLAYWRIGHT_BROWSERS_PATH pointing at a writable dir; the default ms-playwright cache is not writable here.
+
+
+## Session 8: Docker config simplification: audit and close
+<!-- trellis-session: v=2 fp=d3c33148116e33e2 -->
+
+**Date**: 2026-11-10
+**Task**: Docker config simplification: audit and close
+**Branch**: `main`
+
+### Summary
+
+Audited the shipped Docker configuration simplification against the current tree, re-verified the retired outbound allowlists, fixed tuning constants, retained inbound controls, Compose forwarding and trilingual docs, recorded the evidence, and archived the task.
+
+### Main Changes
+
+- Retired outbound allowlists (UPSTREAM/UPSTREAM_PROXY/PROMPT_OPTIMIZER/WEBHOOK/R2_ENDPOINT _HOST_ALLOWLIST) have zero references under backend/app; ALLOWED_HOSTS survives only as the inbound Host check.
+- Retired tuning knobs are constants now (RUNTIME_METRICS_REFRESH_SECONDS=10.0, PROMPT_OPTIMIZER_MAX_OUTPUT_CHARS=32000); derived limits still follow retained bases such as DB_EXECUTOR_WORKERS from MAX_ACTIVE_GENERATE_JOBS.
+- Inbound controls retained (IP_ALLOWLIST, ALLOWED_HOSTS, TRUST_PROXY_HEADERS, TRUSTED_PROXY_IPS, PUBLIC_ORIGIN, CSRF) and SSRF guards remain in core/validators.py and core/safe_connector.py.
+- docker-compose.yml forwards 66 unique bare names with no env_file and all 66 are documented in CONFIGURATION.md; retired names are absent from the list.
+- Migration note present in README.md, README.zh-CN.md, README.zh-TW.md and CONFIGURATION.md; no retired setting remains in the settings UI or overall-config registry.
+- acceptance.md gained a close-out audit section recording verified criteria, re-run evidence and the two unchanged gaps.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `190f3bc` | refactor(config): simplify Docker setup and remove outbound allowlists |
+
+### Testing
+
+- [OK] [OK] Focused config/SSRF/secret suite: 32 passed, 1 skipped (Docker-dependent Compose resolution test).
+- [OK] [OK] Full backend suite: 1303 passed, 23 skipped; the single failure is the local libcairo path issue, unrelated and passing with DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib.
+- [OK] [OK] ruff --select F401,F841 (CI rule set) on touched modules: all checks passed; git diff --check clean.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Docker is still absent on this host: run docker compose config plus an isolated container startup/health/unlock/settings-save smoke on a Docker-equipped machine.
+- The ccs-krill/gpt-6.1-terra independent review remains unavailable (provider cybersecurity-risk refusal); rerun it if the restriction lifts.

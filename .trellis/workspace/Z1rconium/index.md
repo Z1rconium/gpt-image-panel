@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 7
+- **Total Sessions**: 8
 - **Last Active**: 2026-11-10
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~226 | Active |
+| `journal-1.md` | ~268 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 8 | 2026-11-10 | Docker config simplification: audit and close | `190f3bc` | `main` |
 | 7 | 2026-11-10 | Codebase simplification P0/P1/P2: verify and close | `b0890eb`, `40a3a3f`, `82b7e09` | `main` |
 | 6 | 2026-11-06 | Reference asset archive persistence | `6cf85a3` | `feat/reference-asset-library` |
 | 5 | 2026-11-05 | GPT Image 2.6 implementation and v1.9.0 release | `e17e038`, `344b33f`, `88f0490`, `320ef2f` | `codex/gpt-image-26` |
