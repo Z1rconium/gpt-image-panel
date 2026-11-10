@@ -211,10 +211,10 @@ Audited the completed codebase-simplification task against the tree, re-ran the 
 
 ### Testing
 
-- [OK] [OK] Backend: 1303 passed, 23 skipped; the single failure (SVG thumbnail) is the local libcairo path and passes with DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib.
-- [OK] [OK] Contract suite: 732 passed. Focused P0/P1/P2 files: 148 passed.
-- [OK] [OK] Frontend: 27 unit files / 449 tests passed; svelte-check 0 errors, 0 warnings.
-- [OK] [OK] Playwright markup-editor + gallery-collections + agent-asset-mentions: 56 passed.
+- [OK] Backend: 1303 passed, 23 skipped; the single failure (SVG thumbnail) is the local libcairo path and passes with DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib.
+- [OK] Contract suite: 732 passed. Focused P0/P1/P2 files: 148 passed.
+- [OK] Frontend: 27 unit files / 449 tests passed; svelte-check 0 errors, 0 warnings.
+- [OK] Playwright markup-editor + gallery-collections + agent-asset-mentions: 56 passed.
 
 ### Status
 
