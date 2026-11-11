@@ -6,7 +6,7 @@ import {
   initialEditSourceState,
   type EditGalleryReferenceSource
 } from '$lib/stores/editSource';
-import { initialPromptFormState, previewStore, type PreviewState } from '$lib/stores/preview';
+import { initialPromptFormState, previewStore } from '$lib/stores/preview';
 
 vi.mock('$lib/api/client', async (importOriginal) => ({
   ...(await importOriginal<typeof import('$lib/api/client')>()),
@@ -28,30 +28,18 @@ const reference = (id: string): EditGalleryReferenceSource => ({
   height: 10
 });
 
-const queued = (prompt: string): PreviewState => ({
-  loading: true,
-  error: '',
-  job: null,
-  imageUrl: '',
-  filename: '',
-  prompt,
-  streamingPreviews: {},
-  compareSource: null
-});
-
-async function submit() {
+async function submit(form: Partial<typeof initialPromptFormState> = {}) {
   const ok = await previewStore.editImage(
-    { ...initialPromptFormState, prompt: 'make it blue' },
+    { ...initialPromptFormState, prompt: 'make it blue', ...form },
     get(editSourceStore),
-    queued,
-    () => {}
+    { trackJob: () => {} }
   );
   const [endpoint, init] = apiFetchMock.mock.calls[0] ?? [];
   const entries = init?.body instanceof FormData ? [...init.body.entries()] : [];
   const sourceFields = entries
     .filter(([key]) => key === 'image' || key === 'image[]' || key === 'reference_image_id')
     .map(([key, value]) => [key, value instanceof File ? value.name : value]);
-  return { ok, endpoint, sourceFields };
+  return { ok, endpoint, sourceFields, entries };
 }
 
 beforeEach(() => {
@@ -114,5 +102,55 @@ describe('edit submission request shape', () => {
     const { ok } = await submit();
     expect(ok).toBe(false);
     expect(apiFetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('multi-image edit preview', () => {
+  it('reserves every requested unit and keeps streamed frames past the first image', async () => {
+    editSourceStore.addFiles([makeFile('source.png')], () => {});
+    apiFetchMock.mockResolvedValueOnce({ job_id: 'job-edit', status: 'queued', operation: 'edit' } as never);
+    const { ok, entries } = await submit({ quantity: 2 });
+    expect(ok).toBe(true);
+    // The backend still accepts n>1 for edits, so the request carries it.
+    expect(entries).toContainEqual(['n', '2']);
+    expect(get(previewStore).slots).toHaveLength(2);
+
+    previewStore.applyJob({
+      job_id: 'job-edit',
+      status: 'running',
+      operation: 'edit',
+      n: 2,
+      streaming: true,
+      unit_statuses: { '0': 'running', '1': 'running' }
+    });
+    const frame = (unitIndex: number, sequence: number) => ({
+      job_id: 'job-edit',
+      unit_index: unitIndex,
+      partial_image_index: 0,
+      sequence,
+      mime_type: 'image/png',
+      data_url: `data:image/png;base64,unit-${unitIndex}`
+    });
+    previewStore.applyPreviewEvent(frame(0, 1));
+    previewStore.applyPreviewEvent(frame(1, 1));
+    expect(get(previewStore).slots.map((slot) => slot.previewUrl)).toEqual([
+      'data:image/png;base64,unit-0',
+      'data:image/png;base64,unit-1'
+    ]);
+
+    // The first image landing must not end the loading state for the second.
+    previewStore.applyJob({
+      job_id: 'job-edit',
+      status: 'running',
+      operation: 'edit',
+      n: 2,
+      images: [{ image_id: 'e-1', image_url: '/api/image/e-1.png', filename: 'e-1.png', unit_index: 0, result_index: 0 }],
+      unit_statuses: { '0': 'success', '1': 'running' }
+    });
+    const view = get(previewStore);
+    expect(view.loading).toBe(true);
+    expect(view.pendingSlots).toHaveLength(1);
+    expect(view.pendingSlots[0].unitIndex).toBe(1);
+    expect(view.completedCount).toBe(1);
   });
 });

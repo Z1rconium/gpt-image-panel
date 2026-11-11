@@ -101,7 +101,12 @@ async function installEventSourceScenario(page: Page, scenario: EventSourceScena
           const events = Array.isArray(configuredEvents) ? configuredEvents : [configuredEvents];
           events.forEach((payload, index) => {
             setTimeout(() => {
-              if (this.readyState !== MockEventSource.CLOSED && payload) this.dispatchMessage('job', payload);
+              if (this.readyState === MockEventSource.CLOSED || !payload) return;
+              // `{ preview: {...} }` entries are streamed partial frames, not
+              // job snapshots.
+              const entry = payload as { preview?: unknown };
+              if (entry.preview) this.dispatchMessage('preview', entry.preview);
+              else this.dispatchMessage('job', payload);
             }, 120 + index * 700);
           });
           return;
@@ -265,15 +270,17 @@ test('incremental results stay selectable and partial completion remains visible
   await page.getByRole('button', { name: 'Generate', exact: true }).click();
   const preview = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Preview' }) });
 
-  await expect(preview.getByText('Waiting for upstream API response (1/4)', { exact: true })).toBeVisible();
+  // The first final image takes the main view; the units still running stay
+  // visible as pending slots in the strip.
   await expect(preview.getByRole('img', { name: 'Generated preview' })).toBeVisible();
   await expect(preview.getByRole('button', { name: 'Select result 1' })).toBeVisible();
-  await expect(preview.getByText('Waiting for upstream API response (2/4)', { exact: true })).toBeVisible();
   await preview.getByRole('button', { name: 'Select result 2' }).click();
   await expect(preview.getByRole('link', { name: 'Download' })).toHaveAttribute('href', '/api/download/incremental-2.png');
 
   await expect(preview.getByRole('button', { name: 'Select result 3' })).toBeVisible();
   await expect(preview.getByRole('link', { name: 'Download' })).toHaveAttribute('href', '/api/download/incremental-2.png');
+  // Every unit reaches a terminal state: no slot keeps spinning.
+  await expect(preview.locator('[data-slot-status="waiting"]')).toHaveCount(0);
 
   const warning = preview.locator('.status-warning');
   await expect(warning).toContainText('quota exhausted');
@@ -345,6 +352,8 @@ test('a healthy global feed still lets the current job stream deliver the termin
     }
   });
   await loadApp(page, { generatedJob });
+  // Only refreshes caused by the terminal event matter; the page load has its own.
+  galleryRefreshes.length = 0;
 
   await page.getByRole('textbox', { name: 'Prompt', exact: true }).fill('global active list prompt');
   await page.getByRole('button', { name: 'Generate', exact: true }).click();
@@ -378,28 +387,28 @@ test('a failed job stream falls back to precise terminal polling', async ({ page
   expect(sourceState?.closed).toContain('/api/generate/job-generated/events');
 });
 
-test('submitting a second job closes the first stream before its result can update Preview', async ({ page }) => {
+test('submitting a second job keeps the first stream alive and both results in Preview', async ({ page }) => {
   const firstJob = job('job-first', 'first prompt', 'success');
-  const secondJob = job('job-second', 'second prompt');
+  const secondJob = job('job-second', 'second prompt', 'success');
   await installEventSourceScenario(page, {
-    perJobModes: { 'job-first': 'delayed', 'job-second': 'terminal' },
+    perJobModes: { 'job-first': 'delayed', 'job-second': 'delayed' },
     perJobEvents: { 'job-first': firstJob, 'job-second': secondJob }
   });
   await loadApp(page, { generatedJobs: [firstJob, secondJob] });
 
   await page.getByRole('textbox', { name: 'Prompt', exact: true }).fill('first prompt');
   await page.getByRole('button', { name: 'Generate', exact: true }).click();
-  await expect(page.getByRole('status')).toBeVisible();
-  const preview = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Preview' }) });
-  await preview.getByRole('button', { name: 'Clear', exact: true }).click();
-
   await page.getByRole('textbox', { name: 'Prompt', exact: true }).fill('second prompt');
   await page.getByRole('button', { name: 'Generate', exact: true }).click();
-  await expect(page.getByRole('img', { name: 'Generated preview' })).toBeVisible();
-  await expect(page.getByText('second prompt', { exact: true })).toBeVisible();
+
+  const preview = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Preview' }) });
+  await expect(preview.getByRole('img', { name: 'Generated preview' })).toBeVisible();
+  // Both jobs produce a result and stay reachable in one preview group.
+  await expect(preview.getByRole('button', { name: 'Select result 1' })).toBeVisible();
+  await expect(preview.getByRole('button', { name: 'Select result 2' })).toBeVisible();
 
   const sourceState = await page.evaluate(() => (window as Window & { __eventSourceScenario?: { opened: string[]; closed: string[] } }).__eventSourceScenario);
-  expect(sourceState?.closed).toContain('/api/generate/job-first/events');
+  expect(sourceState?.opened).toContain('/api/generate/job-first/events');
   expect(sourceState?.opened).toContain('/api/generate/job-second/events');
 });
 
@@ -736,4 +745,64 @@ test('job history keeps a bounded render window for 500 cached rows', async ({ p
   await historyScroller.evaluate((node) => node.scrollTo({ top: node.scrollHeight }));
   await expect(jobsDrawer.getByText('history prompt 499')).toBeVisible();
   expect(await jobsDrawer.locator('article').count()).toBeLessThanOrEqual(40);
+});
+
+test('multi-image edits keep every streamed unit and their own loading state', async ({ page }) => {
+  const editRunning = {
+    ...job('job-upload-edited', 'browser upload edit prompt', 'running'),
+    operation: 'edit',
+    n: 2,
+    streaming: true,
+    images: [],
+    image_id: null,
+    image_url: null,
+    unit_statuses: { '0': 'running', '1': 'running' }
+  };
+  const frame = (unitIndex: number) => ({
+    preview: {
+      job_id: 'job-upload-edited',
+      unit_index: unitIndex,
+      partial_image_index: 0,
+      call_index: 0,
+      sequence: 1,
+      mime_type: 'image/png',
+      data_url: `data:image/png;base64,${PNG_BYTES.toString('base64')}`
+    }
+  });
+  await installEventSourceScenario(page, {
+    perJobModes: { 'job-upload-edited': 'sequence' },
+    perJobEvents: {
+      'job-upload-edited': [
+        editRunning,
+        // Both units stream; the second frame must not be dropped.
+        frame(0),
+        frame(1),
+        {
+          ...editRunning,
+          images: [{ image_id: 'edit-1', image_url: '/api/image/edit-1.png', filename: 'edit-1.png', unit_index: 0, result_index: 0 }],
+          unit_statuses: { '0': 'success', '1': 'running' }
+        }
+      ]
+    }
+  });
+  await loadApp(page, { generatedJob: editRunning });
+
+  await page.getByLabel('Upload edit image').setInputFiles([{ name: 'source.png', mimeType: 'image/png', buffer: PNG_BYTES }]);
+  await page.getByRole('textbox', { name: 'Prompt', exact: true }).fill('browser upload edit prompt');
+  await page.getByLabel('Quantity').fill('2');
+
+  const editRequestPromise = page.waitForRequest((request) => new URL(request.url()).pathname === '/api/edits');
+  await page.getByRole('button', { name: 'Edits', exact: true }).click();
+  const body = (await editRequestPromise).postDataBuffer()?.toString('latin1') || '';
+  // The backend still accepts n>1 for edits.
+  expect(body).toContain('name="n"');
+  expect(body).toMatch(/name="n"\r\n\r\n2\r\n/);
+
+  const preview = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Preview' }) });
+  // The first unit's image lands, but the second unit keeps its streamed
+  // frame and the loading feedback that belongs to it.
+  await expect(preview.getByRole('img', { name: 'Generated preview' })).toBeVisible();
+  await expect(preview.getByText('1 still generating')).toBeVisible();
+  await expect(preview.locator('[data-slot-status="streaming"]')).toHaveCount(1);
+  await expect(preview.getByRole('img', { name: 'Image 2 streaming preview' })).toBeVisible();
 });

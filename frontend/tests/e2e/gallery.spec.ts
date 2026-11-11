@@ -53,7 +53,9 @@ test('generation, gallery edit source, batch favorite, and lightbox flows work w
   await expect(favoriteButton).toHaveAttribute('aria-pressed', 'true');
   await expect(favoriteButton).toHaveCSS('color', 'rgb(180, 83, 9)');
 
-  await page.getByRole('button', { name: 'Select' }).click();
+  // `exact` keeps this on the gallery's selection control: the preview strip
+  // also offers "Select result N" buttons.
+  await page.getByRole('button', { name: 'Select', exact: true }).click();
   await page.getByRole('button', { name: 'Select page' }).click();
   await page.getByRole('button', { name: 'Favorite selected', exact: true }).click();
   await expect(page.getByRole('status')).toContainText('Updated');
@@ -145,7 +147,7 @@ test('gallery uploads single and selected images to NodeImage and copies result 
   await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe('https://cdn.nodeimage.com/img-1.png');
   await resultDialog.getByRole('button', { name: 'Close NodeImage results' }).click();
 
-  await page.getByRole('button', { name: 'Select' }).click();
+  await page.getByRole('button', { name: 'Select', exact: true }).click();
   await page.getByRole('button', { name: 'Select page' }).click();
   const batchRequest = page.waitForRequest((request) => {
     const url = new URL(request.url());
@@ -174,7 +176,7 @@ test('gallery uploads single and selected images to NodeImage and copies result 
 test('NodeImage batch upload shows queued progress while waiting for job events', async ({ page }) => {
   await loadApp(page, { nodeImageBatchDelayMs: 500 });
 
-  await page.getByRole('button', { name: 'Select' }).click();
+  await page.getByRole('button', { name: 'Select', exact: true }).click();
   await page.getByRole('button', { name: 'Select page' }).click();
   const createResponse = page.waitForResponse((response) => {
     const url = new URL(response.url());
@@ -199,7 +201,7 @@ test('NodeImage batch upload shows queued progress while waiting for job events'
 test('NodeImage batch upload displays partial failure results from the job payload', async ({ page }) => {
   await loadApp(page, { nodeImageBatchFailureIds: ['img-2'] });
 
-  await page.getByRole('button', { name: 'Select' }).click();
+  await page.getByRole('button', { name: 'Select', exact: true }).click();
   await page.getByRole('button', { name: 'Select page' }).click();
   await page.getByRole('button', { name: 'Upload selected to NodeImage', exact: true }).click();
 
@@ -214,7 +216,7 @@ test('NodeImage batch upload displays partial failure results from the job paylo
 test('NodeImage batch upload cancellation calls the job cancel endpoint and keeps completed results', async ({ page }) => {
   await loadApp(page, { nodeImageBatchDelayMs: 1000 });
 
-  await page.getByRole('button', { name: 'Select' }).click();
+  await page.getByRole('button', { name: 'Select', exact: true }).click();
   await page.getByRole('button', { name: 'Select page' }).click();
   const createResponse = page.waitForResponse((response) => {
     const url = new URL(response.url());
@@ -247,7 +249,7 @@ test('NodeImage batch upload cancellation calls the job cancel endpoint and keep
 test('NodeImage batch upload keeps tracking the job when the cancellation request fails', async ({ page }) => {
   await loadApp(page, { nodeImageBatchDelayMs: 750, nodeImageCancelFailure: true });
 
-  await page.getByRole('button', { name: 'Select' }).click();
+  await page.getByRole('button', { name: 'Select', exact: true }).click();
   await page.getByRole('button', { name: 'Select page' }).click();
   await page.getByRole('button', { name: 'Upload selected to NodeImage', exact: true }).click();
 
@@ -267,7 +269,7 @@ test('NodeImage batch upload keeps tracking the job when the cancellation reques
 test('NodeImage batch upload keeps tracking after cancellation status polling fails', async ({ page }) => {
   await loadApp(page, { nodeImageBatchDelayMs: 1000, nodeImageCancelStatusFailure: true });
 
-  await page.getByRole('button', { name: 'Select' }).click();
+  await page.getByRole('button', { name: 'Select', exact: true }).click();
   await page.getByRole('button', { name: 'Select page' }).click();
   await page.getByRole('button', { name: 'Upload selected to NodeImage', exact: true }).click();
 
@@ -286,7 +288,7 @@ test('NodeImage batch upload keeps tracking after cancellation status polling fa
 test('NodeImage cancellation reports a completed job as complete', async ({ page }) => {
   await loadApp(page, { nodeImageBatchDelayMs: 1000, nodeImageCancelReturnsCompleted: true });
 
-  await page.getByRole('button', { name: 'Select' }).click();
+  await page.getByRole('button', { name: 'Select', exact: true }).click();
   await page.getByRole('button', { name: 'Select page' }).click();
   await page.getByRole('button', { name: 'Upload selected to NodeImage', exact: true }).click();
 
@@ -306,7 +308,7 @@ test('NodeImage batch results use response filenames for cross-page selection', 
 
   await page.getByLabel('Filter prompt').fill('Paged gallery image');
   await expect(page.getByRole('img', { name: 'Paged gallery image 1', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Select' }).click();
+  await page.getByRole('button', { name: 'Select', exact: true }).click();
   await page.getByRole('button', { name: 'Select filtered' }).click();
   await expect(page.getByText('10 selected from current filters')).toBeVisible();
   await page.getByRole('button', { name: 'Upload selected to NodeImage', exact: true }).click();
@@ -342,7 +344,7 @@ test('NodeImage batch results fall back for legacy responses without filenames',
     }));
   });
 
-  await page.getByRole('button', { name: 'Select' }).click();
+  await page.getByRole('button', { name: 'Select', exact: true }).click();
   await page.getByRole('button', { name: 'Select page' }).click();
   await page.getByRole('button', { name: 'Upload selected to NodeImage', exact: true }).click();
 
@@ -360,7 +362,7 @@ test('NodeImage results group failures first, progressively reveal successes, an
 
   await page.getByLabel('Filter prompt').fill('Paged gallery image');
   await expect(page.getByRole('img', { name: 'Paged gallery image 1', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Select' }).click();
+  await page.getByRole('button', { name: 'Select', exact: true }).click();
   await page.getByRole('button', { name: 'Select filtered' }).click();
   await page.getByRole('button', { name: 'Upload selected to NodeImage', exact: true }).click();
 
@@ -415,7 +417,7 @@ test('gallery hides NodeImage upload actions when the integration is unavailable
   });
 
   await expect(page.locator('.gallery-card').first().getByRole('button', { name: 'Upload to NodeImage' })).toHaveCount(0);
-  await page.getByRole('button', { name: 'Select' }).click();
+  await page.getByRole('button', { name: 'Select', exact: true }).click();
   await page.getByRole('button', { name: 'Select page' }).click();
   await expect(page.getByRole('button', { name: 'Upload selected to NodeImage', exact: true })).toHaveCount(0);
   const actionGrid = page.locator('.gallery-card').first().locator('.gallery-card-actions');
@@ -673,7 +675,7 @@ test('gallery handles 500 mocked images with lightweight cursor paging, filterin
   expect(nextBody?.include_filter_options).toBe(false);
   await expect(page.getByRole('img', { name: 'Paged gallery image 10', exact: true })).toBeVisible();
 
-  await page.getByRole('button', { name: 'Select' }).click();
+  await page.getByRole('button', { name: 'Select', exact: true }).click();
   await page.getByRole('button', { name: 'Select page' }).click();
   await page.getByRole('button', { name: 'Favorite selected', exact: true }).click();
   await expect(page.getByRole('status')).toContainText('Updated');
@@ -704,7 +706,7 @@ test('gallery selects current filtered results through a batch token', async ({ 
     const url = new URL(request.url());
     return request.method() === 'POST' && url.pathname === '/api/gallery/batch/selection-tokens';
   });
-  await page.getByRole('button', { name: 'Select' }).click();
+  await page.getByRole('button', { name: 'Select', exact: true }).click();
   await page.getByRole('button', { name: 'Select filtered' }).click();
   await tokenRequest;
   await expect(page.getByText('10 selected from current filters')).toBeVisible();
@@ -734,7 +736,7 @@ test('cross-page batch delete refreshes filtered gallery state after the optimis
     const url = new URL(request.url());
     return request.method() === 'POST' && url.pathname === '/api/gallery/batch/selection-tokens';
   });
-  await page.getByRole('button', { name: 'Select' }).click();
+  await page.getByRole('button', { name: 'Select', exact: true }).click();
   await page.getByRole('button', { name: 'Select filtered' }).click();
   await tokenRequest;
 
@@ -766,7 +768,7 @@ test('favorites-only batch unfavorite reloads the page with the remaining matche
   await page.getByLabel('Favorites').check();
   await favoritesRequest;
 
-  await page.getByRole('button', { name: 'Select' }).click();
+  await page.getByRole('button', { name: 'Select', exact: true }).click();
   await page.getByRole('button', { name: 'Select page' }).click();
   const refreshRequest = page.waitForResponse((response) => {
     const body = gallerySearchBody(response.request());

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { get } from 'svelte/store';
 import type { GenerateJobStatus, GeneratePreviewEvent } from '$lib/api/types/jobs';
 import type { EventHandlers } from '$lib/api/events';
+import { ApiError } from '$lib/api/client';
 
 const api = vi.hoisted(() => ({ apiFetch: vi.fn(), openJsonEventSource: vi.fn(), observeJobStatusChange: vi.fn() }));
 vi.mock('$lib/api/client', async (original) => ({ ...await original<typeof import('$lib/api/client')>(), apiFetch: api.apiFetch }));
@@ -242,6 +243,125 @@ describe('global jobs feed lifecycle', () => {
     expect(streams[1].close).toHaveBeenCalledTimes(1);
     emit(streams[1], 'preview', partial);
     expect(preview).toHaveBeenCalledTimes(1);
+  });
+
+  it('tracks several jobs at once without closing the earlier stream', async () => {
+    const first = vi.fn().mockResolvedValue(undefined);
+    const second = vi.fn().mockResolvedValue(undefined);
+    jobsStore.startJobsEvents();
+    jobsStore.trackJob('job-a', first, vi.fn());
+    jobsStore.trackJob('job-b', second, vi.fn());
+    expect(streams.map((stream) => stream.url)).toEqual([
+      '/api/generate/jobs/events',
+      '/api/generate/job-a/events',
+      '/api/generate/job-b/events'
+    ]);
+    expect(streams[1].close).not.toHaveBeenCalled();
+
+    emit(streams[1], 'job', job('job-a', { status: 'success' }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(first).toHaveBeenCalledWith(job('job-a', { status: 'success' }));
+    expect(second).not.toHaveBeenCalled();
+    // Only the finished job's own source is released.
+    expect(streams[1].close).toHaveBeenCalledTimes(1);
+    expect(streams[2].close).not.toHaveBeenCalled();
+
+    emit(streams[2], 'job', job('job-b', { status: 'success' }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(second).toHaveBeenCalledWith(job('job-b', { status: 'success' }));
+    expect(streams[2].close).toHaveBeenCalledTimes(1);
+  });
+
+  it('routes global feed events to every tracked job and ignores untracked ones', async () => {
+    const first = vi.fn().mockResolvedValue(undefined);
+    const second = vi.fn().mockResolvedValue(undefined);
+    jobsStore.startJobsEvents();
+    jobsStore.trackJob('job-a', first, vi.fn());
+    jobsStore.trackJob('job-b', second, vi.fn());
+    emit(streams[0], 'job', job('job-a', { status: 'running', stage: 'waiting_for_api' }));
+    emit(streams[0], 'job', job('job-b', { status: 'running', stage: 'waiting_for_api' }));
+    emit(streams[0], 'job', job('untracked', { status: 'running' }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(first).toHaveBeenCalledTimes(1);
+    expect(second).toHaveBeenCalledTimes(1);
+    expect(first).toHaveBeenCalledWith(job('job-a', { status: 'running', stage: 'waiting_for_api' }));
+  });
+
+  it('de-duplicates repeated tracking of the same job and keeps its handlers', async () => {
+    const first = vi.fn().mockResolvedValue(undefined);
+    const replacement = vi.fn().mockResolvedValue(undefined);
+    jobsStore.startJobsEvents();
+    jobsStore.trackJob('job-a', first, vi.fn());
+    jobsStore.trackJob('job-a', replacement, vi.fn());
+    expect(streams).toHaveLength(2);
+    emit(streams[1], 'job', job('job-a', { status: 'running' }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(first).not.toHaveBeenCalled();
+    expect(replacement).toHaveBeenCalledTimes(1);
+  });
+
+  it('releases every tracker on cleanup and ignores their late callbacks', async () => {
+    const update = vi.fn().mockResolvedValue(undefined);
+    jobsStore.startJobsEvents();
+    jobsStore.trackJob('job-a', update, vi.fn());
+    jobsStore.trackJob('job-b', update, vi.fn());
+    const [feed, first, second] = streams;
+    jobsStore.cleanup();
+    emit(first, 'job', job('job-a', { status: 'success' }));
+    emit(second, 'job', job('job-b', { status: 'success' }));
+    emit(feed, 'job', job('job-a', { status: 'success' }));
+    await vi.advanceTimersByTimeAsync(10000);
+    expect(update).not.toHaveBeenCalled();
+    expect(first.close).toHaveBeenCalledTimes(1);
+    expect(second.close).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('keeps a released job from being revived by its own late poll', async () => {
+    const update = vi.fn().mockResolvedValue(undefined);
+    jobsStore.startJobsEvents();
+    jobsStore.trackJob('job-a', update, vi.fn());
+    const slow = deferred<GenerateJobStatus>();
+    api.apiFetch.mockReturnValueOnce(slow.promise);
+    streams[1].handlers.onNetworkError?.(new Event('error'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(api.apiFetch).toHaveBeenCalledTimes(1);
+    jobsStore.untrackJob('job-a');
+    slow.resolve(job('job-a', { status: 'success' }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(update).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('falls back to per-job polling only for the job whose stream dropped', async () => {
+    const first = vi.fn().mockResolvedValue(undefined);
+    const second = vi.fn().mockResolvedValue(undefined);
+    jobsStore.startJobsEvents();
+    jobsStore.trackJob('job-a', first, vi.fn());
+    jobsStore.trackJob('job-b', second, vi.fn());
+    api.apiFetch.mockImplementation((url: string) =>
+      Promise.resolve(url === '/api/generate/job-a' ? job('job-a', { status: 'success' }) : job('job-b'))
+    );
+    streams[1].handlers.onNetworkError?.(new Event('error'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(api.apiFetch.mock.calls.map(([url]) => url)).toEqual(['/api/generate/job-a']);
+    expect(first).toHaveBeenCalledTimes(1);
+    expect(second).not.toHaveBeenCalled();
+    expect(streams[2].close).not.toHaveBeenCalled();
+  });
+
+  it('reports a permanent tracking error to that job only', async () => {
+    const firstError = vi.fn();
+    const secondError = vi.fn();
+    jobsStore.startJobsEvents();
+    jobsStore.trackJob('job-a', vi.fn().mockResolvedValue(undefined), firstError, vi.fn());
+    jobsStore.trackJob('job-b', vi.fn().mockResolvedValue(undefined), secondError, vi.fn());
+    api.apiFetch.mockRejectedValueOnce(new ApiError('gone', 404, null));
+    streams[1].handlers.onNetworkError?.(new Event('error'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(firstError).toHaveBeenCalledWith('gone');
+    expect(secondError).not.toHaveBeenCalled();
+    expect(streams[2].close).not.toHaveBeenCalled();
   });
 
   it('restores tracked fallback polling on visibility after cleanup and reuse', async () => {
