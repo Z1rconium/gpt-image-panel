@@ -266,3 +266,59 @@ Audited the shipped Docker configuration simplification against the current tree
 
 - Docker is still absent on this host: run docker compose config plus an isolated container startup/health/unlock/settings-save smoke on a Docker-equipped machine.
 - The ccs-krill/gpt-6.1-terra independent review remains unavailable (provider cybersecurity-risk refusal); rerun it if the restriction lifts.
+
+
+## Session 9: Continuous generation and grouped preview
+<!-- trellis-session: v=2 fp=a7a57f9744b86cfe -->
+
+**Date**: 2026-11-11
+**Task**: Continuous generation and grouped preview
+**Branch**: `main`
+
+### Summary
+
+Session summary was not supplied.
+
+### Main Changes
+
+### Summary
+
+Implemented continuous generation with a single grouped preview, then closed three acceptance defects found in review: multi-image results landing in the wrong slot, a later-finishing submission stealing the main image, and multi-image edits ending their loading state after the first image. A final P2 fix made a failed or cancelled unit stop spinning while its siblings keep generating.
+
+### Main Changes
+
+- `frontend/src/lib/stores/previewGroup.ts` (new): pure preview-group model — ordered submissions, stable `submission + unit + result` slot identity, pending/streaming/success/failed/cancelled derivation, per-job event routing. `normalizeJobImages` preserves `unit_index`/`result_index`; `adoptSelection` persists the first automatic pick; `pendingSlotStatus` evaluates a unit's own status before the parent job's.
+- `frontend/src/lib/stores/trackedJobs.ts` (new): per-`jobId` trackers with their own source, epoch, fallback timer and poll token; the global feed stays one connection and dispatches to every tracker.
+- `frontend/src/lib/stores/preview.ts`: appends submissions instead of replacing state, reserves normalized `n` slots before the POST, attaches by submission id, routes by `jobId`, rejects late POST responses from a replaced group by epoch, and reserves `n` units for edits too.
+- `frontend/src/lib/components/PreviewPanel.svelte`, `PromptForm.svelte`, `Workspace.svelte`, locales: unified slot list with pending thumbnails and in-place replacement, generation stays submittable while earlier requests are in flight, metadata follows the selected image's own job.
+- `.trellis/spec/frontend/jobs-lifecycle.md`: added per-job tracking and preview-group contracts, error-matrix rows and wrong/correct examples.
+
+### Testing
+
+- [OK] `npm --prefix frontend run test:unit`: 473 passed (28 files), including new `previewGroup.test.ts` and multi-job isolation cases in `jobsStore.test.ts`.
+- [OK] Every acceptance fix was proven by reverting it and watching the new unit and browser tests fail.
+- [OK] `npm --prefix frontend run check`: 0 errors, 0 warnings.
+- [OK] `npm --prefix frontend run build` + `check:bundle`: homepage JS 114,776 B (≤ 122,880), main CSS 15,338 B (≤ 15,360), OGL 14,955 B.
+- [OK] `npm --prefix frontend run check:worker-build`: production module worker verified.
+- [OK] Full Playwright suite: 284 passed, 3 skipped.
+- [NOTE] `markup-editor.spec.ts` canvas pixel assertions fail under the locally installed Chrome channel on the unmodified baseline too; unrelated to this change.
+- [NOTE] `gallery.spec.ts` needed `exact: true` on its "Select" button locator, because the preview strip now legitimately renders "Select result N".
+
+### Next Steps
+
+- None for this task; it is archived. The pre-existing untracked Trellis scaffolding and the separate `gpt-with-taste/` checkout were deliberately left out of the commits.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `95a4fca` | feat(frontend): aggregate continuous generations into one preview group |
+| `3a8c8a6` | feat(frontend): render grouped preview slots with pending thumbnails |
+| `34beba2` | test(frontend): cover grouped preview ordering, selection and multi-image edits |
+| `bc343e3` | docs(spec): record grouped preview and multi-job tracking contracts |
+| `84efea6` | chore(task): record the continuous generation preview plan and results |
+
+### Status
+
+[OK] **Completed**

@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 8
-- **Last Active**: 2026-11-10
+- **Total Sessions**: 9
+- **Last Active**: 2026-11-11
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~268 | Active |
+| `journal-1.md` | ~324 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 9 | 2026-11-11 | Continuous generation and grouped preview | `95a4fca`, `3a8c8a6`, `34beba2`, `bc343e3`, `84efea6` | `main` |
 | 8 | 2026-11-10 | Docker config simplification: audit and close | `190f3bc` | `main` |
 | 7 | 2026-11-10 | Codebase simplification P0/P1/P2: verify and close | `b0890eb`, `40a3a3f`, `82b7e09` | `main` |
 | 6 | 2026-11-06 | Reference asset archive persistence | `6cf85a3` | `feat/reference-asset-library` |
