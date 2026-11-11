@@ -62,6 +62,10 @@
   const image25 = $derived(isImage25(promptForm.model) || isImage26(promptForm.model));
   const promptOnlyMode = $derived(promptForm.apiPath === '/v1/responses' || promptForm.apiPath === '/v1/chat/completions');
   const parameterControlsDisabled = $derived((promptOnlyMode && !hasEditSource) || loading);
+  // Generation stays submittable while earlier requests are in flight; only
+  // the parameter controls keep their existing loading lock. Edits keep the
+  // single-request interaction.
+  const submitDisabled = $derived(loading && hasEditSource);
   const modeLabel = $derived(promptForm.apiPath === '/v1/chat/completions' ? $t.promptForm.chatCompletionsMode : $t.promptForm.responsesMode);
   const disabledModeLabel = $derived(
     promptForm.apiPath === '/v1/chat/completions' ? $t.promptForm.disabledForChatCompletions : $t.promptForm.disabledForResponses
@@ -149,7 +153,7 @@
     if (event.key !== 'Enter' || event.isComposing || event.repeat) return;
     if (!(event.ctrlKey || event.metaKey)) return;
     event.preventDefault();
-    if (!loading) onSubmit();
+    if (!submitDisabled) onSubmit();
   }
 
   function clampCompression() {
@@ -398,7 +402,7 @@
         >
           {editPlanning ? $t.promptForm.planningEdit : $t.promptForm.planEdit}
         </button>
-        <button type="button" disabled={loading} class="ui-button-primary px-5 font-semibold" onclick={onSubmit}>
+        <button type="button" disabled={submitDisabled} class="ui-button-primary px-5 font-semibold" onclick={onSubmit}>
           {hasEditSource ? $t.promptForm.edits : $t.promptForm.generate}
         </button>
       </div>

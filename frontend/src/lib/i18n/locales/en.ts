@@ -691,7 +691,9 @@ const en = {
     streamingPreviewAlt: 'Streaming partial preview',
     streamingPreviewBadge: 'Preview',
     streamingSlotAlt: (index: number) => `Image ${index} streaming preview`,
-    streamingSlotWaiting: 'Waiting for preview'
+    streamingSlotWaiting: 'Waiting for preview',
+    pendingCount: (count: number) => `${count} still generating`,
+    pendingSlotAlt: (index: number) => `Image ${index} still generating`
   },
   gallery: {
     title: 'Gallery',

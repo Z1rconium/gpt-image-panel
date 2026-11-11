@@ -692,7 +692,9 @@ const zh: Translation = {
     streamingPreviewAlt: '流式阶段性预览',
     streamingPreviewBadge: '预览',
     streamingSlotAlt: (index) => `第 ${index} 张流式预览`,
-    streamingSlotWaiting: '等待预览'
+    streamingSlotWaiting: '等待预览',
+    pendingCount: (count) => `还有 ${count} 张生成中`,
+    pendingSlotAlt: (index) => `第 ${index} 张仍在生成`
   },
   gallery: {
     title: '图库',

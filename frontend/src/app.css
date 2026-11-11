@@ -438,6 +438,15 @@ html.dark input::placeholder {
   display: inline-block;
 }
 
+/* Compact spinner for inline slot/status text. */
+.spinner-inline {
+  width: 12px;
+  height: 12px;
+  border-width: 1.5px;
+  flex-shrink: 0;
+}
+
+
 @keyframes spin {
   to {
     transform: rotate(360deg);

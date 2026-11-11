@@ -287,7 +287,11 @@
   async function loadInitialData() {
     await Promise.all([settingsStore.loadSettings(), jobsStore.loadJobs(), applyUrlStateToApp()]);
     const activeJob = $jobsStore.jobs[0];
-    if (activeJob) trackJob(activeJob.job_id);
+    if (activeJob) {
+      // Resume the newest active job as this page's preview group.
+      previewStore.openJob(activeJob);
+      trackJob(activeJob.job_id);
+    }
     urlSync.setReady();
     urlSync.flush();
     jobsStore.startJobsEvents();
@@ -592,7 +596,8 @@
   }
 
   function updatePreviewFromJob(job: GenerateJobStatus) {
-    previewStore.setPreview(jobsStore.previewFromJob(job, $previewStore));
+    // Only the owning submission changes; every other job keeps its slots.
+    previewStore.applyJob(job);
     if (job.status !== 'queued' && job.status !== 'running') {
       if (handledTerminalJobIds.has(job.job_id)) return;
       handledTerminalJobIds.add(job.job_id);
@@ -607,30 +612,30 @@
   }
 
   function trackJob(jobId: string) {
-    jobsStore.trackJob(jobId, async (job) => updatePreviewFromJob(job), previewStore.setError, previewStore.applyPreviewEvent);
+    jobsStore.trackJob(
+      jobId,
+      (job) => updatePreviewFromJob(job),
+      (message) => previewStore.failJobTracking(jobId, message),
+      previewStore.applyPreviewEvent
+    );
   }
+
+  const previewCallbacks = {
+    trackJob,
+    releaseJobs: () => jobsStore.closeActiveJobSource(),
+    get loadJobs() {
+      return jobsStore.shouldRefreshJobsAfterSubmit() ? jobsStore.loadJobs : undefined;
+    }
+  };
 
   function generateImage(options?: SubmitOptions): Promise<boolean> {
     promptForm.normalizeQuantityForSubmit();
-    return previewStore.generateImage(
-      promptForm.snapshot(),
-      jobsStore.makeQueuedPreview,
-      trackJob,
-      jobsStore.shouldRefreshJobsAfterSubmit() ? jobsStore.loadJobs : undefined,
-      options
-    );
+    return previewStore.generateImage(promptForm.snapshot(), previewCallbacks, options);
   }
 
   function editImage(options?: SubmitOptions): Promise<boolean> {
     promptForm.normalizeQuantityForSubmit();
-    return previewStore.editImage(
-      promptForm.snapshot(),
-      $editSourceStore,
-      jobsStore.makeQueuedPreview,
-      trackJob,
-      jobsStore.shouldRefreshJobsAfterSubmit() ? jobsStore.loadJobs : undefined,
-      options
-    );
+    return previewStore.editImage(promptForm.snapshot(), $editSourceStore, previewCallbacks, options);
   }
 
   async function submitPrompt() {
@@ -882,7 +887,9 @@
   }
 
   function clearPreview() {
-    previewStore.clearPreview(jobsStore.closeActiveJobSource);
+    // Clearing ends display tracking only; the backend jobs keep running.
+    jobsStore.closeActiveJobSource();
+    previewStore.clearPreview();
   }
 
   function openGalleryEditDialog(image: GalleryEntry) {
@@ -1454,7 +1461,7 @@
           const job = await apiFetch<GenerateJobStatus>(`/api/generate/${encodeURIComponent(target.jobId)}`, {}, 'opening completed task');
           jobsStore.closeActiveJobSource();
           changeWorkspaceMode('studio');
-          previewStore.setPreview(jobsStore.previewFromJob(job, jobsStore.makeQueuedPreview(job.prompt || '', job.operation || 'generation')));
+          previewStore.openJob(job);
           if (job.status === 'queued' || job.status === 'running') trackJob(job.job_id);
           await tick();
           document.getElementById('preview-panel')?.scrollIntoView({ block: 'start' });
