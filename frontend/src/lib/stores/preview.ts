@@ -15,26 +15,34 @@ import {
 import type { ApiPath, ResponseFormatDefault } from '$lib/api/types/common';
 import type { GenerateRequestBody } from '$lib/api/types/generation';
 import type { GeneratePreviewEvent, GenerateJobResponse, GenerateJobStatus } from '$lib/api/types/jobs';
+import { jobFailureMessage } from '$lib/utils/format';
 import { MAX_PROMPT_CHARS, imageQualities, isImage25, isImage26, promptLength, validOutputSize } from '$lib/utils/imageModels';
-import { isActiveJobStatus } from '$lib/utils/jobs';
+import {
+  adoptSelection,
+  appendSubmission,
+  applyJobToGroup,
+  applyPreviewEventToGroup,
+  createPreviewGroup,
+  createSubmission,
+  derivePreviewView,
+  failSubmission,
+  findSubmissionByJobId,
+  normalizeUnitCount,
+  replaceSubmission,
+  selectSlotInGroup,
+  submissionFromJob,
+  type PreviewCompareSource,
+  type PreviewGroup,
+  type PreviewSlot,
+  type PreviewSubmission,
+  type PreviewView,
+  type StreamingPreviewSlot
+} from '$lib/stores/previewGroup';
 
-/** Latest streamed partial image for one task unit (keyed by unit_index). */
-export type StreamingPreviewSlot = { dataUrl: string; sequence: number; unitIndex?: number; callIndex?: number };
+export type { PreviewCompareSource, PreviewImage, PreviewSlot, PreviewSlotStatus, StreamingPreviewSlot } from '$lib/stores/previewGroup';
 
-export type PreviewState = {
-  loading: boolean;
-  error: string;
-  job: GenerateJobStatus | null;
-  imageUrl: string;
-  filename: string;
-  prompt: string;
-  streamingPreviews: Record<string, StreamingPreviewSlot>;
-  compareSource: PreviewCompareSource | null;
-};
-
-export type PreviewCompareSource =
-  | { kind: 'upload'; file: File; label: string }
-  | { kind: 'gallery'; url: string; label: string };
+/** Derived view of the current preview group plus its identity. */
+export type PreviewState = PreviewView & { groupId: string };
 
 export type PromptFormState = {
   prompt: string;
@@ -64,15 +72,12 @@ export type SubmitOptions = {
   apiPresetId?: string | null;
 };
 
-const initialPreviewState: PreviewState = {
-  loading: false,
-  error: '',
-  job: null,
-  imageUrl: '',
-  filename: '',
-  prompt: '',
-  streamingPreviews: {},
-  compareSource: null
+/** Tracker wiring supplied by the workspace; identity is the job id. */
+export type PreviewCallbacks = {
+  trackJob: (jobId: string) => void;
+  /** Release every tracked job (clear, group replacement, cleanup). */
+  releaseJobs?: () => void;
+  loadJobs?: () => Promise<void>;
 };
 
 export const DEFAULT_PROMPT_MODEL = 'gpt-image-2';
@@ -183,62 +188,123 @@ function comparisonSourceForEdit(source: EditSourceState): PreviewCompareSource 
   return primary?.kind === 'upload' ? { kind: 'upload', file: primary.file, label: primary.label } : null;
 }
 
+function queuedJob(response: GenerateJobResponse, body: GenerateRequestBody): GenerateJobStatus {
+  const operation = response.operation || 'generation';
+  return {
+    job_id: response.job_id,
+    status: response.status || 'queued',
+    stage: response.stage || 'queued',
+    message: response.message || (operation === 'edit' ? get(t).messages.queuedEdit : get(t).messages.queuedGeneration),
+    operation,
+    n: body.n ?? 1,
+    prompt: body.prompt,
+    model: body.model,
+    size: body.size,
+    quality: body.quality,
+    output_format: body.output_format,
+    background: body.background,
+    streaming: Boolean(body.stream),
+    partial_images: body.partial_images ?? null
+  };
+}
+
 function createPreviewStore() {
-  const { subscribe, set, update } = writable<PreviewState>(initialPreviewState);
+  const { subscribe, set } = writable<PreviewState>({ ...derivePreviewView(createPreviewGroup(''), ''), groupId: '' });
+  let group: PreviewGroup = createPreviewGroup('');
+  let groupError = '';
+  let groupEpoch = 0;
+  let groupSeq = 0;
+  let submissionSeq = 0;
   let lastRequest: GenerateRequestBody | null = null;
   let lastAction: 'generate' | 'edit' = 'generate';
   let lastPasteBack = true;
   let lastApiPresetId: string | null = null;
 
-  function setPreview(next: PreviewState) {
-    set(next);
+  function publish() {
+    const view = derivePreviewView(group, groupError);
+    // Record the first automatic pick (and drop a selection whose slot is
+    // gone) so a later completion never re-points the main image.
+    group = adoptSelection(group, view);
+    // A failed job keeps its own message; submission-level errors take
+    // precedence because they belong to the click the user just made.
+    const error = groupError || jobFailureMessage(view.job, get(t).messages.jobFailed);
+    set({ ...view, error, groupId: group.id });
+  }
+
+  function nextGroup() {
+    groupSeq += 1;
+    groupEpoch += 1;
+    group = createPreviewGroup(`group-${groupSeq}`);
+    groupError = '';
+  }
+
+  function nextSubmissionId() {
+    submissionSeq += 1;
+    return `submission-${submissionSeq}`;
   }
 
   function setError(message: string) {
-    update((current) => ({ ...current, loading: false, error: message, streamingPreviews: {} }));
+    groupError = message;
+    publish();
   }
 
-  function setSubmissionError(error: unknown) {
-    const message = error instanceof Error ? error.message : get(t).messages.requestFailed;
-    update((current) => ({ ...current, loading: false, error: message, job: null, compareSource: null, streamingPreviews: {} }));
+  function clearPreview() {
+    nextGroup();
+    publish();
   }
 
-  function clearPreview(closeActiveJobSource?: () => void) {
-    closeActiveJobSource?.();
-    set(initialPreviewState);
+  /** Replace the group with one job (history open, completion notification). */
+  function openJob(job: GenerateJobStatus) {
+    nextGroup();
+    group = appendSubmission(group, submissionFromJob(nextSubmissionId(), job));
+    publish();
+  }
+
+  function selectSlot(slotId: string) {
+    const next = selectSlotInGroup(group, slotId);
+    if (next === group) return;
+    group = next;
+    publish();
+  }
+
+  function applyJob(job: GenerateJobStatus) {
+    const next = applyJobToGroup(group, job);
+    if (next === group) return;
+    group = next;
+    publish();
   }
 
   function applyPreviewEvent(event: GeneratePreviewEvent) {
-    update((current) => {
-      if (!current.job || current.job.job_id !== event.job_id) return current;
-      // The final image always wins, and out-of-order/duplicate frames
-      // (possible across an SSE reconnect) are dropped via the per-unit
-      // sequence so one image slot never shows another unit's frame.
-      if (!current.loading || !isActiveJobStatus(current.job.status)) return current;
-      if (!Number.isInteger(event.unit_index) || event.unit_index < 0 || event.unit_index >= Math.min(current.job.n || 1, 10)) return current;
-      const callIndex = event.call_index || 0;
-      if (!Number.isInteger(callIndex) || callIndex < 0 || callIndex >= 10 || event.data_url.length > 8 * 1024 * 1024) return current;
-      if (current.job.images?.some((image) => image.unit_index === event.unit_index)) return current;
-      const unitStatus = current.job.unit_statuses?.[event.unit_index];
-      if (unitStatus && !isActiveJobStatus(unitStatus as GenerateJobStatus['status'])) return current;
-      const key = callIndex ? `${event.unit_index}:${callIndex}` : `${event.unit_index}`;
-      const unit = current.streamingPreviews[key];
-      if (unit && event.sequence <= unit.sequence) return current;
-      return {
-        ...current,
-        streamingPreviews: {
-          ...current.streamingPreviews,
-          [key]: { dataUrl: event.data_url, sequence: event.sequence, unitIndex: event.unit_index, callIndex }
-        }
-      };
-    });
+    const next = applyPreviewEventToGroup(group, event);
+    if (next === group) return;
+    group = next;
+    publish();
+  }
+
+  /** A permanent tracking failure ends that submission only. */
+  function failJobTracking(jobId: string, message: string) {
+    const submission = findSubmissionByJobId(group, jobId);
+    if (!submission) return;
+    group = replaceSubmission(group, submission.id, (current) => ({
+      ...current,
+      error: message,
+      job: current.job ? { ...current.job, status: 'error', error: message, message } : current.job
+    }));
+    publish();
+  }
+
+  function attachJob(submissionId: string, response: GenerateJobResponse, body: GenerateRequestBody) {
+    group = replaceSubmission(group, submissionId, (submission) =>
+      submission.id === submissionId
+        ? { ...submission, jobId: response.job_id, job: queuedJob(response, body), submitStatus: 'accepted', error: '' }
+        : submission
+    );
+    publish();
   }
 
   async function generateImage(
     form: PromptFormState,
-    makeQueuedPreview: (prompt: string, operation: NonNullable<GenerateJobResponse['operation']>) => PreviewState,
-    trackJob: (jobId: string) => void,
-    loadJobs?: () => Promise<void>,
+    callbacks: PreviewCallbacks,
     options: SubmitOptions = {}
   ): Promise<boolean> {
     const body = buildRequestBody(form);
@@ -251,10 +317,29 @@ function createPreviewStore() {
     lastRequest = body;
     lastAction = 'generate';
     lastApiPresetId = options.apiPresetId || null;
-    set(makeQueuedPreview(body.prompt, 'generation'));
+
+    // Generation appends to the current group, except when that group holds an
+    // edit result: edits keep their own single-result preview (compare, mask,
+    // paste-back), so the first generation after one starts a fresh group.
+    if (group.submissions.some((entry) => entry.operation === 'edit')) {
+      callbacks.releaseJobs?.();
+      nextGroup();
+    }
+    // Reserve the slots synchronously, before the POST: repeated clicks each
+    // get their own stable place even when the responses arrive out of order.
+    const submission = createSubmission({
+      id: nextSubmissionId(),
+      operation: 'generation',
+      prompt: body.prompt,
+      expectedUnits: body.n ?? 1
+    });
+    group = appendSubmission(group, submission);
+    groupError = '';
+    publish();
+    const epoch = groupEpoch;
 
     try {
-      const job = await apiFetch<GenerateJobResponse>(
+      const response = await apiFetch<GenerateJobResponse>(
         '/api/generate',
         {
           method: 'POST',
@@ -263,11 +348,18 @@ function createPreviewStore() {
         },
         'starting image generation'
       );
-      trackJob(job.job_id);
-      if (loadJobs) await loadJobs();
+      // A late response still describes a real backend job, but it belongs to
+      // a preview group the user already left: never attach it to the new one.
+      if (epoch !== groupEpoch) return true;
+      attachJob(submission.id, response, body);
+      callbacks.trackJob(response.job_id);
+      if (callbacks.loadJobs) await callbacks.loadJobs();
       return true;
     } catch (error) {
-      setSubmissionError(error);
+      if (epoch !== groupEpoch) return false;
+      const message = error instanceof Error ? error.message : get(t).messages.requestFailed;
+      group = failSubmission(group, submission.id, message);
+      publish();
       return false;
     }
   }
@@ -275,9 +367,7 @@ function createPreviewStore() {
   async function editImage(
     form: PromptFormState,
     editSource: EditSourceState,
-    makeQueuedPreview: (prompt: string, operation: NonNullable<GenerateJobResponse['operation']>) => PreviewState,
-    trackJob: (jobId: string) => void,
-    loadJobs?: () => Promise<void>,
+    callbacks: PreviewCallbacks,
     options: SubmitOptions = {}
   ): Promise<boolean> {
     const sourceCount = editSourceCount(editSource);
@@ -313,7 +403,23 @@ function createPreviewStore() {
     lastAction = 'edit';
     lastApiPresetId = options.apiPresetId || null;
     lastPasteBack = form.pasteBack;
-    set({ ...makeQueuedPreview(body.prompt, 'edit'), compareSource: comparisonSourceForEdit(editSource) });
+
+    // Editing keeps its single-result interaction: it starts a fresh group.
+    callbacks.releaseJobs?.();
+    nextGroup();
+    const submission = createSubmission({
+      id: nextSubmissionId(),
+      operation: 'edit',
+      prompt: body.prompt,
+      // The backend accepts n>1 for edits too, so reserve the requested units:
+      // hardcoding 1 drops every extra streamed frame and ends the loading
+      // state as soon as the first image lands.
+      expectedUnits: body.n ?? 1,
+      compareSource: comparisonSourceForEdit(editSource)
+    });
+    group = appendSubmission(group, submission);
+    publish();
+    const epoch = groupEpoch;
 
     const formData = new FormData();
     Object.entries(body).forEach(([key, value]) => {
@@ -341,7 +447,7 @@ function createPreviewStore() {
     }
 
     try {
-      const job = await apiFetch<GenerateJobResponse>(
+      const response = await apiFetch<GenerateJobResponse>(
         endpoint,
         {
           method: 'POST',
@@ -349,11 +455,16 @@ function createPreviewStore() {
         },
         'starting image edit'
       );
-      trackJob(job.job_id);
-      if (loadJobs) await loadJobs();
+      if (epoch !== groupEpoch) return true;
+      attachJob(submission.id, response, body);
+      callbacks.trackJob(response.job_id);
+      if (callbacks.loadJobs) await callbacks.loadJobs();
       return true;
     } catch (error) {
-      setSubmissionError(error);
+      if (epoch !== groupEpoch) return false;
+      const message = error instanceof Error ? error.message : get(t).messages.requestFailed;
+      group = failSubmission(group, submission.id, message);
+      publish();
       return false;
     }
   }
@@ -386,15 +497,19 @@ function createPreviewStore() {
 
   function cleanup() {
     editSourceStore.cleanup();
-    set(initialPreviewState);
+    nextGroup();
+    publish();
   }
 
   return {
     subscribe,
-    setPreview,
     setError,
     clearPreview,
+    openJob,
+    selectSlot,
+    applyJob,
     applyPreviewEvent,
+    failJobTracking,
     generateImage,
     editImage,
     regenerate,
@@ -403,3 +518,7 @@ function createPreviewStore() {
 }
 
 export const previewStore = createPreviewStore();
+
+/** Exposed for tests: the pure slot derivation lives in previewGroup.ts. */
+export { derivePreviewView, normalizeUnitCount };
+export type { PreviewGroup, PreviewSubmission, PreviewView };

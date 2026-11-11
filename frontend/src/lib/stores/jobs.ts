@@ -1,30 +1,17 @@
 import { get, writable } from 'svelte/store';
-import { ApiError, apiFetch } from '$lib/api/client';
-import { openJsonEventSource } from '$lib/api/events';
-import { t } from '$lib/i18n';
-import { filenameFromImageUrl, jobFailureMessage } from '$lib/utils/format';
-import { isPageVisible } from '$lib/utils/network';
-import { isActiveJobStatus } from '$lib/utils/jobs';
+import { apiFetch } from '$lib/api/client';
 import { observeJobStatusChange } from '$lib/utils/completionNotifications';
-import type { GeneratePreviewEvent, GenerateJobResponse, GenerateJobStatus } from '$lib/api/types/jobs';
-import type { PreviewState } from '$lib/stores/preview';
+import type { GeneratePreviewEvent, GenerateJobStatus } from '$lib/api/types/jobs';
 import { createJobsFeedController } from './jobsFeed';
 import { HISTORY_PAGE_SIZE, initialJobsState, mergeHistoryJobs, sameJobList, sameStringSet, type JobsState } from './jobsState';
+import { createTrackedJobsController } from './trackedJobs';
 
 export type { JobsState } from './jobsState';
 
 function createJobsStore() {
   const { subscribe, update } = writable<JobsState>(initialJobsState);
   let state = initialJobsState;
-  let activeJobSource: EventSource | null = null;
-  let activeJobFeedHealthy = false;
-  let activeJobPollingTimer: ReturnType<typeof setTimeout> | null = null;
-  const activeJobPollsInFlight = new Set<number>();
-  let trackedJobId: string | null = null;
-  let trackedJobUpdate: ((job: GenerateJobStatus) => Promise<void>) | null = null;
-  let trackedJobError: ((message: string) => void) | null = null;
-  let trackedJobPreview: ((event: GeneratePreviewEvent) => void) | null = null;
-  let trackedJobGeneration = 0;
+  const trackedJobs = createTrackedJobsController();
   let historyRequestSeq = 0;
 
   subscribe((value) => {
@@ -35,8 +22,8 @@ function createJobsStore() {
     // Observe every status sighting for completion notifications; the first
     // snapshot only primes the tracking (see observeJobStatusChange).
     jobs.forEach((job) => observeJobStatusChange(job));
-    const trackedJob = trackedJobId ? jobs.find((job) => job.job_id === trackedJobId) : null;
-    if (trackedJob) applyTrackedJob(trackedJob);
+    // Every tracked job (not just one) converges from an accepted snapshot.
+    jobs.forEach((job) => trackedJobs.applyFromFeed(job));
     const activeIds = new Set(jobs.map((job) => job.job_id));
     const selectedIds = new Set([...state.selectedIds].filter((id) => activeIds.has(id)));
     update((current) => {
@@ -50,10 +37,10 @@ function createJobsStore() {
     onJob: (job) => {
       // Global events include jobs this tab never tracked.
       observeJobStatusChange(job);
-      void applyTrackedJob(job);
+      trackedJobs.applyFromFeed(job);
     },
     onVisible: () => {
-      if (!activeJobFeedHealthy) startTrackedJobPolling();
+      trackedJobs.resumePolling();
     }
   });
   const loadJobs = jobsFeed.load;
@@ -195,187 +182,33 @@ function createJobsStore() {
 
   function trackJob(
     jobId: string,
-    updatePreviewFromJob: (job: GenerateJobStatus) => Promise<void>,
+    updatePreviewFromJob: (job: GenerateJobStatus) => void | Promise<void>,
     setPreviewError: (message: string) => void,
     onPreview?: (event: GeneratePreviewEvent) => void
   ) {
     if (!jobId) return;
     jobsFeed.activate();
-    closeActiveJobSource();
-    trackedJobId = jobId;
-    trackedJobUpdate = updatePreviewFromJob;
-    trackedJobError = setPreviewError;
-    trackedJobPreview = onPreview || null;
-    const generation = trackedJobGeneration;
-    const source = openJsonEventSource<GenerateJobStatus | GeneratePreviewEvent>(
-      `/api/generate/${encodeURIComponent(jobId)}/events`,
-      {
-        onEvent: ({ event, data }) => {
-          if (activeJobSource !== source || trackedJobId !== jobId || trackedJobGeneration !== generation) return;
-          if (event === 'preview') {
-            const previewEvent = data as GeneratePreviewEvent;
-            if (previewEvent.job_id !== jobId) return;
-            trackedJobPreview?.(previewEvent);
-            return;
-          }
-          const jobData = data as GenerateJobStatus;
-          if (jobData.job_id !== jobId) return;
-          activeJobFeedHealthy = true;
-          clearActiveJobPollingTimer();
-          void applyTrackedJob(jobData);
-        },
-        onNetworkError: () => {
-          if (activeJobSource !== source || trackedJobId !== jobId || trackedJobGeneration !== generation) return;
-          activeJobFeedHealthy = false;
-          startTrackedJobPolling();
-        },
-        onError: () => {
-          if (activeJobSource !== source || trackedJobId !== jobId || trackedJobGeneration !== generation) return;
-          closeActiveJobEventSource();
-          startTrackedJobPolling();
-        }
-      },
-      ['job', 'preview']
-    );
-    activeJobSource = source;
+    // Tracking is per job: a new job never closes an in-flight job's stream.
+    trackedJobs.track(jobId, {
+      onJob: updatePreviewFromJob,
+      onError: setPreviewError,
+      onPreview
+    });
   }
 
-  async function applyTrackedJob(job: GenerateJobStatus) {
-    if (trackedJobId !== job.job_id || !trackedJobUpdate) return;
-    observeJobStatusChange(job);
-    const generation = trackedJobGeneration;
-    const updatePreviewFromJob = trackedJobUpdate;
-    await updatePreviewFromJob(job);
-    if (
-      trackedJobId === job.job_id &&
-      trackedJobGeneration === generation &&
-      !isActiveJobStatus(job.status)
-    ) closeActiveJobSource();
+  /** Stop tracking one job (its own resources only). */
+  function untrackJob(jobId: string) {
+    trackedJobs.release(jobId);
   }
 
-  function startTrackedJobPolling() {
-    if (
-      !trackedJobId ||
-      !trackedJobUpdate ||
-      !trackedJobError ||
-      activeJobPollingTimer ||
-      activeJobPollsInFlight.has(trackedJobGeneration)
-    ) return;
-    void pollJob(trackedJobId, trackedJobGeneration);
-  }
-
-  function scheduleTrackedJobPoll(jobId: string, generation: number) {
-    if (activeJobPollingTimer || trackedJobId !== jobId || trackedJobGeneration !== generation) return;
-    if (!isPageVisible()) return;
-    activeJobPollingTimer = setTimeout(() => {
-      activeJobPollingTimer = null;
-      if (trackedJobId === jobId && trackedJobGeneration === generation) void pollJob(jobId, generation);
-    }, 1200);
-  }
-
-  async function pollJob(jobId: string, generation: number) {
-    if (
-      trackedJobId !== jobId ||
-      trackedJobGeneration !== generation ||
-      activeJobPollsInFlight.has(generation)
-    ) return;
-    if (!isPageVisible()) return;
-    clearActiveJobPollingTimer();
-    activeJobPollsInFlight.add(generation);
-    try {
-      const job = await apiFetch<GenerateJobStatus>(`/api/generate/${encodeURIComponent(jobId)}`, {}, 'loading job');
-      if (trackedJobId !== jobId || trackedJobGeneration !== generation || !trackedJobUpdate) return;
-      await applyTrackedJob(job);
-      if (trackedJobId !== jobId || trackedJobGeneration !== generation) return;
-      if (isActiveJobStatus(job.status)) {
-        if (!activeJobFeedHealthy) scheduleTrackedJobPoll(jobId, generation);
-      } else {
-        closeActiveJobSource();
-      }
-    } catch (error) {
-      if (trackedJobId !== jobId || trackedJobGeneration !== generation) return;
-      const permanentError = error instanceof ApiError && error.status >= 400 && error.status < 500 && ![408, 429].includes(error.status);
-      if (permanentError) {
-        trackedJobError?.(error.message || get(t).messages.jobLoadFailed);
-        closeActiveJobSource();
-      } else {
-        scheduleTrackedJobPoll(jobId, generation);
-      }
-    } finally {
-      activeJobPollsInFlight.delete(generation);
-    }
-  }
-
-  function makeQueuedPreview(currentPrompt: string, operation: NonNullable<GenerateJobResponse['operation']>): PreviewState {
-    closeActiveJobSource();
-    return {
-      loading: true,
-      error: '',
-      imageUrl: '',
-      filename: '',
-      prompt: currentPrompt,
-      streamingPreviews: {},
-      compareSource: null,
-      job: {
-        job_id: '',
-        status: 'queued',
-        stage: 'queued',
-        message: operation === 'edit' ? get(t).messages.queuedEdit : get(t).messages.queuedGeneration,
-        operation
-      }
-    };
-  }
-
-  function previewFromJob(job: GenerateJobStatus, preview: PreviewState): PreviewState {
-    const primaryImage = job.images?.[0];
-    const image = primaryImage?.image_url || job.image_url || '';
-    const active = isActiveJobStatus(job.status);
-    return {
-      loading: active,
-      error: jobFailureMessage(job, get(t).messages.jobFailed),
-      job,
-      imageUrl: image || preview.imageUrl,
-      filename: primaryImage?.filename || (image ? filenameFromImageUrl(image) : preview.filename),
-      prompt: job.prompt || preview.prompt,
-      // The final image always wins over a streamed partial; once it lands,
-      // drop the streaming previews so PreviewPanel switches to the real
-      // images. A failed job never gets one, so release its (potentially
-      // large) data URLs too.
-      streamingPreviews: !active ? {} : Object.fromEntries(
-        Object.entries(preview.streamingPreviews).filter(([key, slot]) =>
-          !job.images?.some((result) => result.unit_index === (slot.unitIndex ?? Number(key.split(':')[0]))) &&
-          (!job.unit_statuses?.[slot.unitIndex ?? key.split(':')[0]] ||
-            isActiveJobStatus(job.unit_statuses[slot.unitIndex ?? key.split(':')[0]] as GenerateJobStatus['status']))
-        )
-      ),
-      compareSource: preview.compareSource
-    };
-  }
-
-  function clearActiveJobPollingTimer() {
-    if (activeJobPollingTimer) clearTimeout(activeJobPollingTimer);
-    activeJobPollingTimer = null;
-  }
-
-  function closeActiveJobEventSource() {
-    activeJobSource?.close();
-    activeJobSource = null;
-    activeJobFeedHealthy = false;
-  }
-
+  /** Stop tracking every job: clear, group replacement and cleanup. */
   function closeActiveJobSource() {
-    trackedJobGeneration += 1;
-    closeActiveJobEventSource();
-    clearActiveJobPollingTimer();
-    trackedJobId = null;
-    trackedJobUpdate = null;
-    trackedJobError = null;
-    trackedJobPreview = null;
+    trackedJobs.releaseAll();
   }
 
   function cleanup() {
     jobsFeed.dispose();
-    closeActiveJobSource();
+    trackedJobs.releaseAll();
     historyRequestSeq += 1;
   }
 
@@ -394,8 +227,7 @@ function createJobsStore() {
     toggleAll,
     cancelSelected,
     trackJob,
-    makeQueuedPreview,
-    previewFromJob,
+    untrackJob,
     closeActiveJobSource,
     cleanup
   };
