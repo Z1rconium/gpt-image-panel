@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.9.4
+
+- Generate continuously: repeated Generate clicks now append to one preview group instead of replacing the previous result, so earlier requests keep their place while new ones are in flight.
+- Track every running job independently, with per-job streams, fallback polling and error isolation instead of a single tracked job.
+- Keep the preview stable as results arrive: slots are identified by submission, unit and result rather than array position, the first automatic selection is kept when a later submission finishes, and a failed or cancelled unit stops loading immediately while its siblings keep generating.
+- Multi-image edits reserve every requested unit, so streamed frames and loading feedback are no longer dropped after the first image.
+
 ## v1.9.3
 
 - Add persistent reference asset packs with ordered gallery collections, multi-image edit references, Agent `@alias` mentions, and archive export and import.
