@@ -154,3 +154,33 @@ describe('multi-image edit preview', () => {
     expect(view.completedCount).toBe(1);
   });
 });
+
+describe('edit tracking ownership', () => {
+  it('releases only the jobs it replaces, so a running generation keeps streaming', async () => {
+    const trackJob = vi.fn();
+    const releaseJobs = vi.fn();
+    const releaseJob = vi.fn();
+    apiFetchMock.mockResolvedValueOnce({ job_id: 'job-gen', status: 'queued', stage: 'queued', operation: 'generation' } as never);
+    await previewStore.generateImage(
+      { ...initialPromptFormState, prompt: 'generate first' },
+      { trackJob, releaseJobs, releaseJob }
+    );
+    expect(trackJob).toHaveBeenCalledWith('job-gen');
+    // The previous test left its edit result in the group; the first generation
+    // after an edit starts a fresh group and releases every tracked job.
+    expect(releaseJobs).toHaveBeenCalledTimes(1);
+    releaseJobs.mockClear();
+
+    editSourceStore.addFiles([makeFile('source.png')], () => {});
+    apiFetchMock.mockResolvedValueOnce({ job_id: 'job-edit', status: 'queued', stage: 'queued', operation: 'edit' } as never);
+    await previewStore.editImage(
+      { ...initialPromptFormState, prompt: 'make it blue' },
+      get(editSourceStore),
+      { trackJob, releaseJobs, releaseJob }
+    );
+
+    expect(releaseJob.mock.calls).toEqual([['job-gen']]);
+    expect(releaseJobs.mock.calls.length).toBe(0);
+    expect(trackJob).toHaveBeenLastCalledWith('job-edit');
+  });
+});

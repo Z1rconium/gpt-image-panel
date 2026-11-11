@@ -623,6 +623,7 @@
   const previewCallbacks = {
     trackJob,
     releaseJobs: () => jobsStore.closeActiveJobSource(),
+    releaseJob: (jobId: string) => jobsStore.untrackJob(jobId),
     get loadJobs() {
       return jobsStore.shouldRefreshJobsAfterSubmit() ? jobsStore.loadJobs : undefined;
     }

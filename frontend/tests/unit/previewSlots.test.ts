@@ -87,4 +87,20 @@ describe('preview store streaming slots', () => {
     expect(get(previewStore).completedSlots).toHaveLength(1);
     expect(get(previewStore).pendingSlots).toEqual([]);
   });
+
+  it('shows a legacy single-image job instead of leaving its slot waiting', () => {
+    previewStore.openJob(runningJob({ n: 1, streaming: false }));
+    previewStore.applyJob({
+      job_id: 'job-1',
+      status: 'success',
+      n: 1,
+      prompt: 'test',
+      image_id: 'legacy',
+      image_url: '/api/image/legacy.png'
+    });
+    const view = get(previewStore);
+    expect(view.completedCount).toBe(1);
+    expect(view.imageUrl).toBe('/api/image/legacy.png');
+    expect(view.slots.map((slot) => [slot.unitIndex, slot.resultIndex, slot.status])).toEqual([[0, 0, 'success']]);
+  });
 });

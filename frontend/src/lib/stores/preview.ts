@@ -72,11 +72,16 @@ export type SubmitOptions = {
   apiPresetId?: string | null;
 };
 
-/** Tracker wiring supplied by the workspace; identity is the job id. */
+/** Trackers released when an edit starts its own group. */
 export type PreviewCallbacks = {
   trackJob: (jobId: string) => void;
-  /** Release every tracked job (clear, group replacement, cleanup). */
+  /** Release every tracked job (clear, cleanup, explicit group replacement). */
   releaseJobs?: () => void;
+  /**
+   * Release one tracked job. An edit starts its own group but must not stop a
+   * generation that is still running, so it releases only the jobs it replaces.
+   */
+  releaseJob?: (jobId: string) => void;
   loadJobs?: () => Promise<void>;
 };
 
@@ -285,11 +290,9 @@ function createPreviewStore() {
   function failJobTracking(jobId: string, message: string) {
     const submission = findSubmissionByJobId(group, jobId);
     if (!submission) return;
-    group = replaceSubmission(group, submission.id, (current) => ({
-      ...current,
-      error: message,
-      job: current.job ? { ...current.job, status: 'error', error: message, message } : current.job
-    }));
+    // Only the submission's own error is set: its slots report the failure
+    // through `submitStatus`, so the job's real status is never overwritten.
+    group = failSubmission(group, submission.id, message);
     publish();
   }
 
@@ -405,7 +408,15 @@ function createPreviewStore() {
     lastPasteBack = form.pasteBack;
 
     // Editing keeps its single-result interaction: it starts a fresh group.
-    callbacks.releaseJobs?.();
+    // Only the jobs this group replaces are released; a generation submitted
+    // moments earlier keeps streaming (and stays in the running list).
+    if (callbacks.releaseJob) {
+      group.submissions.forEach((entry) => {
+        if (entry.jobId) callbacks.releaseJob?.(entry.jobId);
+      });
+    } else {
+      callbacks.releaseJobs?.();
+    }
     nextGroup();
     const submission = createSubmission({
       id: nextSubmissionId(),

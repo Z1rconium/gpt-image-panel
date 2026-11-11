@@ -446,7 +446,6 @@ html.dark input::placeholder {
   flex-shrink: 0;
 }
 
-
 @keyframes spin {
   to {
     transform: rotate(360deg);

@@ -217,6 +217,8 @@ function pendingSlotStatus(submission: PreviewSubmission, unitIndex: number): Pr
 
 function slotsForSubmission(submission: PreviewSubmission): PreviewSlot[] {
   const job = submission.job;
+  // Legacy single-image payloads carry only `image_url`; keep that fallback
+  // reachable so such a job still shows its result instead of a stuck slot.
   const images = normalizeJobImages(job, job?.image_url || '', '');
   // The request snapshot reserves the slots. A job that reports more results
   // than that still shows them (see the loop below); a job that reports fewer
@@ -231,6 +233,9 @@ function slotsForSubmission(submission: PreviewSubmission): PreviewSlot[] {
     bucket.push(image);
     byUnit.set(unitIndex, bucket);
   });
+  // A legacy fallback image has no result identity of its own; it is the
+  // unit's only result, so it takes result 0 rather than its array position.
+  const legacyFallback = !job?.images?.length && images.length === 1;
 
   const slots: PreviewSlot[] = [];
   const pushUnit = (unitIndex: number) => {
@@ -240,7 +245,7 @@ function slotsForSubmission(submission: PreviewSubmission): PreviewSlot[] {
         // The slot id is the unit/result identity the backend reported, never
         // the position in the response array: units finish out of order, so
         // array position would move an image into another unit's slot.
-        const resultIndex = resultIndexOf(image, bucketIndex);
+        const resultIndex = legacyFallback ? 0 : resultIndexOf(image, bucketIndex);
         slots.push({
           id: `${submission.id}:u${unitIndex}:r${resultIndex}`,
           submissionId: submission.id,

@@ -157,6 +157,10 @@ test('two requests of n=2 reserve four slots in submission order', async ({ page
 
   const prompt = page.getByRole('textbox', { name: 'Prompt', exact: true });
   const generate = page.getByRole('button', { name: 'Generate', exact: true });
+  const bodies: number[] = [];
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && new URL(request.url()).pathname === '/api/generate') bodies.push(request.postDataJSON().n);
+  });
   await prompt.fill('four slots prompt');
   await page.getByLabel('Quantity').fill('2');
   await generate.click();
@@ -165,11 +169,7 @@ test('two requests of n=2 reserve four slots in submission order', async ({ page
   const preview = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Preview' }) });
   await expect(preview.locator('[data-slot-status="waiting"]')).toHaveCount(4);
   // Both POSTs carried the snapshot quantity.
-  const bodies: number[] = [];
-  page.on('request', (request) => {
-    if (request.method() === 'POST' && new URL(request.url()).pathname === '/api/generate') bodies.push(request.postDataJSON().n);
-  });
-  await expect(preview.getByRole('status')).toBeVisible();
+  await expect.poll(() => bodies).toEqual([2, 2]);
 });
 
 test('a failed submission stops its own slot without removing another job\'s image', async ({ page }) => {
