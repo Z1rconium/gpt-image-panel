@@ -1,3 +1,0 @@
-{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Svelte 5 runes, dialog patterns, and modal accessibility"}
-{"file": ".trellis/spec/frontend/state-management.md", "reason": "Store updates, optimistic UI, and error handling"}
-{"file": ".trellis/spec/frontend/forms-and-api.md", "reason": "API fetching and conflict handling"}

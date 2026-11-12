@@ -54,3 +54,16 @@ test-results
 
 # Local review artifacts
 /reviews/
+
+# Local agent tooling and workflow state (not project source)
+/.trellis/
+/.agents/
+/.opencode/
+/skills-lock.json
+/.local-backups/
+
+# Third-party checkout, not part of this project
+/gpt-with-taste/
+
+# Trellis merge driver config (local tooling)
+/.gitattributes

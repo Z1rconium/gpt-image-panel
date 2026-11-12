@@ -1,7 +1,0 @@
-{"file": ".trellis/spec/backend/index.md", "reason": "Backend boundaries"}
-{"file": ".trellis/spec/backend/api-routes.md", "reason": "FastAPI contracts and strict requests"}
-{"file": ".trellis/spec/backend/testing.md", "reason": "Backend isolated tests"}
-{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend conventions"}
-{"file": ".trellis/spec/frontend/forms-and-api.md", "reason": "Shared form reuse, APIs and i18n"}
-{"file": ".trellis/spec/frontend/jobs-lifecycle.md", "reason": "SSE and job lifecycle"}
-{"file": ".trellis/tasks/11-05-gpt-image-26/research/official-api.md", "reason": "Verified model and wire constraints"}

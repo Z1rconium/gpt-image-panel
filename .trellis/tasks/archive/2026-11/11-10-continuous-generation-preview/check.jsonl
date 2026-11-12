@@ -1,2 +1,0 @@
-{"file": ".trellis/spec/frontend/jobs-lifecycle.md", "reason": "Preserve feed ownership, epochs, polling and cleanup contracts while enabling multiple tracked jobs."}
-{"file": ".trellis/spec/frontend/forms-and-api.md", "reason": "Preserve API client, form reuse, edit-source and localization contracts."}

@@ -1,3 +1,0 @@
-{"file": ".trellis/spec/backend/index.md", "reason": "Backend guidelines entrypoint"}
-{"file": ".trellis/spec/backend/db-execution.md", "reason": "DB execution and run_db_operation policy"}
-{"file": ".trellis/spec/backend/image-generation.md", "reason": "Image formats and admission rules (SVG/GIF rules)"}
