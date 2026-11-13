@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.9.5
+
+- Isolate edit preview tracking and preserve legacy single-image payloads cleanly across preview group updates.
+- Surface backend job failures across sibling submissions in continuous generation groups instead of hiding errors behind an already selected result.
+- Restore full-size single-image loading/streaming preview presentation in `PreviewPanel` and report the pending job's stage rather than the selected completed slot's stage.
+- Include full member item ordering in collection reference responses so asset packs containing SVG or GIF entries can be reordered without HTTP 422, trim `asset_alias` whitespace before enforcing its length limit, guard `AssetPackPickerDialog` against out-of-order loads, and prevent `Escape` in inline alias editing from closing `CollectionsDialog`.
+- Clean up staged `mask` and `markup` temp files when early edit validation fails, disallow Markup controls when only bare `gallery_reference` sources are selected, prune deleted gallery references from edit sources, support comparison for masked gallery reference edits, and preserve `complexity`, `frame_count`, `frame_duration_ms`, and `safety_identifier` on `regenerate()`.
+
 ## v1.9.4
 
 - Generate continuously: repeated Generate clicks now append to one preview group instead of replacing the previous result, so earlier requests keep their place while new ones are in flight.
