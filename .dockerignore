@@ -8,6 +8,7 @@ frontend/.svelte-kit/
 frontend/build/
 frontend/test-results/
 frontend/playwright-report/
+frontend/.playwright-browsers/
 .venv/
 .pytest_cache/
 data/

@@ -50,6 +50,8 @@ AGENTS.md
 /MASK_RETRY_ACCEPTANCE_*.md
 
 test-results
+playwright-report/
+/frontend/.playwright-browsers/
 .commandcode
 
 # Local review artifacts

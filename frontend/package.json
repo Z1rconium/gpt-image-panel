@@ -12,10 +12,11 @@
     "check:worker-build": "node scripts/check-worker-build.mjs",
     "test:unit": "vitest run",
     "test:unit:watch": "vitest",
-    "test:e2e": "playwright test",
-    "test:e2e:production": "playwright test --config playwright.production-e2e.config.ts",
-    "test:e2e:perf": "RUN_PERFORMANCE_TESTS=true playwright test",
-    "test:perf:production": "playwright test --config playwright.perf.config.ts"
+    "test:e2e:install": "node scripts/run-playwright.mjs install chromium",
+    "test:e2e": "node scripts/run-playwright.mjs test",
+    "test:e2e:production": "node scripts/run-playwright.mjs test --config playwright.production-e2e.config.ts",
+    "test:e2e:perf": "RUN_PERFORMANCE_TESTS=true node scripts/run-playwright.mjs test",
+    "test:perf:production": "node scripts/run-playwright.mjs test --config playwright.perf.config.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0",
