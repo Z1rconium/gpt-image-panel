@@ -27,7 +27,7 @@
   import { accessStore } from '$lib/stores/access';
   import { assistantStore, isAbortError } from '$lib/stores/assistant';
   import { confirmStore } from '$lib/stores/confirm';
-  import { editMarkupDiscards, editMaskDiscards, editSourceCount, editSourceStore, findEditSource, galleryPrimarySource, isMaskValid, MAX_EDIT_SOURCE_IMAGES, primaryEditSource as selectPrimaryEditSource, primaryEditSourceId, primaryRestoreSource, type EditGalleryReferenceSource, type EditMask } from '$lib/stores/editSource';
+  import { editMarkupDiscards, editMaskDiscards, editSourceCount, editSourceStore, findEditSource, isMaskValid, MAX_EDIT_SOURCE_IMAGES, primaryEditSource as selectPrimaryEditSource, primaryEditSourceId, primaryRestoreSource, type EditGalleryReferenceSource, type EditMask } from '$lib/stores/editSource';
   import { galleryActivityStore, galleryStore } from '$lib/stores/gallery';
   import { jobsStore } from '$lib/stores/jobs';
   import type { JobMaskFetch } from '$lib/features/workspace/jobMaskRestore';
@@ -118,15 +118,16 @@
   const primaryEditSource = $derived.by(() => {
     const first = selectPrimaryEditSource($editSourceStore);
     return first
-      ? { id: first.id, label: first.label || first.previewLabel, previewUrl: first.previewUrl, width: first.width, height: first.height }
+      ? { id: first.id, kind: first.kind, label: first.label || first.previewLabel, previewUrl: first.previewUrl, width: first.width, height: first.height }
       : null;
   });
   const activeEditMask = $derived(isMaskValid($editSourceStore) ? $editSourceStore.mask : null);
-  // Markup needs a 2.6 model, a primary image, and (for async providers) the
-  // provider's `markup` capability. Every entry point reads this one value.
+  const markupSupportedPrimary = $derived(Boolean(primaryEditSource && primaryEditSource.kind !== 'gallery_reference'));
+  // Markup needs a 2.6 model, an editable primary image (upload or gallery primary,
+  // never a bare reference), and (for async providers) the provider's `markup` capability.
   const markupAvailable = $derived(
     isImage26(promptForm.model) &&
-      Boolean(primaryEditSource) &&
+      markupSupportedPrimary &&
       ($settingsStore.settings?.provider_kind !== 'async_json' || Boolean($settingsStore.settings?.provider_capabilities?.markup))
   );
   $effect(() => {
@@ -1122,14 +1123,17 @@
     });
   }
 
+  function syncEditSourcesAfterGalleryDelete(deletedIds?: string[]) {
+    editSourceStore.removeGallerySourcesByImageIds(deletedIds);
+    if (editPreviewUrl && !$editSourceStore.sources.some((source) => source.previewUrl === editPreviewUrl)) {
+      closeEditPreview();
+    }
+  }
+
   async function batchDeleteGallery() {
     await galleryStore.batchDelete(showToast, (ids) => {
       if ($lightboxStore.image && ids.includes($lightboxStore.image.id)) closeLightbox();
-      const galleryPrimary = galleryPrimarySource($editSourceStore);
-      if (galleryPrimary && ids.includes(galleryPrimary.imageId)) {
-        editSourceStore.clearGallerySource(galleryPrimary.imageId);
-        closeEditPreview();
-      }
+      syncEditSourcesAfterGalleryDelete(ids);
     });
   }
 
@@ -1203,10 +1207,7 @@
         if ($lightboxStore.image?.id === image.id) closeLightbox();
       },
       () => {
-        if (galleryPrimarySource($editSourceStore)?.imageId === image.id) {
-          editSourceStore.clearGallerySource(image.id);
-          closeEditPreview();
-        }
+        syncEditSourcesAfterGalleryDelete([image.id]);
       }
     );
   }
@@ -1214,8 +1215,7 @@
   async function deleteAllImages() {
     await galleryStore.deleteAll(showToast, () => {
       closeLightbox();
-      editSourceStore.clearGallerySource();
-      closeEditPreview();
+      syncEditSourcesAfterGalleryDelete();
       clearPreview();
     });
   }
@@ -1773,7 +1773,7 @@
               </div>
             {/if}
           </div>
-        {:else if isImage26(promptForm.model) && primaryEditSource}
+        {:else if isImage26(promptForm.model) && markupSupportedPrimary}
           <p class="mt-2 text-sm text-stone-500">{$t.promptForm.markupUnavailable}</p>
         {/if}
       {/snippet}

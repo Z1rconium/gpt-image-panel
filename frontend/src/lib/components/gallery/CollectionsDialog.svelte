@@ -292,6 +292,7 @@
                         event.preventDefault();
                         void commitAlias(collection.id);
                       } else if (event.key === 'Escape') {
+                        event.stopPropagation();
                         cancelEditAlias();
                       }
                     }}

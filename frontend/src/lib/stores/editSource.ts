@@ -397,6 +397,12 @@ function createEditSourceStore() {
     clearGalleryReferences() {
       dropSources((item) => item.kind === 'gallery_reference');
     },
+    /** Remove every gallery source (primary and references) matching the deleted ids, or all of them when omitted. */
+    removeGallerySourcesByImageIds(imageIds?: string[]) {
+      if (imageIds && imageIds.length === 0) return;
+      const targets = imageIds ? new Set(imageIds) : null;
+      dropSources((item) => item.kind !== 'upload' && (!targets || targets.has(item.imageId)));
+    },
     // Accepts a source id, or the image id of a gallery reference.
     remove(sourceId: string) {
       const target = findEditSource(state, sourceId);

@@ -63,6 +63,7 @@ export type GalleryCollection = {
 export type GalleryCollectionReferencesResponse = {
   collection: GalleryCollection;
   images: GalleryEntry[];
+  item_ids?: string[];
   total_count: number;
   skipped_unsupported: number;
 };

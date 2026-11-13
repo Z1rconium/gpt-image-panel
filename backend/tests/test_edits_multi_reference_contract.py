@@ -322,3 +322,32 @@ def test_edit_mask_preserved_with_multiple_references(client, monkeypatch):
     assert job["status"] == "success"
     assert seen["mask_present"] is True
     assert seen["image_sources_count"] == 2
+
+
+def test_edit_early_validation_failure_cleans_up_staged_mask_and_markup(client):
+    from pathlib import Path
+    from backend.app.core import settings as app_config
+
+    temp_dir = Path(app_config.DATA_DIR) / "edit-sources"
+    before = set(temp_dir.glob("*")) if temp_dir.exists() else set()
+
+    missing_sources_resp = client.post(
+        "/api/edits",
+        data={"prompt": "mask without sources", "model": "gpt-image-2"},
+        files={"mask": ("mask.png", _mask_png_bytes((8, 8)), "image/png")},
+    )
+    assert missing_sources_resp.status_code == 422
+
+    too_many_resp = client.post(
+        "/api/edits",
+        data={
+            "prompt": "markup with too many refs",
+            "model": "gpt-image-2.6-flare",
+            "reference_image_id": [f"missing-ref-{idx}" for idx in range(17)],
+        },
+        files={"markup": ("markup.png", _mask_png_bytes((8, 8)), "image/png")},
+    )
+    assert too_many_resp.status_code == 400
+
+    after = set(temp_dir.glob("*")) if temp_dir.exists() else set()
+    assert after == before

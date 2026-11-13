@@ -2,6 +2,7 @@
   import { t } from '$lib/i18n';
   import { galleryCollectionsStore } from '$lib/stores/galleryCollections';
   import { uiStore } from '$lib/stores/ui';
+  import { mergeReorderedSupportedIds } from '$lib/utils/collections';
   import ArrowDown from 'lucide-svelte/icons/arrow-down';
   import ArrowLeft from 'lucide-svelte/icons/arrow-left';
   import ArrowUp from 'lucide-svelte/icons/arrow-up';
@@ -17,9 +18,11 @@
   let { collection, onBack, onClose }: Props = $props();
 
   let memberImages = $state<GalleryEntry[]>([]);
+  let allItemIds = $state<string[]>([]);
   let loadingMembers = $state(false);
   let unsupportedSkipped = $state(0);
   let busy = $state(false);
+  let loadSeq = 0;
 
   $effect(() => {
     void loadMembers(collection.id);
@@ -30,18 +33,23 @@
   }
 
   async function loadMembers(id: string) {
+    const seq = ++loadSeq;
     loadingMembers = true;
     memberImages = [];
+    allItemIds = [];
     unsupportedSkipped = 0;
     try {
       const res = await galleryCollectionsStore.loadReferences(id);
+      if (seq !== loadSeq) return;
       memberImages = res.images;
+      allItemIds = res.item_ids?.length ? res.item_ids : res.images.map((img) => img.id);
       unsupportedSkipped = res.skipped_unsupported;
     } catch (e) {
+      if (seq !== loadSeq) return;
       showError(e);
       onBack();
     } finally {
-      loadingMembers = false;
+      if (seq === loadSeq) loadingMembers = false;
     }
   }
 
@@ -52,12 +60,14 @@
     const [moved] = next.splice(fromIndex, 1);
     next.splice(toIndex, 0, moved);
     memberImages = next;
+    const fullIds = mergeReorderedSupportedIds(
+      allItemIds,
+      next.map((img) => img.id)
+    );
+    allItemIds = fullIds;
     busy = true;
     try {
-      await galleryCollectionsStore.reorderItems(
-        collection.id,
-        next.map((img) => img.id)
-      );
+      await galleryCollectionsStore.reorderItems(collection.id, fullIds);
       uiStore.showToast($t.collections.itemOrderUpdated, 'status');
     } catch (e) {
       showError(e);

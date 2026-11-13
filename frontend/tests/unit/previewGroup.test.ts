@@ -362,4 +362,105 @@ describe('continuous generation submissions', () => {
     expect(view.selectedSlot?.jobId).toBe('job-history');
     expect(view.prompt).toBe('history prompt');
   });
+
+  it('surfaces backend job failures on sibling submissions when another submission is selected', async () => {
+    apiFetchMock.mockResolvedValueOnce(response('job-ok') as never);
+    await previewStore.generateImage(form('ok prompt'), { trackJob: () => {} });
+    apiFetchMock.mockResolvedValueOnce(response('job-bad') as never);
+    await previewStore.generateImage(form('bad prompt'), { trackJob: () => {} });
+
+    previewStore.applyJob(job('job-ok', {
+      status: 'success',
+      images: [{ image_id: 'ok-1', image_url: '/api/image/ok-1.png', filename: 'ok-1.png', unit_index: 0 }]
+    }));
+    previewStore.applyJob(job('job-bad', {
+      status: 'error',
+      error: 'upstream quota exceeded'
+    }));
+
+    const view = get(previewStore);
+    expect(view.selectedSlot?.jobId).toBe('job-ok');
+    expect(view.error).toBe('');
+    expect(view.submissionErrors).toEqual([
+      { id: expect.any(String), message: 'upstream quota exceeded' }
+    ]);
+  });
+
+  it('does not duplicate a single failed backend job into submissionErrors', async () => {
+    apiFetchMock.mockResolvedValueOnce(response('job-only-bad') as never);
+    await previewStore.generateImage(form('only bad'), { trackJob: () => {} });
+    previewStore.applyJob(job('job-only-bad', {
+      status: 'error',
+      error: 'single failure'
+    }));
+
+    const view = get(previewStore);
+    expect(view.error).toBe('single failure');
+    expect(view.submissionErrors).toEqual([]);
+  });
+
+  it('preserves complexity, frame options and safetyIdentifier on regenerate()', async () => {
+    apiFetchMock.mockResolvedValue(response('job-regen') as never);
+    const ok = await previewStore.generateImage(
+      {
+        ...initialPromptFormState,
+        model: 'gpt-image-2.6-flare',
+        prompt: 'animated',
+        outputFormat: 'gif',
+        complexity: 'high',
+        frameCount: 12,
+        frameDurationMs: 150,
+        safetyIdentifier: 'tenant-42'
+      },
+      { trackJob: () => {} }
+    );
+    expect(ok).toBe(true);
+
+    const captured: unknown[] = [];
+    previewStore.regenerate(
+      (next) => captured.push(next),
+      () => {},
+      () => {}
+    );
+    expect(captured[0]).toMatchObject({
+      complexity: 'high',
+      frameCount: 12,
+      frameDurationMs: 150,
+      safetyIdentifier: 'tenant-42'
+    });
+  });
+
+  it('provides a gallery comparison source for a masked gallery reference edit', async () => {
+    editSourceStore.clear();
+    editSourceStore.addGalleryReferences([
+      {
+        id: 'ref-1',
+        imageId: 'gal-ref-1',
+        filename: 'gal-ref-1.png',
+        label: 'Ref One',
+        previewUrl: '/api/image/gal-ref-1.png',
+        previewLabel: 'Ref One',
+        width: 8,
+        height: 8
+      }
+    ]);
+    editSourceStore.setMask({
+      sourceId: 'ref-1',
+      blob: new Blob([new Uint8Array([1, 2, 3])], { type: 'image/png' }),
+      width: 8,
+      height: 8,
+      coverage: 0.25,
+      previewUrl: 'blob:mask-ref',
+      origin: 'painted'
+    });
+    apiFetchMock.mockResolvedValueOnce({ ...response('job-ref-edit'), operation: 'edit' } as never);
+    const ok = await previewStore.editImage(form('masked ref edit'), get(editSourceStore), { trackJob: () => {} });
+    expect(ok).toBe(true);
+    expect(get(previewStore).compareSource).toEqual({
+      kind: 'gallery',
+      url: '/api/image/gal-ref-1.png',
+      label: 'Ref One'
+    });
+    editSourceStore.clear();
+  });
 });

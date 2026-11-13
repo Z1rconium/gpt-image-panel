@@ -308,29 +308,31 @@ async def _stage_and_queue_edit(
     *,
     gallery_primary_id: str | None = None,
 ) -> GenerateJobResponse:
-    # The mask is streamed to disk before the sources because its size decides
-    # whether an EXIF-oriented primary is rotated upright (see
-    # `validate_edit_source_file_details`); the header read for that costs
-    # nothing and the mask itself is still decoded exactly once.
-    markup = await read_upload_edit_markup(form)
-    mask = await read_upload_edit_mask(form)
-    ref_ids = extract_reference_image_ids(form)
-    raw_uploads = [
-        v
-        for k in ("image", "image[]")
-        for v in form.getlist(k)
-        if isinstance(v, StarletteUploadFile)
-    ]
-    has_gallery_primary = gallery_primary_id is not None
-    pre_validate_edit_source_count(
-        has_gallery_primary=has_gallery_primary,
-        uploads_count=len(raw_uploads),
-        reference_ids_count=len(ref_ids),
-    )
-
+    markup: EditImageSource | None = None
+    mask: EditImageSource | None = None
     sources: list[EditImageSource] = []
-    mask_dim = mask_dimensions(mask)
     try:
+        # The mask is streamed to disk before the sources because its size decides
+        # whether an EXIF-oriented primary is rotated upright (see
+        # `validate_edit_source_file_details`); the header read for that costs
+        # nothing and the mask itself is still decoded exactly once.
+        markup = await read_upload_edit_markup(form)
+        mask = await read_upload_edit_mask(form)
+        ref_ids = extract_reference_image_ids(form)
+        raw_uploads = [
+            v
+            for k in ("image", "image[]")
+            for v in form.getlist(k)
+            if isinstance(v, StarletteUploadFile)
+        ]
+        has_gallery_primary = gallery_primary_id is not None
+        pre_validate_edit_source_count(
+            has_gallery_primary=has_gallery_primary,
+            uploads_count=len(raw_uploads),
+            reference_ids_count=len(ref_ids),
+        )
+
+        mask_dim = mask_dimensions(mask)
         if has_gallery_primary:
             # Uploads here are reference images; the gallery entry is the primary
             # the mask must match, so only it gets the orientation check.

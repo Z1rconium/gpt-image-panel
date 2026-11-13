@@ -197,7 +197,7 @@ class GalleryCollectionCreateRequest(StrictRequestModel):
 class GalleryCollectionUpdateRequest(StrictRequestModel):
     name: Optional[str] = Field(default=None, max_length=200)
     is_default: Optional[bool] = None
-    asset_alias: Optional[str] = Field(default=None, max_length=32)
+    asset_alias: Optional[str] = Field(default=None, max_length=200)
 
     @field_validator("name")
     @classmethod
@@ -235,6 +235,7 @@ class GalleryCollectionItemsOrderRequest(StrictRequestModel):
 class GalleryCollectionReferencesResponse(BaseModel):
     collection: GalleryCollection
     images: list[GalleryEntry]
+    item_ids: list[str] = Field(default_factory=list)
     total_count: int
     skipped_unsupported: int
 

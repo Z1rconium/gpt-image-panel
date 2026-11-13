@@ -535,4 +535,20 @@ describe('unified sources array', () => {
     editSourceStore.setGallerySource('gal-1', 'One', 'blob:1', 'one', undefined, 8, 6, 'one.jpg');
     expect(galleryPrimary()).toMatchObject({ filename: 'one.jpg', width: 8, height: 6 });
   });
+
+  it('removeGallerySourcesByImageIds removes deleted primaries and references while preserving uploads', () => {
+    editSourceStore.setGallerySource('gal-1', 'One', 'blob:1', 'one');
+    editSourceStore.addFiles([makeFile('upload.png')], () => {});
+    editSourceStore.addGalleryReferences([ref('ref-1', 'gal-2'), ref('ref-2', 'gal-3')]);
+    editSourceStore.setMask(makeMask('gal-1', 'blob:mask'));
+
+    editSourceStore.removeGallerySourcesByImageIds(['gal-1', 'gal-2']);
+    expect(get(editSourceStore).sources.map((item) => item.kind)).toEqual(['upload', 'gallery_reference']);
+    expect(get(editSourceStore).sources[1]).toMatchObject({ imageId: 'gal-3' });
+    expect(get(editSourceStore).mask).toBeNull();
+    expect(get(editMaskDiscards)).toBe(1);
+
+    editSourceStore.removeGallerySourcesByImageIds();
+    expect(get(editSourceStore).sources.map((item) => item.kind)).toEqual(['upload']);
+  });
 });

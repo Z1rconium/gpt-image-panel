@@ -256,7 +256,21 @@ def test_gallery_collection_assets_and_references(client):
     assert refs_data["collection"]["asset_alias"] == "alice"
     assert refs_data["total_count"] == 4
     assert refs_data["skipped_unsupported"] == 2
+    assert refs_data["item_ids"] == ["ref-1", "ref-2", "ref-3", "ref-4"]
     assert [img["id"] for img in refs_data["images"]] == ["ref-1", "ref-2"]
+
+    # Alias whitespace trimming happens before enforcing the 32-character limit
+    padded_alias = "  " + ("a" * 32) + "  "
+    trimmed_resp = client.patch(
+        f"/api/gallery/collections/{album['id']}",
+        json={"asset_alias": padded_alias},
+    )
+    assert trimmed_resp.status_code == 200
+    assert trimmed_resp.json()["asset_alias"] == "a" * 32
+    assert client.patch(
+        f"/api/gallery/collections/{album['id']}",
+        json={"asset_alias": "alice"},
+    ).status_code == 200
 
     # Items order endpoint
     assert client.put("/api/gallery/collections/missing-col/items/order", json={"ids": ["ref-1"]}).status_code == 404

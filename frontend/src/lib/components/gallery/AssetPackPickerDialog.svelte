@@ -40,25 +40,31 @@
   let skippedUnsupported = $state(0);
   let loadingMembers = $state(false);
   let selectedIds = $state<Set<string>>(new Set());
+  let loadSeq = 0;
 
   $effect(() => {
     if (open) {
+      const seq = ++loadSeq;
       void galleryCollectionsStore.load(false).then(() => {
+        if (seq !== loadSeq || !open) return;
         const list = prioritizedCollections;
         if (!selectedCollectionId || !list.some((c) => c.id === selectedCollectionId)) {
           if (list.length > 0) {
-            selectCollection(list[0].id);
+            void selectCollection(list[0].id);
           }
         } else {
-          selectCollection(selectedCollectionId);
+          void selectCollection(selectedCollectionId);
         }
       });
     } else {
+      loadSeq += 1;
+      loadingMembers = false;
       selectedIds = new Set();
     }
   });
 
   async function selectCollection(id: string) {
+    const seq = ++loadSeq;
     selectedCollectionId = id;
     loadingMembers = true;
     memberImages = [];
@@ -67,14 +73,16 @@
 
     try {
       const res = await galleryCollectionsStore.loadReferences(id);
+      if (seq !== loadSeq) return;
       memberImages = res.images;
       skippedUnsupported = res.skipped_unsupported;
       // Pre-select all available references by default
       selectedIds = new Set(res.images.map((img) => img.id));
     } catch (e) {
+      if (seq !== loadSeq) return;
       uiStore.showToast(e instanceof Error ? e.message : $t.messages.requestFailed, 'error');
     } finally {
-      loadingMembers = false;
+      if (seq === loadSeq) loadingMembers = false;
     }
   }
 

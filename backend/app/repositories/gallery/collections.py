@@ -391,6 +391,7 @@ def list_collection_reference_entries(collection_id: str) -> dict[str, Any] | No
     return {
         "collection": collection,
         "images": valid_entries,
+        "item_ids": ordered_ids,
         "total_count": len(ordered_ids),
         "skipped_unsupported": skipped_unsupported,
     }

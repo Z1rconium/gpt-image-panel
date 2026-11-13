@@ -4,7 +4,7 @@
  * ordering, de-duplication and error-isolation rules stay unit-testable.
  */
 import type { GenerateJobImage, GenerateJobStatus, GeneratePreviewEvent } from '$lib/api/types/jobs';
-import { filenameFromImageUrl, isGifFilename, thumbnailUrl } from '$lib/utils/format';
+import { filenameFromImageUrl, isGifFilename, jobFailureMessage, thumbnailUrl } from '$lib/utils/format';
 import { isActiveJobStatus } from '$lib/utils/jobs';
 
 /** Latest streamed partial image for one task unit (keyed by unit_index). */
@@ -324,7 +324,7 @@ export function adoptSelection(group: PreviewGroup, view: PreviewView): PreviewG
   return selectedId ? { ...group, selectedSlotId: selectedId } : group;
 }
 
-export function derivePreviewView(group: PreviewGroup, error = ''): PreviewView {
+export function derivePreviewView(group: PreviewGroup, error = '', jobFallbackError = ''): PreviewView {
   const slots = derivePreviewSlots(group);
   const completedSlots = slots.filter((slot) => slot.status === 'success' && slot.image);
   const pendingSlots = slots.filter((slot) => slot.status === 'waiting' || slot.status === 'streaming');
@@ -335,9 +335,16 @@ export function derivePreviewView(group: PreviewGroup, error = ''): PreviewView 
     : null;
   const job = selectedSlot?.job || latestSubmission?.job || null;
   const loading = pendingSlots.length > 0 || group.submissions.some((submission) => submission.submitStatus === 'submitting');
-  const submissionErrors = group.submissions
-    .filter((submission) => Boolean(submission.error))
-    .map((submission) => ({ id: submission.id, message: submission.error }));
+  // Include backend job failures on sibling/unselected submissions so a running
+  // or completed earlier click never silently hides a later job failure.
+  const submissionErrors = group.submissions.flatMap((submission) => {
+    if (submission.error) return [{ id: submission.id, message: submission.error }];
+    if (submission.job && submission.job.job_id !== job?.job_id) {
+      const failure = jobFailureMessage(submission.job, jobFallbackError);
+      if (failure) return [{ id: submission.id, message: failure }];
+    }
+    return [];
+  });
   return {
     slots,
     completedSlots,

@@ -33,6 +33,9 @@
   const activeJobId = $derived(view.job?.job_id || '');
   const hasFinalImage = $derived(view.hasFinalImage);
   const showStreamingGrid = $derived(!hasFinalImage && slots.length > 1);
+  const activePendingJob = $derived(pendingSlots.find((slot) => slot.job)?.job || null);
+  const isStreamingPending = $derived(pendingSlots.some((slot) => slot.status === 'streaming') || Boolean(activePendingJob?.streaming));
+  const singlePendingSlot = $derived(slots[0] || null);
 
   let loadedPreviewSrc = $state('');
   let failedPreviewSrc = $state('');
@@ -199,19 +202,28 @@
     </div>
   {/each}
 
+  {#snippet loadingBanner()}
+    <div class="flex min-w-0 items-center gap-3 border-b border-stone-200 bg-white/80 px-4 py-3 dark:border-zinc-800 dark:bg-zinc-900/80" role="status" aria-live="polite" aria-atomic="true">
+      <span class="spinner shrink-0"></span>
+      <div class="min-w-0 flex-1">
+        {#if isStreamingPending}
+          <p class="truncate text-sm font-semibold text-stone-900 dark:text-zinc-100">{$t.preview.streamingPreviewLabel}</p>
+          <p class="mt-0.5 text-xs text-stone-500 dark:text-zinc-400">{stageLabel(activePendingJob, $t.stages) || $t.preview.working}</p>
+        {:else}
+          <p class="truncate text-sm font-semibold text-stone-900 dark:text-zinc-100">{stageLabel(activePendingJob, $t.stages) || $t.preview.working}</p>
+          <p class="mt-0.5 text-xs text-stone-500 dark:text-zinc-400">{statusLabel(activePendingJob?.status, $t.statuses) || $t.preview.queued}</p>
+        {/if}
+      </div>
+    </div>
+  {/snippet}
+
   <div
     class={`preview-well mt-4 flex min-h-[360px] items-center justify-center overflow-hidden rounded-xl border border-stone-200 dark:border-zinc-800 ${selectedImageUrl || pendingSlots.length ? 'bg-stone-100 dark:bg-zinc-950' : 'preview-empty'}`}
     data-seated={seated}
   >
     {#if showStreamingGrid}
       <div class="flex h-full w-full flex-col">
-        <div class="flex min-w-0 items-center gap-3 border-b border-stone-200 bg-white/80 px-4 py-3 dark:border-zinc-800 dark:bg-zinc-900/80" role="status" aria-live="polite" aria-atomic="true">
-          <span class="spinner shrink-0"></span>
-          <div class="min-w-0 flex-1">
-            <p class="truncate text-sm font-semibold text-stone-900 dark:text-zinc-100">{$t.preview.streamingPreviewLabel}</p>
-            <p class="mt-0.5 text-xs text-stone-500 dark:text-zinc-400">{stageLabel(selectedJob, $t.stages) || $t.preview.working}</p>
-          </div>
-        </div>
+        {@render loadingBanner()}
         <div class="grid flex-1 grid-cols-2 content-start gap-3 overflow-y-auto p-3 lg:grid-cols-3">
           {#each slots as slot, slotIndex (slot.id)}
             {@const unitStatus = slot.job?.unit_statuses?.[String(slot.unitIndex)]}
@@ -241,13 +253,7 @@
     {:else if selectedImageUrl}
       <div class="flex h-full w-full flex-col">
         {#if loading}
-          <div class="flex min-w-0 items-center gap-3 border-b border-stone-200 bg-white/80 px-4 py-3 dark:border-zinc-800 dark:bg-zinc-900/80" role="status" aria-live="polite" aria-atomic="true">
-            <span class="spinner shrink-0"></span>
-            <div class="min-w-0 flex-1">
-              <p class="truncate text-sm font-semibold text-stone-900 dark:text-zinc-100">{$t.preview.streamingPreviewLabel}</p>
-              <p class="mt-0.5 text-xs text-stone-500 dark:text-zinc-400">{stageLabel(job, $t.stages) || $t.preview.working}</p>
-            </div>
-          </div>
+          {@render loadingBanner()}
         {/if}
         {#if compareUrl && seated && selectedJob?.operation === 'edit'}
           <div class="flex justify-end border-b border-stone-200 bg-white/80 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900/80">
@@ -373,30 +379,27 @@
           </div>
         {/if}
       </div>
-    {:else if loading}
-      <div class="flex h-full w-full flex-col">
-        <div class="flex min-w-0 items-center gap-3 border-b border-stone-200 bg-white/80 px-4 py-3 dark:border-zinc-800 dark:bg-zinc-900/80" role="status" aria-live="polite" aria-atomic="true">
-          <span class="spinner shrink-0"></span>
-          <div class="min-w-0 flex-1">
-            <p class="truncate text-sm font-semibold text-stone-900 dark:text-zinc-100">{$t.preview.streamingPreviewLabel}</p>
-            <p class="mt-0.5 text-xs text-stone-500 dark:text-zinc-400">{stageLabel(job, $t.stages) || $t.preview.working}</p>
+    {:else if loading && singlePendingSlot?.previewUrl}
+      <div class="flex h-full w-full flex-col" data-slot-status={singlePendingSlot.status}>
+        {@render loadingBanner()}
+        <div class="flex min-h-[320px] flex-1 items-center justify-center p-3">
+          <div class="preview-image-frame relative">
+            <img
+              src={singlePendingSlot.previewUrl}
+              alt={slotAlt(singlePendingSlot, 0)}
+              class="preview-image max-h-[640px] max-w-full rounded-lg object-contain opacity-90"
+              loading="eager"
+              decoding="async"
+            />
+            <span class="absolute left-2 top-2 rounded-sm bg-black/60 px-2 py-1 text-xs font-medium text-white">{slotStatusLabel(singlePendingSlot)}</span>
           </div>
         </div>
-        <div class="flex flex-1 flex-wrap content-start items-start justify-center gap-3 overflow-y-auto p-3">
-          {#each slots as slot, index (slot.id)}
-            <div class="relative aspect-square w-24 shrink-0" data-slot-status={slot.status}>
-              {#if slot.previewUrl}
-                <img src={slot.previewUrl} alt={slotAlt(slot, index)} class="h-full w-full rounded-lg object-contain opacity-90" loading="eager" decoding="async" />
-              {:else}
-                <div class="flex h-full w-full flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-stone-300 dark:border-zinc-700">
-                  {#if slot.status === 'waiting' || slot.status === 'streaming'}<span class="spinner spinner-inline"></span>{/if}
-                  <span class="px-1 text-center text-[10px] leading-tight text-stone-500 dark:text-zinc-400">{slotStatusLabel(slot)}</span>
-                </div>
-              {/if}
-              <span class="absolute left-1.5 top-1.5 rounded-sm bg-black/60 px-1.5 py-0.5 text-xs font-medium text-white">{index + 1}</span>
-            </div>
-          {/each}
-        </div>
+      </div>
+    {:else if loading}
+      <div class="flex max-w-sm flex-col items-center px-6 text-center" role="status" aria-live="polite" aria-atomic="true" data-slot-status={singlePendingSlot?.status || 'waiting'}>
+        <span class="spinner"></span>
+        <p class="mt-4 text-sm font-semibold text-stone-900 dark:text-zinc-100">{stageLabel(activePendingJob, $t.stages) || $t.preview.working}</p>
+        <p class="mt-2 text-xs text-stone-500 dark:text-zinc-400">{statusLabel(activePendingJob?.status, $t.statuses) || $t.preview.queued}</p>
       </div>
     {:else}
       <div class="px-6 text-center">

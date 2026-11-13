@@ -184,7 +184,7 @@ function submissionError(body: GenerateRequestBody, edit = false, hasMask = fals
 function comparisonSourceForEdit(source: EditSourceState): PreviewCompareSource | null {
   if (!source.mask) return null;
   const primary = primaryEditSource(source);
-  if (primary?.kind === 'gallery_primary') {
+  if (primary?.kind === 'gallery_primary' || primary?.kind === 'gallery_reference') {
     if (!primary.previewUrl) return null;
     return { kind: 'gallery', url: primary.previewUrl, label: primary.previewLabel || primary.label };
   }
@@ -226,13 +226,14 @@ function createPreviewStore() {
   let lastApiPresetId: string | null = null;
 
   function publish() {
-    const view = derivePreviewView(group, groupError);
+    const fallbackJobError = get(t).messages.jobFailed;
+    const view = derivePreviewView(group, groupError, fallbackJobError);
     // Record the first automatic pick (and drop a selection whose slot is
     // gone) so a later completion never re-points the main image.
     group = adoptSelection(group, view);
     // A failed job keeps its own message; submission-level errors take
     // precedence because they belong to the click the user just made.
-    const error = groupError || jobFailureMessage(view.job, get(t).messages.jobFailed);
+    const error = groupError || jobFailureMessage(view.job, fallbackJobError);
     set({ ...view, error, groupId: group.id });
   }
 
@@ -494,12 +495,16 @@ function createPreviewStore() {
       quantity: lastRequest.n,
       quality: lastRequest.quality,
       outputFormat: lastRequest.output_format,
+      complexity: lastRequest.complexity ?? null,
+      frameCount: lastRequest.frame_count ?? initialPromptFormState.frameCount,
+      frameDurationMs: lastRequest.frame_duration_ms ?? initialPromptFormState.frameDurationMs,
       background: (lastRequest.background as PromptFormState['background']) ?? 'auto',
       outputCompression: lastRequest.output_compression === null || lastRequest.output_compression === undefined ? '' : String(lastRequest.output_compression),
       responseFormat: lastRequest.response_format || '',
       stream: Boolean(lastRequest.stream),
       partialImages: lastRequest.partial_images ?? initialPromptFormState.partialImages,
-      pasteBack: lastPasteBack
+      pasteBack: lastPasteBack,
+      safetyIdentifier: lastRequest.safety_identifier ?? ''
     });
     const options = lastApiPresetId ? { apiPresetId: lastApiPresetId } : undefined;
     if (lastAction === 'edit') edit(options);

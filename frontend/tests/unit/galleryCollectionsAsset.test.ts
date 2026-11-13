@@ -12,6 +12,7 @@ vi.mock('$lib/api/client', async (original) => ({
 }));
 
 import { galleryCollectionsStore } from '$lib/stores/galleryCollections';
+import { mergeReorderedSupportedIds } from '$lib/utils/collections';
 
 describe('galleryCollectionsStore asset pack features', () => {
   beforeEach(() => {
@@ -174,4 +175,11 @@ it('marks failed forced refresh stale so a later load retries', async () => {
   await galleryCollectionsStore.load();
   expect(api.apiFetch).toHaveBeenCalledTimes(2);
   expect(get(galleryCollectionsStore).loaded).toBe(true);
+});
+
+it('merges reordered raster ids while keeping unsupported SVG/GIF slots in place', () => {
+  expect(
+    mergeReorderedSupportedIds(['img-1', 'svg-1', 'img-2', 'gif-1'], ['img-2', 'img-1'])
+  ).toEqual(['img-2', 'svg-1', 'img-1', 'gif-1']);
+  expect(mergeReorderedSupportedIds([], ['img-2', 'img-1'])).toEqual(['img-2', 'img-1']);
 });
