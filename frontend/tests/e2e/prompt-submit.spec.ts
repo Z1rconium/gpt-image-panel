@@ -150,6 +150,37 @@ test('a finished image stays selected while a new request appends a loading thum
   await expect(preview.getByText('1 still generating')).toBeVisible();
 });
 
+test('a sibling partial failure uses a warning while the selected result stays visible', async ({ page }) => {
+  const finished = job('job-first', 'kept prompt');
+  const partial = {
+    ...job('job-partial', 'partial prompt', 'partial_failure'),
+    n: 2,
+    error: 'one unit failed'
+  };
+  await installJobStreams(page, { events: { 'job-first': finished, 'job-partial': partial } });
+  await loadApp(page, { generatedJobs: [finished, partial] });
+  const prompt = page.getByRole('textbox', { name: 'Prompt', exact: true });
+  const generate = page.getByRole('button', { name: 'Generate', exact: true });
+  await prompt.fill('kept prompt');
+  await generate.click();
+  const preview = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Preview' }) });
+  await expect(preview.getByRole('img', { name: 'Generated preview' })).toBeVisible();
+  await prompt.fill('partial prompt');
+  await page.getByLabel('Quantity').fill('2');
+  await generate.click();
+
+  const warning = preview.locator('[data-submission-error]');
+  await expect(warning).toHaveText('one unit failed');
+  await expect(warning).toHaveClass(/status-warning/);
+  await expect(warning).toHaveAttribute('role', 'status');
+  await expect(preview.locator('[data-slot-status="waiting"]')).toHaveCount(0);
+  await expect(preview.getByRole('img', { name: 'Generated preview' })).toBeVisible();
+  await preview.getByRole('button', { name: 'Select result 2' }).click();
+  await expect(preview.locator('[data-submission-error]')).toHaveCount(0);
+  await expect(preview.locator('.status-warning')).toHaveText('one unit failed');
+  await expect(preview.locator('.status-error')).toHaveCount(0);
+});
+
 test('two requests of n=2 reserve four slots in submission order', async ({ page }) => {
   const pending = { ...job('job-pending', 'four slots prompt', 'running'), images: [], image_id: null, image_url: null };
   await installJobStreams(page, { events: {} });

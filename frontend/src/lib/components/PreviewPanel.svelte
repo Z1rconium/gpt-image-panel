@@ -35,7 +35,7 @@
   const showStreamingGrid = $derived(!hasFinalImage && slots.length > 1);
   const activePendingJob = $derived(pendingSlots.find((slot) => slot.job)?.job || null);
   const isStreamingPending = $derived(pendingSlots.some((slot) => slot.status === 'streaming') || Boolean(activePendingJob?.streaming));
-  const singlePendingSlot = $derived(slots[0] || null);
+  const singlePendingSlot = $derived(pendingSlots[0] || null);
 
   let loadedPreviewSrc = $state('');
   let failedPreviewSrc = $state('');
@@ -197,7 +197,11 @@
     </div>
   {/if}
   {#each submissionErrors as submissionError (submissionError.id)}
-    <div class="status-error mt-2 px-4 py-3 text-sm break-words" role="alert" data-submission-error={submissionError.id}>
+    <div
+      class={`${submissionError.severity === 'warning' ? 'status-warning' : 'status-error'} mt-2 px-4 py-3 text-sm break-words`}
+      role={submissionError.severity === 'warning' ? 'status' : 'alert'}
+      data-submission-error={submissionError.id}
+    >
       {submissionError.message}
     </div>
   {/each}
@@ -386,7 +390,7 @@
           <div class="preview-image-frame relative">
             <img
               src={singlePendingSlot.previewUrl}
-              alt={slotAlt(singlePendingSlot, 0)}
+              alt={slotAlt(singlePendingSlot, singlePendingSlot.unitIndex)}
               class="preview-image max-h-[640px] max-w-full rounded-lg object-contain opacity-90"
               loading="eager"
               decoding="async"

@@ -9,6 +9,22 @@ def _create_collection(client, name: str) -> dict:
     return resp.json()
 
 
+def test_collection_alias_schema_matches_trimmed_validation(client):
+    from backend.app.schemas.gallery import GalleryCollectionUpdateRequest
+
+    alias_schema = GalleryCollectionUpdateRequest.model_json_schema()["properties"]["asset_alias"]
+    string_schema = next(option for option in alias_schema["anyOf"] if option["type"] == "string")
+    assert string_schema["maxLength"] == 32
+    album = _create_collection(client, "Alias validation")
+    url = f"/api/gallery/collections/{album['id']}"
+    for value in ["a" * 33, "  " + "a" * 33 + "  ", 123, ["alias"]]:
+        assert client.patch(url, json={"asset_alias": value}).status_code == 422
+    for value, expected in [("  " + "a" * 32 + "  ", "a" * 32), ("   ", None), (None, None)]:
+        response = client.patch(url, json={"asset_alias": value})
+        assert response.status_code == 200, response.text
+        assert response.json()["asset_alias"] == expected
+
+
 def test_gallery_collections_crud_default_and_order(client):
     assert client.get("/api/gallery/collections").json() == []
 

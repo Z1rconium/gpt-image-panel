@@ -74,7 +74,7 @@ export type PreviewView = {
   pendingCount: number;
   totalCount: number;
   /** Per-submission failures, shown next to the images they belong to. */
-  submissionErrors: { id: string; message: string }[];
+  submissionErrors: { id: string; message: string; severity: 'error' | 'warning' }[];
 };
 
 export const MAX_PREVIEW_UNITS = 10;
@@ -337,11 +337,15 @@ export function derivePreviewView(group: PreviewGroup, error = '', jobFallbackEr
   const loading = pendingSlots.length > 0 || group.submissions.some((submission) => submission.submitStatus === 'submitting');
   // Include backend job failures on sibling/unselected submissions so a running
   // or completed earlier click never silently hides a later job failure.
-  const submissionErrors = group.submissions.flatMap((submission) => {
-    if (submission.error) return [{ id: submission.id, message: submission.error }];
+  const submissionErrors = group.submissions.flatMap<PreviewView['submissionErrors'][number]>((submission) => {
+    if (submission.error) return [{ id: submission.id, message: submission.error, severity: 'error' }];
     if (submission.job && submission.job.job_id !== job?.job_id) {
       const failure = jobFailureMessage(submission.job, jobFallbackError);
-      if (failure) return [{ id: submission.id, message: failure }];
+      if (failure) return [{
+        id: submission.id,
+        message: failure,
+        severity: submission.job.status === 'partial_failure' ? 'warning' : 'error'
+      }];
     }
     return [];
   });
@@ -420,7 +424,9 @@ function streamingStillRelevant(job: GenerateJobStatus, slot: StreamingPreviewSl
 /** Apply a job snapshot to its owning submission; other submissions are untouched. */
 export function applyJobToGroup(group: PreviewGroup, job: GenerateJobStatus): PreviewGroup {
   const submission = findSubmissionByJobId(group, job.job_id);
-  if (!submission) return group;
+  // Tracking failure ends this submission's lifecycle. Opening the job again
+  // creates a fresh group; late snapshots cannot restart the failed slots.
+  if (!submission || submission.submitStatus === 'failed') return group;
   const active = isActiveJobStatus(job.status);
   const streamingPreviews = active
     ? Object.fromEntries(
@@ -447,7 +453,7 @@ export function applyJobToGroup(group: PreviewGroup, job: GenerateJobStatus): Pr
 
 export function applyPreviewEventToGroup(group: PreviewGroup, event: GeneratePreviewEvent): PreviewGroup {
   const submission = findSubmissionByJobId(group, event.job_id);
-  if (!submission?.job) return group;
+  if (!submission?.job || submission.submitStatus === 'failed') return group;
   const job = submission.job;
   // The final image always wins, and out-of-order/duplicate frames (possible
   // across an SSE reconnect) are dropped via the per-unit sequence so one

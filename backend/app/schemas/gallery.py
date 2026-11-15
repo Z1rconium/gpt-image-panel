@@ -197,7 +197,13 @@ class GalleryCollectionCreateRequest(StrictRequestModel):
 class GalleryCollectionUpdateRequest(StrictRequestModel):
     name: Optional[str] = Field(default=None, max_length=200)
     is_default: Optional[bool] = None
-    asset_alias: Optional[str] = Field(default=None, max_length=200)
+    asset_alias: Optional[str] = Field(default=None, max_length=32)
+
+    @field_validator("asset_alias", mode="before")
+    @classmethod
+    def strip_asset_alias(cls, value: object) -> object:
+        # The schema limit applies to the stored alias, excluding whitespace.
+        return value.strip() if isinstance(value, str) else value
 
     @field_validator("name")
     @classmethod

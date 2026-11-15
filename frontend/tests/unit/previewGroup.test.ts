@@ -36,6 +36,64 @@ beforeEach(() => {
 });
 
 describe('continuous generation submissions', () => {
+  it.each(['running', 'success'] as const)('ignores a late %s snapshot and frames after tracking fails', async (status) => {
+    apiFetchMock.mockResolvedValueOnce(response('job-a') as never);
+    await previewStore.generateImage(form('first', 2), { trackJob: () => {} });
+    const running = job('job-a', {
+      n: 2,
+      images: [{ image_id: 'a-1', image_url: '/api/image/a-1.png', filename: 'a-1.png', unit_index: 0 }]
+    });
+    previewStore.applyJob(running);
+    previewStore.failJobTracking('job-a', 'tracking unavailable');
+    const failed = get(previewStore);
+    expect(failed.slots.map((slot) => slot.status)).toEqual(['success', 'failed']);
+    expect(failed.loading).toBe(false);
+    expect(failed.job).toBe(running);
+
+    previewStore.applyPreviewEvent({
+      job_id: 'job-a', unit_index: 1, partial_image_index: 0, sequence: 1,
+      mime_type: 'image/png', data_url: 'data:late-frame'
+    });
+    expect(get(previewStore)).toBe(failed);
+    const late = job('job-a', { n: 2, status });
+    previewStore.applyJob(late);
+    expect(get(previewStore)).toBe(failed);
+    expect(failed.submissionErrors).toEqual([
+      { id: expect.any(String), message: 'tracking unavailable', severity: 'error' }
+    ]);
+
+    // Explicitly opening the job starts a new lifecycle and can show new data.
+    previewStore.openJob(late);
+    expect(get(previewStore).job).toBe(late);
+    expect(get(previewStore).submissionErrors).toEqual([]);
+  });
+
+  it('marks an unselected partially failed job as a warning and keeps its result reachable', async () => {
+    apiFetchMock.mockResolvedValueOnce(response('job-ok') as never);
+    await previewStore.generateImage(form('ok'), { trackJob: () => {} });
+    previewStore.applyJob(job('job-ok', {
+      status: 'success',
+      images: [{ image_id: 'ok', image_url: '/api/image/ok.png', filename: 'ok.png', unit_index: 0 }]
+    }));
+    apiFetchMock.mockResolvedValueOnce(response('job-partial') as never);
+    await previewStore.generateImage(form('partial', 2), { trackJob: () => {} });
+    previewStore.applyJob(job('job-partial', {
+      n: 2, status: 'partial_failure', error: 'one unit failed',
+      images: [{ image_id: 'partial', image_url: '/api/image/partial.png', filename: 'partial.png', unit_index: 0 }]
+    }));
+    const view = get(previewStore);
+    expect(view.selectedSlot?.jobId).toBe('job-ok');
+    expect(view.submissionErrors).toEqual([
+      { id: expect.any(String), message: 'one unit failed', severity: 'warning' }
+    ]);
+    expect(view.completedCount).toBe(2);
+    expect(view.loading).toBe(false);
+    previewStore.selectSlot(view.completedSlots[1].id);
+    expect(get(previewStore).job?.status).toBe('partial_failure');
+    expect(get(previewStore).error).toBe('one unit failed');
+    expect(get(previewStore).submissionErrors).toEqual([]);
+  });
+
   it('reserves slots synchronously and keeps three out-of-order responses in click order', async () => {
     const first = deferred<ReturnType<typeof response>>();
     const second = deferred<ReturnType<typeof response>>();
@@ -382,7 +440,7 @@ describe('continuous generation submissions', () => {
     expect(view.selectedSlot?.jobId).toBe('job-ok');
     expect(view.error).toBe('');
     expect(view.submissionErrors).toEqual([
-      { id: expect.any(String), message: 'upstream quota exceeded' }
+      { id: expect.any(String), message: 'upstream quota exceeded', severity: 'error' }
     ]);
   });
 
