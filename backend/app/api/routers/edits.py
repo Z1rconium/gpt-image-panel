@@ -1,6 +1,5 @@
-from ...services.edit_markup import validate_edit_markup
-from ...core.image_models import is_image_26
-from ...services.job_queue import get_active_preset, get_api_presets
+"""Image edit upload, gallery source staging, and queue admission routes."""
+
 import asyncio
 from dataclasses import replace
 
@@ -9,6 +8,14 @@ from starlette.datastructures import FormData
 from starlette.datastructures import UploadFile as StarletteUploadFile
 
 from ..edit_limits import EDIT_MASK_FIELD_NAME, MAX_EDIT_MASK_BYTES, MAX_EDIT_SOURCE_IMAGES
+from ..uploads import is_image_upload, resolve_upload_content_type
+from ...core import overall_config
+from ...core import settings as config
+from ...core.image_models import is_image_26
+from ...core.media import get_image_dimensions
+from ...runtime.blocking import run_image_operation
+from ...schemas.generation import EditRequest, GenerateJobResponse
+from ...services.edit_markup import validate_edit_markup
 from ...services.edit_masks import (
     EditMaskInfo,
     validate_edit_mask_against_primary,
@@ -24,14 +31,11 @@ from ...services.edit_sources import (
 from ...services.job_queue import (
     EditImageSource,
     build_edit_request_from_form,
+    get_active_preset,
+    get_api_presets,
     queue_edit_job,
+    resolve_effective_model,
 )
-from ..uploads import is_image_upload, resolve_upload_content_type
-from ...core import overall_config
-from ...core import settings as config
-from ...core.media import get_image_dimensions
-from ...schemas.generation import EditRequest, GenerateJobResponse
-from ...runtime.blocking import run_image_operation
 
 
 router = APIRouter()
@@ -263,18 +267,23 @@ async def read_upload_edit_markup(form: FormData) -> EditImageSource | None:
     return replace(source, role="markup")
 
 
-async def validate_uploaded_markup(markup: EditImageSource | None, primary: EditImageSource, req: EditRequest):
+async def validate_uploaded_markup(markup: EditImageSource | None, primary: EditImageSource, req: EditRequest) -> None:
     if markup is None:
         return
-    preset = next((p for p in get_api_presets() if p.get("id") == req.api_preset_id), None) if req.api_preset_id else get_active_preset()
-    effective_model = req.model.strip() or str((preset or {}).get("default_model") or "gpt-image-2")
+    requested_model = req.model if "model" in getattr(req, "model_fields_set", set()) else None
+    effective_model = resolve_effective_model(
+        requested_model,
+        api_preset_id=req.api_preset_id,
+        api_path="/v1/images/edits",
+        get_active=get_active_preset,
+        get_presets=get_api_presets,
+    )
     if not is_image_26(effective_model):
         raise HTTPException(status_code=422, detail="Markup requires GPT Image 2.6")
     try:
         await run_image_operation(validate_edit_markup, markup.temp_path, primary.width, primary.height, metric_name="validate_edit_markup")
     except (ValueError, OSError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    req.paste_back = False
 
 
 async def validate_edit_mask(mask: EditImageSource, primary: EditImageSource) -> EditMaskInfo:
@@ -370,6 +379,8 @@ async def _stage_and_queue_edit(
 
         validate_edit_source_count(sources)
         await validate_uploaded_markup(markup, sources[0], req)
+        if markup is not None:
+            req.paste_back = False
         mask_coverage = None
         mask_optimized_png = None
         if mask is not None:

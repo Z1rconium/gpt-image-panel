@@ -131,6 +131,7 @@ def test_markup_copy_removed_on_queue_rejection_or_cancel(tmp_path, monkeypatch,
     source_path.write_bytes(b'original')
     persisted = {}
     monkeypatch.setattr(job_queue, 'write_mask_file', lambda data, name: persisted.update({name: data}))
+    monkeypatch.setattr(job_queue, 'copy_mask_file', lambda src, name: persisted.update({name: src.read_bytes()}))
     monkeypatch.setattr(job_queue, 'delete_mask_file', lambda name: persisted.pop(name, None))
     async def reject(**kwargs):
         assert any(s['role'] == 'markup' for s in kwargs['edit_sources_payload'])
@@ -182,7 +183,7 @@ def test_markup_uses_saved_preset_default_model(tmp_path, monkeypatch):
     monkeypatch.setattr('backend.app.api.routers.edits.get_active_preset', lambda: {'default_model': 'gpt-image-2.6-flare'})
     req = EditRequest(prompt='x', model='')
     asyncio.run(validate_uploaded_markup(source, source, req))
-    assert req.paste_back is False
+    assert req.paste_back is None
 
 
 def test_edit_complexity_requires_edit_template_not_generation_template(client, monkeypatch):

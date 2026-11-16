@@ -1,5 +1,3 @@
-from ..schemas.provider import resolve_provider_config
-from ..core.provider_mapping import template_variables
 """Image job request construction and durable queue admission."""
 
 import asyncio
@@ -8,6 +6,9 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal
+
+from ..core.provider_mapping import template_variables
+from ..schemas.provider import resolve_provider_config
 
 
 from ..runtime.state import MAX_GENERATE_JOBS, state
@@ -37,7 +38,7 @@ from ..core.image_models import is_image_25, is_image_26
 from ..core.constants import ACTIVE_GENERATE_JOB_STATUSES
 from ..core.observability import metrics
 from ..core.utils import utc_now
-from ..repositories.image_files import delete_mask_file, write_mask_file
+from ..repositories.image_files import copy_mask_file, delete_mask_file, write_mask_file
 from ..repositories.image_jobs import (
     aggregate_image_job_units,
     enqueue_image_job,
@@ -68,6 +69,28 @@ def kick_thumbnail_dispatcher() -> None:
     event = getattr(state, "thumbnail_dispatcher_kick", None)
     if task and not task.done() and event is not None:
         event.set()
+
+
+def resolve_effective_model(
+    model: str | None,
+    *,
+    api_preset_id: str | None = None,
+    api_path: str = "/v1/images/edits",
+    get_active: Callable[[], dict] = get_active_preset,
+    get_presets: Callable[[], list[dict]] = get_api_presets,
+) -> str:
+    """Resolve explicit or preset-default image model without mutating request objects."""
+    active_preset = get_active()
+    if api_preset_id:
+        active_preset = next(
+            (preset for preset in get_presets() if preset.get("id") == api_preset_id),
+            None,
+        )
+    explicit = str(model or "").strip()
+    return explicit or normalize_default_model(
+        (active_preset or {}).get("default_model"),
+        api_path,
+    )
 
 
 @dataclass(frozen=True)
@@ -609,7 +632,7 @@ async def queue_edit_job(
         )
     edit_sources = [*image_sources, mask_source] if mask_source is not None else image_sources
     if markup_source is not None:
-        await asyncio.to_thread(lambda: write_mask_file(markup_source.temp_path.read_bytes(), f"{job_id}-markup.png"))
+        await asyncio.to_thread(copy_mask_file, markup_source.temp_path, f"{job_id}-markup.png")
         edit_sources = [*edit_sources, markup_source]
     edit_source_bytes = sum(source.byte_size for source in edit_sources)
 

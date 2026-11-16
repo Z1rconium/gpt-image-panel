@@ -11,6 +11,10 @@ def validate_edit_markup(path: Path, width: int, height: int) -> None:
             raise ValueError('Markup must be PNG')
         if image.size != (width, height):
             raise ValueError('Markup dimensions must match the oriented primary image')
-        image.load()
-        if image.convert('RGBA').getchannel('A').getextrema()[0] == 255:
+        if "A" in image.getbands():
+            alpha_min = image.getchannel("A").getextrema()[0]
+        else:
+            image.load()
+            alpha_min = image.convert("RGBA").getchannel("A").getextrema()[0]
+        if alpha_min == 255:
             raise ValueError('Markup must contain transparent pixels')

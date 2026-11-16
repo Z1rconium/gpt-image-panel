@@ -378,6 +378,11 @@ class ImageUnitExecutionContext:
                     (source for source in edit_sources if source.role == "mask"),
                     None,
                 )
+                markup_source = next(
+                    (source for source in edit_sources if source.role == "markup"),
+                    None,
+                )
+                markup_kwargs = {"markup_source": markup_source} if markup_source is not None else {}
                 if not image_sources:
                     raise proxy.UpstreamApiError(
                         "At least one edit source image is required"
@@ -395,7 +400,7 @@ class ImageUnitExecutionContext:
                         socks5_proxy=self.socks5_proxy,
                         persist_gallery_entry=add_to_gallery_async,
                         mask_source=mask_source,
-                        **({"markup_source": next(s for s in edit_sources if s.role == "markup")} if any(s.role == "markup" for s in edit_sources) else {}),
+                        **markup_kwargs,
                         mask_coverage=mask_source.coverage if mask_source else None,
                         prompt_guard=self.prompt_guard,
                         **self.provider_kwargs,
@@ -410,7 +415,7 @@ class ImageUnitExecutionContext:
                     socks5_proxy=self.socks5_proxy,
                     persist_gallery_entry=add_to_gallery_async,
                     mask_source=mask_source,
-                    **({"markup_source": next(s for s in edit_sources if s.role == "markup")} if any(s.role == "markup" for s in edit_sources) else {}),
+                    **markup_kwargs,
                     mask_coverage=mask_source.coverage if mask_source else None,
                     **self.stream_kwargs,
                 )

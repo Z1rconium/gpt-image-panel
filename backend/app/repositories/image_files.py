@@ -5,6 +5,7 @@ so integrations can use them without depending on this layer.
 """
 
 import logging
+import shutil
 import tempfile
 from pathlib import Path
 
@@ -189,6 +190,29 @@ def write_mask_file(data: bytes, mask_filename: str) -> Path:
     try:
         with temp_file:
             temp_file.write(data)
+        temp_path.replace(path)
+    except BaseException:
+        temp_path.unlink(missing_ok=True)
+        raise
+    return path
+
+
+def copy_mask_file(src_path: Path, mask_filename: str) -> Path:
+    """Atomically copy an existing layer file into MASKS_DIR without reading it all into RAM."""
+    path = safe_mask_path(mask_filename)
+    if not path:
+        raise ValueError(f"Invalid mask filename: {mask_filename}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_file = tempfile.NamedTemporaryFile(
+        prefix=f".{path.stem}-",
+        suffix=f"{path.suffix}.tmp",
+        dir=path.parent,
+        delete=False,
+    )
+    temp_path = Path(temp_file.name)
+    try:
+        with src_path.open("rb") as src, temp_file:
+            shutil.copyfileobj(src, temp_file, length=256 * 1024)
         temp_path.replace(path)
     except BaseException:
         temp_path.unlink(missing_ok=True)
