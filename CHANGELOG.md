@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.9.6
+
+- Faster markup editing: cache primary image dimensions, add undo checkpoints that fold old history without losing visible marks, and reduce memory and copying in the backend markup pipeline with unified layer endpoints.
+- Load job streams on demand, throttle rapid submissions, show static GIF thumbnails, de-duplicate reference images, and ask before applying markup over an existing mask; preview reference thumbnails and fall back when one is missing.
+- Skip SVG files in filtered-gallery AI analysis and clarify SVG notices; linearize SVG validation, cache parses off the event loop, and harden SVG thumbnails.
+- Bound archive collection scans with O(k) de-duplication, align the import metadata limit with 10,000 entries and the GIF size ceiling, and gate prompt optimizer endpoints on `ai_assistant.enabled`.
+- Stabilize browser tests: provide Python for the edit-mask coverage probe in CI and wait for the settled auto-fill readout.
+
 ## v1.9.5
 
 - Isolate edit preview tracking and preserve legacy single-image payloads cleanly across preview group updates.
