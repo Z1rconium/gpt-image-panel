@@ -1520,7 +1520,9 @@ test('the readout reports the auto-fill delta and matches the exported mask', as
   await page.mouse.up();
 
   const readout = page.getByText(/^Edit area/);
-  await expect(readout).toContainText('auto-fill');
+  // While the region is still computing the delta shows a placeholder ("+…%"),
+  // so wait for the settled "Edit area X% (auto-fill +Y%)" form.
+  await expect(readout).toHaveText(/auto-fill \+[\d.]+%/);
   const numbers = ((await readout.textContent()) ?? '').match(/[\d.]+/g)?.map(Number) ?? [];
   expect(numbers.length).toBeGreaterThanOrEqual(2);
 
