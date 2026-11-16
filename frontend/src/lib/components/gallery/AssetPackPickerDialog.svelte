@@ -10,6 +10,7 @@
     type EditGalleryReferenceSource
   } from '$lib/stores/editSource';
   import { uiStore } from '$lib/stores/ui';
+  import { thumbnailUrl } from '$lib/utils/format';
   import type { GalleryCollection, GalleryEntry } from '$lib/api/types/gallery';
   import Check from 'lucide-svelte/icons/check';
   import Package from 'lucide-svelte/icons/package';
@@ -116,7 +117,7 @@
       imageId: img.id,
       filename: img.filename,
       label: img.prompt || img.filename,
-      previewUrl: img.image_url || img.thumbnail_url || '',
+      previewUrl: thumbnailUrl(img.filename, img.thumbnail_url) || img.image_url || '',
       previewLabel: img.prompt || img.filename,
       width: img.image_width || 0,
       height: img.image_height || 0

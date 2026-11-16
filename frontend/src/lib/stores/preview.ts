@@ -15,7 +15,7 @@ import {
 import type { ApiPath, ResponseFormatDefault } from '$lib/api/types/common';
 import type { GenerateRequestBody } from '$lib/api/types/generation';
 import type { GeneratePreviewEvent, GenerateJobResponse, GenerateJobStatus } from '$lib/api/types/jobs';
-import { jobFailureMessage } from '$lib/utils/format';
+import { imageUrl, jobFailureMessage } from '$lib/utils/format';
 import { MAX_PROMPT_CHARS, imageQualities, isImage25, isImage26, promptLength, validOutputSize } from '$lib/utils/imageModels';
 import {
   MAX_CONCURRENT_SUBMISSIONS,
@@ -187,8 +187,9 @@ function comparisonSourceForEdit(source: EditSourceState): PreviewCompareSource 
   if (!source.mask) return null;
   const primary = primaryEditSource(source);
   if (primary?.kind === 'gallery_primary' || primary?.kind === 'gallery_reference') {
-    if (!primary.previewUrl) return null;
-    return { kind: 'gallery', url: primary.previewUrl, label: primary.previewLabel || primary.label };
+    const url = primary.filename ? imageUrl(primary.filename) : primary.previewUrl;
+    if (!url) return null;
+    return { kind: 'gallery', url, label: primary.previewLabel || primary.label };
   }
   // The source store may revoke its preview URL after submission. Keep the
   // File and let PreviewPanel own a separate, short-lived comparison URL.

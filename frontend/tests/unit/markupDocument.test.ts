@@ -311,4 +311,25 @@ describe('markup export and editor state', () => {
     expect(() => doc.commit(rect(1, 1, 9, 9))).toThrowError(expect.objectContaining({ code: 'disposed' }));
     expect(() => doc.layer).toThrow(MarkupDocumentError);
   });
+
+  it('uses periodic undo checkpoints to reduce command replay and disposes them cleanly', () => {
+    const { createCanvas, canvases } = harness();
+    const doc = MarkupDocument.create(200, 200, { createCanvas, checkpointInterval: 20 });
+    for (let i = 0; i < 45; i += 1) {
+      expect(doc.commit(rect(i, i, i + 10, i + 10))).toBe(true);
+    }
+    // Work canvas + checkpoints at 20 and 40.
+    expect(canvases).toHaveLength(3);
+    const work = canvases[0];
+    work.ctx!.log.length = 0;
+
+    expect(doc.undo()).toBe(true);
+    // Replays from checkpoint 40: 1 drawImage + only 4 strokeRect commands (40..43), not 44.
+    expect(work.ctx?.log.filter((entry) => entry === 'drawImage')).toHaveLength(1);
+    expect(work.ctx?.log.filter((entry) => entry === 'strokeRect')).toHaveLength(4);
+
+    doc.dispose();
+    expect(canvases[1].width).toBe(0);
+    expect(canvases[2].width).toBe(0);
+  });
 });

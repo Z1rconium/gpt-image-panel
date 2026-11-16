@@ -138,4 +138,19 @@ describe('primary image decoding', () => {
     expect(closed).toBe(0);
     image.bitmap.close();
   });
+
+  it('caches decoded dimensions per primary EditSource object and invalidates when swapped', async () => {
+    const firstState = gallery({ id: 'gal-cache-1', imageId: 'gal-cache-1' });
+    const first = await readPrimaryDimensions(firstState);
+    const second = await readPrimaryDimensions(firstState);
+    expect(first).toEqual({ sourceId: 'gal-cache-1', width: 300, height: 400 });
+    expect(second).toEqual(first);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(closed).toBe(1);
+
+    const swappedState = gallery({ id: 'gal-cache-2', imageId: 'gal-cache-2' });
+    await readPrimaryDimensions(swappedState);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(closed).toBe(2);
+  });
 });

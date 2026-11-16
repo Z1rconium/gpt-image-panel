@@ -410,6 +410,17 @@
   function isImageSelected(image: GalleryEntry) {
     return selectedAllFiltered || selectedIds.has(image.id);
   }
+
+  const selectedAllVisibleSvg = $derived.by(() => {
+    if (selectedAllFiltered || selectedIds.size === 0 || !images.length) return false;
+    const selectedVisible = images.filter((image) => selectedIds.has(image.id));
+    return (
+      selectedVisible.length === selectedIds.size &&
+      selectedVisible.every(
+        (image) => image.filename.toLowerCase().endsWith('.svg') || image.output_format === 'svg'
+      )
+    );
+  });
 </script>
 
 <section class="app-section px-1 py-1 sm:px-0">
@@ -488,7 +499,7 @@
         <button
           type="button"
           class="control-focus rounded-lg border px-2.5 py-2 text-xs transition-colors {canAiAnalyze ? 'border-stone-300 text-stone-700 hover:bg-stone-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800' : 'cursor-not-allowed border-stone-300 bg-stone-100 text-stone-400 opacity-60 dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-500'} disabled:cursor-not-allowed disabled:opacity-40"
-          disabled={!canAiAnalyze || !hasSelection || busy}
+          disabled={!canAiAnalyze || !hasSelection || busy || selectedAllVisibleSvg}
           title={!canAiAnalyze ? $t.aiAssistant.unavailable : undefined}
           onclick={onBatchAiAnalyze}
         >

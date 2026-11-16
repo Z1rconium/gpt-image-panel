@@ -181,8 +181,11 @@
         image.bitmap.close();
         return;
       }
-      const options = { maxPixels: markupLimits().maxPixels };
       const size = { width: image.width, height: image.height };
+      const options = {
+        maxPixels: markupLimits().maxPixels,
+        checkpointInterval: size.width * size.height <= 4_194_304 ? 20 : 0
+      };
       const previous = existing && existing.sourceId === sourceId ? existing : null;
       if (previous?.editorState && previous.editorState.width === size.width && previous.editorState.height === size.height) {
         next = await MarkupDocument.fromState(previous.editorState, options);
@@ -215,9 +218,7 @@
       loadError =
         error instanceof MarkupDocumentError && (error.code === 'too_large' || error.code === 'canvas')
           ? copy.errorCanvas
-          : error instanceof PrimaryImageError || error instanceof MarkupDocumentError
-            ? copy.errorLoad
-            : copy.errorLoad;
+          : copy.errorLoad;
       onError(loadError);
     }
   }

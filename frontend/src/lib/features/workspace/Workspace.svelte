@@ -965,11 +965,16 @@
     }
   }
 
+  function sourcePreviewModalUrl(source: { kind: string; previewUrl: string; filename?: string }) {
+    return source.kind !== 'upload' && source.filename ? imageUrl(source.filename) : source.previewUrl;
+  }
+
   async function openEditPreview(sourceId: string) {
     rememberPanelFocus('editPreview');
     const source = findEditSource($editSourceStore, sourceId);
-    if (!source?.previewUrl) return;
-    editPreviewUrl = source.previewUrl;
+    const previewUrl = source ? sourcePreviewModalUrl(source) : '';
+    if (!source || !previewUrl) return;
+    editPreviewUrl = previewUrl;
     editPreviewLabel = source.previewLabel || source.label;
     if (await ensurePanel('editPreview')) setUi('editPreviewOpen', true);
   }
@@ -1117,7 +1122,7 @@
   function removeEditSource(sourceId: string) {
     const source = findEditSource($editSourceStore, sourceId);
     const label = source ? source.label || source.previewLabel : '';
-    const previewUrl = source?.previewUrl ?? '';
+    const previewUrl = source ? sourcePreviewModalUrl(source) : '';
     if (!editSourceStore.remove(sourceId)) return;
     if (previewUrl && editPreviewUrl === previewUrl) closeEditPreview();
     showToast($t.messages.editSourceRemoved(label));
@@ -1131,7 +1136,7 @@
 
   function syncEditSourcesAfterGalleryDelete(deletedIds?: string[]) {
     editSourceStore.removeGallerySourcesByImageIds(deletedIds);
-    if (editPreviewUrl && !$editSourceStore.sources.some((source) => source.previewUrl === editPreviewUrl)) {
+    if (editPreviewUrl && !$editSourceStore.sources.some((source) => sourcePreviewModalUrl(source) === editPreviewUrl)) {
       closeEditPreview();
     }
   }
@@ -1144,9 +1149,25 @@
   }
 
   async function batchAnalyzeGallery() {
-    const batchBody = galleryStore.selectedBatchRequestBody();
-    const selectedCount = $galleryStore.selectionToken?.count || $galleryStore.selectedIds.size;
+    let batchBody = galleryStore.selectedBatchRequestBody();
+    let selectedCount = $galleryStore.selectionToken?.count || $galleryStore.selectedIds.size;
     if (!selectedCount) return;
+    if (batchBody.ids?.length) {
+      const svgIds = new Set(
+        ($galleryStore.gallery?.images || [])
+          .filter((img) => img.filename.toLowerCase().endsWith('.svg') || img.output_format === 'svg')
+          .map((img) => img.id)
+      );
+      if (svgIds.size > 0) {
+        const filteredIds = batchBody.ids.filter((id) => !svgIds.has(id));
+        if (!filteredIds.length) {
+          showToast($t.messages.imageUploadRequired, 'error');
+          return;
+        }
+        batchBody = { ...batchBody, ids: filteredIds };
+        selectedCount = filteredIds.length;
+      }
+    }
     galleryActivityStore.setOperationStatus({
       kind: 'ai_analyze',
       label: $t.gallery.aiAnalyzing,

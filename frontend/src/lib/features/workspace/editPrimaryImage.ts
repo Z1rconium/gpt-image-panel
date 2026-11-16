@@ -1,5 +1,7 @@
 import { apiFetch, apiFetchRaw, DEFAULT_API_TIMEOUT_MS } from '$lib/api/client';
-import { primaryEditSource, type EditSourceState } from '$lib/stores/editSource';
+import { primaryEditSource, type EditSource, type EditSourceState } from '$lib/stores/editSource';
+
+const primaryDimensionsCache = new WeakMap<EditSource, { sourceId: string; width: number; height: number }>();
 
 // One place that turns the current primary edit source into its original,
 // upright pixels. The markup validator and the markup editor both go through
@@ -64,12 +66,23 @@ export async function decodePrimaryBlob(blob: Blob): Promise<{ bitmap: ImageBitm
   return { bitmap, width: bitmap.width, height: bitmap.height };
 }
 
-/** Upright dimensions only; the bitmap is released immediately. */
+/** Upright dimensions only; the bitmap is released immediately and cached per primary object. */
 export async function readPrimaryDimensions(state: EditSourceState, signal?: AbortSignal) {
+  const primary = primaryEditSource(state);
+  if (primary) {
+    const cached = primaryDimensionsCache.get(primary);
+    if (cached && cached.sourceId === primary.id) {
+      return { ...cached };
+    }
+  }
   const { sourceId, blob } = await fetchPrimaryImageBlob(state, signal);
   const decoded = await decodePrimaryBlob(blob);
   decoded.bitmap.close();
-  return { sourceId, width: decoded.width, height: decoded.height };
+  const dimensions = { sourceId, width: decoded.width, height: decoded.height };
+  if (primary && primary.id === sourceId) {
+    primaryDimensionsCache.set(primary, dimensions);
+  }
+  return { ...dimensions };
 }
 
 /**

@@ -404,16 +404,20 @@ export type MarkupLayerStats = { nonEmpty: boolean; hasTransparency: boolean };
 
 type ActiveStroke = { kind: 'pen' | 'erase'; color: string; width: number; points: number[] };
 
+const MAX_UNDO_CHECKPOINTS = 4;
+
 export class MarkupDocument {
   readonly width: number;
   readonly height: number;
 
   private readonly createCanvas: MarkupCanvasFactory;
+  private readonly checkpointInterval: number;
   private work: MarkupCanvasLike | null;
   private workCtx: MarkupContext | null;
   private base: MarkupCanvasLike | null = null;
   private baseBlob: Blob | null = null;
   private baseBlobStale = false;
+  private checkpoints = new Map<number, MarkupCanvasLike>();
   private commands: MarkupCommand[] = [];
   private cursor = 0;
   private folded = 0;
@@ -422,10 +426,16 @@ export class MarkupDocument {
   private revisionCounter = 0;
   private disposed = false;
 
-  private constructor(width: number, height: number, createCanvas: MarkupCanvasFactory) {
+  private constructor(
+    width: number,
+    height: number,
+    createCanvas: MarkupCanvasFactory,
+    checkpointInterval = 0
+  ) {
     this.width = width;
     this.height = height;
     this.createCanvas = createCanvas;
+    this.checkpointInterval = checkpointInterval > 0 ? Math.trunc(checkpointInterval) : 0;
     this.work = this.allocate();
     this.workCtx = this.contextOf(this.work);
   }
@@ -433,16 +443,21 @@ export class MarkupDocument {
   static create(
     width: number,
     height: number,
-    options: { createCanvas?: MarkupCanvasFactory; maxPixels?: number } = {}
+    options: { createCanvas?: MarkupCanvasFactory; maxPixels?: number; checkpointInterval?: number } = {}
   ): MarkupDocument {
     validateMarkupSize(width, height, options.maxPixels);
-    return new MarkupDocument(width, height, options.createCanvas ?? createBrowserCanvas);
+    return new MarkupDocument(
+      width,
+      height,
+      options.createCanvas ?? createBrowserCanvas,
+      options.checkpointInterval ?? 0
+    );
   }
 
   /** Rebuilds a working copy from an applied state; the state itself is not mutated. */
   static async fromState(
     state: MarkupEditorState,
-    options: { createCanvas?: MarkupCanvasFactory; maxPixels?: number; decode?: (blob: Blob) => Promise<ImageBitmap> } = {}
+    options: { createCanvas?: MarkupCanvasFactory; maxPixels?: number; checkpointInterval?: number; decode?: (blob: Blob) => Promise<ImageBitmap> } = {}
   ): Promise<MarkupDocument> {
     const doc = MarkupDocument.create(state.width, state.height, options);
     try {
@@ -466,7 +481,7 @@ export class MarkupDocument {
   static async fromPng(
     blob: Blob,
     expected: MarkupSize,
-    options: { createCanvas?: MarkupCanvasFactory; maxPixels?: number; decode?: (blob: Blob) => Promise<ImageBitmap> } = {}
+    options: { createCanvas?: MarkupCanvasFactory; maxPixels?: number; checkpointInterval?: number; decode?: (blob: Blob) => Promise<ImageBitmap> } = {}
   ): Promise<MarkupDocument> {
     const doc = MarkupDocument.create(expected.width, expected.height, options);
     try {
@@ -563,26 +578,81 @@ export class MarkupDocument {
     this.rebuild();
   }
 
-  /** Clears the live layer and replays the base checkpoint plus applied commands. */
+  private clearCheckpoints(fromIndex = 0) {
+    for (const [index, canvas] of this.checkpoints) {
+      if (index < fromIndex) continue;
+      canvas.width = 0;
+      canvas.height = 0;
+      this.checkpoints.delete(index);
+    }
+  }
+
+  private saveCheckpoint(index: number) {
+    if (!this.checkpointInterval || index <= 0 || index % this.checkpointInterval !== 0 || !this.work) return;
+    if (this.checkpoints.has(index)) return;
+    while (this.checkpoints.size >= MAX_UNDO_CHECKPOINTS) {
+      const oldest = this.checkpoints.keys().next().value;
+      if (oldest === undefined) break;
+      const dropped = this.checkpoints.get(oldest);
+      if (dropped) {
+        dropped.width = 0;
+        dropped.height = 0;
+      }
+      this.checkpoints.delete(oldest);
+    }
+    try {
+      const canvas = this.createCanvas(this.width, this.height);
+      if (!canvas || canvas.width !== this.width || canvas.height !== this.height) return;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        canvas.width = 0;
+        canvas.height = 0;
+        return;
+      }
+      ctx.clearRect(0, 0, this.width, this.height);
+      ctx.drawImage(this.work as unknown as CanvasImageSource, 0, 0);
+      this.checkpoints.set(index, canvas);
+    } catch {
+      // Checkpoint caching is best-effort; full replay remains exact without it.
+    }
+  }
+
+  /** Clears the live layer and replays the nearest checkpoint plus remaining commands. */
   private rebuild() {
     this.assertAlive();
     const ctx = this.workCtx as MarkupContext;
+    let startIndex = 0;
+    let checkpointCanvas: MarkupCanvasLike | null = null;
+    for (const [index, canvas] of this.checkpoints) {
+      if (index <= this.cursor && index > startIndex) {
+        startIndex = index;
+        checkpointCanvas = canvas;
+      }
+    }
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.globalCompositeOperation = 'source-over';
     ctx.clearRect(0, 0, this.width, this.height);
-    if (this.base) ctx.drawImage(this.base as unknown as CanvasImageSource, 0, 0);
+    if (checkpointCanvas) {
+      ctx.drawImage(checkpointCanvas as unknown as CanvasImageSource, 0, 0);
+    } else if (this.base) {
+      ctx.drawImage(this.base as unknown as CanvasImageSource, 0, 0);
+    }
     ctx.restore();
-    for (let i = 0; i < this.cursor; i += 1) renderMarkupCommand(ctx, this.commands[i], this.size);
+    for (let i = startIndex; i < this.cursor; i += 1) {
+      renderMarkupCommand(ctx, this.commands[i], this.size);
+    }
     this.revisionCounter += 1;
   }
 
   private truncateRedo() {
     if (this.cursor < this.commands.length) this.commands.length = this.cursor;
+    this.clearCheckpoints(this.cursor + 1);
   }
 
   /** Folds the oldest commands into the base checkpoint so the visible result is kept. */
   private enforceHistoryLimit() {
+    if (this.commands.length > MAX_HISTORY) this.clearCheckpoints();
     while (this.commands.length > MAX_HISTORY) {
       const oldest = this.commands.shift() as MarkupCommand;
       renderMarkupCommand(this.ensureBase(), oldest, this.size);
@@ -612,6 +682,7 @@ export class MarkupDocument {
     if (clean.kind === 'clear' && this.cursor === 0 && !this.base) return false;
     const command = this.push(clean);
     renderMarkupCommand(this.workCtx as MarkupContext, command, this.size);
+    this.saveCheckpoint(this.cursor);
     this.revisionCounter += 1;
     return true;
   }
@@ -672,6 +743,7 @@ export class MarkupDocument {
         ? { kind: 'pen', color: stroke.color, width: stroke.width, points: stroke.points }
         : { kind: 'erase', width: stroke.width, points: stroke.points }
     );
+    this.saveCheckpoint(this.cursor);
     this.revisionCounter += 1;
     return true;
   }
@@ -695,6 +767,7 @@ export class MarkupDocument {
     if (!this.canRedo) return false;
     renderMarkupCommand(this.workCtx as MarkupContext, this.commands[this.cursor], this.size);
     this.cursor += 1;
+    this.saveCheckpoint(this.cursor);
     this.revisionCounter += 1;
     return true;
   }
@@ -773,6 +846,7 @@ export class MarkupDocument {
       this.base.width = 0;
       this.base.height = 0;
     }
+    this.clearCheckpoints();
     this.work = null;
     this.workCtx = null;
     this.base = null;
