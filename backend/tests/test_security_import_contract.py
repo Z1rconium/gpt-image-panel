@@ -787,3 +787,42 @@ def test_chat_completions_sse_markdown_image_url_is_saved(tmp_path, monkeypatch)
         },
     )
     assert session_events[1] == ("get", "https://example.com/generated.jpg", None)
+
+
+def _write_ndjson_zip(path, records_bytes):
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_STORED) as zf:
+        zf.writestr("metadata.ndjson", records_bytes)
+
+
+def test_read_archive_collections_bounds_image_records(client, tmp_path):
+    from backend.app.core import settings as config
+    from backend.app.services.gallery_archive_import import read_archive_collections
+    from backend.app.core.errors import InvalidRequestError
+
+    lines = [json.dumps({"type": "image", "image": {"id": f"id-{i}"}}) for i in range(config.IMPORT_MAX_ENTRIES + 1)]
+    zip_path = tmp_path / "too-many.zip"
+    _write_ndjson_zip(zip_path, ("\n".join(lines) + "\n").encode("utf-8"))
+    with pytest.raises(InvalidRequestError, match="too many entries"):
+        read_archive_collections(zip_path)
+
+
+def test_ndjson_line_at_exact_limit_is_accepted(client, tmp_path, monkeypatch):
+    from backend.app.core import settings as config
+    from backend.app.core.errors import InvalidRequestError
+    from backend.app.services.gallery_archive_import import _iter_ndjson_records
+
+    monkeypatch.setattr(config, "IMPORT_MAX_METADATA_LINE_BYTES", 64)
+    exact = json.dumps({"type": "x", "p": "a" * 40})
+    exact = exact + " " * (64 - len(exact))
+    assert len(exact) == 64
+    zip_path = tmp_path / "exact.zip"
+    _write_ndjson_zip(zip_path, (exact + "\n").encode())
+    with zipfile.ZipFile(zip_path) as zf:
+        assert len(list(_iter_ndjson_records(zf))) == 1
+
+    over = json.dumps({"type": "x", "p": "a" * 41})
+    over = over + " " * (65 - len(over))
+    zip_path2 = tmp_path / "over.zip"
+    _write_ndjson_zip(zip_path2, (over + "\n").encode())
+    with zipfile.ZipFile(zip_path2) as zf, pytest.raises(InvalidRequestError, match="line is too large"):
+        list(_iter_ndjson_records(zf))

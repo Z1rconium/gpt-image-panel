@@ -259,10 +259,7 @@ def _iter_ndjson_records(zf: zipfile.ZipFile) -> Iterator[dict[str, Any]]:
 
     line_limit = max(
         0,
-        min(
-            config.IMPORT_MAX_METADATA_BYTES,
-            getattr(config, "IMPORT_MAX_METADATA_LINE_BYTES", 1048576),
-        ),
+        min(config.IMPORT_MAX_METADATA_BYTES, config.IMPORT_MAX_METADATA_LINE_BYTES),
     )
     with stream:
         total_bytes = 0
@@ -273,7 +270,9 @@ def _iter_ndjson_records(zf: zipfile.ZipFile) -> Iterator[dict[str, Any]]:
             total_bytes += len(raw_line)
             if total_bytes > config.IMPORT_MAX_METADATA_BYTES:
                 raise InvalidRequestError("metadata.ndjson is too large")
-            if len(raw_line) > line_limit:
+            # readline(limit + 1) returns a full line of exactly `line_limit`
+            # bytes plus its newline; only an unterminated read is oversized.
+            if len(raw_line) > line_limit and not raw_line.endswith(b"\n"):
                 raise InvalidRequestError("metadata.ndjson line is too large")
             line = raw_line.strip()
             if not line:
@@ -445,6 +444,8 @@ def read_archive_collections(zip_path: Path) -> list[dict[str, Any]]:
                     if record.get("type") == "collection":
                         raw_collections.append(record.get("collection"))
                     elif record.get("type") == "image" and isinstance(record.get("image"), dict):
+                        if len(source_ids) >= config.IMPORT_MAX_ENTRIES:
+                            raise InvalidRequestError("Import metadata contains too many entries")
                         source_ids.append(str(record["image"].get("id") or ""))
             else:
                 metadata = _read_import_metadata_json(zf)
