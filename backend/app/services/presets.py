@@ -1,4 +1,7 @@
+import copy
 import logging
+from contextlib import contextmanager
+from typing import Any
 
 from pydantic import ValidationError
 
@@ -105,6 +108,37 @@ def persist_api_settings():
     )
 
 
+_MISSING = object()
+_API_SETTINGS_STATE_FIELDS = (
+    "api_presets",
+    "active_preset_id",
+    "api_url",
+    "api_key",
+    "api_path",
+    "default_model",
+    "default_response_format",
+    "upstream_socks5_proxy",
+    "webhook_url",
+)
+
+
+def _snapshot_api_settings_state() -> dict[str, Any]:
+    snapshot: dict[str, Any] = {}
+    for field in _API_SETTINGS_STATE_FIELDS:
+        value = getattr(state, field, _MISSING)
+        snapshot[field] = _MISSING if value is _MISSING else copy.deepcopy(value)
+    return snapshot
+
+
+def _restore_api_settings_state(snapshot: dict[str, Any]) -> None:
+    for field, value in snapshot.items():
+        if value is _MISSING:
+            if hasattr(state, field):
+                delattr(state, field)
+        else:
+            setattr(state, field, value)
+
+
 def begin_api_settings_write() -> None:
     """Mark an in-memory API-settings update as in flight.
 
@@ -120,6 +154,25 @@ def begin_api_settings_write() -> None:
 
 def end_api_settings_write() -> None:
     state.api_settings_write_pending = False
+
+
+@contextmanager
+def api_settings_write(*, rollback_on_error: bool = True):
+    """Bracket an API-settings runtime mutation and persistence write.
+
+    Holds the reload guard (`begin_api_settings_write` / `end_api_settings_write`)
+    across the write and restores touched runtime state on error by default.
+    """
+    snapshot = _snapshot_api_settings_state() if rollback_on_error else None
+    begin_api_settings_write()
+    try:
+        yield
+    except BaseException:
+        if snapshot is not None:
+            _restore_api_settings_state(snapshot)
+        raise
+    finally:
+        end_api_settings_write()
 
 
 def load_api_settings():
@@ -359,12 +412,9 @@ def reorder_api_presets(preset_ids: list[str]) -> None:
         )
     by_id = {str(preset.get("id")): preset for preset in presets}
     ordered = [by_id[preset_id] for preset_id in preset_ids]
-    begin_api_settings_write()
-    try:
+    with api_settings_write():
         state.api_presets = ordered
         persist_api_settings()
-    finally:
-        end_api_settings_write()
 
 
 def serialize_api_preset(preset: dict) -> ApiPresetResponse:
@@ -509,51 +559,53 @@ def build_nodeimage_settings_response(raw: dict | None) -> NodeImageSettingsResp
     )
 
 
-def resolve_prompt_optimizer_api_key(raw: dict | None) -> str:
-    settings = normalize_prompt_optimizer_settings(raw)
+def _resolve_prompt_optimizer_family_api_key(
+    settings: dict,
+    *,
+    missing_env_template: str,
+) -> str:
     secret_id = str(settings.get("api_key") or "").strip()
     if not secret_id:
         return ""
     env_var = get_api_key_env_var(secret_id)
+    target_url = str(settings.get("api_url") or "")
     if secret_id not in secrets.configured_secret_ids():
         resolved_key = resolve_api_key(
             secret_id,
             purpose="prompt_optimizer",
-            target_url=str(settings.get("api_url") or ""),
+            target_url=target_url,
         )
         if resolved_key:
             return resolved_key
         if env_var:
-            raise UnprocessableRequestError(f"Prompt optimizer API Key environment variable {env_var} is not set or empty. Set it in the server environment.")
+            raise UnprocessableRequestError(
+                missing_env_template.replace("{env_var}", env_var)
+            )
         return secret_id
     return _resolve_secret_or_unprocessable(
         secret_id,
         purpose="prompt_optimizer",
-        target_url=str(settings.get("api_url") or ""),
+        target_url=target_url,
+    )
+
+
+def resolve_prompt_optimizer_api_key(raw: dict | None) -> str:
+    return _resolve_prompt_optimizer_family_api_key(
+        normalize_prompt_optimizer_settings(raw),
+        missing_env_template=(
+            "Prompt optimizer API Key environment variable {env_var} is not set or empty. "
+            "Set it in the server environment."
+        ),
     )
 
 
 def resolve_ai_assistant_api_key(raw: dict | None) -> str:
-    settings = effective_ai_assistant_settings(raw)
-    secret_id = str(settings.get("api_key") or "").strip()
-    if not secret_id:
-        return ""
-    env_var = get_api_key_env_var(secret_id)
-    if secret_id not in secrets.configured_secret_ids():
-        resolved_key = resolve_api_key(
-            secret_id,
-            purpose="prompt_optimizer",
-            target_url=str(settings.get("api_url") or ""),
-        )
-        if resolved_key:
-            return resolved_key
-        if env_var:
-            raise UnprocessableRequestError(f"Prompt Optimizer API Key environment variable {env_var} is not set or empty for AI Assistant. Set it in the server environment.")
-        return secret_id
-    return _resolve_secret_or_unprocessable(
-        secret_id,
-        purpose="prompt_optimizer",
-        target_url=str(settings.get("api_url") or ""),
+    return _resolve_prompt_optimizer_family_api_key(
+        effective_ai_assistant_settings(raw),
+        missing_env_template=(
+            "Prompt Optimizer API Key environment variable {env_var} is not set or empty "
+            "for AI Assistant. Set it in the server environment."
+        ),
     )
 
 

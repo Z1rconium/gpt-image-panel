@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException
 from ...repositories.db.execution import run_db_operation
 from ...runtime.state import state
 from ...services.presets import (
+    api_settings_write,
     apply_api_preset,
     apply_ai_assistant_settings,
     apply_preset_provider,
@@ -13,9 +14,7 @@ from ...services.presets import (
     apply_nodeimage_settings,
     apply_upstream_socks5_proxy,
     apply_webhook_url,
-    begin_api_settings_write,
     build_settings_response,
-    end_api_settings_write,
     get_active_preset,
     get_ai_assistant_settings,
     get_prompt_optimizer_settings,
@@ -225,8 +224,7 @@ async def update_settings(req: SettingsRequest):
     if not preset:
         raise HTTPException(status_code=404, detail="Preset not found")
 
-    begin_api_settings_write()
-    try:
+    with api_settings_write(rollback_on_error=False):  # Removed in C8-S3
         preset["name"] = (req.preset_name or preset.get("name") or "Untitled preset").strip()
         previous_api_url = str(preset.get("api_url") or "")
         next_api_url = req.api_url.rstrip("/")
@@ -268,8 +266,6 @@ async def update_settings(req: SettingsRequest):
         validate_preset_secret_binding(preset)
         apply_api_preset(preset)
         await run_db_operation(persist_api_settings)
-    finally:
-        end_api_settings_write()
     if req.prompt_optimizer is not None:
         current_optimizer = get_prompt_optimizer_settings()
         updated_optimizer = apply_prompt_optimizer_settings(current_optimizer, req.prompt_optimizer)

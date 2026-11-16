@@ -12,11 +12,10 @@ from ...services.preset_package import (
     build_preset_import_preview,
 )
 from ...services.presets import (
+    api_settings_write,
     apply_api_preset,
     apply_preset_provider,
-    begin_api_settings_write,
     build_settings_response,
-    end_api_settings_write,
     get_active_preset,
     get_api_presets,
     get_preset_by_id,
@@ -97,13 +96,10 @@ async def create_settings_preset(req: PresetCreateRequest):
     preset["provider_kind"] = source.get("provider_kind", "openai")
     preset["provider_config"] = source.get("provider_config")
     apply_preset_provider(preset, req.provider_kind, req.provider_config)
-    begin_api_settings_write()
-    try:
+    with api_settings_write():
         presets.append(preset)
         apply_api_preset(preset)
         await run_db_operation(persist_api_settings)
-    finally:
-        end_api_settings_write()
     return await run_db_operation(build_settings_response)
 
 
@@ -145,12 +141,9 @@ async def activate_settings_preset(preset_id: str):
     if not preset:
         raise HTTPException(status_code=404, detail="Preset not found")
 
-    begin_api_settings_write()
-    try:
+    with api_settings_write():
         apply_api_preset(preset)
         await run_db_operation(persist_api_settings)
-    finally:
-        end_api_settings_write()
     return await run_db_operation(build_settings_response)
 
 
@@ -168,8 +161,7 @@ async def delete_settings_preset(preset_id: str):
     if delete_index is None:
         raise HTTPException(status_code=404, detail="Preset not found")
 
-    begin_api_settings_write()
-    try:
+    with api_settings_write():
         active_preset_id = getattr(state, "active_preset_id", presets[0]["id"])
         presets.pop(delete_index)
         state.api_presets = presets
@@ -180,7 +172,5 @@ async def delete_settings_preset(preset_id: str):
             state.active_preset_id = active_preset_id
 
         await run_db_operation(persist_api_settings)
-    finally:
-        end_api_settings_write()
 
     return await run_db_operation(build_settings_response)

@@ -27,9 +27,8 @@ from ..schemas.presets import (
 )
 from .presets import (
     _stored_provider_config,
+    api_settings_write,
     apply_api_preset,
-    begin_api_settings_write,
-    end_api_settings_write,
     get_api_presets,
     get_preset_by_id,
     persist_api_settings,
@@ -255,32 +254,12 @@ def apply_preset_import(package: Any, instructions: list[dict]) -> None:
         else:
             new_presets.append(_new_preset_from_export(item))
 
-    previous_presets = list(state.api_presets or [])
-    previous_active_id = str(getattr(state, "active_preset_id", "") or "")
-    begin_api_settings_write()
-    try:
+    active_preset_id = str(getattr(state, "active_preset_id", "") or "")
+    with api_settings_write():
         state.api_presets = new_presets
-        for target_id in updates:
-            if target_id == previous_active_id:
-                updated = next(
-                    preset for preset in new_presets if str(preset.get("id")) == target_id
-                )
-                apply_api_preset(updated)
-                break
-        persist_api_settings()
-    except Exception:
-        state.api_presets = previous_presets
-        if previous_active_id:
-            previous = next(
-                (
-                    preset
-                    for preset in previous_presets
-                    if str(preset.get("id")) == previous_active_id
-                ),
-                None,
+        if active_preset_id in updates:
+            updated = next(
+                preset for preset in new_presets if str(preset.get("id")) == active_preset_id
             )
-            if previous is not None:
-                apply_api_preset(previous)
-        raise
-    finally:
-        end_api_settings_write()
+            apply_api_preset(updated)
+        persist_api_settings()
