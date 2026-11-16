@@ -1116,25 +1116,36 @@ def transition_generate_job_to_terminal(
     return row, True
 
 
-def cancel_generate_job_tx(
+def cancel_generate_job_with_counts_tx(
     job_id: str, message: str
-) -> tuple[dict[str, Any] | None, bool]:
-    """Cancel a parent job and its units atomically.
+) -> tuple[dict[str, Any] | None, bool, int]:
+    """Cancel a parent job and its units atomically, returning `(row, cancelled, running_count)`.
 
-    Returns `(row, cancelled)`. When the job is missing the row is None; when
-    it is already terminal `cancelled` is False and the stored terminal row is
-    returned untouched, which the router maps to HTTP 409 (defect D3).
+    `running_count` is read inside the same write transaction before cancelling units so
+    post-terminal edit-source cleanup can safely keep temp files when a worker was
+    actively running a unit at cancel time.
     """
     _ensure_database()
     now = utc_now()
+    running_count = 0
     with _connect() as conn:
         with _transaction(conn):
             current = _get_generate_job_on_conn(conn, job_id)
             if current is None:
-                return None, False
+                return None, False, 0
             if current.get("status") not in ACTIVE_GENERATE_JOB_STATUSES:
                 metrics.increment("image_jobs.parent_write_skipped_terminal")
-                return current, False
+                return current, False, 0
+
+            count_row = conn.execute(
+                """
+                SELECT COUNT(*) AS running_count
+                FROM image_job_units
+                WHERE parent_job_id = ? AND status = 'running'
+                """,
+                (job_id,),
+            ).fetchone()
+            running_count = int(count_row["running_count"] or 0) if count_row else 0
 
             _cancel_image_job_units_on_conn(conn, job_id, now)
             merged = {
@@ -1148,7 +1159,20 @@ def cancel_generate_job_tx(
             }
             row = _update_generate_job_on_conn(conn, merged)
             _release_reservation(conn, job_id)
-    return row, True
+    return row, True, running_count
+
+
+def cancel_generate_job_tx(
+    job_id: str, message: str
+) -> tuple[dict[str, Any] | None, bool]:
+    """Cancel a parent job and its units atomically.
+
+    Returns `(row, cancelled)`. When the job is missing the row is None; when
+    it is already terminal `cancelled` is False and the stored terminal row is
+    returned untouched, which the router maps to HTTP 409 (defect D3).
+    """
+    row, cancelled, _ = cancel_generate_job_with_counts_tx(job_id, message)
+    return row, cancelled
 
 
 def _get_generate_job_rows_on_conn(

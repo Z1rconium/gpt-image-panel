@@ -7,7 +7,7 @@ from typing import Any, Literal
 from ..core.errors import DomainError, NotFoundError
 from ..repositories.db.execution import run_db_operation
 from ..repositories.image_jobs import (
-    cancel_generate_job_tx,
+    cancel_generate_job_with_counts_tx,
     finalize_parent_job_from_units,
     release_edit_source_reservation,
 )
@@ -38,23 +38,34 @@ TerminalOutcome = FinalizeFromUnitsOutcome | CancelJobOutcome
 async def _write_terminal_outcome(
     job_id: str,
     outcome: TerminalOutcome,
-) -> tuple[dict[str, Any] | None, bool]:
+    *,
+    sources: TerminalSourcePolicy | None,
+) -> tuple[dict[str, Any] | None, bool, TerminalSourcePolicy]:
     if isinstance(outcome, FinalizeFromUnitsOutcome):
-        return await run_db_operation(
+        if sources is None:
+            raise ValueError("sources policy is required for FinalizeFromUnitsOutcome")
+        row, transitioned = await run_db_operation(
             finalize_parent_job_from_units,
             job_id,
             derive=outcome.derive,
             metric_name="finalize_parent_image_job",
             critical=True,
         )
+        return row, transitioned, sources
     if isinstance(outcome, CancelJobOutcome):
-        return await run_db_operation(
-            cancel_generate_job_tx,
+        row, transitioned, running_count = await run_db_operation(
+            cancel_generate_job_with_counts_tx,
             job_id,
             outcome.message,
             metric_name="cancel_generate_job",
             critical=True,
         )
+        effective_sources: TerminalSourcePolicy = (
+            sources
+            if sources is not None
+            else ("release_only" if running_count > 0 else "delete")
+        )
+        return row, transitioned, effective_sources
     raise TypeError(f"Unsupported terminal outcome: {type(outcome).__name__}")
 
 
@@ -80,13 +91,15 @@ async def settle_terminal(
     job_id: str,
     outcome: TerminalOutcome,
     *,
-    sources: TerminalSourcePolicy,
+    sources: TerminalSourcePolicy | None = None,
     dispatch_webhook: bool = True,
     operation: str | None = None,
     require_transition: bool = False,
 ) -> dict[str, Any] | None:
     """Apply a critical terminal write, publish the row, trim history, and settle sources."""
-    row, transitioned = await _write_terminal_outcome(job_id, outcome)
+    row, transitioned, effective_sources = await _write_terminal_outcome(
+        job_id, outcome, sources=sources
+    )
     if row is None:
         if require_transition:
             raise NotFoundError("Generation job not found")
@@ -101,5 +114,5 @@ async def settle_terminal(
     await run_db_operation(trim_generate_jobs, metric_name="trim_generate_jobs")
     effective_operation = str(operation or row.get("operation") or "generation")
     if effective_operation == "edit":
-        await _settle_edit_sources(job_id, sources)
+        await _settle_edit_sources(job_id, effective_sources)
     return job

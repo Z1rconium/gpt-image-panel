@@ -275,3 +275,110 @@ def test_cancel_twice_dispatches_webhook_only_once(tmp_path, monkeypatch):
     assert exc_info.value.status_code == 409
     assert dispatch_calls == [(job_id, "cancelled")]
 
+
+def test_cancel_uses_in_transaction_running_count_when_unit_claimed_mid_cancel(
+    tmp_path, monkeypatch
+):
+    """C7-S6 regression: unit claimed after pre-check must keep temp files on cancel."""
+    _configure_runtime(tmp_path)
+    source_path, _parent, units = _enqueue_edit_job(
+        tmp_path, job_id="cancel-race-claimed", filename="race-claimed.png"
+    )
+    assert source_path.exists()
+
+    orig_resolve = job_cancel.resolve_generate_job_view
+
+    async def resolve_then_claim(job_id: str):
+        view = await orig_resolve(job_id)
+        claimed = image_jobs_repo.claim_next_image_job_unit(
+            worker_id="worker-race",
+            claim_token="token-race",
+            lease_expires_at="2099-01-01T00:00:00+00:00",
+            now=utc_now(),
+            running_limit=4,
+        )
+        assert claimed is not None and claimed["unit_id"] == units[0]["unit_id"]
+        return view
+
+    monkeypatch.setattr(job_cancel, "resolve_generate_job_view", resolve_then_claim)
+
+    asyncio.run(job_cancel.cancel_image_job("cancel-race-claimed"))
+
+    parent = image_jobs_repo.get_generate_job("cancel-race-claimed")
+    assert parent is not None and parent["status"] == "cancelled"
+    assert image_jobs_repo.get_pending_edit_source_bytes() == 0
+    assert source_path.exists() is True
+
+
+def test_cancel_deletes_temp_files_when_running_unit_finishes_before_tx(
+    tmp_path, monkeypatch
+):
+    """C7-S6 regression: unit finishing after pre-check allows temp file cleanup."""
+    _configure_runtime(tmp_path)
+    source_path = tmp_path / "race-finished.png"
+    source_path.write_bytes(PNG_BYTES)
+    source = EditImageSource(
+        temp_path=source_path,
+        byte_size=len(PNG_BYTES),
+        filename="race-finished.png",
+        content_type="image/png",
+        role="image",
+    )
+    job_id = "cancel-race-finished"
+    _parent, units = image_jobs_repo.enqueue_image_job(
+        parent_job={
+            "job_id": job_id,
+            "status": "queued",
+            "stage": "queued",
+            "operation": "edit",
+            "prompt": "race finished",
+            "model": "gpt-image-2",
+            "n": 2,
+        },
+        operation="edit",
+        request={"prompt": "race finished", "model": "gpt-image-2", "n": 2},
+        image_units=2,
+        api_preset_id="default",
+        api_preset_name="Default",
+        api_path="/v1/images/edits",
+        edit_sources=[edit_source_to_payload(source)],
+        pending_edit_source_bytes=len(PNG_BYTES),
+        max_active_generate_jobs=4,
+        max_queued_generate_jobs=4,
+        max_pending_edit_source_bytes=1024 * 1024,
+    )
+    claimed = image_jobs_repo.claim_next_image_job_unit(
+        worker_id="worker-race",
+        claim_token="token-race-finish",
+        lease_expires_at="2099-01-01T00:00:00+00:00",
+        now=utc_now(),
+        running_limit=4,
+    )
+    assert claimed is not None and claimed["unit_id"] == units[0]["unit_id"]
+
+    orig_resolve = job_cancel.resolve_generate_job_view
+
+    async def resolve_then_fail_unit(target_job_id: str):
+        view = await orig_resolve(target_job_id)
+        image_jobs_repo.fail_image_job_unit(
+            str(claimed["unit_id"]),
+            claim_token="token-race-finish",
+            status="error",
+            stage="generation_failed",
+            message="failed before cancel tx",
+            error="failed before cancel tx",
+            stage_timings={},
+            duration="0.10s",
+            completed_at=utc_now(),
+        )
+        return view
+
+    monkeypatch.setattr(job_cancel, "resolve_generate_job_view", resolve_then_fail_unit)
+
+    asyncio.run(job_cancel.cancel_image_job(job_id))
+
+    parent = image_jobs_repo.get_generate_job(job_id)
+    assert parent is not None and parent["status"] == "cancelled"
+    assert image_jobs_repo.get_pending_edit_source_bytes() == 0
+    assert source_path.exists() is False
+
