@@ -154,6 +154,21 @@ async def _prepare_upstream_request(
         socks5_proxy=socks5_proxy,
     )
 
+def _validate_and_measure_upstream_image(
+    image_bytes: bytes,
+    image_id: str,
+    format_extension: str,
+) -> tuple[str | None, str, str, tuple[int, int] | None]:
+    fmt = detect_image_format(image_bytes)
+    ext = DETECTED_FORMAT_EXTENSIONS.get(
+        fmt or "",
+        format_extension,
+    )
+    fname = f"{image_id}.{ext}"
+    validate_image_header_bytes(image_bytes, filename=fname)
+    return fmt, ext, fname, get_image_dimensions(image_bytes)
+
+
 async def save_gallery_entries_from_upstream_data(
     *,
     download_session: aiohttp.ClientSession,
@@ -208,14 +223,19 @@ async def save_gallery_entries_from_upstream_data(
                         f"{decoded_task_bytes} bytes (max {max_task_bytes})"
                     )
 
-                detected_format = detect_image_format(image_bytes)
-                detected_extension = DETECTED_FORMAT_EXTENSIONS.get(
-                    detected_format or "",
-                    format_extension,
-                )
                 image_id = stable_image_id_for(image_index) or generate_image_id()
-                filename = f"{image_id}.{detected_extension}"
-                validate_image_header_bytes(image_bytes, filename=filename)
+                (
+                    detected_format,
+                    detected_extension,
+                    filename,
+                    actual_size,
+                ) = await run_image_operation(
+                    _validate_and_measure_upstream_image,
+                    image_bytes,
+                    image_id,
+                    format_extension,
+                    metric_name="validate_upstream_generated_image",
+                )
             entry_metadata = {**gallery_metadata}
             entry_metadata.update(reported_image_fields(image_data))
             entry_metadata.update({
@@ -231,7 +251,7 @@ async def save_gallery_entries_from_upstream_data(
                 revised_prompt=entry_metadata.get("revised_prompt"),
                 reported_size=entry_metadata.get("reported_size"),
                 reported_quality=entry_metadata.get("reported_quality"),
-                actual_size=get_image_dimensions(image_bytes),
+                actual_size=actual_size,
             )
             if chroma_mode:
                 if progress:

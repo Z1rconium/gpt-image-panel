@@ -1,11 +1,11 @@
 """Isolated, thumbnail-sized SVG renderer. Never fetch external resources."""
 import subprocess
 import sys
-from .generated_media import _svg
+from .svg_validation import validate_svg_bytes
 
 
 def render_svg_thumbnail(data: bytes, max_side: int) -> bytes:
-    width, height = _svg(data)
+    width, height = validate_svg_bytes(data)
     scale = min(1, max_side / max(width, height))
     script = '''
 import sys

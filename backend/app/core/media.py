@@ -17,7 +17,7 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 
 from . import settings as config
-from .svg_validation import _svg
+from .svg_validation import validate_svg_bytes
 
 try:
     from PIL import Image, ImageOps, UnidentifiedImageError
@@ -429,7 +429,7 @@ def get_image_dimensions(image_bytes: bytes) -> tuple[int, int] | None:
 def image_dimension_metadata(image_bytes: bytes) -> dict[str, int]:
     if not detect_image_format(image_bytes):
         try:
-            dimensions = _svg(image_bytes)
+            dimensions = validate_svg_bytes(image_bytes)
         except ValueError:
             return {}
     else:

@@ -1,4 +1,5 @@
 import io
+import time
 import pytest
 from PIL import Image
 from backend.app.core.generated_media import (
@@ -148,3 +149,55 @@ def test_startup_retains_markup_original_and_removes_orphan(client):
     cleanup_orphan_mask_files()
     assert original.read_bytes() == b'original'
     assert not orphan.exists()
+
+
+@pytest.mark.parametrize('token', ['url(', 'url(#'])
+def test_svg_unterminated_url_is_linear_and_rejected(token):
+    payload = token * 40_000
+    data = (
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><style>{payload}</style></svg>'
+    ).encode()
+    started = time.perf_counter()
+    with pytest.raises(ValueError):
+        validate_generated_image_bytes(data)
+    assert time.perf_counter() - started < 0.2
+
+
+@pytest.mark.parametrize('fill', ['url(#grad)', "url('#grad')", 'url("#grad")', "url( '#grad' )"])
+def test_svg_local_fragment_url_variants_accepted(fill):
+    data = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="20">'
+        '<defs><linearGradient id="grad"/></defs>'
+        f'<style>rect{{fill:{fill};}}</style>'
+        '<rect width="40" height="20"/>'
+        '</svg>'
+    ).encode()
+    assert validate_generated_image_bytes(data, filename='local.svg') == 'svg'
+
+
+def test_svg_validation_caches_repeated_parses(monkeypatch):
+    from backend.app.core import media, svg_validation
+    from backend.app.core.generated_media import (
+        detect_generated_image_format,
+        validate_generated_image_header_bytes,
+    )
+
+    unique_svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 43 23">'
+        '<rect width="43" height="23" fill="green"/></svg>'
+    ).encode()
+    calls = 0
+    real_fromstring = svg_validation.ElementTree.fromstring
+
+    def spy_fromstring(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return real_fromstring(*args, **kwargs)
+
+    monkeypatch.setattr(svg_validation.ElementTree, 'fromstring', spy_fromstring)
+
+    assert detect_generated_image_format(unique_svg) == 'svg'
+    assert validate_generated_image_header_bytes(unique_svg, filename='cached.svg') == 'svg'
+    assert get_generated_image_dimensions(unique_svg) == (43, 23)
+    assert media.image_dimension_metadata(unique_svg) == {'image_width': 43, 'image_height': 23}
+    assert calls == 1
