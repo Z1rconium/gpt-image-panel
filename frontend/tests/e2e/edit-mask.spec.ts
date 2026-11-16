@@ -36,8 +36,38 @@ async function uploadPrimary(page: Page, name = 'mask-source.png') {
 
 async function openMaskEditor(page: Page, label = 'mask-source.png') {
   await page.getByRole('button', { name: `Edit repaint area for ${label}` }).click();
-  await expect(EDITOR_DIALOG(page)).toBeVisible();
+  // Opening decodes the source and, on a cold dev server, compiles the
+  // editor modules on first request; 2048px sources under parallel load were
+  // traced at up to 4.6 s, too close to the default 5 s.
+  await expect(EDITOR_DIALOG(page)).toBeVisible({ timeout: 15_000 });
   await expect(page.locator(MASK_CANVAS)).toBeVisible();
+  await waitForEditorSettled(page);
+}
+
+/**
+ * Wait out the dialog's entry transition (`dialogIn` in motion.ts scales the
+ * panel from 0.985 to 1 over 240 ms). A stroke aimed at an image box read
+ * mid-transition lands on different image pixels once the panel finishes
+ * growing. Under load the transition starts late, after a blocked main thread
+ * (e.g. the synchronous gap-fill pass without a worker), and can overlap the
+ * first stroke.
+ */
+async function waitForEditorSettled(page: Page) {
+  await EDITOR_DIALOG(page).evaluate(async () => {
+    const finite = document
+      .getAnimations()
+      .filter((animation) => Number.isFinite(animation.effect?.getComputedTiming().endTime ?? Infinity));
+    await Promise.all(finite.map((animation) => animation.finished.catch(() => undefined)));
+  });
+  await expect
+    .poll(() =>
+      page.locator(MASK_CANVAS).evaluate((canvas) => {
+        const stage = canvas.parentElement as HTMLElement;
+        // Rendered width over layout width: 1 once no ancestor is scaled.
+        return Math.abs(stage.getBoundingClientRect().width / parseFloat(getComputedStyle(stage).width) - 1);
+      })
+    )
+    .toBeLessThan(1e-4);
 }
 
 // The overlay canvas is the whole stage viewport now; strokes must be aimed
@@ -1550,6 +1580,11 @@ test('the auto-fill toggle is remembered across editor sessions', async ({ page 
 });
 
 test('the export is identical without a worker', async ({ page, context }) => {
+  // Two full app loads and two 2048px editor sessions in one test: under
+  // eight parallel workers a single half was traced at ~13 s (app load 7.3 s,
+  // editor open 4.6 s against a cold dev server), so the default 30 s budget
+  // has no headroom for both.
+  test.slow();
   const run = async (target: Page, disableWorker: boolean) => {
     const workers: string[] = [];
     target.on('worker', (worker) => workers.push(worker.url()));
