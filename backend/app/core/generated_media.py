@@ -3,8 +3,6 @@ import io
 from . import media
 from .svg_validation import validate_svg_bytes
 
-_svg = validate_svg_bytes
-
 
 
 def detect_generated_image_format(data: bytes) -> str | None:

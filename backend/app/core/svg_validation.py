@@ -30,6 +30,12 @@ _EXTERNAL_URL_RE = re.compile(r"url\s*\((?!\s*(?:['\"]\s*)?#[^()]*\))", re.I)
 _DIMENSION_RE = re.compile(r"([\d.+eE-]+)(?:px)?")
 _VIEWBOX_SPLIT_RE = re.compile(r"[\s,]+")
 
+
+
+class _TransientSvgError(ValueError):
+    """Resource exhaustion while parsing; must not be cached as a verdict."""
+
+
 _SVG_CACHE_LOCK = threading.Lock()
 _SVG_CACHE: OrderedDict[tuple[int, bytes, int], tuple[int, int] | None] = OrderedDict()
 
@@ -89,6 +95,8 @@ def _parse_svg_uncached(data: bytes) -> tuple[int, int]:
         ):
             raise ValueError("SVG raster dimensions exceed image limits")
         return width_px, height_px
+    except (MemoryError, RecursionError) as exc:
+        raise _TransientSvgError("Invalid or unsafe SVG image") from exc
     except Exception as exc:
         raise ValueError("Invalid or unsafe SVG image") from exc
 
@@ -121,12 +129,11 @@ def validate_svg_bytes(data: bytes) -> tuple[int, int]:
 
     try:
         dimensions = _parse_svg_uncached(data)
+    except _TransientSvgError:
+        raise
     except ValueError:
         _store_svg_cache(key, None)
         raise
 
     _store_svg_cache(key, dimensions)
     return dimensions
-
-
-_svg = validate_svg_bytes

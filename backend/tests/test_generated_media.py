@@ -201,3 +201,26 @@ def test_svg_validation_caches_repeated_parses(monkeypatch):
     assert get_generated_image_dimensions(unique_svg) == (43, 23)
     assert media.image_dimension_metadata(unique_svg) == {'image_width': 43, 'image_height': 23}
     assert calls == 1
+
+
+def test_svg_transient_parse_failure_is_not_cached(monkeypatch):
+    from backend.app.core import svg_validation
+
+    data = (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 47 29">'
+        '<rect width="47" height="29"/></svg>'
+    ).encode()
+    real_fromstring = svg_validation.ElementTree.fromstring
+    state = {'fail': True}
+
+    def flaky_fromstring(*args, **kwargs):
+        if state['fail']:
+            state['fail'] = False
+            raise MemoryError
+        return real_fromstring(*args, **kwargs)
+
+    monkeypatch.setattr(svg_validation.ElementTree, 'fromstring', flaky_fromstring)
+
+    with pytest.raises(ValueError):
+        svg_validation.validate_svg_bytes(data)
+    assert svg_validation.validate_svg_bytes(data) == (47, 29)
