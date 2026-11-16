@@ -123,7 +123,7 @@ def extract_reference_image_ids(form: FormData) -> list[str]:
                 trimmed = value.strip()
                 if trimmed:
                     ids.append(trimmed)
-    return ids
+    return list(dict.fromkeys(ids))
 
 
 def pre_validate_edit_source_count(
@@ -319,6 +319,8 @@ async def _stage_and_queue_edit(
         markup = await read_upload_edit_markup(form)
         mask = await read_upload_edit_mask(form)
         ref_ids = extract_reference_image_ids(form)
+        if gallery_primary_id is not None:
+            ref_ids = [ref_id for ref_id in ref_ids if ref_id != gallery_primary_id]
         raw_uploads = [
             v
             for k in ("image", "image[]")

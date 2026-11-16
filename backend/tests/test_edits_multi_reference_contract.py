@@ -351,3 +351,64 @@ def test_edit_early_validation_failure_cleans_up_staged_mask_and_markup(client):
 
     after = set(temp_dir.glob("*")) if temp_dir.exists() else set()
     assert after == before
+
+
+def test_edit_deduplicates_duplicate_and_primary_reference_image_ids(client, monkeypatch):
+    from backend.app import main as backend_main
+
+    _fake_gallery_entry("primary-dup-img", "primary", "8x8", "primary-dup-img.png")
+    _fake_gallery_entry("ref-dup-a", "ref a", "8x8", "ref-dup-a.png")
+    _fake_gallery_entry("ref-dup-b", "ref b", "8x8", "ref-dup-b.png")
+
+    captured: dict[str, object] = {}
+
+    async def fake_edit_api(
+        api_url,
+        api_key,
+        payload,
+        image_sources,
+        api_preset_name=None,
+        progress=None,
+        socks5_proxy=None,
+        persist_gallery_entry=None,
+        mask_source=None,
+        mask_coverage=None,
+    ):
+        captured["source_count"] = len(image_sources)
+        captured["filenames"] = [src.filename for src in image_sources]
+        image_id = media.generate_image_id()
+        entry = await gallery_mutations.add_to_gallery_async(
+            image_bytes=PNG_BYTES,
+            image_id=image_id,
+            prompt=payload.prompt,
+            size=payload.size,
+            filename=f"{image_id}.png",
+            metadata={"api_path": "/v1/images/edits", "api_preset_name": api_preset_name},
+        )
+        return [entry]
+
+    monkeypatch.setattr(backend_main.proxy, "call_image_edit_api", fake_edit_api)
+
+    resp = client.post(
+        "/api/edits/from-gallery/primary-dup-img",
+        data={
+            "prompt": "deduplicate duplicate references",
+            "model": "gpt-image-2.6-flare",
+            "reference_image_id": [
+                "primary-dup-img",
+                "ref-dup-a",
+                "ref-dup-a",
+                "ref-dup-b",
+                "ref-dup-a",
+            ],
+        },
+    )
+    assert resp.status_code == 202, resp.json()
+    job = _wait_for_job(client, resp.json()["job_id"])
+    assert job["status"] == "success"
+    assert captured["source_count"] == 3
+    assert captured["filenames"] == [
+        "primary-dup-img.png",
+        "ref-dup-a.png",
+        "ref-dup-b.png",
+    ]
