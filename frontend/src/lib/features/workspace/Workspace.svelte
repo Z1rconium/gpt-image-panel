@@ -43,7 +43,7 @@
   import { versionStore } from '$lib/stores/version';
   import { workspaceModeStore, type WorkspaceMode } from '$lib/stores/workspaceMode';
   import { extractImageFilesFromClipboard } from '$lib/utils/clipboard';
-  import { copyText, imageUrl } from '$lib/utils/format';
+  import { copyText, imageUrl, isSvgMedia } from '$lib/utils/format';
   import { canPrefetchNonCritical } from '$lib/utils/network';
   import { readSettingsPrefill, stripSettingsPrefill } from '$lib/utils/settingsPrefill';
   import { buildPresetShareUrl, readPresetShare, stripPresetShare } from '$lib/utils/presetShare';
@@ -1152,18 +1152,18 @@
     let batchBody = galleryStore.selectedBatchRequestBody();
     let selectedCount = $galleryStore.selectionToken?.count || $galleryStore.selectedIds.size;
     if (!selectedCount) return;
+    let skippedSvgCount = 0;
     if (batchBody.ids?.length) {
       const svgIds = new Set(
-        ($galleryStore.gallery?.images || [])
-          .filter((img) => img.filename.toLowerCase().endsWith('.svg') || img.output_format === 'svg')
-          .map((img) => img.id)
+        ($galleryStore.gallery?.images || []).filter((img) => isSvgMedia(img)).map((img) => img.id)
       );
       if (svgIds.size > 0) {
         const filteredIds = batchBody.ids.filter((id) => !svgIds.has(id));
         if (!filteredIds.length) {
-          showToast($t.messages.imageUploadRequired, 'error');
+          showToast($t.messages.svgAnalysisUnsupported, 'error');
           return;
         }
+        skippedSvgCount = batchBody.ids.length - filteredIds.length;
         batchBody = { ...batchBody, ids: filteredIds };
         selectedCount = filteredIds.length;
       }
@@ -1199,8 +1199,19 @@
         progress: 100
       });
       galleryStore.clearSelection();
+      // Filtered locally above, or skipped by the server when the whole filtered gallery was selected.
+      const serverSkipped = Math.max(
+        0,
+        currentJob.requested_count - currentJob.analyzed_count - currentJob.failed_count - currentJob.missing_count
+      );
+      const svgSkipped = skippedSvgCount + serverSkipped;
+      const summary = $t.gallery.aiAnalyzeComplete(
+        currentJob.analyzed_count,
+        currentJob.failed_count,
+        currentJob.missing_count
+      );
       showToast(
-        $t.gallery.aiAnalyzeComplete(currentJob.analyzed_count, currentJob.failed_count, currentJob.missing_count),
+        svgSkipped > 0 ? `${summary} ${$t.gallery.aiAnalyzeSvgSkipped(svgSkipped)}` : summary,
         currentJob.failed_count || currentJob.missing_count ? 'error' : 'status'
       );
     } catch (error) {

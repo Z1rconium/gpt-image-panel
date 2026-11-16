@@ -1250,3 +1250,44 @@ def test_ai_assistant_gallery_batch_skips_svg_and_rejects_svg_only(client, monke
     assert job["requested_count"] == 1
     assert job["analyzed_count"] == 1
     assert job["failed_count"] == 0
+
+
+def test_ai_assistant_gallery_batch_selection_token_skips_svg_without_failing(client, monkeypatch):
+    settings = client.get("/api/settings").json()
+    assert client.post("/api/settings", json=_assistant_runtime_payload(settings)).status_code == 200
+    assert _fake_gallery_entry("tokskip-raster-1", "tokskip prompt", "1024x1024", "tokskip-raster-1.png") is not None
+    gallery_mutations.add_to_gallery_sync(
+        image_id="tokskip-svg-1",
+        prompt="tokskip svg",
+        size="40x20",
+        filename="tokskip-svg-1.svg",
+        metadata={"output_format": "svg"},
+        image_bytes=b'<svg xmlns="http://www.w3.org/2000/svg" width="40" height="20"><rect width="40" height="20"/></svg>',
+    )
+
+    async def fake_request_assistant_json(**kwargs):
+        return (
+            {
+                "description": "ok",
+                "prompt": "ok prompt",
+                "analysis": {"subjects": []},
+                "warnings": [],
+            },
+            "assistant-vision-model",
+            5,
+        )
+
+    monkeypatch.setattr(assistant_router.assistant_client, "request_assistant_json", fake_request_assistant_json)
+    token_resp = client.post("/api/gallery/batch/selection-tokens", json={"filters": {"prompt": "tokskip"}})
+    assert token_resp.status_code == 201
+    submitted = client.post(
+        "/api/assistant/gallery/batch/analyze",
+        json={"selection_token": token_resp.json()["selection_token"]},
+    )
+    assert submitted.status_code == 202, submitted.text
+    job = _wait_for_gallery_batch_analyze_job(client, submitted.json()["job_id"])
+    assert job["status"] == "success"
+    assert job["analyzed_count"] == 1
+    assert job["failed_count"] == 0
+    assert job["missing_count"] == 0
+    assert "skipped 1 unsupported" in job["message"]

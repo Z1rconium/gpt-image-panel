@@ -26,6 +26,7 @@ from ..repositories.coordination import (
 )
 from ..repositories.gallery.queries import (
     get_gallery_entries_by_ids,
+    get_gallery_entry,
     get_gallery_id_batch,
     get_gallery_selection_snapshot,
 )
@@ -356,6 +357,7 @@ async def _run_ai_analyze_job(job: dict[str, Any]) -> None:
     analyzed = int(job.get("exported_count") or 0)
     missing = int(job.get("missing_count") or 0)
     failed = int(job.get("failed_count") or 0)
+    unsupported = 0
     await _update_ai_analyze_job(
         job_id,
         lease_owner,
@@ -379,7 +381,13 @@ async def _run_ai_analyze_job(job: dict[str, Any]) -> None:
         has_stored_ids = bool(_ai_analyze_ids_from_payload(payload))
         for row in batch:
             image_id = str(row["id"])
-            while True:
+            # Vector images cannot be sent to the vision model. They are skipped,
+            # not failed, so a mixed selection still finishes as a success.
+            entry = await run_db_operation(get_gallery_entry, image_id)
+            skip_unsupported = entry is not None and _is_svg_gallery_entry(entry)
+            if skip_unsupported:
+                unsupported += 1
+            while not skip_unsupported:
                 try:
                     await _analyze_gallery_image_with_lease_renewal(
                         image_id,
@@ -437,6 +445,9 @@ async def _run_ai_analyze_job(job: dict[str, Any]) -> None:
         missing += max(0, requested_count - processed)
     skipped = missing + failed
     status = "success" if skipped == 0 else "error"
+    complete_message = "Gallery AI analysis complete"
+    if unsupported:
+        complete_message = f"{complete_message}; skipped {unsupported} unsupported image(s)"
     try:
         await _update_ai_analyze_job(
             job_id,
@@ -444,7 +455,7 @@ async def _run_ai_analyze_job(job: dict[str, Any]) -> None:
             {
                 "status": status,
                 "stage": "completed" if status == "success" else "error",
-                "message": "Gallery AI analysis complete" if status == "success" else "Gallery AI analysis finished with skipped images",
+                "message": complete_message if status == "success" else "Gallery AI analysis finished with skipped images",
                 "progress": 100,
                 "processed_count": processed,
                 "exported_count": analyzed,

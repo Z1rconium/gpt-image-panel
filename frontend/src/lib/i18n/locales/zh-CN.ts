@@ -774,6 +774,7 @@ const zh: Translation = {
     aiAnalyzePreparing: (count) => `正在分析 ${count} 张所选图片。`,
     aiAnalyzeProgress: (done, total, failed, missing = 0) =>
       `已分析 ${done} / ${total}${missing ? `；缺失 ${missing}` : ''}${failed ? `；失败 ${failed}` : ''}`,
+    aiAnalyzeSvgSkipped: (count) => `已跳过 ${count} 张 SVG 图片（AI 分析仅支持位图）。`,
     aiAnalyzeComplete: (done, failed, missing = 0) =>
       `AI 分析完成。已分析 ${done}${missing ? `，缺失 ${missing}` : ''}${failed ? `，失败 ${failed}` : ''}。`,
     browserSavingDownload: '正在接收 ZIP 归档。下载完成后浏览器会保存文件。',
@@ -1003,6 +1004,7 @@ const zh: Translation = {
     editSourceRemoved: (label) => `${label || '参考图'}已移除`,
     galleryImageNotFound: '未找到图片',
     imageUploadRequired: '请上传图片文件',
+    svgAnalysisUnsupported: 'SVG 图片不支持 AI 分析',
     editSourceFromClipboardAdded: '已从剪贴板添加参考图',
     promptCopied: '提示词已复制',
     promptOptimized: '提示词已优化',

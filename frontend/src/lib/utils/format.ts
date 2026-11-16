@@ -43,6 +43,27 @@ export function isGifMedia(media?: MediaLike | null): boolean {
   return isGifFilename(media.filename) || isGifFilename(media.image_url);
 }
 
+export function isSvgMedia(media?: MediaLike | null): boolean {
+  if (!media) return false;
+  if (media.output_format?.trim().toLowerCase() === 'svg') return true;
+  return /\.svg$/i.test((media.filename || '').trim());
+}
+
+/** The original-image URL behind a `/api/thumb/` URL, or null when it is not one. */
+export function originalUrlForThumbnail(url?: string | null): string | null {
+  const match = /^\/api\/thumb\/(.+)$/.exec(url || '');
+  return match ? `/api/image/${match[1]}` : null;
+}
+
+/** `<img onerror>` handler: a missing thumbnail falls back to the original once. */
+export function revertThumbnailToOriginal(image: HTMLImageElement) {
+  if (image.dataset.thumbFallback) return;
+  const original = originalUrlForThumbnail(image.getAttribute('src'));
+  if (!original) return;
+  image.dataset.thumbFallback = '1';
+  image.src = original;
+}
+
 export function previewMediaUrl(media: MediaLike): string {
   const filename = media.filename || filenameFromImageUrl(media.image_url || '') || '';
   return thumbnailUrl(filename, media.thumbnail_url);

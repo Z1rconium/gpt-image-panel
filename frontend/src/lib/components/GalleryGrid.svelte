@@ -28,7 +28,7 @@
   import Star from 'lucide-svelte/icons/star';
   import Trash2 from 'lucide-svelte/icons/trash-2';
   import X from 'lucide-svelte/icons/x';
-  import { displayImageSize, formatBytes, gifInteractiveSrc, isGifMedia } from '$lib/utils/format';
+  import { displayImageSize, formatBytes, gifInteractiveSrc, isGifMedia, isSvgMedia } from '$lib/utils/format';
 
   interface Props {
     canSyncR2?: boolean;
@@ -416,9 +416,7 @@
     const selectedVisible = images.filter((image) => selectedIds.has(image.id));
     return (
       selectedVisible.length === selectedIds.size &&
-      selectedVisible.every(
-        (image) => image.filename.toLowerCase().endsWith('.svg') || image.output_format === 'svg'
-      )
+      selectedVisible.every((image) => isSvgMedia(image))
     );
   });
 </script>

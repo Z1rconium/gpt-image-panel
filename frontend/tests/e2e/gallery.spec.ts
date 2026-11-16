@@ -853,6 +853,57 @@ test('gallery AI batch analysis uses SSE without status polling', async ({ page 
   expect(statusPolls).toEqual([]);
 });
 
+test('gallery AI batch analysis drops SVG items before submitting and says so', async ({ page }) => {
+  let submittedIds: string[] | undefined;
+  page.on('request', (request) => {
+    const url = new URL(request.url());
+    if (request.method() === 'POST' && url.pathname === '/api/assistant/gallery/batch/analyze') {
+      submittedIds = (request.postDataJSON() as { ids?: string[] }).ids;
+    }
+  });
+  await loadApp(page, {
+    galleryImages: [
+      baseGalleryImages[0],
+      {
+        ...baseGalleryImages[0],
+        id: 'vector-1',
+        prompt: 'Vector gallery image',
+        filename: 'vector-1.svg',
+        thumbnail_url: '/api/thumb/vector-1.svg',
+        output_format: 'svg'
+      }
+    ]
+  });
+
+  await page.getByRole('button', { name: 'Select', exact: true }).click();
+  await page.getByRole('img', { name: 'First gallery image', exact: true }).click();
+  await page.getByRole('img', { name: 'Vector gallery image', exact: true }).click();
+  await page.getByRole('button', { name: 'AI analyze', exact: true }).click();
+
+  await expect(page.getByRole('status')).toContainText('AI analysis complete. Analyzed 1.');
+  await expect(page.getByRole('status')).toContainText('Skipped 1 SVG image');
+  expect(submittedIds).toEqual([baseGalleryImages[0].id]);
+});
+
+test('gallery AI analyze is disabled when only SVG images are selected', async ({ page }) => {
+  await loadApp(page, {
+    galleryImages: [
+      {
+        ...baseGalleryImages[0],
+        id: 'vector-only',
+        prompt: 'Only vector image',
+        filename: 'vector-only.svg',
+        thumbnail_url: '/api/thumb/vector-only.svg',
+        output_format: 'svg'
+      }
+    ]
+  });
+
+  await page.getByRole('button', { name: 'Select', exact: true }).click();
+  await page.getByRole('img', { name: 'Only vector image', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'AI analyze', exact: true })).toBeDisabled();
+});
+
 test('lightbox navigates across pages with 2000 mocked images', async ({ page }) => {
   await loadApp(page, { galleryImages: manyGalleryImages(2000) });
 

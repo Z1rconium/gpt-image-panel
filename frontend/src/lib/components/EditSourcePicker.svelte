@@ -4,6 +4,7 @@
   import Upload from 'lucide-svelte/icons/upload';
   import X from 'lucide-svelte/icons/x';
   import { t } from '$lib/i18n';
+  import { revertThumbnailToOriginal } from '$lib/utils/format';
   import { MAX_EDIT_SOURCE_IMAGES, type EditMaskOrigin } from '$lib/stores/editSource';
 
   export let sources: {
@@ -26,6 +27,10 @@
   export let maskSupported = true;
   export let pasteBack = true;
   export let onPasteBackChange: (enabled: boolean) => void = () => {};
+
+  function handleThumbnailError(event: Event) {
+    revertThumbnailToOriginal(event.currentTarget as HTMLImageElement);
+  }
 
   let input: HTMLInputElement;
   let dragDepth = 0;
@@ -167,7 +172,7 @@
             title={$t.promptForm.previewEditLabel(source.label)}
             on:click={() => onPreview(source.id)}
           >
-            <img src={source.previewUrl} alt="" class="h-12 w-12 shrink-0 rounded-md object-cover ring-1 ring-black/5 dark:ring-white/10" />
+            <img src={source.previewUrl} alt="" class="h-12 w-12 shrink-0 rounded-md object-cover ring-1 ring-black/5 dark:ring-white/10" on:error={handleThumbnailError} />
             <span class="min-w-0">
               <span class="block truncate text-xs font-medium text-stone-800 dark:text-zinc-200" title={source.label}>{source.label}</span>
               <span class="mt-0.5 flex flex-wrap items-center gap-1">

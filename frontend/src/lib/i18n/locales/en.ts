@@ -773,6 +773,8 @@ const en = {
     aiAnalyzePreparing: (count: number) => `Analyzing ${count} selected image${count === 1 ? '' : 's'}.`,
     aiAnalyzeProgress: (done: number, total: number, failed: number, missing = 0) =>
       `Analyzed ${done} / ${total}${missing ? `; missing ${missing}` : ''}${failed ? `; failed ${failed}` : ''}`,
+    aiAnalyzeSvgSkipped: (count: number) =>
+      `Skipped ${count} SVG image${count === 1 ? '' : 's'} (AI analysis supports raster images only).`,
     aiAnalyzeComplete: (done: number, failed: number, missing = 0) =>
       `AI analysis complete. Analyzed ${done}${missing ? `, missing ${missing}` : ''}${failed ? `, failed ${failed}` : ''}.`,
     browserSavingDownload: 'Receiving ZIP archive. The browser save dialog may appear after download completes.',
@@ -1002,6 +1004,7 @@ const en = {
     editSourceRemoved: (label: string) => `${label || 'Reference image'} removed`,
     galleryImageNotFound: 'Image not found',
     imageUploadRequired: 'Please upload an image file',
+    svgAnalysisUnsupported: 'SVG images do not support AI analysis',
     editSourceFromClipboardAdded: 'Reference image added from clipboard',
     promptCopied: 'Prompt copied',
     promptOptimized: 'Prompt optimized',
