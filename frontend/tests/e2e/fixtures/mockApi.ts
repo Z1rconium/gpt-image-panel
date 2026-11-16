@@ -2000,7 +2000,8 @@ async function mockApi(page: Page, options: MockOptions = {}) {
     if (url.pathname.startsWith('/api/generate/job-')) {
       const id = url.pathname.split('/').pop() || 'job-generated';
       const generatedJob = generatedJobs.find((candidate) => (candidate as { job_id?: string }).job_id === id);
-      await route.fulfill(json(generatedJob ?? job(id, 'polled prompt')));
+      const fallback = id === 'job-edited' || id === 'job-upload-edited' ? { ...job(id, 'polled prompt'), operation: 'edit' } : job(id, 'polled prompt');
+      await route.fulfill(json(generatedJob ?? fallback));
       return;
     }
 

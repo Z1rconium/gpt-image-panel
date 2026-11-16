@@ -122,7 +122,7 @@ export function pendingImageMatchesFilters(image: GalleryEntry, filters: Gallery
 
 export function galleryThumbnailPendingState(gallery: GalleryResponse, filters: GalleryFilters) {
   const pendingIds = gallery.images
-    .filter((image) => !isGifMedia(image) && image.thumbnail_status && image.thumbnail_status !== 'ready')
+    .filter((image) => image.thumbnail_status && image.thumbnail_status !== 'ready')
     .map((image) => image.id);
   if (!pendingIds.length) return null;
   return {

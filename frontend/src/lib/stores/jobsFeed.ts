@@ -8,6 +8,8 @@ type JobsFeedHandlers = {
   onSnapshot: (jobs: GenerateJobStatus[]) => void;
   onJob: (job: GenerateJobStatus) => void;
   onVisible: () => void;
+  onHealthy?: () => void;
+  onUnhealthy?: () => void;
 };
 
 export function createJobsFeedController(handlers: JobsFeedHandlers) {
@@ -90,7 +92,7 @@ export function createJobsFeedController(handlers: JobsFeedHandlers) {
       onEvent: ({ event, data }) => {
         if (!isCurrent()) return;
         stopPolling();
-        healthy = true;
+        markHealthy();
         if (event === 'jobs' && Array.isArray(data)) {
           snapshotRevision += 1;
           handlers.onSnapshot(data);
@@ -106,15 +108,22 @@ export function createJobsFeedController(handlers: JobsFeedHandlers) {
     function isCurrent() {
       return active && epoch === mine && source === next;
     }
+    /** Notify only on an unhealthy -> healthy transition, not on every event. */
+    function markHealthy() {
+      const recovered = !healthy;
+      healthy = true;
+      if (recovered) handlers.onHealthy?.();
+    }
     function handleError() {
       if (!isCurrent()) return;
       healthy = false;
+      handlers.onUnhealthy?.();
       startPolling();
     }
     next.onopen = () => {
       if (!isCurrent()) return;
-      healthy = true;
       stopPolling();
+      markHealthy();
     };
     source = next;
   }

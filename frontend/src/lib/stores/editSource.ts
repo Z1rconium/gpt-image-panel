@@ -140,6 +140,16 @@ export function editSourceCount(source: EditSourceState) {
   return source.sources.length;
 }
 
+export function existingGalleryImageIds(source: EditSourceState): Set<string> {
+  const ids = new Set<string>();
+  for (const item of source.sources) {
+    if (item.kind !== 'upload' && item.imageId) {
+      ids.add(item.imageId);
+    }
+  }
+  return ids;
+}
+
 /** Matches a source by id, then falls back to a gallery reference's image id. */
 export function findEditSource(source: EditSourceState, idOrImageId: string): EditSource | null {
   return (
@@ -370,14 +380,32 @@ function createEditSourceStore() {
         return 0;
       }
       const current = state;
+      const seen = existingGalleryImageIds(current);
+      const dedupedItems: EditGalleryReferenceSource[] = [];
+      for (const item of validItems) {
+        const key = item.imageId?.trim();
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        dedupedItems.push(item);
+      }
+      const duplicateCount = validItems.length - dedupedItems.length;
+      if (!dedupedItems.length) {
+        if (duplicateCount > 0 && setError) {
+          setError(get(t).messages.duplicateReferencesSkipped(duplicateCount));
+        }
+        return 0;
+      }
       const availableSlots = MAX_EDIT_SOURCE_IMAGES - editSourceCount(current);
       if (availableSlots <= 0) {
         if (setError) setError(get(t).messages.editSourceLimit(MAX_EDIT_SOURCE_IMAGES));
         return 0;
       }
-      const accepted = validItems.slice(0, availableSlots);
-      const overLimitCount = validItems.length - accepted.length;
+      const accepted = dedupedItems.slice(0, availableSlots);
+      const overLimitCount = dedupedItems.length - accepted.length;
       if (invalidCount > 0 && setError) setError(get(t).messages.imageUploadRequired);
+      if (duplicateCount > 0 && setError) {
+        setError(get(t).messages.duplicateReferencesSkipped(duplicateCount));
+      }
       if (overLimitCount > 0 && setError)
         setError(get(t).messages.editSourceSomeSkipped(MAX_EDIT_SOURCE_IMAGES));
 
@@ -413,6 +441,7 @@ function createEditSourceStore() {
     },
     setMarkup(markup: EditMarkup) {
       if (state.markup) URL.revokeObjectURL(state.markup.previewUrl);
+      if (state.mask) editMaskDiscards.update((count) => count + 1);
       revokeMaskUrl(state.mask);
       update((source) => ({ ...source, mask: null, markup }));
     },

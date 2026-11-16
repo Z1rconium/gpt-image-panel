@@ -1,7 +1,11 @@
 import { get } from 'svelte/store';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { editSourceStore, initialEditSourceState, primaryEditSourceId } from '$lib/stores/editSource';
-import { installMarkup, MarkupRejectedError, markupRejectionMessage, validatePaintedMarkup } from '$lib/features/workspace/markup';
+import { editMaskDiscards, editSourceStore, initialEditSourceState, primaryEditSourceId } from '$lib/stores/editSource';
+import { attachMarkup, installMarkup, MarkupRejectedError, markupRejectionMessage, validatePaintedMarkup } from '$lib/features/workspace/markup';
+
+vi.mock('$lib/features/workspace/editPrimaryImage', () => ({
+  readPrimaryDimensions: vi.fn().mockResolvedValue({ width: 8, height: 8 })
+}));
 
 function pngHeader(width: number, height: number, signature = [137, 80, 78, 71, 13, 10, 26, 10]) {
   const bytes = new Uint8Array(33);
@@ -90,5 +94,51 @@ describe('installMarkup (atomic swap)', () => {
     installMarkup({ sourceId: id, blob: blob(), width: 8, height: 8, origin: 'restored' });
     expect(get(editSourceStore).markup?.origin).toBe('restored');
     expect(get(editSourceStore).markup?.editorState).toBeUndefined();
+  });
+});
+
+describe('attachMarkup (mask replacement confirmation)', () => {
+  it('cancels without clearing mask or counting discards when confirmReplaceMask declines, and installs when confirmed', async () => {
+    const id = primaryEditSourceId(get(editSourceStore));
+    editSourceStore.setMask({
+      sourceId: id,
+      blob: new Blob([new Uint8Array([1])], { type: 'image/png' }),
+      width: 8,
+      height: 8,
+      coverage: 0.4,
+      previewUrl: 'blob:existing-mask',
+      origin: 'painted'
+    });
+    const discardsBefore = get(editMaskDiscards);
+    const closeSpy = vi.fn();
+    (globalThis as unknown as { createImageBitmap: () => Promise<unknown> }).createImageBitmap = vi
+      .fn()
+      .mockResolvedValue({ width: 8, height: 8, close: closeSpy });
+    const fakeCanvas = {
+      width: 0,
+      height: 0,
+      getContext: () => ({
+        drawImage: () => {},
+        getImageData: () => ({ data: new Uint8ClampedArray([0, 0, 0, 0]) })
+      })
+    };
+    (globalThis as unknown as { document: unknown }).document = {
+      createElement: () => fakeCanvas
+    };
+
+    const decline = vi.fn().mockResolvedValue(false);
+    await expect(attachMarkup(pngHeader(8, 8), { confirmReplaceMask: decline })).resolves.toBe(false);
+    expect(decline).toHaveBeenCalledTimes(1);
+    expect(get(editSourceStore).mask?.previewUrl).toBe('blob:existing-mask');
+    expect(get(editSourceStore).markup).toBeNull();
+    expect(get(editMaskDiscards)).toBe(discardsBefore);
+
+    const accept = vi.fn().mockResolvedValue(true);
+    await expect(attachMarkup(pngHeader(8, 8), { confirmReplaceMask: accept })).resolves.toBe(true);
+    expect(accept).toHaveBeenCalledTimes(1);
+    expect(get(editSourceStore).mask).toBeNull();
+    expect(get(editSourceStore).markup?.origin).toBe('uploaded');
+    expect(get(editMaskDiscards)).toBe(discardsBefore + 1);
+    expect(closeSpy).toHaveBeenCalledTimes(2);
   });
 });

@@ -4,7 +4,7 @@
  * ordering, de-duplication and error-isolation rules stay unit-testable.
  */
 import type { GenerateJobImage, GenerateJobStatus, GeneratePreviewEvent } from '$lib/api/types/jobs';
-import { filenameFromImageUrl, isGifFilename, jobFailureMessage, thumbnailUrl } from '$lib/utils/format';
+import { filenameFromImageUrl, jobFailureMessage, thumbnailUrl } from '$lib/utils/format';
 import { isActiveJobStatus } from '$lib/utils/jobs';
 
 /** Latest streamed partial image for one task unit (keyed by unit_index). */
@@ -73,13 +73,17 @@ export type PreviewView = {
   completedCount: number;
   pendingCount: number;
   totalCount: number;
+  activeSubmissionCount: number;
   /** Per-submission failures, shown next to the images they belong to. */
   submissionErrors: { id: string; message: string; severity: 'error' | 'warning' }[];
 };
 
 export const MAX_PREVIEW_UNITS = 10;
+export const MAX_CONCURRENT_SUBMISSIONS = 8;
+export const SUBMIT_COOLDOWN_MS = 400;
 const MAX_PREVIEW_CALL_INDEX = 10;
 const MAX_PREVIEW_FRAME_BYTES = 8 * 1024 * 1024;
+const submissionSlotsCache = new WeakMap<PreviewSubmission, PreviewSlot[]>();
 
 export function createPreviewGroup(id: string): PreviewGroup {
   return { id, submissions: [], selectedSlotId: '' };
@@ -146,7 +150,7 @@ export function normalizeJobImages(
         // whenever a different unit finishes first.
         unit_index: image.unit_index ?? null,
         result_index: image.result_index ?? null,
-        thumb_url: imageFilename ? (isGifFilename(imageFilename) ? imageUrl : thumbnailUrl(imageFilename)) : imageUrl,
+        thumb_url: imageFilename ? thumbnailUrl(imageFilename) : imageUrl,
         image_width: image.image_width ?? null,
         image_height: image.image_height ?? null,
         sent_prompt: image.sent_prompt ?? null,
@@ -168,7 +172,7 @@ export function normalizeJobImages(
       image_id: job?.image_id || fallbackFilename || fallbackUrl,
       image_url: fallbackUrl,
       filename: imageFilename,
-      thumb_url: imageFilename ? (isGifFilename(imageFilename) ? fallbackUrl : thumbnailUrl(imageFilename)) : fallbackUrl,
+      thumb_url: imageFilename ? thumbnailUrl(imageFilename) : fallbackUrl,
       image_width: job?.image_width ?? null,
       image_height: job?.image_height ?? null
     }
@@ -305,9 +309,30 @@ function slotsForSubmission(submission: PreviewSubmission): PreviewSlot[] {
   return slots;
 }
 
+function slotsForSubmissionCached(submission: PreviewSubmission): PreviewSlot[] {
+  const cached = submissionSlotsCache.get(submission);
+  if (cached) return cached;
+  const slots = slotsForSubmission(submission);
+  submissionSlotsCache.set(submission, slots);
+  return slots;
+}
+
 /** Submission order, then unit order, then result order (never response order). */
 export function derivePreviewSlots(group: PreviewGroup): PreviewSlot[] {
-  return group.submissions.flatMap(slotsForSubmission);
+  return group.submissions.flatMap(slotsForSubmissionCached);
+}
+
+export function countActiveSubmissions(group: PreviewGroup): number {
+  let count = 0;
+  for (const submission of group.submissions) {
+    if (
+      submission.submitStatus === 'submitting' ||
+      (submission.submitStatus === 'accepted' && (!submission.job || isActiveJobStatus(submission.job.status)))
+    ) {
+      count += 1;
+    }
+  }
+  return count;
 }
 
 /**
@@ -349,6 +374,7 @@ export function derivePreviewView(group: PreviewGroup, error = '', jobFallbackEr
     }
     return [];
   });
+  const activeSubmissionCount = countActiveSubmissions(group);
   return {
     slots,
     completedSlots,
@@ -365,6 +391,7 @@ export function derivePreviewView(group: PreviewGroup, error = '', jobFallbackEr
     completedCount: completedSlots.length,
     pendingCount: pendingSlots.length,
     totalCount: slots.length,
+    activeSubmissionCount,
     submissionErrors
   };
 }
@@ -421,6 +448,61 @@ function streamingStillRelevant(job: GenerateJobStatus, slot: StreamingPreviewSl
   return !unitStatus || isActiveJobStatus(unitStatus);
 }
 
+function sameUnitStatuses(
+  left: Record<string, string> | undefined,
+  right: Record<string, string> | undefined
+): boolean {
+  if (left === right) return true;
+  if (!left || !right) return !left && !right;
+  const leftKeys = Object.keys(left);
+  if (leftKeys.length !== Object.keys(right).length) return false;
+  return leftKeys.every((key) => left[key] === right[key]);
+}
+
+function sameJobImages(
+  left: GenerateJobImage[] | undefined,
+  right: GenerateJobImage[] | undefined
+): boolean {
+  if (left === right) return true;
+  if (!left || !right) return !left?.length && !right?.length;
+  if (left.length !== right.length) return false;
+  return left.every((item, index) => {
+    const other = right[index];
+    return (
+      item.image_id === other.image_id &&
+      item.image_url === other.image_url &&
+      item.filename === other.filename &&
+      item.unit_index === other.unit_index &&
+      item.result_index === other.result_index
+    );
+  });
+}
+
+export function sameJobSnapshot(left: GenerateJobStatus | null, right: GenerateJobStatus): boolean {
+  if (left === right) return true;
+  if (!left) return false;
+  return (
+    left.job_id === right.job_id &&
+    left.status === right.status &&
+    left.stage === right.stage &&
+    left.message === right.message &&
+    left.error === right.error &&
+    left.completed_count === right.completed_count &&
+    left.success_count === right.success_count &&
+    left.failure_count === right.failure_count &&
+    left.image_id === right.image_id &&
+    left.image_url === right.image_url &&
+    left.duration === right.duration &&
+    left.completed_at === right.completed_at &&
+    left.updated_at === right.updated_at &&
+    left.streaming === right.streaming &&
+    left.mask_applied === right.mask_applied &&
+    left.markup_applied === right.markup_applied &&
+    sameUnitStatuses(left.unit_statuses, right.unit_statuses) &&
+    sameJobImages(left.images, right.images)
+  );
+}
+
 /** Apply a job snapshot to its owning submission; other submissions are untouched. */
 export function applyJobToGroup(group: PreviewGroup, job: GenerateJobStatus): PreviewGroup {
   const submission = findSubmissionByJobId(group, job.job_id);
@@ -437,7 +519,7 @@ export function applyJobToGroup(group: PreviewGroup, job: GenerateJobStatus): Pr
     Object.keys(streamingPreviews).length === Object.keys(submission.streamingPreviews).length &&
     Object.entries(streamingPreviews).every(([key, slot]) => submission.streamingPreviews[key] === slot);
   if (
-    submission.job === job &&
+    sameJobSnapshot(submission.job, job) &&
     submission.submitStatus === 'accepted' &&
     sameStreaming
   ) {

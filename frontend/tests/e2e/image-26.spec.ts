@@ -144,6 +144,9 @@ for (const format of ['svg', 'gif']) {
       ]
     });
     await page.route(`**/api/image/${filename}*`, route => route.fulfill({ status: 200, contentType: format === 'svg' ? 'image/svg+xml' : 'image/gif', headers: { 'Content-Disposition': `attachment; filename="${filename}"` }, body: bytes }));
+    if (format === 'gif') {
+      await page.route(`**/api/thumb/${filename}*`, route => route.fulfill({ status: 200, contentType: 'image/gif', body: bytes }));
+    }
     await page.route(`**/api/download/${filename}`, route => route.fulfill({ status: 200, contentType: format === 'svg' ? 'image/svg+xml' : 'image/gif', body: bytes }));
     // Reload to ensure image requests use the original media route.
     await page.reload();
@@ -158,7 +161,12 @@ for (const format of ['svg', 'gif']) {
     const img = card.locator('img').first();
     await expect(img).toBeVisible();
     if (format === 'gif') {
+      await expect(img).toHaveAttribute('src', `/api/thumb/${filename}`);
+      await expect.poll(() => img.evaluate((node: HTMLImageElement) => node.naturalWidth)).toBeGreaterThan(0);
+      await card.locator('.gallery-media-well').hover();
       await expect(img).toHaveAttribute('src', `/api/image/${filename}`);
+      await page.mouse.move(0, 0);
+      await expect(img).toHaveAttribute('src', `/api/thumb/${filename}`);
     }
     await expect.poll(() => img.evaluate((node: HTMLImageElement) => node.naturalWidth)).toBeGreaterThan(0);
     await page.screenshot({ path: `/tmp/gpt-image-26-${format}-preview.png`, fullPage: true });
@@ -173,6 +181,9 @@ for (const format of ['svg', 'gif']) {
       await expect(modal.getByRole('button', { name: 'Analyze', exact: true })).toBeEnabled();
     }
     const original = modal.locator('img').first();
+    if (format === 'gif') {
+      await expect(original).toHaveAttribute('src', `/api/image/${filename}`);
+    }
     await expect.poll(() => original.evaluate((node: HTMLImageElement) => node.naturalWidth)).toBe(64);
     await modal.evaluate(async node => { await Promise.all(node.getAnimations({ subtree: true }).map(animation => animation.finished.catch(() => {}))); });
     await page.screenshot({ path: `/tmp/gpt-image-26-${format}-lightbox.png`, fullPage: false, animations: 'disabled' });
@@ -237,4 +248,59 @@ test('markup decodes local original when gallery preview uses a signed CDN URL',
   await local;
   await expect(page.getByRole('img', { name: 'Markup overlay' })).toBeVisible();
   expect(externalFetches).toBe(0);
+});
+
+test('uploading a markup PNG asks before replacing an active mask and preserves it on cancel', async ({ page }) => {
+  await loadApp(page);
+  const opaqueSource = await page.evaluate(async () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 16;
+    canvas.height = 16;
+    const ctx = canvas.getContext('2d')!;
+    ctx.fillStyle = '#336699';
+    ctx.fillRect(0, 0, 16, 16);
+    return Array.from(new Uint8Array(await (await new Promise<Blob>((r) => canvas.toBlob((b) => r(b!), 'image/png'))).arrayBuffer()));
+  });
+  const transparentLayer = await page.evaluate(async () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 16;
+    canvas.height = 16;
+    const ctx = canvas.getContext('2d')!;
+    ctx.fillStyle = 'rgba(255, 255, 255, 1)';
+    ctx.fillRect(0, 0, 8, 8);
+    return Array.from(new Uint8Array(await (await new Promise<Blob>((r) => canvas.toBlob((b) => r(b!), 'image/png'))).arrayBuffer()));
+  });
+
+  await page.getByLabel('Upload edit image').setInputFiles({ name: 'base.png', mimeType: 'image/png', buffer: Buffer.from(opaqueSource) });
+  await page.locator('section').filter({ has: page.locator('#prompt') }).getByRole('combobox', { name: 'Model', exact: true }).selectOption('gpt-image-2.6-flare');
+  await page.getByRole('button', { name: 'Edit repaint area for base.png' }).click();
+  await page.locator('input[type="file"][aria-label="Upload mask"]').setInputFiles({
+    name: 'mask.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from(transparentLayer)
+  });
+  await page.getByRole('button', { name: 'Save selection', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Remove area', exact: true })).toBeVisible();
+
+  await page.getByLabel('Upload / replace markup PNG').setInputFiles({
+    name: 'markup.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from(transparentLayer)
+  });
+  const dialog = page.getByRole('dialog', { name: 'Replace the current mask?' });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Remove area', exact: true })).toBeVisible();
+  await expect(page.getByRole('img', { name: 'Markup overlay' })).toHaveCount(0);
+
+  await page.getByLabel('Upload / replace markup PNG').setInputFiles({
+    name: 'markup.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from(transparentLayer)
+  });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: 'Replace mask', exact: true }).click();
+  await expect(page.getByRole('img', { name: 'Markup overlay' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Remove area', exact: true })).toHaveCount(0);
 });

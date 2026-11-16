@@ -28,7 +28,7 @@
   import Star from 'lucide-svelte/icons/star';
   import Trash2 from 'lucide-svelte/icons/trash-2';
   import X from 'lucide-svelte/icons/x';
-  import { displayImageSize, formatBytes, imageUrl, isGifMedia, thumbnailUrl } from '$lib/utils/format';
+  import { displayImageSize, formatBytes, gifInteractiveSrc, isGifMedia } from '$lib/utils/format';
 
   interface Props {
     canSyncR2?: boolean;
@@ -367,11 +367,11 @@
     action();
   }
 
+  let hoveredGifId = $state<string | null>(null);
+  let focusedGifId = $state<string | null>(null);
+
   function galleryMediaUrl(image: GalleryEntry) {
-    if (isGifMedia(image)) {
-      return imageUrl(image.filename, image.image_url);
-    }
-    return thumbnailUrl(image.filename, image.thumbnail_url);
+    return gifInteractiveSrc(image, hoveredGifId === image.id || focusedGifId === image.id);
   }
 
   function galleryImageSrc(image: GalleryEntry) {
@@ -392,7 +392,6 @@
   }
 
   function thumbnailReady(image: GalleryEntry) {
-    if (isGifMedia(image)) return true;
     return !image.thumbnail_status || image.thumbnail_status === 'ready';
   }
 
@@ -603,6 +602,10 @@
               style="touch-action: pan-y"
               aria-label={image.prompt}
               aria-pressed={selectionMode ? isImageSelected(image) : undefined}
+              onmouseenter={() => { if (isGifMedia(image)) hoveredGifId = image.id; }}
+              onmouseleave={() => { if (hoveredGifId === image.id) hoveredGifId = null; }}
+              onfocusin={() => { if (isGifMedia(image)) focusedGifId = image.id; }}
+              onfocusout={() => { if (focusedGifId === image.id) focusedGifId = null; }}
               onclick={(event) => handleImageClick(event, image)}
               onpointerdown={handleCardSwipeDown}
               onpointermove={(event) => handleCardSwipeMove(event, image)}

@@ -1,10 +1,12 @@
 /**
  * Per-job tracking resources for the current preview group.
  *
- * Each tracked job owns its own SSE source, lifecycle epoch, fallback polling
- * timer and in-flight token, so starting or finishing one job never closes
- * another job's stream. The global jobs feed stays a single connection; its
- * `job` events are dispatched to the matching tracker here.
+ * Each tracked job owns its own lifecycle epoch, fallback polling timer, and
+ * in-flight poll token. Per-job SSE (`/api/generate/{id}/events`) is opened
+ * only for active, non-queued streaming jobs (`streaming: true`) that emit
+ * partial preview frames; non-streaming and queued jobs rely on the single
+ * global `/api/generate/jobs/events` feed with per-job polling fallback when
+ * the global feed is unhealthy.
  */
 import { get } from 'svelte/store';
 import { ApiError, apiFetch } from '$lib/api/client';
@@ -20,9 +22,18 @@ export type TrackedJobHandlers = {
   onPreview?: (event: GeneratePreviewEvent) => void;
 };
 
+export type TrackJobOptions = {
+  streaming?: boolean;
+  status?: string;
+  feedHealthy?: () => boolean;
+};
+
 type Tracker = {
   jobId: string;
   handlers: TrackedJobHandlers;
+  streaming: boolean;
+  status: string;
+  feedHealthy?: () => boolean;
   /** Invalidated before teardown so late callbacks cannot revive the tracker. */
   epoch: number;
   source: EventSource | null;
@@ -32,6 +43,7 @@ type Tracker = {
 };
 
 export const TRACKED_JOB_POLL_INTERVAL_MS = 1200;
+export const MAX_TRACKED_JOBS = 8;
 
 export function createTrackedJobsController() {
   const trackers = new Map<string, Tracker>();
@@ -54,6 +66,14 @@ export function createTrackedJobsController() {
     previous?.close();
   }
 
+  function shouldOpenSource(tracker: Tracker) {
+    return tracker.streaming && isActiveJobStatus(tracker.status) && tracker.status !== 'queued';
+  }
+
+  function needsFallbackPoll(tracker: Tracker) {
+    return tracker.source ? !tracker.healthy : !tracker.feedHealthy?.();
+  }
+
   function release(jobId: string) {
     const tracker = trackers.get(jobId);
     if (!tracker) return;
@@ -74,15 +94,27 @@ export function createTrackedJobsController() {
 
   async function apply(tracker: Tracker, job: GenerateJobStatus) {
     const epoch = tracker.epoch;
-    await tracker.handlers.onJob(job);
-    if (!isCurrent(tracker, epoch)) return;
-    if (!isActiveJobStatus(job.status)) release(tracker.jobId);
+    tracker.status = job.status;
+    if (job.streaming !== undefined) tracker.streaming = Boolean(job.streaming);
+    try {
+      await tracker.handlers.onJob(job);
+    } finally {
+      if (isCurrent(tracker, epoch) && !isActiveJobStatus(job.status)) {
+        release(tracker.jobId);
+      }
+    }
   }
 
   /** Apply a snapshot that arrived through the global feed. */
   function applyFromFeed(job: GenerateJobStatus) {
     const tracker = trackers.get(job.job_id);
     if (!tracker) return;
+    tracker.status = job.status;
+    if (job.streaming !== undefined) tracker.streaming = Boolean(job.streaming);
+    clearTimer(tracker);
+    if (!tracker.source && shouldOpenSource(tracker)) {
+      openSource(tracker);
+    }
     void apply(tracker, job);
   }
 
@@ -113,9 +145,8 @@ export function createTrackedJobsController() {
       await apply(tracker, job);
       if (!isCurrent(tracker, epoch)) return;
       if (isActiveJobStatus(job.status)) {
-        if (!tracker.healthy) schedulePoll(tracker);
-      } else {
-        closeSource(tracker);
+        if (!tracker.source && shouldOpenSource(tracker)) openSource(tracker);
+        if (needsFallbackPoll(tracker)) schedulePoll(tracker);
       }
     } catch (error) {
       if (!isCurrent(tracker, epoch) || tracker.pollToken !== token) return;
@@ -123,7 +154,7 @@ export function createTrackedJobsController() {
       if (permanentError) {
         tracker.handlers.onError(error.message || get(t).messages.jobLoadFailed);
         release(tracker.jobId);
-      } else {
+      } else if (needsFallbackPoll(tracker)) {
         schedulePoll(tracker);
       }
     } finally {
@@ -139,6 +170,7 @@ export function createTrackedJobsController() {
   }
 
   function openSource(tracker: Tracker) {
+    if (tracker.source) return;
     const epoch = tracker.epoch;
     const source = openJsonEventSource<GenerateJobStatus | GeneratePreviewEvent>(
       `/api/generate/${encodeURIComponent(tracker.jobId)}/events`,
@@ -173,17 +205,29 @@ export function createTrackedJobsController() {
     tracker.source = source;
   }
 
-  /** Track a job once; re-tracking the same id only refreshes its handlers. */
-  function track(jobId: string, handlers: TrackedJobHandlers) {
+  /** Track a job once; re-tracking the same id refreshes its handlers and streaming state. */
+  function track(jobId: string, handlers: TrackedJobHandlers, options: TrackJobOptions = {}) {
     if (!jobId) return;
     const existing = trackers.get(jobId);
     if (existing) {
       existing.handlers = handlers;
+      if (options.streaming !== undefined) existing.streaming = Boolean(options.streaming);
+      if (options.status) existing.status = options.status;
+      if (options.feedHealthy) existing.feedHealthy = options.feedHealthy;
+      if (!existing.source && shouldOpenSource(existing)) openSource(existing);
+      return;
+    }
+    if (trackers.size >= MAX_TRACKED_JOBS) {
+      // Never drop silently: the job keeps running server-side (see the Jobs drawer).
+      handlers.onError(get(t).messages.tooManyActiveSubmissions(MAX_TRACKED_JOBS));
       return;
     }
     const tracker: Tracker = {
       jobId,
       handlers,
+      streaming: Boolean(options.streaming),
+      status: options.status || 'queued',
+      feedHealthy: options.feedHealthy,
       epoch: 0,
       source: null,
       healthy: false,
@@ -191,7 +235,33 @@ export function createTrackedJobsController() {
       pollToken: null
     };
     trackers.set(jobId, tracker);
-    openSource(tracker);
+    if (shouldOpenSource(tracker)) {
+      openSource(tracker);
+    } else if (needsFallbackPoll(tracker)) {
+      schedulePoll(tracker);
+    }
+  }
+
+  /**
+   * The global feed recovered. A reconnect snapshot lists only active jobs, so a
+   * feed-backed job that finished during the outage would never be seen again:
+   * confirm each one with a single poll instead of just dropping its timer.
+   */
+  function onFeedHealthy() {
+    for (const tracker of [...trackers.values()]) {
+      if (tracker.source) continue;
+      clearTimer(tracker);
+      void poll(tracker);
+    }
+  }
+
+  /** Start fallback polling for feed-backed trackers when the global feed drops. */
+  function onFeedUnhealthy() {
+    for (const tracker of trackers.values()) {
+      if (!tracker.source && !tracker.timer && !tracker.pollToken) {
+        schedulePoll(tracker);
+      }
+    }
   }
 
   /** Restart fallback polling for every unhealthy tracker (page became visible). */
@@ -208,6 +278,8 @@ export function createTrackedJobsController() {
     release,
     releaseAll,
     applyFromFeed,
+    onFeedHealthy,
+    onFeedUnhealthy,
     resumePolling,
     get size() {
       return trackers.size;

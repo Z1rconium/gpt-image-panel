@@ -82,6 +82,9 @@ async function installEventSourceScenario(page: Page, scenario: EventSourceScena
         this.onopen?.(openEvent);
 
         if (this.url.endsWith('/api/generate/jobs/events')) {
+          (window as Window & { __globalFeedDispatch?: (eventName: string, payload: unknown) => void }).__globalFeedDispatch = (eventName: string, payload: unknown) => {
+            if (this.readyState !== MockEventSource.CLOSED) this.dispatchMessage(eventName, payload);
+          };
           this.dispatchMessage('jobs', currentConfig.globalJobs || []);
           return;
         }
@@ -267,7 +270,15 @@ test('incremental results stay selectable and partial completion remains visible
   galleryRefreshes.length = 0;
 
   await page.getByRole('textbox', { name: 'Prompt', exact: true }).fill(prompt);
+  const submitDone = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/generate' && response.request().method() === 'POST');
   await page.getByRole('button', { name: 'Generate', exact: true }).click();
+  await submitDone;
+  await page.evaluate((payloads) => {
+    const dispatch = (window as Window & { __globalFeedDispatch?: (eventName: string, payload: unknown) => void }).__globalFeedDispatch;
+    payloads.forEach((payload, index) => {
+      setTimeout(() => dispatch?.('job', payload), 120 + index * 700);
+    });
+  }, events);
   const preview = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Preview' }) });
 
   // The first final image takes the main view; the units still running stay
@@ -297,8 +308,8 @@ test('initial load resumes only the newest active job and shows its result', asy
 
   await loadApp(page, {
     runningJobs: [
-      { ...job('job-newest', 'newest active prompt', 'running'), updated_at: '2026-05-18T12:02:00Z' },
-      { ...job('job-older', 'older active prompt', 'running'), updated_at: '2026-05-18T12:01:00Z' }
+      { ...job('job-newest', 'newest active prompt', 'running'), streaming: true, updated_at: '2026-05-18T12:02:00Z' },
+      { ...job('job-older', 'older active prompt', 'running'), streaming: true, updated_at: '2026-05-18T12:01:00Z' }
     ]
   });
 
@@ -336,14 +347,14 @@ test('successful jobs refresh page one lightly after the current job event strea
     include_counts: false,
     include_filter_options: false
   });
-  expect(perJobEventRequests).toEqual(['/api/generate/job-generated/events']);
+  expect(perJobEventRequests).toEqual([]);
 });
 
 test('a healthy global feed still lets the current job stream deliver the terminal preview', async ({ page }) => {
-  const generatedJob = job('job-generated', 'global active list prompt');
+  const generatedJob = { ...job('job-generated', 'global active list prompt'), streaming: true };
   const galleryRefreshes: Array<Record<string, unknown>> = [];
   await installEventSourceScenario(page, {
-    globalJobs: [{ ...generatedJob, status: 'running', stage: 'waiting_for_api' }],
+    globalJobs: [{ ...generatedJob, status: 'running', stage: 'waiting_for_api', streaming: true }],
     perJobEvents: { 'job-generated': generatedJob }
   });
   page.on('request', (request) => {
@@ -352,9 +363,18 @@ test('a healthy global feed still lets the current job stream deliver the termin
     }
   });
   await loadApp(page, { generatedJob });
+  await page.route('**/api/generate', async (route) => {
+    if (route.request().method() !== 'POST') return route.fallback();
+    await route.fulfill({
+      status: 202,
+      contentType: 'application/json',
+      body: JSON.stringify({ job_id: 'job-generated', status: 'running', stage: 'waiting_for_api', streaming: true, operation: 'generation' })
+    });
+  });
   // Only refreshes caused by the terminal event matter; the page load has its own.
   galleryRefreshes.length = 0;
 
+  await page.getByLabel('Streaming preview').check();
   await page.getByRole('textbox', { name: 'Prompt', exact: true }).fill('global active list prompt');
   await page.getByRole('button', { name: 'Generate', exact: true }).click();
 
@@ -366,7 +386,7 @@ test('a healthy global feed still lets the current job stream deliver the termin
 });
 
 test('a failed job stream falls back to precise terminal polling', async ({ page }) => {
-  const generatedJob = job('job-generated', 'disconnected stream prompt');
+  const generatedJob = { ...job('job-generated', 'disconnected stream prompt'), streaming: true };
   const polledJobIds: string[] = [];
   await installEventSourceScenario(page, {
     perJobModes: { 'job-generated': 'disconnect' }
@@ -377,7 +397,16 @@ test('a failed job stream falls back to precise terminal polling', async ({ page
     if (match) polledJobIds.push(match[1]);
   });
   await loadApp(page, { generatedJob });
+  await page.route('**/api/generate', async (route) => {
+    if (route.request().method() !== 'POST') return route.fallback();
+    await route.fulfill({
+      status: 202,
+      contentType: 'application/json',
+      body: JSON.stringify({ job_id: 'job-generated', status: 'running', stage: 'waiting_for_api', streaming: true, operation: 'generation' })
+    });
+  });
 
+  await page.getByLabel('Streaming preview').check();
   await page.getByRole('textbox', { name: 'Prompt', exact: true }).fill('disconnected stream prompt');
   await page.getByRole('button', { name: 'Generate', exact: true }).click();
 
@@ -388,18 +417,31 @@ test('a failed job stream falls back to precise terminal polling', async ({ page
 });
 
 test('submitting a second job keeps the first stream alive and both results in Preview', async ({ page }) => {
-  const firstJob = job('job-first', 'first prompt', 'success');
-  const secondJob = job('job-second', 'second prompt', 'success');
+  const firstJob = { ...job('job-first', 'first prompt', 'success'), streaming: true };
+  const secondJob = { ...job('job-second', 'second prompt', 'success'), streaming: true };
   await installEventSourceScenario(page, {
     perJobModes: { 'job-first': 'delayed', 'job-second': 'delayed' },
     perJobEvents: { 'job-first': firstJob, 'job-second': secondJob }
   });
   await loadApp(page, { generatedJobs: [firstJob, secondJob] });
+  let submitIndex = 0;
+  await page.route('**/api/generate', async (route) => {
+    if (route.request().method() !== 'POST') return route.fallback();
+    const jobId = submitIndex++ === 0 ? 'job-first' : 'job-second';
+    await route.fulfill({
+      status: 202,
+      contentType: 'application/json',
+      body: JSON.stringify({ job_id: jobId, status: 'running', stage: 'waiting_for_api', streaming: true, operation: 'generation' })
+    });
+  });
 
+  await page.getByLabel('Streaming preview').check();
+  const generateBtn = page.getByRole('button', { name: 'Generate', exact: true });
   await page.getByRole('textbox', { name: 'Prompt', exact: true }).fill('first prompt');
-  await page.getByRole('button', { name: 'Generate', exact: true }).click();
+  await generateBtn.click();
+  await expect(generateBtn).toBeEnabled();
   await page.getByRole('textbox', { name: 'Prompt', exact: true }).fill('second prompt');
-  await page.getByRole('button', { name: 'Generate', exact: true }).click();
+  await generateBtn.click();
 
   const preview = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Preview' }) });
   await expect(preview.getByRole('img', { name: 'Generated preview' })).toBeVisible();
@@ -786,8 +828,17 @@ test('multi-image edits keep every streamed unit and their own loading state', a
     }
   });
   await loadApp(page, { generatedJob: editRunning });
+  await page.route('**/api/edits', async (route) => {
+    if (route.request().method() !== 'POST') return route.fallback();
+    await route.fulfill({
+      status: 202,
+      contentType: 'application/json',
+      body: JSON.stringify({ job_id: 'job-upload-edited', status: 'running', stage: 'waiting_for_api', streaming: true, operation: 'edit' })
+    });
+  });
 
   await page.getByLabel('Upload edit image').setInputFiles([{ name: 'source.png', mimeType: 'image/png', buffer: PNG_BYTES }]);
+  await page.getByLabel('Streaming preview').check();
   await page.getByRole('textbox', { name: 'Prompt', exact: true }).fill('browser upload edit prompt');
   await page.getByLabel('Quantity').fill('2');
 

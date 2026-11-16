@@ -3,7 +3,15 @@
   import type { GenerateJobStatus } from '$lib/api/types/jobs';
   import { t } from '$lib/i18n';
   import { previewStore, type PreviewCompareSource, type PreviewSlot } from '$lib/stores/preview';
-  import { displayImageSize, downloadUrl, formatLocalTime, isGifFilename, stageLabel, statusLabel } from '$lib/utils/format';
+  import {
+    displayImageSize,
+    downloadUrl,
+    formatLocalTime,
+    gifInteractiveSrc,
+    isGifFilename,
+    stageLabel,
+    statusLabel
+  } from '$lib/utils/format';
   import { canRunExposure, runExposure, type ExposureHandle } from '$lib/webgl/exposureScene';
   import ImageTrace from '$lib/components/ImageTrace.svelte';
 
@@ -102,8 +110,17 @@
     return $t.preview.resultThumbAlt(index + 1);
   }
 
+  let hoveredSlotId = $state<string | null>(null);
+  let focusedSlotId = $state<string | null>(null);
+
   function slotThumbUrl(slot: PreviewSlot) {
-    if (slot.image) return failedStripThumbs[slot.id] ? slot.image.image_url : slot.image.thumb_url;
+    if (slot.image) {
+      if (failedStripThumbs[slot.id]) return slot.image.image_url;
+      return gifInteractiveSrc(
+        { filename: slot.image.filename, image_url: slot.image.image_url, thumbnail_url: slot.image.thumb_url },
+        hoveredSlotId === slot.id || focusedSlotId === slot.id
+      );
+    }
     return slot.previewUrl;
   }
 
@@ -343,6 +360,10 @@
                     aria-label={$t.preview.selectResult(index + 1)}
                     aria-pressed={slot.id === selectedSlot?.id}
                     class={`control-focus relative aspect-square w-20 shrink-0 overflow-hidden rounded-lg border ${slot.id === selectedSlot?.id ? 'border-emerald-400 ring-1 ring-emerald-400/40' : 'border-stone-200 hover:border-stone-400 dark:border-zinc-800 dark:hover:border-zinc-600'}`}
+                    onmouseenter={() => { if (slot.image && isGifFilename(slot.image.filename)) hoveredSlotId = slot.id; }}
+                    onmouseleave={() => { if (hoveredSlotId === slot.id) hoveredSlotId = null; }}
+                    onfocusin={() => { if (slot.image && isGifFilename(slot.image.filename)) focusedSlotId = slot.id; }}
+                    onfocusout={() => { if (focusedSlotId === slot.id) focusedSlotId = null; }}
                     onclick={() => previewStore.selectSlot(slot.id)}
                   >
                     <img

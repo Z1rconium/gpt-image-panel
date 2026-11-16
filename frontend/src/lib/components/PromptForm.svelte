@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte';
   import PromptHelperPanel from '$lib/components/PromptHelperPanel.svelte';
   import ImageModelPicker from '$lib/components/ImageModelPicker.svelte';
   import { plainTextInput } from '$lib/actions/plainTextInput';
@@ -6,6 +7,7 @@
   import { t } from '$lib/i18n';
   import type { Snippet } from 'svelte';
   import type { PromptFormState } from '$lib/stores/preview';
+  import { MAX_CONCURRENT_SUBMISSIONS, SUBMIT_COOLDOWN_MS } from '$lib/stores/previewGroup';
   import { settingsStore } from '$lib/stores/settings';
   import { RESPONSE_FORMAT_OPTIONS, sanitizeQuantityInput } from '$lib/utils/promptForm';
   import { imageQualities, isImage25, isImage26, MAX_PROMPT_CHARS, promptLength } from '$lib/utils/imageModels';
@@ -18,8 +20,9 @@
     editPlanning?: boolean;
     hasEditSource?: boolean;
     hasEditMask?: boolean;
+    activeSubmissions?: number;
     editSource?: Snippet;
-    onSubmit?: () => void;
+    onSubmit?: () => Promise<boolean> | boolean | void;
     onOpenSize?: () => void;
     onOptimize?: () => void;
     onPlanEdit?: () => void;
@@ -34,6 +37,7 @@
     editPlanning = false,
     hasEditSource = false,
     hasEditMask = false,
+    activeSubmissions = 0,
     editSource,
     onSubmit = () => {},
     onOpenSize = () => {},
@@ -63,9 +67,45 @@
   const promptOnlyMode = $derived(promptForm.apiPath === '/v1/responses' || promptForm.apiPath === '/v1/chat/completions');
   const parameterControlsDisabled = $derived((promptOnlyMode && !hasEditSource) || loading);
   // Generation stays submittable while earlier requests are in flight; only
-  // the parameter controls keep their existing loading lock. Edits keep the
-  // single-request interaction.
-  const submitDisabled = $derived(loading && hasEditSource);
+  // the parameter controls keep their existing loading lock, while a short
+  // cooldown prevents accidental double-clicks and activeSubmissions caps total
+  // concurrent tracked jobs. Edits keep the single-request interaction.
+  let submitCooldown = $state(false);
+  let cooldownTimer: ReturnType<typeof setTimeout> | null = null;
+  onDestroy(() => {
+    if (cooldownTimer) clearTimeout(cooldownTimer);
+  });
+  const atActiveLimit = $derived(!hasEditSource && activeSubmissions >= MAX_CONCURRENT_SUBMISSIONS);
+  const submitDisabled = $derived((loading && hasEditSource) || submitCooldown || atActiveLimit);
+
+  function clearCooldown() {
+    if (cooldownTimer) {
+      clearTimeout(cooldownTimer);
+      cooldownTimer = null;
+    }
+    submitCooldown = false;
+  }
+
+  async function handleSubmit(options: { viaKeyboard?: boolean } = {}) {
+    // At the in-flight cap the button is disabled, but the keyboard shortcut
+    // still reaches the store so the user gets the limit message, not silence.
+    const blocked = (loading && hasEditSource) || submitCooldown || (atActiveLimit && !options.viaKeyboard);
+    if (blocked) return;
+    if (!hasEditSource) {
+      submitCooldown = true;
+      if (cooldownTimer) clearTimeout(cooldownTimer);
+      cooldownTimer = setTimeout(() => {
+        submitCooldown = false;
+        cooldownTimer = null;
+      }, SUBMIT_COOLDOWN_MS);
+    }
+    try {
+      const accepted = await onSubmit();
+      if (accepted === false) clearCooldown();
+    } catch {
+      clearCooldown();
+    }
+  }
   const modeLabel = $derived(promptForm.apiPath === '/v1/chat/completions' ? $t.promptForm.chatCompletionsMode : $t.promptForm.responsesMode);
   const disabledModeLabel = $derived(
     promptForm.apiPath === '/v1/chat/completions' ? $t.promptForm.disabledForChatCompletions : $t.promptForm.disabledForResponses
@@ -114,8 +154,7 @@
   $effect(() => {
     if (
       promptForm.stream &&
-      (loading ||
-        (!hasEditSource && !['/v1/images/generations', '/v1/responses'].includes(promptForm.apiPath)) ||
+      ((!hasEditSource && !['/v1/images/generations', '/v1/responses'].includes(promptForm.apiPath)) ||
         (providerMapped && !providerCaps?.stream))
     ) {
       promptForm.stream = false;
@@ -153,7 +192,7 @@
     if (event.key !== 'Enter' || event.isComposing || event.repeat) return;
     if (!(event.ctrlKey || event.metaKey)) return;
     event.preventDefault();
-    if (!submitDisabled) onSubmit();
+    void handleSubmit({ viaKeyboard: true });
   }
 
   function clampCompression() {
@@ -388,6 +427,15 @@
         <span class="inline-flex items-center gap-1.5 rounded-full bg-stone-200/60 px-2.5 py-1 font-medium text-stone-600 dark:bg-zinc-800/80 dark:text-zinc-300">
           {$t.promptForm.generate}
         </span>
+        {#if activeSubmissions > 0}
+          <span
+            class="inline-flex items-center rounded-full bg-stone-200/60 px-2.5 py-1 font-mono text-[11px] font-medium text-stone-600 dark:bg-zinc-800/80 dark:text-zinc-300"
+            data-testid="active-submissions-badge"
+            title={atActiveLimit ? $t.messages.tooManyActiveSubmissions(MAX_CONCURRENT_SUBMISSIONS) : undefined}
+          >
+            {$t.promptForm.activeSubmissions(activeSubmissions, MAX_CONCURRENT_SUBMISSIONS)}
+          </span>
+        {/if}
       {/if}
     </div>
 
@@ -402,7 +450,7 @@
         >
           {editPlanning ? $t.promptForm.planningEdit : $t.promptForm.planEdit}
         </button>
-        <button type="button" disabled={submitDisabled} class="ui-button-primary px-5 font-semibold" onclick={onSubmit}>
+        <button type="button" disabled={submitDisabled} class="ui-button-primary px-5 font-semibold" onclick={() => void handleSubmit()}>
           {hasEditSource ? $t.promptForm.edits : $t.promptForm.generate}
         </button>
       </div>

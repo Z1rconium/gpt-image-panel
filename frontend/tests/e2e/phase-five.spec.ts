@@ -173,7 +173,7 @@ test('multi-image preview keeps a running slot after another unit finishes and c
 
 test('simultaneous terminal events notify once across tabs and a click opens the result', async ({ page, context }) => {
   const final = { ...job('job-notification', 'notification result'), status: 'partial_failure', n: 2, success_count: 1, failure_count: 1 };
-  const running = { ...final, status: 'running', images: [], image_id: null, image_url: null };
+  const running = { ...final, status: 'running', streaming: true, images: [], image_id: null, image_url: null };
   const other = { ...running, job_id: 'job-other', n: 1, prompt: 'another running task' };
   const second = await context.newPage();
   for (const tab of [page, second]) {

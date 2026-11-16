@@ -154,7 +154,10 @@ export function markupRejectionMessage(error: unknown): string {
  * Existing contract: any failure surfaces as the generic `invalidMarkup` text,
  * and a failure never touches the markup that is already applied.
  */
-export async function attachMarkup(blob: Blob, options: { origin?: EditMarkupOrigin } = {}): Promise<void> {
+export async function attachMarkup(
+  blob: Blob,
+  options: { origin?: EditMarkupOrigin; confirmReplaceMask?: () => Promise<boolean> } = {}
+): Promise<boolean> {
   const state = get(editSourceStore);
   const sourceId = primaryEditSourceId(state);
   const fail = () => new Error(get(t).promptForm.invalidMarkup);
@@ -172,7 +175,14 @@ export async function attachMarkup(blob: Blob, options: { origin?: EditMarkupOri
     const primary = await readPrimaryDimensions(state);
     if (width !== primary.width || height !== primary.height) throw new MarkupRejectedError('size_mismatch');
     if (!hasTransparentPixel(bitmap)) throw new MarkupRejectedError('opaque');
+    if (state.mask && options.confirmReplaceMask) {
+      const confirmed = await options.confirmReplaceMask();
+      if (!confirmed) return false;
+      const latestSourceId = primaryEditSourceId(get(editSourceStore));
+      if (latestSourceId !== sourceId) throw new MarkupRejectedError('source');
+    }
     installMarkup({ sourceId, blob, width, height, origin: options.origin ?? 'uploaded' });
+    return true;
   } catch {
     throw fail();
   } finally {

@@ -446,6 +446,7 @@ const en = {
     planningEdit: 'Planning...',
     edits: 'Edits',
     generate: 'Generate',
+    activeSubmissions: (active: number, max: number) => `${active}/${max} active`,
     submitShortcut: 'Ctrl/⌘ + Enter to submit',
     editSourcePreview: 'Edit Source Preview',
     closeEditPreview: 'Close edit image preview',
@@ -917,6 +918,7 @@ const en = {
     slotsAvailable: (count: number) => `${count} slots remaining`,
     slotsFull: 'Edit source slots full (limit 16)',
     addSelectedReferences: (count: number) => `Add ${count} selected`,
+    alreadyAdded: 'Already added',
     referencesAdded: (count: number) => `Added ${count} reference images`,
     referencesTruncated: (count: number) => `Slot limit reached; added first ${count} images`,
     noAssetPacks: 'No asset packs available',
@@ -1047,6 +1049,10 @@ const en = {
     editMaskPresetUnsupported: 'The active preset does not support masks; the applied mask was removed',
     editSourceLimit: (max: number) => `At most ${max} edit source images are supported`,
     editSourceSomeSkipped: (max: number) => `Some selected files were skipped because the edit source limit is ${max}`,
+    duplicateReferencesSkipped: (count: number) =>
+      `Skipped ${count} duplicate reference image${count === 1 ? '' : 's'} already in edit sources`,
+    tooManyActiveSubmissions: (max: number) =>
+      `Up to ${max} concurrent submissions can be tracked at once. Wait for an active job to finish.`,
     sessionExpired: 'Session expired. Please enter the access key.',
     r2BackupUnavailable: 'R2 backup is not ready. Enable it in Settings and fill endpoint, bucket, access key ID, and secret access key.',
     failedToFetch: 'Failed to fetch',

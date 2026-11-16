@@ -17,6 +17,7 @@ type JobScenario = {
 async function installJobStreams(page: Page, scenario: JobScenario) {
   await page.addInitScript((config: JobScenario) => {
     const state = { opened: [] as string[], closed: [] as string[] };
+    let globalFeedSource: MockEventSource | null = null;
     class MockEventSource extends EventTarget {
       static readonly CONNECTING = 0;
       static readonly OPEN = 1;
@@ -31,7 +32,13 @@ async function installJobStreams(page: Page, scenario: JobScenario) {
         super();
         this.url = url;
         state.opened.push(url);
+        if (url.endsWith('/api/generate/jobs/events')) globalFeedSource = this;
         setTimeout(() => this.open(), 0);
+      }
+
+      emitJob(payload: unknown) {
+        if (this.readyState === MockEventSource.CLOSED) return;
+        this.dispatchEvent(new MessageEvent('job', { data: JSON.stringify(payload) }));
       }
 
       private open() {
@@ -43,32 +50,53 @@ async function installJobStreams(page: Page, scenario: JobScenario) {
         if (this.url.endsWith('/api/generate/jobs/events')) return;
         const match = this.url.match(/\/api\/generate\/(job-[^/]+)\/events$/);
         if (!match) return;
-        const sequence = config.sequences?.[match[1]];
-        if (sequence) {
-          const startMs = config.sequenceStartMs?.[match[1]] ?? 250;
-          const intervalMs = config.sequenceIntervalMs ?? 400;
-          sequence.forEach((payload, index) => {
-            setTimeout(() => {
-              if (this.readyState === MockEventSource.CLOSED) return;
-              this.dispatchEvent(new MessageEvent('job', { data: JSON.stringify(payload) }));
-            }, startMs + index * intervalMs);
-          });
-          return;
-        }
-        const payload = config.events?.[match[1]];
-        if (!payload) return;
-        setTimeout(() => {
-          if (this.readyState === MockEventSource.CLOSED) return;
-          this.dispatchEvent(new MessageEvent('job', { data: JSON.stringify(payload) }));
-        }, 250);
+        scheduleJobPayloads(match[1], this);
       }
 
       close() {
         if (this.readyState === MockEventSource.CLOSED) return;
         this.readyState = MockEventSource.CLOSED;
+        if (globalFeedSource === this) globalFeedSource = null;
         state.closed.push(this.url);
       }
     }
+
+    function scheduleJobPayloads(jobId: string, target: MockEventSource) {
+      const sequence = config.sequences?.[jobId];
+      if (sequence) {
+        const startMs = config.sequenceStartMs?.[jobId] ?? 250;
+        const intervalMs = config.sequenceIntervalMs ?? 400;
+        sequence.forEach((payload, index) => {
+          setTimeout(() => {
+            target.emitJob(payload);
+          }, startMs + index * intervalMs);
+        });
+        return;
+      }
+      const payload = config.events?.[jobId];
+      if (!payload) return;
+      setTimeout(() => {
+        target.emitJob(payload);
+      }, 250);
+    }
+
+    const originalFetch = window.fetch.bind(window);
+    window.fetch = async (input, init) => {
+      const response = await originalFetch(input, init);
+      try {
+        const url = typeof input === 'string' ? input : input instanceof Request ? input.url : String(input);
+        const method = (init?.method || (input instanceof Request ? input.method : 'GET')).toUpperCase();
+        if (response.ok && method === 'POST' && new URL(url, window.location.origin).pathname === '/api/generate') {
+          const data = await response.clone().json();
+          if (data?.job_id && !data.streaming && globalFeedSource) {
+            scheduleJobPayloads(String(data.job_id), globalFeedSource);
+          }
+        }
+      } catch {
+        // Ignore inspect failures on mocked responses.
+      }
+      return response;
+    };
     (window as Window & { __jobStreams?: typeof state }).__jobStreams = state;
     window.EventSource = MockEventSource as unknown as typeof EventSource;
   }, scenario);
@@ -115,14 +143,69 @@ test('repeated Generate clicks during a pending POST each create a request and a
   const generate = page.getByRole('button', { name: 'Generate', exact: true });
   await prompt.fill('repeated prompt');
   await generate.click();
-  // The button stays usable while the first request is still in flight.
+  // Cooldown clears quickly while earlier requests remain in flight.
   await expect(generate).toBeEnabled();
   await generate.click();
+  await expect(generate).toBeEnabled();
   await generate.click();
 
   await expect.poll(() => generateRequests.length).toBe(3);
   const preview = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Preview' }) });
   await expect(preview.locator('[data-slot-status="waiting"]')).toHaveCount(3);
+  await expect(page.getByTestId('active-submissions-badge')).toHaveText('3/8 active');
+});
+
+test('double-clicking Generate within cooldown sends only one submission', async ({ page }) => {
+  const pending = { ...job('job-pending', 'double click prompt', 'running'), images: [], image_id: null, image_url: null, n: 1 };
+  await installJobStreams(page, { events: {} });
+  await loadApp(page, { generatedJobs: [pending] });
+
+  let postCount = 0;
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && new URL(request.url()).pathname === '/api/generate') postCount += 1;
+  });
+
+  const prompt = page.getByRole('textbox', { name: 'Prompt', exact: true });
+  const generate = page.getByRole('button', { name: 'Generate', exact: true });
+  await prompt.fill('double click prompt');
+  await generate.click();
+  await expect(generate).toBeDisabled();
+  await generate.click({ force: true });
+  expect(postCount).toBe(1);
+
+  await expect(generate).toBeEnabled();
+  await generate.click();
+  await expect.poll(() => postCount).toBe(2);
+  await expect(page.getByTestId('active-submissions-badge')).toHaveText('2/8 active');
+});
+
+test('the 8 in-flight limit disables Generate and the shortcut explains why', async ({ page }) => {
+  const pending = { ...job('job-pending', 'limit prompt', 'running'), images: [], image_id: null, image_url: null, n: 1 };
+  await installJobStreams(page, { events: {} });
+  await loadApp(page, { generatedJobs: [pending] });
+
+  let postCount = 0;
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && new URL(request.url()).pathname === '/api/generate') postCount += 1;
+  });
+
+  const prompt = page.getByRole('textbox', { name: 'Prompt', exact: true });
+  const generate = page.getByRole('button', { name: 'Generate', exact: true });
+  await prompt.fill('limit prompt');
+  for (let i = 1; i <= 8; i += 1) {
+    await expect(generate).toBeEnabled();
+    await generate.click();
+    await expect.poll(() => postCount).toBe(i);
+  }
+
+  await expect(page.getByTestId('active-submissions-badge')).toHaveText('8/8 active');
+  await expect(generate).toBeDisabled();
+
+  // Let the 400 ms double-click cooldown from the last submit elapse first.
+  await page.waitForTimeout(500);
+  await prompt.press('Control+Enter');
+  await expect(page.getByText('Up to 8 concurrent submissions can be tracked at once', { exact: false })).toBeVisible();
+  expect(postCount).toBe(8);
 });
 
 test('a finished image stays selected while a new request appends a loading thumbnail', async ({ page }) => {
@@ -195,6 +278,7 @@ test('two requests of n=2 reserve four slots in submission order', async ({ page
   await prompt.fill('four slots prompt');
   await page.getByLabel('Quantity').fill('2');
   await generate.click();
+  await expect(generate).toBeEnabled();
   await generate.click();
 
   const preview = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Preview' }) });
@@ -232,10 +316,19 @@ test('a failed submission stops its own slot without removing another job\'s ima
 });
 
 test('clearing the preview stops its streams and does not revive them with late results', async ({ page }) => {
-  const late = job('job-late', 'late prompt', 'success');
+  const late = { ...job('job-late', 'late prompt', 'success'), streaming: true };
   await installJobStreams(page, { events: { 'job-late': late } });
   await loadApp(page, { generatedJobs: [late] });
+  await page.route('**/api/generate', async (route) => {
+    if (route.request().method() !== 'POST') return route.fallback();
+    await route.fulfill({
+      status: 202,
+      contentType: 'application/json',
+      body: JSON.stringify({ job_id: 'job-late', status: 'running', stage: 'waiting_for_api', streaming: true, operation: 'generation' })
+    });
+  });
 
+  await page.getByLabel('Streaming preview').check();
   await page.getByRole('textbox', { name: 'Prompt', exact: true }).fill('late prompt');
   await page.getByRole('button', { name: 'Generate', exact: true }).click();
   const preview = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Preview' }) });
@@ -254,11 +347,23 @@ test('streaming frames stay with their own job when two requests run together', 
   const second = { ...job('job-beta', 'beta prompt', 'running'), n: 1, streaming: true, images: [], image_id: null, image_url: null };
   await installJobStreams(page, { events: { 'job-alpha': first, 'job-beta': second } });
   await loadApp(page, { generatedJobs: [first, second] });
+  let submitIndex = 0;
+  await page.route('**/api/generate', async (route) => {
+    if (route.request().method() !== 'POST') return route.fallback();
+    const jobId = submitIndex++ === 0 ? 'job-alpha' : 'job-beta';
+    await route.fulfill({
+      status: 202,
+      contentType: 'application/json',
+      body: JSON.stringify({ job_id: jobId, status: 'running', stage: 'waiting_for_api', streaming: true, operation: 'generation' })
+    });
+  });
 
+  await page.getByLabel('Streaming preview').check();
   const prompt = page.getByRole('textbox', { name: 'Prompt', exact: true });
   const generate = page.getByRole('button', { name: 'Generate', exact: true });
   await prompt.fill('alpha prompt');
   await generate.click();
+  await expect(generate).toBeEnabled();
   await prompt.fill('beta prompt');
   await generate.click();
 
@@ -357,6 +462,7 @@ test('a later-finishing submission does not steal the main image', async ({ page
   const generate = page.getByRole('button', { name: 'Generate', exact: true });
   await prompt.fill('slow prompt');
   await generate.click();
+  await expect(generate).toBeEnabled();
   await prompt.fill('fast prompt');
   await generate.click();
 

@@ -18,10 +18,12 @@ import type { GeneratePreviewEvent, GenerateJobResponse, GenerateJobStatus } fro
 import { jobFailureMessage } from '$lib/utils/format';
 import { MAX_PROMPT_CHARS, imageQualities, isImage25, isImage26, promptLength, validOutputSize } from '$lib/utils/imageModels';
 import {
+  MAX_CONCURRENT_SUBMISSIONS,
   adoptSelection,
   appendSubmission,
   applyJobToGroup,
   applyPreviewEventToGroup,
+  countActiveSubmissions,
   createPreviewGroup,
   createSubmission,
   derivePreviewView,
@@ -74,7 +76,7 @@ export type SubmitOptions = {
 
 /** Trackers released when an edit starts its own group. */
 export type PreviewCallbacks = {
-  trackJob: (jobId: string) => void;
+  trackJob: (jobId: string, meta?: { streaming?: boolean; status?: string }) => void;
   /** Release every tracked job (clear, cleanup, explicit group replacement). */
   releaseJobs?: () => void;
   /**
@@ -317,6 +319,10 @@ function createPreviewStore() {
       setError(error);
       return false;
     }
+    if (countActiveSubmissions(group) >= MAX_CONCURRENT_SUBMISSIONS) {
+      setError(get(t).messages.tooManyActiveSubmissions(MAX_CONCURRENT_SUBMISSIONS));
+      return false;
+    }
     if (options.apiPresetId) body.api_preset_id = options.apiPresetId;
     lastRequest = body;
     lastAction = 'generate';
@@ -356,7 +362,10 @@ function createPreviewStore() {
       // a preview group the user already left: never attach it to the new one.
       if (epoch !== groupEpoch) return true;
       attachJob(submission.id, response, body);
-      callbacks.trackJob(response.job_id);
+      callbacks.trackJob(response.job_id, {
+        streaming: Boolean(body.stream),
+        status: response.status || 'queued'
+      });
       if (callbacks.loadJobs) await callbacks.loadJobs();
       return true;
     } catch (error) {
@@ -469,7 +478,10 @@ function createPreviewStore() {
       );
       if (epoch !== groupEpoch) return true;
       attachJob(submission.id, response, body);
-      callbacks.trackJob(response.job_id);
+      callbacks.trackJob(response.job_id, {
+        streaming: Boolean(body.stream),
+        status: response.status || 'queued'
+      });
       if (callbacks.loadJobs) await callbacks.loadJobs();
       return true;
     } catch (error) {

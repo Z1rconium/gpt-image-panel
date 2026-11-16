@@ -8,7 +8,7 @@ import {
   pendingImageMatchesFilters,
   sameGalleryFilters
 } from '$lib/features/gallery/query';
-import { isGifFilename, isGifMedia, previewMediaUrl } from '$lib/utils/format';
+import { gifInteractiveSrc, isGifFilename, isGifMedia, previewMediaUrl } from '$lib/utils/format';
 import type { GalleryEntry, GalleryResponse } from '$lib/api/types/gallery';
 
 function entry(overrides: Partial<GalleryEntry> = {}): GalleryEntry {
@@ -165,14 +165,20 @@ describe('GIF media format detection and preview URL', () => {
     expect(isGifMedia(null)).toBe(false);
   });
 
-  it('routes GIF previewMediaUrl to imageUrl and others to thumbnailUrl', () => {
+  it('routes all previewMediaUrl calls including GIF to thumbnailUrl and chooses interactive GIF src on hover/focus', () => {
     expect(previewMediaUrl({ filename: 'anim.gif', thumbnail_url: '/api/thumb/anim.gif' }))
-      .toBe('/api/image/anim.gif');
+      .toBe('/api/thumb/anim.gif');
     expect(previewMediaUrl({ filename: 'photo.png', thumbnail_url: '/api/thumb/photo.png' }))
+      .toBe('/api/thumb/photo.png');
+    expect(gifInteractiveSrc({ filename: 'anim.gif', thumbnail_url: '/api/thumb/anim.gif' }, false))
+      .toBe('/api/thumb/anim.gif');
+    expect(gifInteractiveSrc({ filename: 'anim.gif', thumbnail_url: '/api/thumb/anim.gif' }, true))
+      .toBe('/api/image/anim.gif');
+    expect(gifInteractiveSrc({ filename: 'photo.png', thumbnail_url: '/api/thumb/photo.png' }, true))
       .toBe('/api/thumb/photo.png');
   });
 
-  it('excludes GIF entries from galleryThumbnailPendingState', () => {
+  it('includes pending GIF entries in galleryThumbnailPendingState', () => {
     const gallery: GalleryResponse = {
       images: [
         entry({ id: 'gif-1', filename: 'anim.gif', thumbnail_status: 'queued' }),
@@ -189,6 +195,6 @@ describe('GIF media format detection and preview URL', () => {
     };
     const state = galleryThumbnailPendingState(gallery, defaultGalleryFilters);
     expect(state).not.toBeNull();
-    expect(state?.pendingIds).toEqual(['png-1']);
+    expect(state?.pendingIds).toEqual(['gif-1', 'png-1']);
   });
 });

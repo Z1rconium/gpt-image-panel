@@ -45,7 +45,20 @@ export function isGifMedia(media?: MediaLike | null): boolean {
 
 export function previewMediaUrl(media: MediaLike): string {
   const filename = media.filename || filenameFromImageUrl(media.image_url || '') || '';
-  if (isGifMedia(media)) {
+  return thumbnailUrl(filename, media.thumbnail_url);
+}
+
+export function prefersReducedMotion(): boolean {
+  return (
+    typeof window !== 'undefined' &&
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  );
+}
+
+export function gifInteractiveSrc(media: MediaLike, active: boolean): string {
+  const filename = media.filename || filenameFromImageUrl(media.image_url || '') || '';
+  if (active && isGifMedia(media) && !prefersReducedMotion()) {
     return imageUrl(filename, media.image_url);
   }
   return thumbnailUrl(filename, media.thumbnail_url);

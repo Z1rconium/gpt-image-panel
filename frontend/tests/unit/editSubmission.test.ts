@@ -165,7 +165,7 @@ describe('edit tracking ownership', () => {
       { ...initialPromptFormState, prompt: 'generate first' },
       { trackJob, releaseJobs, releaseJob }
     );
-    expect(trackJob).toHaveBeenCalledWith('job-gen');
+    expect(trackJob).toHaveBeenCalledWith('job-gen', { streaming: false, status: 'queued' });
     // The previous test left its edit result in the group; the first generation
     // after an edit starts a fresh group and releases every tracked job.
     expect(releaseJobs).toHaveBeenCalledTimes(1);
@@ -181,6 +181,6 @@ describe('edit tracking ownership', () => {
 
     expect(releaseJob.mock.calls).toEqual([['job-gen']]);
     expect(releaseJobs.mock.calls.length).toBe(0);
-    expect(trackJob).toHaveBeenLastCalledWith('job-edit');
+    expect(trackJob).toHaveBeenLastCalledWith('job-edit', { streaming: false, status: 'queued' });
   });
 });

@@ -4,7 +4,7 @@ import { observeJobStatusChange } from '$lib/utils/completionNotifications';
 import type { GeneratePreviewEvent, GenerateJobStatus } from '$lib/api/types/jobs';
 import { createJobsFeedController } from './jobsFeed';
 import { HISTORY_PAGE_SIZE, initialJobsState, mergeHistoryJobs, sameJobList, sameStringSet, type JobsState } from './jobsState';
-import { createTrackedJobsController } from './trackedJobs';
+import { createTrackedJobsController, type TrackJobOptions } from './trackedJobs';
 
 export type { JobsState } from './jobsState';
 
@@ -41,6 +41,12 @@ function createJobsStore() {
     },
     onVisible: () => {
       trackedJobs.resumePolling();
+    },
+    onHealthy: () => {
+      trackedJobs.onFeedHealthy();
+    },
+    onUnhealthy: () => {
+      trackedJobs.onFeedUnhealthy();
     }
   });
   const loadJobs = jobsFeed.load;
@@ -184,16 +190,24 @@ function createJobsStore() {
     jobId: string,
     updatePreviewFromJob: (job: GenerateJobStatus) => void | Promise<void>,
     setPreviewError: (message: string) => void,
-    onPreview?: (event: GeneratePreviewEvent) => void
+    onPreview?: (event: GeneratePreviewEvent) => void,
+    options: Omit<TrackJobOptions, 'feedHealthy'> = {}
   ) {
     if (!jobId) return;
     jobsFeed.activate();
     // Tracking is per job: a new job never closes an in-flight job's stream.
-    trackedJobs.track(jobId, {
-      onJob: updatePreviewFromJob,
-      onError: setPreviewError,
-      onPreview
-    });
+    trackedJobs.track(
+      jobId,
+      {
+        onJob: updatePreviewFromJob,
+        onError: setPreviewError,
+        onPreview
+      },
+      {
+        ...options,
+        feedHealthy: () => jobsFeed.healthy
+      }
+    );
   }
 
   /** Stop tracking one job (its own resources only). */

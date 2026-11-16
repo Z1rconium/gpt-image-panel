@@ -3,7 +3,7 @@
   import { t } from '$lib/i18n';
   import { galleryActivityStore, galleryStore } from '$lib/stores/gallery';
   import { uiStore } from '$lib/stores/ui';
-  import { imageUrl, isGifFilename, thumbnailUrl } from '$lib/utils/format';
+  import { gifInteractiveSrc, isGifFilename } from '$lib/utils/format';
   import Download from 'lucide-svelte/icons/download';
   import FolderOpen from 'lucide-svelte/icons/folder-open';
 
@@ -17,14 +17,17 @@
   let { collections, activeCollectionId, onOpenCollection, onManageCollections }: Props = $props();
 
   let failedCoverIds = $state<string[]>([]);
+  let hoveredCoverId = $state<string | null>(null);
+  let focusedCoverId = $state<string | null>(null);
 
   const busy = $derived(Boolean($galleryActivityStore.operationStatus));
 
   function coverSrc(collection: GalleryCollection) {
     if (!collection.cover_filename || failedCoverIds.includes(collection.cover_filename)) return '';
-    return isGifFilename(collection.cover_filename)
-      ? imageUrl(collection.cover_filename)
-      : thumbnailUrl(collection.cover_filename);
+    return gifInteractiveSrc(
+      { filename: collection.cover_filename },
+      hoveredCoverId === collection.id || focusedCoverId === collection.id
+    );
   }
 
   function handleCoverError(collection: GalleryCollection) {
@@ -64,6 +67,10 @@
             class="control-focus block w-full text-left"
             aria-label={`${collection.name} · ${$t.collections.imageCount(collection.image_count)}`}
             aria-pressed={activeCollectionId === collection.id}
+            onmouseenter={() => { if (collection.cover_filename && isGifFilename(collection.cover_filename)) hoveredCoverId = collection.id; }}
+            onmouseleave={() => { if (hoveredCoverId === collection.id) hoveredCoverId = null; }}
+            onfocusin={() => { if (collection.cover_filename && isGifFilename(collection.cover_filename)) focusedCoverId = collection.id; }}
+            onfocusout={() => { if (focusedCoverId === collection.id) focusedCoverId = null; }}
             onclick={() => onOpenCollection(collection.id)}
           >
             <span class="relative block aspect-[4/3] bg-stone-100 dark:bg-zinc-900">

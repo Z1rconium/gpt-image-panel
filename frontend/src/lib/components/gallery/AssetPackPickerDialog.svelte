@@ -5,6 +5,7 @@
   import {
     editSourceStore,
     editSourceCount,
+    existingGalleryImageIds,
     MAX_EDIT_SOURCE_IMAGES,
     type EditGalleryReferenceSource
   } from '$lib/stores/editSource';
@@ -34,6 +35,7 @@
   const availableSlots = $derived(
     Math.max(0, MAX_EDIT_SOURCE_IMAGES - editSourceCount($editSourceStore))
   );
+  const addedImageIds = $derived(existingGalleryImageIds($editSourceStore));
 
   let selectedCollectionId = $state<string>('');
   let memberImages = $state<GalleryEntry[]>([]);
@@ -76,8 +78,8 @@
       if (seq !== loadSeq) return;
       memberImages = res.images;
       skippedUnsupported = res.skipped_unsupported;
-      // Pre-select all available references by default
-      selectedIds = new Set(res.images.map((img) => img.id));
+      // Pre-select all available references not already in edit sources
+      selectedIds = new Set(res.images.filter((img) => !addedImageIds.has(img.id)).map((img) => img.id));
     } catch (e) {
       if (seq !== loadSeq) return;
       uiStore.showToast(e instanceof Error ? e.message : $t.messages.requestFailed, 'error');
@@ -87,6 +89,7 @@
   }
 
   function toggleSelect(id: string) {
+    if (addedImageIds.has(id)) return;
     const next = new Set(selectedIds);
     if (next.has(id)) {
       next.delete(id);
@@ -97,7 +100,7 @@
   }
 
   function selectAll() {
-    selectedIds = new Set(memberImages.map((img) => img.id));
+    selectedIds = new Set(memberImages.filter((img) => !addedImageIds.has(img.id)).map((img) => img.id));
   }
 
   function deselectAll() {
@@ -105,7 +108,7 @@
   }
 
   function handleAdd() {
-    const selectedList = memberImages.filter((img) => selectedIds.has(img.id));
+    const selectedList = memberImages.filter((img) => !addedImageIds.has(img.id) && selectedIds.has(img.id));
     if (!selectedList.length) return;
 
     const refs: EditGalleryReferenceSource[] = selectedList.map((img) => ({
@@ -255,13 +258,17 @@
       {:else}
         <div class="grid grid-cols-2 gap-2.5 sm:grid-cols-3 md:grid-cols-4">
           {#each memberImages as img, index (img.id)}
-            {@const checked = selectedIds.has(img.id)}
+            {@const alreadyAdded = addedImageIds.has(img.id)}
+            {@const checked = !alreadyAdded && selectedIds.has(img.id)}
             <button
               type="button"
+              disabled={alreadyAdded}
               class={`group relative flex flex-col overflow-hidden rounded-lg border text-left transition-all ${
-                checked
-                  ? 'border-emerald-500 bg-emerald-500/5 shadow-xs ring-2 ring-emerald-500/20'
-                  : 'border-stone-200 bg-white hover:border-stone-300 dark:border-zinc-800 dark:bg-zinc-950/60 dark:hover:border-zinc-700'
+                alreadyAdded
+                  ? 'cursor-not-allowed border-stone-200 bg-stone-50 opacity-60 dark:border-zinc-800 dark:bg-zinc-900/40'
+                  : checked
+                    ? 'border-emerald-500 bg-emerald-500/5 shadow-xs ring-2 ring-emerald-500/20'
+                    : 'border-stone-200 bg-white hover:border-stone-300 dark:border-zinc-800 dark:bg-zinc-950/60 dark:hover:border-zinc-700'
               }`}
               onclick={() => toggleSelect(img.id)}
             >
@@ -283,9 +290,9 @@
                 >
                   <Check class="h-3.5 w-3.5" strokeWidth={3} />
                 </span>
-                <!-- Position badge -->
+                <!-- Position / already-added badge -->
                 <span class="absolute right-1.5 top-1.5 rounded bg-black/60 px-1 py-0.2 font-mono text-[10px] font-medium text-white shadow-xs backdrop-blur-xs">
-                  #{index + 1}
+                  {alreadyAdded ? $t.collections.alreadyAdded : `#${index + 1}`}
                 </span>
               </div>
               <div class="min-w-0 p-1.5">

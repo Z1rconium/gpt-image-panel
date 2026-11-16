@@ -104,7 +104,7 @@ describe('global jobs feed lifecycle', () => {
   it('does not replay a late list status after a current single-job terminal event', async () => {
     const update = vi.fn().mockResolvedValue(undefined);
     jobsStore.startJobsEvents();
-    jobsStore.trackJob('tracked', update, vi.fn());
+    jobsStore.trackJob('tracked', update, vi.fn(), undefined, { streaming: true, status: 'running' });
     const slow = deferred<GenerateJobStatus[]>();
     api.apiFetch.mockReturnValueOnce(slow.promise);
     const loading = jobsStore.loadJobs();
@@ -229,7 +229,7 @@ describe('global jobs feed lifecycle', () => {
     const update = vi.fn().mockResolvedValue(undefined);
     const preview = vi.fn();
     jobsStore.startJobsEvents();
-    jobsStore.trackJob('tracked', update, vi.fn(), preview);
+    jobsStore.trackJob('tracked', update, vi.fn(), preview, { streaming: true, status: 'running' });
     const partial: GeneratePreviewEvent = { job_id: 'tracked', unit_index: 0, partial_image_index: 0, sequence: 1, mime_type: 'image/png', data_url: 'data:partial' };
     emit(streams[1], 'preview', partial);
     expect(preview).toHaveBeenCalledWith(partial);
@@ -249,8 +249,8 @@ describe('global jobs feed lifecycle', () => {
     const first = vi.fn().mockResolvedValue(undefined);
     const second = vi.fn().mockResolvedValue(undefined);
     jobsStore.startJobsEvents();
-    jobsStore.trackJob('job-a', first, vi.fn());
-    jobsStore.trackJob('job-b', second, vi.fn());
+    jobsStore.trackJob('job-a', first, vi.fn(), undefined, { streaming: true, status: 'running' });
+    jobsStore.trackJob('job-b', second, vi.fn(), undefined, { streaming: true, status: 'running' });
     expect(streams.map((stream) => stream.url)).toEqual([
       '/api/generate/jobs/events',
       '/api/generate/job-a/events',
@@ -276,6 +276,8 @@ describe('global jobs feed lifecycle', () => {
     const first = vi.fn().mockResolvedValue(undefined);
     const second = vi.fn().mockResolvedValue(undefined);
     jobsStore.startJobsEvents();
+    // An already-open feed: its events are not an unhealthy -> healthy recovery.
+    streams[0].onopen?.();
     jobsStore.trackJob('job-a', first, vi.fn());
     jobsStore.trackJob('job-b', second, vi.fn());
     emit(streams[0], 'job', job('job-a', { status: 'running', stage: 'waiting_for_api' }));
@@ -291,8 +293,8 @@ describe('global jobs feed lifecycle', () => {
     const first = vi.fn().mockResolvedValue(undefined);
     const replacement = vi.fn().mockResolvedValue(undefined);
     jobsStore.startJobsEvents();
-    jobsStore.trackJob('job-a', first, vi.fn());
-    jobsStore.trackJob('job-a', replacement, vi.fn());
+    jobsStore.trackJob('job-a', first, vi.fn(), undefined, { streaming: true, status: 'running' });
+    jobsStore.trackJob('job-a', replacement, vi.fn(), undefined, { streaming: true, status: 'running' });
     expect(streams).toHaveLength(2);
     emit(streams[1], 'job', job('job-a', { status: 'running' }));
     await vi.advanceTimersByTimeAsync(0);
@@ -303,8 +305,8 @@ describe('global jobs feed lifecycle', () => {
   it('releases every tracker on cleanup and ignores their late callbacks', async () => {
     const update = vi.fn().mockResolvedValue(undefined);
     jobsStore.startJobsEvents();
-    jobsStore.trackJob('job-a', update, vi.fn());
-    jobsStore.trackJob('job-b', update, vi.fn());
+    jobsStore.trackJob('job-a', update, vi.fn(), undefined, { streaming: true, status: 'running' });
+    jobsStore.trackJob('job-b', update, vi.fn(), undefined, { streaming: true, status: 'running' });
     const [feed, first, second] = streams;
     jobsStore.cleanup();
     emit(first, 'job', job('job-a', { status: 'success' }));
@@ -320,7 +322,7 @@ describe('global jobs feed lifecycle', () => {
   it('keeps a released job from being revived by its own late poll', async () => {
     const update = vi.fn().mockResolvedValue(undefined);
     jobsStore.startJobsEvents();
-    jobsStore.trackJob('job-a', update, vi.fn());
+    jobsStore.trackJob('job-a', update, vi.fn(), undefined, { streaming: true, status: 'running' });
     const slow = deferred<GenerateJobStatus>();
     api.apiFetch.mockReturnValueOnce(slow.promise);
     streams[1].handlers.onNetworkError?.(new Event('error'));
@@ -337,8 +339,8 @@ describe('global jobs feed lifecycle', () => {
     const first = vi.fn().mockResolvedValue(undefined);
     const second = vi.fn().mockResolvedValue(undefined);
     jobsStore.startJobsEvents();
-    jobsStore.trackJob('job-a', first, vi.fn());
-    jobsStore.trackJob('job-b', second, vi.fn());
+    jobsStore.trackJob('job-a', first, vi.fn(), undefined, { streaming: true, status: 'running' });
+    jobsStore.trackJob('job-b', second, vi.fn(), undefined, { streaming: true, status: 'running' });
     api.apiFetch.mockImplementation((url: string) =>
       Promise.resolve(url === '/api/generate/job-a' ? job('job-a', { status: 'success' }) : job('job-b'))
     );
@@ -354,8 +356,8 @@ describe('global jobs feed lifecycle', () => {
     const firstError = vi.fn();
     const secondError = vi.fn();
     jobsStore.startJobsEvents();
-    jobsStore.trackJob('job-a', vi.fn().mockResolvedValue(undefined), firstError, vi.fn());
-    jobsStore.trackJob('job-b', vi.fn().mockResolvedValue(undefined), secondError, vi.fn());
+    jobsStore.trackJob('job-a', vi.fn().mockResolvedValue(undefined), firstError, vi.fn(), { streaming: true, status: 'running' });
+    jobsStore.trackJob('job-b', vi.fn().mockResolvedValue(undefined), secondError, vi.fn(), { streaming: true, status: 'running' });
     api.apiFetch.mockRejectedValueOnce(new ApiError('gone', 404, null));
     streams[1].handlers.onNetworkError?.(new Event('error'));
     await vi.advanceTimersByTimeAsync(0);
@@ -368,7 +370,7 @@ describe('global jobs feed lifecycle', () => {
     jobsStore.cleanup();
     page.show('hidden');
     const update = vi.fn().mockResolvedValue(undefined);
-    jobsStore.trackJob('tracked', update, vi.fn());
+    jobsStore.trackJob('tracked', update, vi.fn(), undefined, { streaming: true, status: 'running' });
     streams[0].handlers.onNetworkError?.(new Event('error'));
     expect(api.apiFetch).not.toHaveBeenCalled();
     api.apiFetch.mockImplementation((url: string) => Promise.resolve(url === '/api/generate/jobs' ? [] : job('tracked')));
@@ -397,5 +399,86 @@ describe('global jobs feed lifecycle', () => {
     pending.resolve([job('stale-history')]);
     await history;
     expect(get(jobsStore).historyJobs.map((value) => value.job_id)).toEqual(['failed']);
+  });
+
+  it('keeps non-streaming and queued streaming jobs off per-job SSE until streaming runs', async () => {
+    const nonStream = vi.fn().mockResolvedValue(undefined);
+    const queuedStream = vi.fn().mockResolvedValue(undefined);
+    jobsStore.startJobsEvents();
+    // Feed is marked healthy so non-streaming job relies on feed instead of opening per-job SSE or polling.
+    streams[0].onopen?.();
+    jobsStore.trackJob('job-nonstream', nonStream, vi.fn(), undefined, { streaming: false, status: 'running' });
+    jobsStore.trackJob('job-queued', queuedStream, vi.fn(), undefined, { streaming: true, status: 'queued' });
+    expect(streams).toHaveLength(1);
+
+    // Promoting the queued streaming job to running via global feed opens its per-job SSE stream.
+    emit(streams[0], 'job', job('job-queued', { status: 'running', streaming: true }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(streams).toHaveLength(2);
+    expect(streams[1].url).toBe('/api/generate/job-queued/events');
+
+    // Feed dropping triggers fallback poll for non-streaming job without creating per-job EventSource.
+    api.apiFetch.mockImplementation((url: string) =>
+      Promise.resolve(url === '/api/generate/job-nonstream' ? job('job-nonstream', { status: 'success' }) : job('job-queued'))
+    );
+    streams[0].handlers.onNetworkError?.(new Event('error'));
+    await vi.advanceTimersByTimeAsync(1200);
+    expect(api.apiFetch.mock.calls.map(([url]) => url)).toContain('/api/generate/job-nonstream');
+    expect(nonStream).toHaveBeenCalledWith(job('job-nonstream', { status: 'success' }));
+  });
+
+  it('caps concurrently tracked jobs at 8', () => {
+    jobsStore.startJobsEvents();
+    for (let i = 1; i <= 10; i += 1) {
+      jobsStore.trackJob(`job-${i}`, vi.fn().mockResolvedValue(undefined), vi.fn(), undefined, {
+        streaming: true,
+        status: 'running'
+      });
+    }
+    // 1 global feed + at most 8 active per-job streams.
+    expect(streams).toHaveLength(9);
+    expect(streams.slice(1).map((stream) => stream.url)).toEqual(
+      Array.from({ length: 8 }, (_, idx) => `/api/generate/job-${idx + 1}/events`)
+    );
+  });
+  it('reports the tracking cap to the rejected job instead of dropping it silently', () => {
+    jobsStore.startJobsEvents();
+    for (let i = 1; i <= 8; i += 1) {
+      jobsStore.trackJob(`job-${i}`, vi.fn().mockResolvedValue(undefined), vi.fn(), undefined, {
+        streaming: true,
+        status: 'running'
+      });
+    }
+    const onError = vi.fn();
+    jobsStore.trackJob('job-9', vi.fn().mockResolvedValue(undefined), onError, undefined, {
+      streaming: true,
+      status: 'running'
+    });
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(onError.mock.calls[0][0]).toEqual(expect.any(String));
+    expect(streams.some((stream) => stream.url === '/api/generate/job-9/events')).toBe(false);
+  });
+
+  it('confirms a feed-backed job with one poll when the global feed recovers', async () => {
+    const onJob = vi.fn().mockResolvedValue(undefined);
+    jobsStore.startJobsEvents();
+    streams[0].onopen?.();
+    jobsStore.trackJob('job-gap', onJob, vi.fn(), undefined, { streaming: false, status: 'running' });
+    streams[0].handlers.onNetworkError?.(new Event('error'));
+    await vi.advanceTimersByTimeAsync(0);
+    api.apiFetch.mockClear();
+
+    // The job finished during the outage; the reconnect snapshot only lists active jobs.
+    api.apiFetch.mockResolvedValue(job('job-gap', { status: 'success' }));
+    streams[0].onopen?.();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(api.apiFetch.mock.calls.map(([url]) => url)).toEqual(['/api/generate/job-gap']);
+    expect(onJob).toHaveBeenCalledWith(job('job-gap', { status: 'success' }));
+    // Ordinary feed events after recovery do not poll again.
+    api.apiFetch.mockClear();
+    emit(streams[0], 'jobs', []);
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(api.apiFetch).not.toHaveBeenCalled();
   });
 });

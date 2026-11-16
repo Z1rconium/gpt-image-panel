@@ -2,6 +2,7 @@ import { get } from 'svelte/store';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiFetch } from '$lib/api/client';
 import { initialPromptFormState, previewStore } from '$lib/stores/preview';
+import { MAX_CONCURRENT_SUBMISSIONS, sameJobSnapshot } from '$lib/stores/previewGroup';
 import { editSourceStore } from '$lib/stores/editSource';
 import type { GenerateJobStatus } from '$lib/api/types/jobs';
 
@@ -520,5 +521,39 @@ describe('continuous generation submissions', () => {
       label: 'Ref One'
     });
     editSourceStore.clear();
+  });
+
+  it('uses static thumb_url for GIF slots and reuses cached slots across unrelated updates', async () => {
+    apiFetchMock.mockResolvedValueOnce(response('job-gif-1') as never);
+    await previewStore.generateImage(form('gif anim'), { trackJob: () => {} });
+    const firstJob = job('job-gif-1', {
+      status: 'success',
+      images: [{ image_id: 'g1', image_url: '/api/image/g1.gif', filename: 'g1.gif', unit_index: 0 }]
+    });
+    previewStore.applyJob(firstJob);
+    const firstSlots = get(previewStore).slots;
+    expect(firstSlots[0].image?.thumb_url).toBe('/api/thumb/g1.gif');
+
+    // Identical job snapshot is ignored cleanly without replacing cached slot object.
+    previewStore.applyJob(firstJob);
+    expect(get(previewStore).slots).toBe(firstSlots);
+    expect(sameJobSnapshot(firstJob, { ...firstJob })).toBe(true);
+    expect(sameJobSnapshot(firstJob, { ...firstJob, stage: 'finalizing' })).toBe(false);
+
+    // Second submission appends without rebuilding the unchanged first submission's slot object.
+    apiFetchMock.mockResolvedValueOnce(response('job-gif-2') as never);
+    await previewStore.generateImage(form('second'), { trackJob: () => {} });
+    expect(get(previewStore).slots[0]).toBe(firstSlots[0]);
+  });
+
+  it('caps concurrent in-flight submissions at MAX_CONCURRENT_SUBMISSIONS (8)', async () => {
+    const trackJob = vi.fn();
+    for (let i = 0; i < MAX_CONCURRENT_SUBMISSIONS; i += 1) {
+      apiFetchMock.mockResolvedValueOnce(response(`job-cap-${i}`) as never);
+      expect(await previewStore.generateImage(form(`prompt-${i}`), { trackJob })).toBe(true);
+    }
+    expect(get(previewStore).activeSubmissionCount).toBe(MAX_CONCURRENT_SUBMISSIONS);
+    expect(await previewStore.generateImage(form('overflow'), { trackJob })).toBe(false);
+    expect(get(previewStore).error).not.toBe('');
   });
 });

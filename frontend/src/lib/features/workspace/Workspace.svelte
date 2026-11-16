@@ -290,7 +290,7 @@
     if (activeJob) {
       // Resume the newest active job as this page's preview group.
       previewStore.openJob(activeJob);
-      trackJob(activeJob.job_id);
+      trackJob(activeJob.job_id, { streaming: Boolean(activeJob.streaming), status: activeJob.status });
     }
     urlSync.setReady();
     urlSync.flush();
@@ -611,12 +611,13 @@
     }
   }
 
-  function trackJob(jobId: string) {
+  function trackJob(jobId: string, meta?: { streaming?: boolean; status?: string }) {
     jobsStore.trackJob(
       jobId,
       (job) => updatePreviewFromJob(job),
       (message) => previewStore.failJobTracking(jobId, message),
-      previewStore.applyPreviewEvent
+      previewStore.applyPreviewEvent,
+      meta
     );
   }
 
@@ -639,13 +640,14 @@
     return previewStore.editImage(promptForm.snapshot(), $editSourceStore, previewCallbacks, options);
   }
 
-  async function submitPrompt() {
+  async function submitPrompt(): Promise<boolean> {
     const submittedPrompt = promptForm.prompt;
     const accepted = await (hasEditSource ? editImage() : generateImage());
     // Only clear once the job was accepted, and never over text typed meanwhile.
     if (accepted && $preferencesStore.clearPromptAfterSubmit && promptForm.prompt === submittedPrompt) {
       promptForm.prompt = '';
     }
+    return accepted;
   }
 
   async function planEdit() {
@@ -1029,6 +1031,18 @@
     closeUiPanel('markupEditor', 'markupEditorOpen');
   }
 
+  async function confirmReplaceMaskForMarkup(): Promise<boolean> {
+    if (!$editSourceStore.mask) return true;
+    return confirmStore.confirm({
+      title: $t.markupEditor.replaceMaskTitle,
+      message: $t.markupEditor.replaceMaskMessage,
+      confirmLabel: $t.markupEditor.replaceMaskConfirm,
+      cancelLabel: $t.confirm.cancel,
+      closeLabel: $t.confirm.closeLabel,
+      variant: 'default'
+    });
+  }
+
   /**
    * Final, atomic step of "Apply markup". Returns true only when the new markup
    * is installed; on any refusal the previous markup, mask and the editor's
@@ -1052,14 +1066,7 @@
       await validatePaintedMarkup(payload.blob, payload.width, payload.height);
       if (!current()) throw new MarkupRejectedError('source');
       if ($editSourceStore.mask) {
-        const replace = await confirmStore.confirm({
-          title: $t.markupEditor.replaceMaskTitle,
-          message: $t.markupEditor.replaceMaskMessage,
-          confirmLabel: $t.markupEditor.replaceMaskConfirm,
-          cancelLabel: $t.confirm.cancel,
-          closeLabel: $t.confirm.closeLabel,
-          variant: 'default'
-        });
+        const replace = await confirmReplaceMaskForMarkup();
         if (!replace) return false;
         if (!current()) throw new MarkupRejectedError('source');
       }
@@ -1462,7 +1469,9 @@
           jobsStore.closeActiveJobSource();
           changeWorkspaceMode('studio');
           previewStore.openJob(job);
-          if (job.status === 'queued' || job.status === 'running') trackJob(job.job_id);
+          if (job.status === 'queued' || job.status === 'running') {
+            trackJob(job.job_id, { streaming: Boolean(job.streaming), status: job.status });
+          }
           await tick();
           document.getElementById('preview-panel')?.scrollIntoView({ block: 'start' });
         } catch (error) {
@@ -1709,6 +1718,7 @@
       onSubmit={submitPrompt}
       {hasEditSource}
       {hasEditMask}
+      activeSubmissions={$previewStore.activeSubmissionCount}
       onPlanEdit={planEdit}
       onOptimize={optimizePrompt}
       onAppendPromptTag={appendPromptTag}
@@ -1761,7 +1771,11 @@
                 const file = event.currentTarget.files?.[0];
                 event.currentTarget.value = '';
                 if (!file) return;
-                try { await attachMarkup(file); } catch (error) { previewStore.setError(error instanceof Error ? error.message : $t.promptForm.invalidMarkup); }
+                try {
+                  await attachMarkup(file, { confirmReplaceMask: confirmReplaceMaskForMarkup });
+                } catch (error) {
+                  previewStore.setError(error instanceof Error ? error.message : $t.promptForm.invalidMarkup);
+                }
               }}
             />
             <p class="text-xs text-stone-500">{$t.promptForm.markupHint}</p>

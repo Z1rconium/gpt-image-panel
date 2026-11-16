@@ -5,6 +5,7 @@ import {
   editMaskDiscards,
   editSourceCount,
   editSourceStore,
+  existingGalleryImageIds,
   findEditSource,
   galleryPrimarySource,
   galleryReferenceSources,
@@ -514,8 +515,32 @@ describe('unified sources array', () => {
   });
 
   it('findEditSource prefers an exact id over a reference image id', () => {
-    editSourceStore.setGallerySource('img-shared', 'Primary', 'blob:p', 'p');
-    editSourceStore.addGalleryReferences([ref('ref-1', 'img-shared')]);
+    editSourceStore.set({
+      ...initialEditSourceState,
+      sources: [
+        {
+          kind: 'gallery_primary',
+          id: 'img-shared',
+          imageId: 'img-shared',
+          label: 'Primary',
+          previewUrl: 'blob:p',
+          previewLabel: 'p',
+          width: 0,
+          height: 0
+        },
+        {
+          kind: 'gallery_reference',
+          id: 'ref-1',
+          imageId: 'img-shared',
+          filename: 'ref-1.png',
+          label: 'Ref',
+          previewUrl: '/api/image/ref-1.png',
+          previewLabel: 'Ref',
+          width: 0,
+          height: 0
+        }
+      ]
+    });
     expect(findEditSource(get(editSourceStore), 'img-shared')?.kind).toBe('gallery_primary');
     expect(findEditSource(get(editSourceStore), 'ref-1')?.kind).toBe('gallery_reference');
     expect(findEditSource(get(editSourceStore), 'nope')).toBeNull();
@@ -550,5 +575,43 @@ describe('unified sources array', () => {
 
     editSourceStore.removeGallerySourcesByImageIds();
     expect(get(editSourceStore).sources.map((item) => item.kind)).toEqual(['upload']);
+  });
+
+  it('deduplicates gallery references by imageId against primary, existing refs, and within batch', () => {
+    editSourceStore.setGallerySource('gal-primary', 'Primary', 'blob:p', 'p');
+    expect([...existingGalleryImageIds(get(editSourceStore))]).toEqual(['gal-primary']);
+
+    const errorSpy = vi.fn();
+    const added = editSourceStore.addGalleryReferences(
+      [ref('ref-dup-primary', 'gal-primary'), ref('ref-1', 'gal-1'), ref('ref-1b', 'gal-1'), ref('ref-2', 'gal-2')],
+      errorSpy
+    );
+    expect(added).toBe(2);
+    expect(galleryRefs().map((item) => item.imageId)).toEqual(['gal-1', 'gal-2']);
+    expect([...existingGalleryImageIds(get(editSourceStore))]).toEqual(['gal-primary', 'gal-1', 'gal-2']);
+    expect(errorSpy).toHaveBeenCalled();
+
+    errorSpy.mockClear();
+    expect(editSourceStore.addGalleryReferences([ref('ref-2b', 'gal-2')], errorSpy)).toBe(0);
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    expect(galleryRefs()).toHaveLength(2);
+  });
+
+  it('increments editMaskDiscards when setMarkup replaces an active mask', () => {
+    const discardsBefore = get(editMaskDiscards);
+    editSourceStore.addFiles([makeFile('a.png')], () => {});
+    const primaryId = primaryEditSourceId(get(editSourceStore));
+    editSourceStore.setMask(makeMask(primaryId, 'blob:mask-1'));
+    editSourceStore.setMarkup({
+      sourceId: primaryId,
+      blob: new Blob([new Uint8Array([1])], { type: 'image/png' }),
+      width: 8,
+      height: 8,
+      previewUrl: 'blob:markup-1',
+      origin: 'uploaded'
+    });
+    expect(get(editSourceStore).mask).toBeNull();
+    expect(revokeSpy).toHaveBeenCalledWith('blob:mask-1');
+    expect(get(editMaskDiscards)).toBe(discardsBefore + 1);
   });
 });
