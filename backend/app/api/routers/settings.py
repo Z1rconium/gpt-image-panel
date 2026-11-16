@@ -266,39 +266,52 @@ async def update_settings(req: SettingsRequest):
                 apply_webhook_url(requested_webhook_url)
             _validate_webhook_security()
         validate_preset_secret_binding(draft_preset)
+
+        updated_optimizer = None
+        if req.prompt_optimizer is not None:
+            current_optimizer = get_prompt_optimizer_settings()
+            updated_optimizer = apply_prompt_optimizer_settings(current_optimizer, req.prompt_optimizer)
+            validate_optimizer_secret_binding(updated_optimizer)
+
+        updated_assistant = None
+        if req.ai_assistant is not None:
+            current_assistant = get_ai_assistant_settings()
+            updated_assistant = apply_ai_assistant_settings(current_assistant, req.ai_assistant)
+
+        updated_r2 = None
+        if req.r2_backup is not None:
+            current_r2 = get_r2_backup_settings()
+            updated_r2 = apply_r2_backup_settings(current_r2, req.r2_backup)
+            if updated_r2.get("endpoint_url"):
+                try:
+                    await ssrf.validate_r2_endpoint_url_async(
+                        updated_r2["endpoint_url"],
+                    )
+                except ValueError as e:
+                    raise HTTPException(status_code=422, detail=str(e)) from e
+            validate_r2_secret_bindings(updated_r2)
+
+        updated_nodeimage = None
+        if req.nodeimage is not None:
+            current_nodeimage = get_nodeimage_settings()
+            updated_nodeimage = apply_nodeimage_settings(
+                current_nodeimage,
+                req.nodeimage,
+            )
+            validate_nodeimage_secret_binding(updated_nodeimage)
+
         preset.clear()
         preset.update(draft_preset)
         apply_api_preset(preset)
         await run_db_operation(persist_api_settings)
-    if req.prompt_optimizer is not None:
-        current_optimizer = get_prompt_optimizer_settings()
-        updated_optimizer = apply_prompt_optimizer_settings(current_optimizer, req.prompt_optimizer)
-        validate_optimizer_secret_binding(updated_optimizer)
-        await run_db_operation(save_prompt_optimizer_settings, updated_optimizer)
-    if req.ai_assistant is not None:
-        current_assistant = get_ai_assistant_settings()
-        updated_assistant = apply_ai_assistant_settings(current_assistant, req.ai_assistant)
-        await run_db_operation(save_ai_assistant_settings, updated_assistant)
-    if req.r2_backup is not None:
-        current_r2 = get_r2_backup_settings()
-        updated_r2 = apply_r2_backup_settings(current_r2, req.r2_backup)
-        if updated_r2.get("endpoint_url"):
-            try:
-                await ssrf.validate_r2_endpoint_url_async(
-                    updated_r2["endpoint_url"],
-                )
-            except ValueError as e:
-                raise HTTPException(status_code=422, detail=str(e)) from e
-        validate_r2_secret_bindings(updated_r2)
-        await run_db_operation(save_r2_backup_settings, updated_r2)
-    if req.nodeimage is not None:
-        current_nodeimage = get_nodeimage_settings()
-        updated_nodeimage = apply_nodeimage_settings(
-            current_nodeimage,
-            req.nodeimage,
-        )
-        validate_nodeimage_secret_binding(updated_nodeimage)
-        await run_db_operation(save_nodeimage_settings, updated_nodeimage)
+        if updated_optimizer is not None:
+            await run_db_operation(save_prompt_optimizer_settings, updated_optimizer)
+        if updated_assistant is not None:
+            await run_db_operation(save_ai_assistant_settings, updated_assistant)
+        if updated_r2 is not None:
+            await run_db_operation(save_r2_backup_settings, updated_r2)
+        if updated_nodeimage is not None:
+            await run_db_operation(save_nodeimage_settings, updated_nodeimage)
     return await run_db_operation(build_settings_response)
 
 

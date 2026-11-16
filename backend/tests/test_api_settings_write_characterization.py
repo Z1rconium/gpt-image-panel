@@ -165,7 +165,7 @@ def test_post_settings_422_secret_binding_immediate_get_and_fresh_load_return_ol
     assert presets.get_active_preset()["api_key"] == "good-upstream-secret"
 
 
-def test_post_settings_late_422_in_r2_leaves_earlier_groups_persisted(
+def test_post_settings_late_422_in_r2_leaves_no_earlier_groups_persisted(
     client, configured_secret_registry
 ):
     baseline = _save_baseline_settings(client)
@@ -175,7 +175,7 @@ def test_post_settings_late_422_in_r2_leaves_earlier_groups_persisted(
         "/api/settings",
         json={
             "active_preset_id": preset_id,
-            "preset_name": "Persisted Before R2 422",
+            "preset_name": "Should Not Persist Before R2 422",
             "api_url": "https://api.example.com",
             "api_key": "good-upstream-secret",
             "api_path": "/v1/images/generations",
@@ -201,27 +201,24 @@ def test_post_settings_late_422_in_r2_leaves_earlier_groups_persisted(
     assert failed.status_code == 422
     assert "not permitted" in failed.json()["detail"]
 
-    # CHARACTERIZATION (C8-S4):
-    # update_settings persists the preset group, prompt_optimizer, and ai_assistant
-    # in separate DB operations before validating r2_backup, so the late 422 in
-    # R2 leaves those earlier groups persisted while r2_backup stays unchanged.
+    # C8-S4: all groups are validated before persisting any group, so a late 422
+    # in R2 leaves preset, prompt_optimizer, ai_assistant, and r2_backup unchanged.
     after = client.get("/api/settings").json()
-    assert after["presets"][0]["name"] == "Persisted Before R2 422"
-    assert after["prompt_optimizer"]["enabled"] is True
-    assert after["prompt_optimizer"]["model"] == "gpt-4o"
-    assert after["ai_assistant"]["enabled"] is True
+    assert after["presets"][0]["name"] == "Baseline Preset"
+    assert after["prompt_optimizer"]["enabled"] is False
+    assert after["ai_assistant"]["vision_model"] == baseline["ai_assistant"]["vision_model"]
     assert after["r2_backup"]["enabled"] is False
     assert after["r2_backup"]["bucket_name"] == ""
 
     presets.load_api_settings()
     reloaded = presets.build_settings_response().model_dump()
-    assert reloaded["presets"][0]["name"] == "Persisted Before R2 422"
-    assert reloaded["prompt_optimizer"]["enabled"] is True
-    assert reloaded["ai_assistant"]["enabled"] is True
+    assert reloaded["presets"][0]["name"] == "Baseline Preset"
+    assert reloaded["prompt_optimizer"]["enabled"] is False
+    assert reloaded["ai_assistant"]["vision_model"] == baseline["ai_assistant"]["vision_model"]
     assert reloaded["r2_backup"]["enabled"] is False
 
 
-def test_post_settings_late_422_in_nodeimage_leaves_earlier_groups_including_r2_persisted(
+def test_post_settings_late_422_in_nodeimage_leaves_no_earlier_groups_persisted(
     client, configured_secret_registry
 ):
     baseline = _save_baseline_settings(client)
@@ -231,7 +228,7 @@ def test_post_settings_late_422_in_nodeimage_leaves_earlier_groups_including_r2_
         "/api/settings",
         json={
             "active_preset_id": preset_id,
-            "preset_name": "Persisted Before NodeImage 422",
+            "preset_name": "Should Not Persist Before NodeImage 422",
             "api_url": "https://api.example.com",
             "api_key": "good-upstream-secret",
             "api_path": "/v1/images/generations",
@@ -261,21 +258,18 @@ def test_post_settings_late_422_in_nodeimage_leaves_earlier_groups_including_r2_
     assert failed.status_code == 422
     assert "not permitted" in failed.json()["detail"]
 
-    # CHARACTERIZATION (C8-S4):
-    # update_settings persists preset, prompt_optimizer, ai_assistant, and r2_backup
-    # before validating nodeimage, so a late 422 in nodeimage leaves all four
-    # earlier groups persisted while nodeimage remains disabled/unset.
+    # C8-S4: a late 422 in nodeimage leaves all earlier groups untouched.
     after = client.get("/api/settings").json()
-    assert after["presets"][0]["name"] == "Persisted Before NodeImage 422"
-    assert after["prompt_optimizer"]["enabled"] is True
-    assert after["ai_assistant"]["enabled"] is True
-    assert after["r2_backup"]["enabled"] is True
-    assert after["r2_backup"]["bucket_name"] == "persisted-bucket"
+    assert after["presets"][0]["name"] == "Baseline Preset"
+    assert after["prompt_optimizer"]["enabled"] is False
+    assert after["ai_assistant"]["vision_model"] == baseline["ai_assistant"]["vision_model"]
+    assert after["r2_backup"]["enabled"] is False
+    assert after["r2_backup"]["bucket_name"] == ""
     assert after["nodeimage"]["enabled"] is False
     assert after["nodeimage"]["has_api_key"] is False
 
     presets.load_api_settings()
     reloaded = presets.build_settings_response().model_dump()
-    assert reloaded["presets"][0]["name"] == "Persisted Before NodeImage 422"
-    assert reloaded["r2_backup"]["enabled"] is True
+    assert reloaded["presets"][0]["name"] == "Baseline Preset"
+    assert reloaded["r2_backup"]["enabled"] is False
     assert reloaded["nodeimage"]["enabled"] is False
