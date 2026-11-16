@@ -1568,7 +1568,7 @@ def test_generate_jobs_list_broadcast_debounces_without_db_reads(client, monkeyp
     async def run_updates():
         async with generate_feed.subscribe(None, start_poller=False) as queue:
             for index in range(3):
-                job_persistence.store_generate_job(
+                await job_persistence.store_generate_job_async(
                     "job-memory-broadcast",
                     {
                         "status": "running",

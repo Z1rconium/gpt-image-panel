@@ -1,9 +1,13 @@
 """Image generation and edit job queue persistence."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 
 from ..core import settings as config
-from ..core.constants import ACTIVE_GENERATE_JOB_STATUSES, IMAGE_JOB_UNIT_MAX_RECOVERIES
+from ..core.constants import (
+    ACTIVE_GENERATE_JOB_STATUSES,
+    IMAGE_JOB_UNIT_MAX_RECOVERIES,
+    TERMINAL_GENERATE_JOB_STATUSES,
+)
 from ..core.observability import metrics
 from ..core.utils import json_dumps_canonical, utc_now
 from .image_files import delete_persisted_masks
@@ -259,6 +263,22 @@ def get_image_queue_runtime_metrics() -> dict[str, int]:
     }
 
 
+_DELETE_EDIT_SOURCE_RESERVATION_SQL = (
+    "DELETE FROM edit_source_reservations WHERE job_id = ?"
+)
+
+
+def _release_reservation(
+    conn: sqlite3.Connection, job_id: str | Iterable[str]
+) -> None:
+    if isinstance(job_id, str):
+        conn.execute(_DELETE_EDIT_SOURCE_RESERVATION_SQL, (job_id,))
+        return
+    params = [(item,) for item in job_id]
+    if params:
+        conn.executemany(_DELETE_EDIT_SOURCE_RESERVATION_SQL, params)
+
+
 def release_edit_source_reservation(job_id: str) -> int:
     _ensure_database()
     with _connect() as conn:
@@ -269,10 +289,7 @@ def release_edit_source_reservation(job_id: str) -> int:
             ).fetchone()
             if not row:
                 return 0
-            conn.execute(
-                "DELETE FROM edit_source_reservations WHERE job_id = ?",
-                (job_id,),
-            )
+            _release_reservation(conn, job_id)
     return int(row["byte_count"] or 0)
 
 
@@ -399,10 +416,7 @@ def enqueue_image_job(
                     (normalized_job["job_id"], reserved_bytes, now, now),
                 )
             elif existing_bytes > 0:
-                conn.execute(
-                    "DELETE FROM edit_source_reservations WHERE job_id = ?",
-                    (normalized_job["job_id"],),
-                )
+                _release_reservation(conn, normalized_job["job_id"])
             conn.executemany(
                 f"""
                 INSERT INTO image_job_units ({unit_columns_sql})
@@ -950,8 +964,9 @@ def _aggregate_image_job_units_on_conn(
     ).fetchall()
     units = [_image_job_unit_from_row(row) for row in rows]
     total = len(units)
-    terminal_statuses = {"success", "error", "upstream_error", "cancelled", "interrupted"}
-    completed = sum(1 for unit in units if unit.get("status") in terminal_statuses)
+    completed = sum(
+        1 for unit in units if unit.get("status") in TERMINAL_GENERATE_JOB_STATUSES
+    )
     successes = [unit for unit in units if unit.get("status") == "success"]
     failures = [unit for unit in units if unit.get("status") in {"error", "upstream_error"}]
     cancelled = [unit for unit in units if unit.get("status") == "cancelled"]
@@ -1072,10 +1087,7 @@ def finalize_parent_job_from_units(
             merged = {**current, **update, "updated_at": utc_now()}
             row = _update_generate_job_on_conn(conn, merged)
             if merged.get("status") not in ACTIVE_GENERATE_JOB_STATUSES:
-                conn.execute(
-                    "DELETE FROM edit_source_reservations WHERE job_id = ?",
-                    (parent_job_id,),
-                )
+                _release_reservation(conn, parent_job_id)
     return row, True
 
 
@@ -1100,10 +1112,7 @@ def transition_generate_job_to_terminal(
 
             merged = {**current, **updates, "updated_at": utc_now()}
             row = _update_generate_job_on_conn(conn, merged)
-            conn.execute(
-                "DELETE FROM edit_source_reservations WHERE job_id = ?",
-                (job_id,),
-            )
+            _release_reservation(conn, job_id)
     return row, True
 
 
@@ -1138,10 +1147,7 @@ def cancel_generate_job_tx(
                 "updated_at": now,
             }
             row = _update_generate_job_on_conn(conn, merged)
-            conn.execute(
-                "DELETE FROM edit_source_reservations WHERE job_id = ?",
-                (job_id,),
-            )
+            _release_reservation(conn, job_id)
     return row, True
 
 
@@ -1246,10 +1252,7 @@ def clear_generate_job_history() -> int:
             if not rows:
                 return 0
             job_ids = [row["job_id"] for row in rows]
-            conn.executemany(
-                "DELETE FROM edit_source_reservations WHERE job_id = ?",
-                [(job_id,) for job_id in job_ids],
-            )
+            _release_reservation(conn, job_ids)
             conn.executemany(
                 "DELETE FROM image_job_units WHERE parent_job_id = ?",
                 [(job_id,) for job_id in job_ids],
@@ -1283,10 +1286,7 @@ def mark_active_generate_jobs_interrupted() -> int:
             if not rows:
                 return 0
             job_ids = [row["job_id"] for row in rows]
-            conn.executemany(
-                "DELETE FROM edit_source_reservations WHERE job_id = ?",
-                [(job_id,) for job_id in job_ids],
-            )
+            _release_reservation(conn, job_ids)
             conn.executemany(
                 "DELETE FROM image_job_units WHERE parent_job_id = ?",
                 [(job_id,) for job_id in job_ids],
@@ -1333,10 +1333,7 @@ def trim_generate_jobs(max_jobs: int):
             if not rows:
                 return
             job_ids = [row["job_id"] for row in rows]
-            conn.executemany(
-                "DELETE FROM edit_source_reservations WHERE job_id = ?",
-                [(job_id,) for job_id in job_ids],
-            )
+            _release_reservation(conn, job_ids)
             conn.executemany(
                 "DELETE FROM image_job_units WHERE parent_job_id = ?",
                 [(job_id,) for job_id in job_ids],

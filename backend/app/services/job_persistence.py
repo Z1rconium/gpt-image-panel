@@ -25,23 +25,7 @@ from .job_events import (
     publish_generate_job,
     remember_generate_job_memory,
 )
-from .webhook_service import dispatch_job_webhook, dispatch_job_webhook_async
-
-
-def build_job_update(job_id: str, updates: dict) -> dict:
-    now = utc_now()
-    existing = state.generate_jobs.get(job_id) or get_generate_job(job_id) or {}
-    job = {
-        **existing,
-        **updates,
-        "job_id": job_id,
-        "updated_at": now,
-    }
-    if "created_at" not in job:
-        job["created_at"] = now
-    if job.get("image_id"):
-        job["id"] = job["image_id"]
-    return job
+from .webhook_service import dispatch_job_webhook_async
 
 
 def should_persist_generate_job(job_id: str, job: dict, persist: bool) -> bool:
@@ -59,18 +43,6 @@ def should_persist_generate_job(job_id: str, job: dict, persist: bool) -> bool:
     return False
 
 
-def _publish_generate_job_row_sync(job: dict, *, dispatch_webhook: bool) -> dict:
-    is_terminal = job.get("status") not in ACTIVE_GENERATE_JOB_STATUSES
-    if is_terminal:
-        drop_generate_job_memory(str(job["job_id"]))
-    else:
-        remember_generate_job_memory(str(job["job_id"]), job)
-    publish_generate_job(job, list_debounce=not is_terminal, list_reconcile=False)
-    if is_terminal and dispatch_webhook:
-        dispatch_job_webhook(job)
-    return job
-
-
 async def publish_generate_job_row_async(job: dict, *, dispatch_webhook: bool) -> dict:
     """Apply an authoritative parent row to memory and publish it.
 
@@ -86,29 +58,6 @@ async def publish_generate_job_row_async(job: dict, *, dispatch_webhook: bool) -
     publish_generate_job(job, list_debounce=not is_terminal, list_reconcile=False)
     if is_terminal and dispatch_webhook:
         await dispatch_job_webhook_async(job)
-    return job
-
-
-def store_generate_job(job_id: str, updates: dict, *, persist: bool = True) -> dict:
-    job = build_job_update(job_id, updates)
-    status = job.get("status")
-    if status not in ACTIVE_GENERATE_JOB_STATUSES:
-        row, written = transition_generate_job_to_terminal(job_id, updates)
-        if row is None:
-            drop_generate_job_memory(job_id)
-            publish_generate_job(job, list_debounce=False, list_reconcile=False)
-            dispatch_job_webhook(job)
-            return job
-        return _publish_generate_job_row_sync(row, dispatch_webhook=written)
-
-    if should_persist_generate_job(job_id, job, persist):
-        _stored, wrote = upsert_generate_job_guarded(job)
-        if not wrote:
-            db_row = get_generate_job(job_id)
-            if db_row is not None:
-                return _publish_generate_job_row_sync(db_row, dispatch_webhook=False)
-    remember_generate_job_memory(job_id, job)
-    publish_generate_job(job, list_debounce=True, list_reconcile=False)
     return job
 
 

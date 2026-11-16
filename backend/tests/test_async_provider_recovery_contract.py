@@ -18,7 +18,7 @@ from backend.app.core.diagnostics import UnitDiagnostics
 from backend.app.integrations.upstream import async_provider
 from backend.app.runtime import state as runtime_state
 from backend.app.schemas.generation import GenerateRequest
-from backend.app.services import image_unit_execution, job_executor
+from backend.app.services import image_unit_execution
 from backend.app.services import presets as presets_service
 from backend.tests.support.contract import (
     ORIGINAL_CALL_IMAGE_GENERATION_API,
@@ -703,7 +703,7 @@ def test_results_ready_checkpoint_completes_without_upstream(tmp_path, monkeypat
         raise AssertionError("results_ready recovery must not call upstream")
 
     monkeypatch.setattr(image_unit_execution.proxy, "call_image_generation_api", fail_if_called)
-    asyncio.run(job_executor.run_claimed_image_unit(resumed, "worker-a"))
+    asyncio.run(image_unit_execution.run_claimed_image_unit(resumed, "worker-a"))
 
     row = image_jobs_repo.get_image_job_unit(unit_id)
     assert row["status"] == "success"
@@ -732,7 +732,7 @@ def test_queued_provider_snapshot_survives_preset_changes(tmp_path, monkeypatch,
         raise image_unit_execution.proxy.UpstreamApiError("intentional fixture stop")
 
     monkeypatch.setattr(image_unit_execution.proxy, "call_image_generation_api", captured)
-    asyncio.run(job_executor.run_claimed_image_unit(claimed, "worker-a"))
+    asyncio.run(image_unit_execution.run_claimed_image_unit(claimed, "worker-a"))
     row = image_jobs_repo.get_image_job_unit(claimed["unit_id"])
     assert row["status"] == "upstream_error"
     if origin_changed:
@@ -773,7 +773,7 @@ def test_reclaimed_async_unit_without_checkpoint_is_interrupted(tmp_path, monkey
         raise AssertionError("unknown submit must not call upstream")
 
     monkeypatch.setattr(image_unit_execution.proxy, "call_image_generation_api", fail_if_called)
-    asyncio.run(job_executor.run_claimed_image_unit(second, "worker-b"))
+    asyncio.run(image_unit_execution.run_claimed_image_unit(second, "worker-b"))
 
     row = image_jobs_repo.get_image_job_unit(unit_id)
     assert row["status"] == "interrupted"
@@ -801,7 +801,7 @@ def test_executor_replays_unknown_submit_with_persisted_idempotency_key(tmp_path
         ("GET", V2_STATUS_URL): [_json({"state": "done"})],
         ("GET", V2_RESULT_URL): [_json({"images": [{"b64": base64.b64encode(PNG_BYTES).decode("ascii")}]})],
     }))
-    asyncio.run(job_executor.run_claimed_image_unit(resumed, "worker-a"))
+    asyncio.run(image_unit_execution.run_claimed_image_unit(resumed, "worker-a"))
     assert image_jobs_repo.get_image_job_unit(claimed["unit_id"])["status"] == "success"
     assert session.calls[0][2]["headers"]["Idempotency-Key"] == "original-paid-request-key"
 
@@ -819,7 +819,7 @@ def test_executor_redacts_resolved_preset_key_from_errors_and_logs(tmp_path, mon
         raise image_unit_execution.proxy.UpstreamApiError("The submitted recovery-secret was rejected")
 
     monkeypatch.setattr(image_unit_execution.proxy, "call_image_generation_api", rejected)
-    asyncio.run(job_executor.run_claimed_image_unit(claimed, "worker-a"))
+    asyncio.run(image_unit_execution.run_claimed_image_unit(claimed, "worker-a"))
     unit = image_jobs_repo.get_image_job_unit(claimed["unit_id"])
     assert unit["status"] == "upstream_error"
     assert "recovery-secret" not in unit["error"]
@@ -857,7 +857,7 @@ def test_worker_killed_after_submit_resumes_without_second_submit(tmp_path, monk
         }
     )
     _use_session(monkeypatch, session_a)
-    asyncio.run(job_executor.run_claimed_image_unit(first_claim, "worker-a"))
+    asyncio.run(image_unit_execution.run_claimed_image_unit(first_claim, "worker-a"))
 
     checkpointed = image_jobs_repo.get_image_job_unit(unit_id)
     assert checkpointed["status"] == "running"
@@ -886,7 +886,7 @@ def test_worker_killed_after_submit_resumes_without_second_submit(tmp_path, monk
         }
     )
     _use_session(monkeypatch, session_b)
-    asyncio.run(job_executor.run_claimed_image_unit(reclaimed, "worker-b"))
+    asyncio.run(image_unit_execution.run_claimed_image_unit(reclaimed, "worker-b"))
 
     row = image_jobs_repo.get_image_job_unit(unit_id)
     assert row["status"] == "success"

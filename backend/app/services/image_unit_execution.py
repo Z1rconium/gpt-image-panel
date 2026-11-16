@@ -186,6 +186,79 @@ class ImageUnitExecutionContext:
         )
         return self.diagnostics.payload()
 
+    def _compute_usage_and_cost(
+        self, *, estimate_without_usage: bool = False
+    ) -> tuple[dict | None, dict | None]:
+        usage = image_cost.normalize_usage(
+            self.usage_sink.raw_usage,
+            output_format=self.req.output_format,
+        )
+        if usage is None and not estimate_without_usage:
+            return None, None
+        cost = image_cost.estimate_image_cost(
+            self.req.model,
+            usage,
+            output_format=self.req.output_format,
+        )
+        return usage, cost
+
+    def _build_failure_outcome(
+        self,
+        *,
+        status: str,
+        stage: str,
+        message: str,
+        error: str,
+        stage_timings: dict[str, float] | None = None,
+        duration: str | None = None,
+        usage: dict | None = None,
+        cost: dict | None = None,
+        diagnostics: dict | None = None,
+    ) -> dict:
+        return {
+            "status": status,
+            "stage": stage,
+            "message": message,
+            "error": error,
+            "stage_timings": {} if stage_timings is None else stage_timings,
+            "duration": duration,
+            "completed_at": utc_now(),
+            "usage": usage,
+            "cost": cost,
+            "diagnostics": diagnostics,
+        }
+
+    def _build_cancelled_outcome(
+        self,
+        *,
+        stage_timings: dict[str, float],
+        duration: str,
+        usage: dict | None,
+        cost: dict | None,
+        diagnostics: dict | None = None,
+    ) -> dict:
+        return self._build_failure_outcome(
+            status="cancelled",
+            stage="cancelled",
+            message="Generation job cancelled",
+            error="Generation job cancelled",
+            stage_timings=stage_timings,
+            duration=duration,
+            usage=usage,
+            cost=cost,
+            diagnostics=diagnostics,
+        )
+
+    async def _fail_unit(self, outcome: dict, *, metric_name: str) -> None:
+        await run_db_operation(
+            fail_image_job_unit,
+            self.unit_id,
+            claim_token=self.claim_token,
+            **outcome,
+            metric_name=metric_name,
+            critical=True,
+        )
+
     async def complete_unit_from_checkpoint(self, state: dict) -> None:
         """Write the terminal success state staged by a previous owner.
 
@@ -233,24 +306,20 @@ class ImageUnitExecutionContext:
             "A provider submit may have been sent but its result was not recorded",
         )
         metrics.increment("image_jobs.unit_submit_unknown")
-        await run_db_operation(
-            fail_image_job_unit,
-            self.unit_id,
-            claim_token=self.claim_token,
-            status="interrupted",
-            stage="interrupted",
-            message=(
-                "Provider submit result is unknown; start a new generation to retry"
+        await self._fail_unit(
+            self._build_failure_outcome(
+                status="interrupted",
+                stage="interrupted",
+                message=(
+                    "Provider submit result is unknown; start a new generation to retry"
+                ),
+                error=(
+                    "Provider submit result is unknown: the worker stopped before "
+                    "recording the remote task, so no automatic resubmission was attempted"
+                ),
+                diagnostics=recorded.payload(),
             ),
-            error=(
-                "Provider submit result is unknown: the worker stopped before "
-                "recording the remote task, so no automatic resubmission was attempted"
-            ),
-            stage_timings={},
-            completed_at=utc_now(),
-            diagnostics=recorded.payload(),
             metric_name="interrupt_unknown_submit_image_job_unit",
-            critical=True,
         )
 
     async def recover(self):
@@ -466,8 +535,7 @@ class ImageUnitExecutionContext:
         kick_thumbnail_dispatcher()
         result_images = [gallery_entry_job_result(entry) for entry in updated_entries]
         stage_timings = self.stage_timer.snapshot()
-        usage = image_cost.normalize_usage(self.usage_sink.raw_usage, output_format=self.req.output_format)
-        cost = image_cost.estimate_image_cost(self.req.model, usage, output_format=self.req.output_format)
+        usage, cost = self._compute_usage_and_cost(estimate_without_usage=True)
         metrics.increment(f"image_jobs.{self.operation}.succeeded")
         metrics.observe_ms("image_job.duration", duration_seconds * 1000)
         metrics.observe_job_stage_timings(stage_timings)
@@ -476,22 +544,15 @@ class ImageUnitExecutionContext:
         if not cost.get("complete"):
             metrics.increment("image_job.cost_unknown_rate")
         if await self.parent_was_cancelled():
-            await run_db_operation(
-                fail_image_job_unit,
-                self.unit_id,
-                claim_token=self.claim_token,
-                status="cancelled",
-                stage="cancelled",
-                message="Generation job cancelled",
-                error="Generation job cancelled",
-                stage_timings=stage_timings,
-                duration=duration,
-                completed_at=utc_now(),
-                usage=usage,
-                cost=cost,
-                diagnostics=self.unit_diagnostics_payload(),
+            await self._fail_unit(
+                self._build_cancelled_outcome(
+                    stage_timings=stage_timings,
+                    duration=duration,
+                    usage=usage,
+                    cost=cost,
+                    diagnostics=self.unit_diagnostics_payload(),
+                ),
                 metric_name="cancel_completed_image_job_unit",
-                critical=True,
             )
             return
         # Stage the finished results before the terminal write: if this worker
@@ -532,8 +593,7 @@ class ImageUnitExecutionContext:
         await self.session.abort_upstream()
         duration_seconds = time.monotonic() - self.started_at
         stage_timings = self.stage_timer.snapshot()
-        usage = image_cost.normalize_usage(self.usage_sink.raw_usage, output_format=self.req.output_format)
-        cost = image_cost.estimate_image_cost(self.req.model, usage, output_format=self.req.output_format) if usage else None
+        usage, cost = self._compute_usage_and_cost()
         await self.session.flush_progress_before_terminal(suppress_cancelled=True)
         if self.async_provider:
             # Do not terminalize a mapped provider unit here: a user cancel
@@ -557,21 +617,14 @@ class ImageUnitExecutionContext:
             )
             return
         metrics.increment(f"image_jobs.{self.operation}.cancelled")
-        await run_db_operation(
-            fail_image_job_unit,
-            self.unit_id,
-            claim_token=self.claim_token,
-            status="cancelled",
-            stage="cancelled",
-            message="Generation job cancelled",
-            error="Generation job cancelled",
-            stage_timings=stage_timings,
-            duration=f"{duration_seconds:.2f}s",
-            completed_at=utc_now(),
-            usage=usage,
-            cost=cost,
+        await self._fail_unit(
+            self._build_cancelled_outcome(
+                stage_timings=stage_timings,
+                duration=f"{duration_seconds:.2f}s",
+                usage=usage,
+                cost=cost,
+            ),
             metric_name="cancel_image_job_unit",
-            critical=True,
         )
 
     async def fail(self, error: Exception):
@@ -583,8 +636,7 @@ class ImageUnitExecutionContext:
         )
         duration_seconds = time.monotonic() - self.started_at
         stage_timings = self.stage_timer.snapshot()
-        usage = image_cost.normalize_usage(self.usage_sink.raw_usage, output_format=self.req.output_format)
-        cost = image_cost.estimate_image_cost(self.req.model, usage, output_format=self.req.output_format) if usage else None
+        usage, cost = self._compute_usage_and_cost()
         cancelled = await self.parent_was_cancelled()
         if not cancelled:
             metrics.increment(f"image_jobs.{self.operation}.failed")
@@ -612,27 +664,32 @@ class ImageUnitExecutionContext:
                 self.worker_id,
             )
             return
-        await run_db_operation(
-            fail_image_job_unit,
-            self.unit_id,
-            claim_token=self.claim_token,
-            status="cancelled" if cancelled else status,
-            stage=(
-                "cancelled"
-                if cancelled
-                else "generation_failed" if self.operation == "generation" else "edit_failed"
-            ),
-            message="Generation job cancelled" if cancelled else error_message,
-            error="Generation job cancelled" if cancelled else error_message,
-            stage_timings=stage_timings,
-            duration=f"{duration_seconds:.2f}s",
-            completed_at=utc_now(),
-            usage=usage,
-            cost=cost,
-            diagnostics=self.unit_diagnostics_payload(),
-            metric_name="fail_image_job_unit",
-            critical=True,
+        outcome = (
+            self._build_cancelled_outcome(
+                stage_timings=stage_timings,
+                duration=f"{duration_seconds:.2f}s",
+                usage=usage,
+                cost=cost,
+                diagnostics=self.unit_diagnostics_payload(),
+            )
+            if cancelled
+            else self._build_failure_outcome(
+                status=status,
+                stage=(
+                    "generation_failed"
+                    if self.operation == "generation"
+                    else "edit_failed"
+                ),
+                message=error_message,
+                error=error_message,
+                stage_timings=stage_timings,
+                duration=f"{duration_seconds:.2f}s",
+                usage=usage,
+                cost=cost,
+                diagnostics=self.unit_diagnostics_payload(),
+            )
         )
+        await self._fail_unit(outcome, metric_name="fail_image_job_unit")
 
     async def cleanup(self):
         await self.session.close()
@@ -677,3 +734,7 @@ class ImageUnitExecutionContext:
             await self.fail(error)
         finally:
             await self.cleanup()
+
+
+async def run_claimed_image_unit(unit: dict, worker_id: str):
+    await ImageUnitExecutionContext(unit, worker_id).execute()

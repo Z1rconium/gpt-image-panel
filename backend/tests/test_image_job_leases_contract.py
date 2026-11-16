@@ -4,7 +4,11 @@ from backend.tests.support.contract import *  # noqa: F403
 
 from backend.app.integrations.upstream.errors import UpstreamApiError
 from backend.app.core.utils import utc_now
-from backend.app.services import image_unit_session, job_executor
+from backend.app.services import (
+    image_job_aggregate,
+    image_unit_execution,
+    image_unit_session,
+)
 
 
 def _mark_running_with_expired_lease(
@@ -400,7 +404,7 @@ def test_lease_loss_aborts_inflight_upstream_without_terminal_write(
         assert claimed is not None
 
         task = asyncio.create_task(
-            job_executor.run_claimed_image_unit(dict(claimed), "worker-loser")
+            image_unit_execution.run_claimed_image_unit(dict(claimed), "worker-loser")
         )
         for _ in range(200):
             if state["started"]:
@@ -458,7 +462,7 @@ def test_lease_loss_aborts_inflight_upstream_without_terminal_write(
     assert completed["status"] == "success"
 
     client.portal.call(
-        job_executor.aggregate_parent_image_job, result["parent_id"]
+        image_job_aggregate.aggregate_parent_image_job, result["parent_id"]
     )
     parent_view = image_jobs_repo.get_generate_job(result["parent_id"])
     assert parent_view["status"] == "success"
@@ -504,7 +508,7 @@ def _run_unit_until_upstream_started(
         assert claimed is not None and claimed["unit_id"] == unit_id
 
         task = asyncio.create_task(
-            job_executor.run_claimed_image_unit(dict(claimed), worker_id)
+            image_unit_execution.run_claimed_image_unit(dict(claimed), worker_id)
         )
         deadline = time.monotonic() + upstream_started_timeout
         while not state["started"] and time.monotonic() < deadline:
@@ -794,7 +798,7 @@ def test_lease_loss_pops_terminal_parent_memory(client, monkeypatch):
         assert claimed is not None
 
         task = asyncio.create_task(
-            job_executor.run_claimed_image_unit(dict(claimed), "worker-a")
+            image_unit_execution.run_claimed_image_unit(dict(claimed), "worker-a")
         )
         for _ in range(200):
             if state["started"]:

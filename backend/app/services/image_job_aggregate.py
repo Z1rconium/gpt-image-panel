@@ -5,12 +5,13 @@ from datetime import datetime
 
 from ..core.constants import ACTIVE_GENERATE_JOB_STATUSES
 from ..core.utils import beijing_now, utc_now
-from ..repositories.image_jobs import finalize_parent_job_from_units, get_generate_job_with_unit_aggregate
+from ..repositories.image_jobs import get_generate_job_with_unit_aggregate
 from ..repositories.db.execution import run_db_operation
 from ..runtime.state import state
+from .image_job_terminal import FinalizeFromUnitsOutcome, settle_terminal
 from .job_events import clear_generate_job_unit_previews, publish_generate_job
-from .job_persistence import publish_generate_job_row_async, store_generate_job_async
-from .job_queue import cleanup_parent_edit_sources, summarize_unit_failures, trim_generate_jobs
+from .job_persistence import store_generate_job_async
+from .job_queue import summarize_unit_failures
 
 logger = logging.getLogger(__name__)
 
@@ -229,27 +230,13 @@ async def aggregate_parent_image_job(
                 operation=str(parent_row.get("operation") or operation),
             )
 
-        row, written = await run_db_operation(
-            finalize_parent_job_from_units,
+        return await settle_terminal(
             parent_job_id,
-            derive=derive,
-            metric_name="finalize_parent_image_job",
-            critical=True,
+            FinalizeFromUnitsOutcome(derive=derive),
+            sources="delete",
+            dispatch_webhook=True,
+            operation=operation,
         )
-        if not row:
-            return None
-        job = await publish_generate_job_row_async(row, dispatch_webhook=written)
-        await run_db_operation(
-            trim_generate_jobs,
-            metric_name="trim_generate_jobs",
-        )
-        if operation == "edit":
-            await run_db_operation(
-                cleanup_parent_edit_sources,
-                parent_job_id,
-                metric_name="cleanup_parent_edit_sources",
-            )
-        return job
 
     update = derive_parent_update(parent, aggregate, operation=operation)
     if update is None:
