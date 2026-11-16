@@ -13,11 +13,16 @@ import {
   type EditSourceState,
   type EditSourceSubmitBlocker
 } from '$lib/stores/editSource';
-import type { ApiPath, ResponseFormatDefault } from '$lib/api/types/common';
 import type { GenerateRequestBody } from '$lib/api/types/generation';
 import type { GeneratePreviewEvent, GenerateJobResponse, GenerateJobStatus } from '$lib/api/types/jobs';
 import { imageUrl, jobFailureMessage } from '$lib/utils/format';
-import { MAX_PROMPT_CHARS, imageQualities, isImage25, isImage26, promptLength, validOutputSize } from '$lib/utils/imageModels';
+import {
+  DEFAULT_PROMPT_MODEL,
+  DEFAULT_QUANTITY,
+  initialPromptFormState,
+  type PromptFormState
+} from '$lib/utils/promptFormTypes';
+import { buildRequestBody, validateSubmission, type SubmissionErrorKey } from '$lib/utils/promptRules';
 import {
   MAX_CONCURRENT_SUBMISSIONS,
   adoptSelection,
@@ -47,27 +52,7 @@ export type { PreviewCompareSource, PreviewImage, PreviewSlot, PreviewSlotStatus
 /** Derived view of the current preview group plus its identity. */
 export type PreviewState = PreviewView & { groupId: string };
 
-export type PromptFormState = {
-  prompt: string;
-  apiPath: ApiPath;
-  size: string;
-  model: string;
-  quality: GenerateRequestBody['quality'];
-  outputFormat: GenerateRequestBody['output_format'];
-  complexity?: 'low' | 'medium' | 'high' | null;
-  frameCount?: number;
-  frameDurationMs?: number;
-  background: NonNullable<GenerateRequestBody['background']>;
-  outputCompression: string;
-  quantity: number | string;
-  responseFormat: ResponseFormatDefault;
-  stream: boolean;
-  partialImages: number;
-  pasteBack: boolean;
-  safetyIdentifier?: string;
-};
-
-export const DEFAULT_QUANTITY = 1;
+export { DEFAULT_PROMPT_MODEL, DEFAULT_QUANTITY, initialPromptFormState, type PromptFormState };
 
 /** Per-submission overrides that are not part of the editable form. */
 export type SubmitOptions = {
@@ -88,100 +73,33 @@ export type PreviewCallbacks = {
   loadJobs?: () => Promise<void>;
 };
 
-export const DEFAULT_PROMPT_MODEL = 'gpt-image-2';
-
-export const initialPromptFormState: PromptFormState = {
-  prompt: '',
-  apiPath: '/v1/images/generations',
-  size: 'auto',
-  model: DEFAULT_PROMPT_MODEL,
-  quality: 'auto',
-  outputFormat: 'png',
-  complexity: null,
-  frameCount: 9,
-  frameDurationMs: 200,
-  background: 'auto',
-  outputCompression: '',
-  quantity: DEFAULT_QUANTITY,
-  responseFormat: 'url',
-  stream: false,
-  partialImages: 2,
-  pasteBack: true,
-  safetyIdentifier: ''
-};
-
-function buildRequestBody(form: PromptFormState): GenerateRequestBody {
-  const quantity = form.quantity === '' ? DEFAULT_QUANTITY : Math.min(Math.max(Number(form.quantity) || DEFAULT_QUANTITY, 1), 10);
-  const body: GenerateRequestBody = {
-    prompt: form.prompt.trim(),
-    size: form.size,
-    model: form.model.trim(),
-    n: quantity,
-    quality: form.quality,
-    output_format: form.outputFormat,
-    output_compression: null,
-    background: form.background,
-    response_format: !isImage25(form.model) && !isImage26(form.model) && form.responseFormat ? (form.responseFormat as 'url' | 'b64_json') : null,
-    api_path: form.apiPath
-  };
-
-  const special = form.outputFormat === 'svg' || form.outputFormat === 'gif';
-  if (isImage26(form.model)) {
-    delete body.response_format;
-    body.api_path = '/v1/images/generations';
-    if (form.complexity) body.complexity = form.complexity;
-    if (form.outputFormat === 'gif') {
-      body.frame_count = form.frameCount ?? 9;
-      body.frame_duration_ms = form.frameDurationMs ?? 200;
-    }
+function submissionErrorMessage(key: SubmissionErrorKey): string {
+  const messages = get(t);
+  switch (key) {
+    case 'media_reset':
+      return messages.promptForm.mediaReset;
+    case 'invalid_frames':
+      return messages.promptForm.invalidFrames;
+    case 'prompt_required':
+      return messages.messages.promptRequired;
+    case 'prompt_too_long':
+      return messages.promptForm.promptTooLong;
+    case 'image25_endpoint':
+      return messages.promptForm.image25Endpoint;
+    case 'quality_reset':
+      return messages.promptForm.qualityReset;
+    case 'invalid_size':
+      return messages.sizeDialog.invalidSize;
+    case 'stream_unsupported_path':
+      return messages.promptForm.streamUnsupportedPath;
+    case 'chroma_unsupported_path':
+      return messages.promptForm.chromaUnsupportedPath;
   }
-  if (special) {
-    body.output_compression = null;
-    if (form.outputFormat === 'svg') body.n = 1;
-    if (body.background?.startsWith('chroma_')) body.background = 'auto';
-  }
-
-  if (!special && form.outputFormat !== 'png' && form.outputCompression !== '') {
-    body.output_compression = Math.min(Math.max(Number(form.outputCompression), 0), 100);
-  }
-
-  if (body.background === 'chroma_green' || body.background === 'chroma_magenta') {
-    body.output_format = 'png';
-    body.output_compression = null;
-  } else if (body.background === 'transparent' && body.output_format === 'jpeg') {
-    body.output_format = 'png';
-    body.output_compression = null;
-  }
-
-  if (form.stream && !special) {
-    body.stream = true;
-    body.partial_images = Math.min(Math.max(Math.round(form.partialImages) || 2, 1), 3);
-  }
-
-  if (form.safetyIdentifier?.trim()) {
-    body.safety_identifier = form.safetyIdentifier.trim();
-  }
-
-  return body;
 }
 
 function submissionError(body: GenerateRequestBody, edit = false, hasMask = false): string {
-  const messages = get(t);
-  const special = body.output_format === 'svg' || body.output_format === 'gif';
-  if (special && !isImage26(body.model)) return messages.promptForm.mediaReset;
-  // SVG is generation-only; GIF edits are fine until a mask is drawn.
-  if (edit && (body.output_format === 'svg' || (body.output_format === 'gif' && hasMask))) return messages.promptForm.mediaReset;
-  if (body.output_format === 'gif' && (!Number.isInteger(body.frame_count) || Number(body.frame_count) < 2 || Number(body.frame_count) > 64 || !Number.isInteger(body.frame_duration_ms) || Number(body.frame_duration_ms) < 20 || Number(body.frame_duration_ms) > 2000 || Number(body.frame_duration_ms) % 10 !== 0)) return messages.promptForm.invalidFrames;
-  if (!body.prompt) return messages.messages.promptRequired;
-  if (promptLength(body.prompt) > MAX_PROMPT_CHARS) return messages.promptForm.promptTooLong;
-  if ((isImage25(body.model) || isImage26(body.model)) && !edit && body.api_path !== '/v1/images/generations') return messages.promptForm.image25Endpoint;
-  if (!imageQualities(body.model).includes(body.quality)) return messages.promptForm.qualityReset;
-  if ((edit || body.api_path === '/v1/images/generations') && !validOutputSize(body.size, body.output_format === 'gif')) return messages.sizeDialog.invalidSize;
-  if (body.stream && !edit && !['/v1/images/generations', '/v1/responses'].includes(body.api_path || '')) {
-    return messages.promptForm.streamUnsupportedPath;
-  }
-  if (!edit && body.background?.startsWith('chroma_') && body.api_path !== '/v1/images/generations') return messages.promptForm.chromaUnsupportedPath;
-  return '';
+  const key = validateSubmission(body, { edit, hasMask });
+  return key ? submissionErrorMessage(key) : '';
 }
 
 function comparisonSourceForEdit(source: EditSourceState): PreviewCompareSource | null {

@@ -26,7 +26,8 @@
   import { jobsStore } from '$lib/stores/jobs';
   import { lightboxStore } from '$lib/stores/lightbox';
   import { nodeImageResult } from '$lib/stores/nodeImage';
-  import { initialPromptFormState, previewStore, type PromptFormState, type SubmitOptions } from '$lib/stores/preview';
+  import { previewStore, type SubmitOptions } from '$lib/stores/preview';
+  import { initialPromptFormState, type PromptFormState } from '$lib/utils/promptFormTypes';
   import { preferencesStore } from '$lib/stores/preferences';
   import { promptSnippetsStore } from '$lib/stores/promptSnippets';
   import { settingsActivityStore, settingsStore } from '$lib/stores/settings';

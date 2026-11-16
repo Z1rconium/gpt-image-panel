@@ -1,7 +1,7 @@
 import { untrack } from 'svelte';
 import type { ApiPath, ResponseFormatDefault } from '$lib/api/types/common';
 import type { SettingsResponse } from '$lib/api/types/settings';
-import { initialPromptFormState, type PromptFormState } from '$lib/stores/preview';
+import { initialPromptFormState, type PromptFormState } from '$lib/utils/promptFormTypes';
 import { MASK_PASTE_BACK_PREF_KEY } from '$lib/stores/editSource';
 import {
   activePreset,

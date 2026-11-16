@@ -2,7 +2,7 @@ import { apiFetch } from '$lib/api/client';
 import type { PromptOptimizeRequest, PromptOptimizeResponse } from '$lib/api/types/assistant';
 import type { ApiPath } from '$lib/api/types/common';
 import type { Language } from '$lib/i18n';
-import type { PromptFormState } from '$lib/stores/preview';
+import type { PromptFormState } from '$lib/utils/promptFormTypes';
 
 export type BuildPromptOptimizeRequestInput = {
   prompt: string;

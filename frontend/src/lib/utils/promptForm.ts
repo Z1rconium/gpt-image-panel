@@ -1,7 +1,7 @@
 import type { ApiPath, ResponseFormatDefault } from '$lib/api/types/common';
 import type { GalleryEntry } from '$lib/api/types/gallery';
 import type { GenerateJobStatus } from '$lib/api/types/jobs';
-import { DEFAULT_PROMPT_MODEL, DEFAULT_QUANTITY, initialPromptFormState, type PromptFormState } from '$lib/stores/preview';
+import { DEFAULT_PROMPT_MODEL, DEFAULT_QUANTITY, initialPromptFormState, type PromptFormState } from '$lib/utils/promptFormTypes';
 import { displayImageSize } from '$lib/utils/format';
 
 const GENERATION_API_PATHS: ApiPath[] = ['/v1/images/generations', '/v1/responses', '/v1/chat/completions'];

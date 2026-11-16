@@ -1,6 +1,6 @@
 import type { ApiPath, ResponseFormatDefault } from '$lib/api/types/common';
 import type { SettingsResponse } from '$lib/api/types/settings';
-import { DEFAULT_PROMPT_MODEL, initialPromptFormState } from '$lib/stores/preview';
+import { DEFAULT_PROMPT_MODEL, initialPromptFormState } from '$lib/utils/promptFormTypes';
 import { normalizeApiPath, normalizeResponseFormat } from '$lib/utils/promptForm';
 
 export function activePreset(settings: SettingsResponse | null) {

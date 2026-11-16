@@ -1,16 +1,23 @@
 <script lang="ts">
-  import { onDestroy } from 'svelte';
+  import { onDestroy, untrack } from 'svelte';
   import PromptHelperPanel from '$lib/components/PromptHelperPanel.svelte';
   import ImageModelPicker from '$lib/components/ImageModelPicker.svelte';
   import { plainTextInput } from '$lib/actions/plainTextInput';
   import { promptForm } from '$lib/features/workspace/formState.svelte';
   import { t } from '$lib/i18n';
   import type { Snippet } from 'svelte';
-  import type { PromptFormState } from '$lib/stores/preview';
+  import type { PromptFormState } from '$lib/utils/promptFormTypes';
   import { MAX_CONCURRENT_SUBMISSIONS, SUBMIT_COOLDOWN_MS } from '$lib/stores/previewGroup';
   import { settingsStore } from '$lib/stores/settings';
   import { RESPONSE_FORMAT_OPTIONS, sanitizeQuantityInput } from '$lib/utils/promptForm';
   import { imageQualities, isImage25, isImage26, MAX_PROMPT_CHARS, promptLength } from '$lib/utils/imageModels';
+  import {
+    isPromptOnlyApiPath,
+    isStreamUnavailableMapped,
+    isStreamUnsupportedPath,
+    isTransparentUnavailableMapped,
+    normalizeForm
+  } from '$lib/utils/promptRules';
 
   interface Props {
     loading?: boolean;
@@ -51,20 +58,9 @@
   const image26 = $derived(isImage26(promptForm.model));
   const specialMedia = $derived(promptForm.outputFormat === 'svg' || promptForm.outputFormat === 'gif');
   let mediaReset = $state(false);
-  $effect(() => {
-    if (specialMedia) {
-      // SVG is generation-only; GIF may animate a reference image but not a masked edit.
-      const unsupportedForEdit = promptForm.outputFormat === 'svg' ? hasEditSource : hasEditMask;
-      if (!image26 || unsupportedForEdit) { promptForm.outputFormat = 'png'; mediaReset = true; return; }
-      if (promptForm.stream || promptForm.outputCompression || promptForm.background.startsWith('chroma_') || (promptForm.outputFormat === 'svg' && Number(promptForm.quantity) !== 1)) mediaReset = true;
-      promptForm.stream = false;
-      promptForm.outputCompression = '';
-      if (promptForm.background.startsWith('chroma_')) promptForm.background = 'auto';
-      if (promptForm.outputFormat === 'svg') promptForm.quantity = 1;
-    }
-  });
+  let qualityResetModel = $state('');
   const image25 = $derived(isImage25(promptForm.model) || isImage26(promptForm.model));
-  const promptOnlyMode = $derived(promptForm.apiPath === '/v1/responses' || promptForm.apiPath === '/v1/chat/completions');
+  const promptOnlyMode = $derived(isPromptOnlyApiPath(promptForm.apiPath));
   const parameterControlsDisabled = $derived((promptOnlyMode && !hasEditSource) || loading);
   // Generation stays submittable while earlier requests are in flight; only
   // the parameter controls keep their existing loading lock, while a short
@@ -124,64 +120,77 @@
   const providerMapped = $derived(($settingsStore.settings?.provider_kind ?? 'openai') === 'async_json');
 
   const streamUnavailableReason = $derived(
-    !hasEditSource && !['/v1/images/generations', '/v1/responses'].includes(promptForm.apiPath)
+    isStreamUnsupportedPath(promptForm.apiPath, hasEditSource)
       ? $t.promptForm.streamUnsupportedPath
-      : providerMapped && !providerCaps?.stream
+      : isStreamUnavailableMapped(providerMapped, providerCaps)
         ? $t.promptForm.streamUnavailableMapped
         : ''
   );
   const streamDisabled = $derived(specialMedia || loading || Boolean(streamUnavailableReason));
   const transparentDisabledReason = $derived(
-    providerMapped && providerCaps && !providerCaps.transparent_background
+    isTransparentUnavailableMapped(providerMapped, providerCaps)
       ? $t.promptForm.transparentUnavailableMapped
       : ''
   );
 
-  $effect(() => {
-    if (providerMapped && !providerCaps?.complexity) promptForm.complexity = null;
-    if (specialMedia && providerMapped && (!providerCaps?.formats.includes(promptForm.outputFormat) || (promptForm.outputFormat === 'gif' && !providerCaps?.animation))) { promptForm.outputFormat = 'png'; mediaReset = true; }
-  });
-  let qualityResetModel = $state('');
+  const NORMALIZED_FIELDS = [
+    'model',
+    'apiPath',
+    'quality',
+    'outputFormat',
+    'complexity',
+    'background',
+    'outputCompression',
+    'quantity',
+    'stream'
+  ] as const;
 
-  // Field-scoped normalizers: each effect tracks only the fields it
-  // constrains, so typing in the prompt never re-runs them.
+  // Track only capability-relevant fields and context so typing in the prompt
+  // or editing size/frames never triggers capability normalization.
   $effect(() => {
-    if (!imageQualities(promptForm.model).includes(promptForm.quality)) {
-      promptForm.quality = 'auto';
-      qualityResetModel = promptForm.model;
-    }
-  });
-  $effect(() => {
-    if (
-      promptForm.stream &&
-      ((!hasEditSource && !['/v1/images/generations', '/v1/responses'].includes(promptForm.apiPath)) ||
-        (providerMapped && !providerCaps?.stream))
-    ) {
-      promptForm.stream = false;
-    }
-  });
-  $effect(() => {
-    if (promptForm.outputFormat === 'png' && promptForm.outputCompression !== '') promptForm.outputCompression = '';
-  });
-  $effect(() => {
-    if (promptForm.background === 'transparent' && promptForm.outputFormat === 'jpeg') {
-      promptForm.outputFormat = 'png';
-      promptForm.outputCompression = '';
-    }
-  });
-  $effect(() => {
-    if (promptForm.background === 'transparent' && transparentDisabledReason) {
-      promptForm.background = 'auto';
-    }
-  });
-  $effect(() => {
-    if (promptForm.background?.startsWith('chroma_')) {
-      if (hasEditSource || promptOnlyMode) promptForm.background = 'auto';
-      else if (promptForm.outputFormat !== 'png') {
-        promptForm.outputFormat = 'png';
-        promptForm.outputCompression = '';
+    const capabilitySnapshot = {
+      model: promptForm.model,
+      apiPath: promptForm.apiPath,
+      quality: promptForm.quality,
+      outputFormat: promptForm.outputFormat,
+      complexity: promptForm.complexity,
+      background: promptForm.background,
+      outputCompression: promptForm.outputCompression,
+      quantity: promptForm.quantity,
+      stream: promptForm.stream
+    };
+    const editMode = hasEditSource;
+    const hasMask = hasEditMask;
+    const mapped = providerMapped;
+    const caps = providerCaps;
+
+    const { form: normalized, resets } = untrack(() =>
+      normalizeForm(
+        { ...promptForm.snapshot(), ...capabilitySnapshot },
+        { providerMapped: mapped, providerCaps: caps, editMode, hasMask }
+      )
+    );
+
+    if (resets.length === 0) return;
+
+    const updates: Partial<PromptFormState> = {};
+    for (const key of NORMALIZED_FIELDS) {
+      if (normalized[key] !== capabilitySnapshot[key]) {
+        (updates as Record<string, unknown>)[key] = normalized[key];
       }
     }
+
+    untrack(() => {
+      if (Object.keys(updates).length > 0) {
+        promptForm.patch(updates);
+      }
+      if (resets.includes('media_reset')) {
+        mediaReset = true;
+      }
+      if (resets.includes('quality_reset')) {
+        qualityResetModel = normalized.model;
+      }
+    });
   });
 
   function handleQuantityInput() {
