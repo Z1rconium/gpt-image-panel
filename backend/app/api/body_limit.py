@@ -16,6 +16,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from ..core import security as auth
 from ..core import settings as config
+from ..core.media import EDIT_INPUT_LIMIT_BYTES
 from .middleware import AUTH_EXEMPT_PATHS, AUTH_EXEMPT_PREFIXES
 from .edit_limits import (
     EDIT_MULTIPART_METADATA_OVERHEAD_BYTES,
@@ -53,7 +54,7 @@ def _max_body_for_path(path: str, content_type: str = "") -> int:
             * 1024
             * 1024
             + MAX_EDIT_MASK_BYTES
-            + min(config.MAX_FILE_SIZE_MB * 1024 * 1024, 50 * 1024 * 1024 - 1)
+            + min(config.MAX_FILE_SIZE_MB * 1024 * 1024, EDIT_INPUT_LIMIT_BYTES - 1)
             + EDIT_MULTIPART_METADATA_OVERHEAD_BYTES,
         ),
     ]

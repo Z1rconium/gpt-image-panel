@@ -22,8 +22,9 @@ from ...services.job_persistence import resolve_generate_job_view
 from ...core.utils import json_dumps_canonical
 from ...repositories.db.execution import run_db_operation
 from ...runtime.blocking import run_image_operation
+from ...services.image_admission import admit_generation
 from ...services.job_cancel import cancel_image_job
-from ...services.job_queue import queue_image_job
+from ...services.job_queue import enqueue
 from ...services.poll_backoff import next_poll_delay
 from ...repositories.sse_limiter import sse_limiter
 from ...core import security as auth
@@ -189,14 +190,13 @@ async def _poll_generate_sse() -> None:
 
 @router.post("/api/generate", response_model=GenerateJobResponse, status_code=202)
 async def generate(req: GenerateRequest):
-    return await queue_image_job(
-        req=req,
-        operation="generation",
-        api_path=lambda preset: normalize_api_path(
+    admitted = await admit_generation(
+        req,
+        api_path_for=lambda preset: normalize_api_path(
             req.api_path or str(preset.get("api_path") or "/v1/images/generations")
         ),
-        queued_message="Queued image generation",
     )
+    return await enqueue(admitted, queued_message="Queued image generation")
 
 
 @router.get("/api/generate/jobs", response_model=list[GenerateJobStatus])

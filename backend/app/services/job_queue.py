@@ -3,15 +3,19 @@
 import asyncio
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal
 
-from ..core.provider_mapping import template_variables
-from ..schemas.provider import resolve_provider_config
-
-
 from ..runtime.state import MAX_GENERATE_JOBS, state
+from . import edit_source_types
+from .image_admission import (
+    AdmittedJob,
+    EditInputs,
+    admit_edit,
+    admit_generation,
+    admit_image_job,
+    resolve_effective_preset,
+)
 from .preset_credentials import get_effective_preset_api_key
 from .presets import (
     get_active_preset,
@@ -20,7 +24,6 @@ from .presets import (
     get_webhook_url,
     load_api_settings,
 )
-from .image_preset_snapshot import apply_image_preset_snapshot
 from ..core.errors import (
     InvalidRequestError,
     RateLimitedError,
@@ -28,13 +31,7 @@ from ..core.errors import (
 )
 from ..core import settings as config
 from ..core import validators as ssrf
-from ..core.api_paths import (
-    PROVIDER_KIND_ASYNC_JSON,
-    normalize_default_model,
-    normalize_default_response_format,
-    normalize_provider_kind,
-)
-from ..core.image_models import is_image_25, is_image_26
+from ..core.api_paths import normalize_default_model
 from ..core.constants import ACTIVE_GENERATE_JOB_STATUSES
 from ..core.observability import metrics
 from ..core.utils import utc_now
@@ -53,7 +50,6 @@ from ..repositories.db import (
 from ..repositories.db import image_url_for_filename
 from ..schemas.gallery import GalleryEntry
 from ..schemas.generation import EditRequest, GenerateJobResponse, GenerateRequest
-from ..schemas.provider import provider_capabilities
 from ..repositories.db.execution import run_db_operation
 from .job_events import (
     get_job_subscribers,
@@ -80,36 +76,20 @@ def resolve_effective_model(
     get_presets: Callable[[], list[dict]] = get_api_presets,
 ) -> str:
     """Resolve explicit or preset-default image model without mutating request objects."""
-    active_preset = get_active()
-    if api_preset_id:
-        active_preset = next(
-            (preset for preset in get_presets() if preset.get("id") == api_preset_id),
+    try:
+        active_preset = resolve_effective_preset(
+            api_preset_id,
+            get_active(),
+            get_presets(),
             None,
         )
+    except UnprocessableRequestError:
+        active_preset = {}
     explicit = str(model or "").strip()
     return explicit or normalize_default_model(
-        (active_preset or {}).get("default_model"),
+        active_preset.get("default_model"),
         api_path,
     )
-
-
-@dataclass(frozen=True)
-class EditImageSource:
-    temp_path: Path
-    byte_size: int
-    filename: str
-    content_type: str
-    role: Literal["image", "mask", "markup"] = "image"
-    coverage: float | None = None
-    # Populated when the source was admitted with Pillow validation (see
-    # `copy_edit_source_stream_to_temp(..., validate=True)`); 0 for sources
-    # admitted with validation skipped (masks) or rebuilt from a payload saved
-    # before this field existed. Callers must treat 0 as "unknown" and fall
-    # back to decoding the file when they need the size.
-    width: int = 0
-    height: int = 0
-    raw_sha256: str | None = None
-    gallery_image_id: str | None = None
 
 
 def trim_generate_jobs():
@@ -200,22 +180,20 @@ def snapshot_queue_metrics() -> dict[str, int]:
 
 def build_pending_job(
     job_id: str,
-    req: GenerateRequest | EditRequest,
-    operation: str,
+    admitted: AdmittedJob,
     message: str,
-    api_path: str | None = None,
-    api_preset_name: str | None = None,
     image_units: int = 1,
-    mask_applied: bool = False,
-    api_preset_id: str | None = None,
 ) -> dict:
+    req = admitted.request
+    preset = admitted.preset
+    mask_applied = bool(admitted.edit_inputs and admitted.edit_inputs.mask is not None)
     now = utc_now()
     return {
         "job_id": job_id,
         "status": "queued",
         "stage": "queued",
         "message": message,
-        "operation": operation,
+        "operation": admitted.operation,
         "prompt": req.prompt,
         "size": req.size,
         "created_at": now,
@@ -231,12 +209,12 @@ def build_pending_job(
         "response_format": req.response_format,
         "n": req.n,
         "image_units": max(1, int(image_units or 1)),
-        "api_path": api_path,
-        "api_preset_id": api_preset_id,
-        "api_preset_name": api_preset_name,
+        "api_path": admitted.api_path,
+        "api_preset_id": str(preset.get("id") or "default"),
+        "api_preset_name": preset.get("name") or "Untitled preset",
         "streaming": bool(getattr(req, "stream", False)),
         "partial_images": getattr(req, "partial_images", None) if getattr(req, "stream", False) else None,
-        "mask_applied": bool(mask_applied),
+        "mask_applied": mask_applied,
         "paste_back": req.paste_back if isinstance(req, EditRequest) and mask_applied else None,
         "safety_identifier": getattr(req, "safety_identifier", None),
     }
@@ -278,40 +256,6 @@ def gallery_entry_job_result(entry: GalleryEntry) -> dict:
     image["api_preset_name"] = entry.api_preset_name
     image["completed_at"] = entry.completed_at
     return image
-
-
-def edit_source_to_payload(source: EditImageSource) -> dict:
-    return {
-        "temp_path": str(source.temp_path),
-        "byte_size": source.byte_size,
-        "filename": source.filename,
-        "content_type": source.content_type,
-        "role": source.role,
-        "coverage": source.coverage,
-        "width": source.width,
-        "height": source.height,
-        "raw_sha256": source.raw_sha256,
-        "gallery_image_id": source.gallery_image_id,
-    }
-
-
-def edit_source_from_payload(payload: dict) -> EditImageSource:
-    role = str(payload.get("role") or "image")
-    coverage = payload.get("coverage")
-    return EditImageSource(
-        temp_path=Path(str(payload.get("temp_path") or "")),
-        byte_size=int(payload.get("byte_size") or 0),
-        filename=str(payload.get("filename") or "image.png"),
-        content_type=str(payload.get("content_type") or "application/octet-stream"),
-        role=role if role in {"mask", "markup"} else "image",
-        coverage=float(coverage) if coverage is not None else None,
-        # Missing on payloads persisted before this field existed; 0 means
-        # "decode to find out" to every reader (see EditImageSource docstring).
-        width=int(payload.get("width") or 0),
-        height=int(payload.get("height") or 0),
-        raw_sha256=payload.get("raw_sha256"),
-        gallery_image_id=payload.get("gallery_image_id"),
-    )
 
 
 def build_request_payload(req: GenerateRequest | EditRequest) -> dict:
@@ -410,6 +354,155 @@ def build_edit_request_from_form(
         raise UnprocessableRequestError(str(e)) from e
 
 
+async def _cleanup_retry_layer_copies(
+    job_id: str,
+    *,
+    wrote_mask: bool,
+    wrote_markup: bool,
+) -> None:
+    if wrote_markup:
+        await asyncio.to_thread(delete_mask_file, f"{job_id}-markup.png")
+    if wrote_mask:
+        await asyncio.to_thread(delete_mask_file, f"{job_id}.png")
+
+
+async def enqueue(
+    admitted: AdmittedJob,
+    *,
+    queued_message: str | None = None,
+    job_id: str | None = None,
+    agent_turn_id: str | None = None,
+    agent_conversation_id: str | None = None,
+) -> GenerateJobResponse:
+    """Run impure preflight, write retry copies, and persist an admitted job."""
+    req = admitted.request
+    preset = admitted.preset
+    active_preset_id = str(preset.get("id") or "default")
+    api_url = str(preset.get("api_url") or "").rstrip("/")
+    api_preset_name = preset.get("name") or "Untitled preset"
+    message = queued_message or (
+        "Queued image generation"
+        if admitted.operation == "generation"
+        else "Queued image edit"
+    )
+
+    if not api_url:
+        raise InvalidRequestError("API URL not configured. Please set it in Settings.")
+    try:
+        ssrf.normalize_upstream_base_url(api_url)
+    except ValueError as e:
+        raise InvalidRequestError(str(e)) from e
+    get_effective_preset_api_key(preset)
+    get_upstream_socks5_proxy()
+
+    webhook_url = await asyncio.to_thread(
+        validate_job_webhook_url,
+        req.webhook_url or get_webhook_url(),
+    )
+
+    edit_inputs = admitted.edit_inputs
+    edit_sources = edit_inputs.all_sources if edit_inputs is not None else ()
+    edit_sources_payload = (
+        [edit_source_types.edit_source_to_payload(source) for source in edit_sources]
+        if edit_sources
+        else None
+    )
+    pending_edit_source_bytes = sum(source.byte_size for source in edit_sources)
+    has_mask = edit_inputs is not None and edit_inputs.mask is not None
+    has_markup = edit_inputs is not None and edit_inputs.markup is not None
+
+    image_units = request_image_units(req)
+    job_id = job_id or str(uuid.uuid4())
+    pending_job = build_pending_job(
+        job_id=job_id,
+        admitted=admitted,
+        message=message,
+        image_units=image_units,
+    )
+    pending_job["webhook_url"] = webhook_url
+    pending_job["agent_turn_id"] = agent_turn_id
+    pending_job["agent_conversation_id"] = agent_conversation_id
+    pending_job["markup_applied"] = has_markup
+    request_payload = build_request_payload(req)
+    request_payload["_provider_snapshot"] = {
+        key: preset.get(key)
+        for key in ("api_url", "provider_kind", "provider_config", "prompt_guard", "supports_mask")
+    }
+
+    wrote_mask = False
+    wrote_markup = False
+    try:
+        if has_mask:
+            if admitted.mask_info is None:
+                raise ValueError("mask_info is required when edit_inputs.mask is set")
+            # The retry copy in MASKS_DIR is a re-encoded `LA` PNG built once,
+            # during the mask's single admission-time decode (see
+            # services.edit_masks.validate_edit_mask_file); the raw upload at
+            # edit_inputs.mask.temp_path is untouched and sent upstream.
+            await asyncio.to_thread(
+                write_mask_file,
+                admitted.mask_info.optimized_png,
+                f"{job_id}.png",
+            )
+            wrote_mask = True
+        if has_markup:
+            assert edit_inputs is not None and edit_inputs.markup is not None
+            await asyncio.to_thread(
+                copy_mask_file,
+                edit_inputs.markup.temp_path,
+                f"{job_id}-markup.png",
+            )
+            wrote_markup = True
+
+        stored_job, _units = await run_db_operation(
+            enqueue_image_job,
+            parent_job=pending_job,
+            operation=admitted.operation,
+            request=request_payload,
+            image_units=image_units,
+            api_preset_id=active_preset_id,
+            api_preset_name=api_preset_name,
+            api_path=admitted.api_path,
+            edit_sources=edit_sources_payload,
+            pending_edit_source_bytes=pending_edit_source_bytes,
+            max_active_generate_jobs=config.MAX_ACTIVE_GENERATE_JOBS,
+            max_queued_generate_jobs=config.MAX_QUEUED_GENERATE_JOBS,
+            max_pending_edit_source_bytes=get_max_pending_edit_source_bytes(),
+            metric_name="enqueue_image_job",
+        )
+    except ImageJobQueueFullError as e:
+        await _cleanup_retry_layer_copies(
+            job_id, wrote_mask=wrote_mask, wrote_markup=wrote_markup
+        )
+        metrics.increment("image_jobs.rejected.queue_full")
+        raise RateLimitedError("Generation job queue is full") from e
+    except EditSourceQueueFullError as e:
+        await _cleanup_retry_layer_copies(
+            job_id, wrote_mask=wrote_mask, wrote_markup=wrote_markup
+        )
+        metrics.increment("image_jobs.rejected.edit_source_full")
+        raise RateLimitedError("Edit source queue is full") from e
+    except BaseException:
+        await _cleanup_retry_layer_copies(
+            job_id, wrote_mask=wrote_mask, wrote_markup=wrote_markup
+        )
+        raise
+
+    remember_generate_job_memory(job_id, stored_job)
+    state.generate_job_last_persist_at.pop(job_id, None)
+    metrics.increment(f"image_jobs.{admitted.operation}.queued")
+    publish_generate_job(stored_job, list_debounce=False, list_reconcile=True)
+    kick_image_unit_dispatcher()
+
+    return GenerateJobResponse(
+        job_id=job_id,
+        status="queued",
+        stage="queued",
+        message=message,
+        operation=admitted.operation,
+    )
+
+
 async def queue_image_job(
     *,
     req: GenerateRequest | EditRequest,
@@ -424,235 +517,77 @@ async def queue_image_job(
     agent_conversation_id: str | None = None,
     preset_snapshot: dict | None = None,
 ) -> GenerateJobResponse:
-    await run_db_operation(load_api_settings, metric_name="load_api_settings")
-    active_preset = get_active_preset()
-    if req.api_preset_id:
-        # Retrying a historical job may pin the preset it ran with, without
-        # switching the globally active preset.
-        active_preset = next(
-            (preset for preset in get_api_presets() if preset.get("id") == req.api_preset_id),
-            None,
+    del pending_edit_source_bytes, mask_applied
+    if operation == "generation":
+        admitted = await admit_generation(
+            req,
+            api_path_for=api_path if callable(api_path) else (lambda _preset: api_path),
+            preset_snapshot=preset_snapshot,
         )
-        if active_preset is None:
-            raise UnprocessableRequestError("API preset not found")
-    if preset_snapshot is not None:
-        active_preset = apply_image_preset_snapshot(active_preset, preset_snapshot)
-    active_preset_id = str(active_preset.get("id") or "default")
-    api_url = str(active_preset.get("api_url") or "").rstrip("/")
-    api_preset_name = active_preset.get("name") or "Untitled preset"
-    resolved_api_path = api_path(active_preset) if callable(api_path) else api_path
-    requested_model = (
-        str(req.model or "").strip()
-        if "model" in getattr(req, "model_fields_set", set())
-        else ""
-    )
-    req.model = requested_model or normalize_default_model(
-        active_preset.get("default_model"),
-        resolved_api_path,
-    )
-    if "response_format" not in getattr(req, "model_fields_set", set()):
-        default_response_format = normalize_default_response_format(
-            active_preset.get("default_response_format")
+    else:
+        await run_db_operation(load_api_settings, metric_name="load_api_settings")
+        preset = resolve_effective_preset(
+            req,
+            get_active_preset(),
+            get_api_presets(),
+            preset_snapshot,
         )
-        req.response_format = default_response_format or None
-
-    try:
-        req.normalize_model_options(resolved_api_path)
-    except ValueError as e:
-        raise UnprocessableRequestError(str(e)) from e
-    if req.output_format in {"svg", "gif"} and "partial_images" in req.model_fields_set:
-        raise UnprocessableRequestError("SVG/GIF does not support partial_images")
-    if operation == "edit" and (is_image_25(req.model) or is_image_26(req.model)):
-        for source in edit_sources_payload or []:
-            if source.get("content_type") not in {"image/png", "image/jpeg", "image/webp"}:
-                raise UnprocessableRequestError("GPT Image 2.5/2.6 edit inputs must be PNG, JPEG or WebP; convert this image before editing")
-            if int(source.get("byte_size") or 0) >= 50 * 1024 * 1024:
-                raise UnprocessableRequestError("GPT Image 2.5/2.6 edit inputs must be smaller than 50 MB")
-
-    if normalize_provider_kind(active_preset.get("provider_kind")) == PROVIDER_KIND_ASYNC_JSON:
-        # Admission and the frontend both read this single capability view of
-        # the mapping, so a task never enters the queue on an unstated ability.
-        provider_caps = provider_capabilities(active_preset.get("provider_config"))
-        resolved_provider = resolve_provider_config(active_preset.get("provider_config"))
-        active_submit = resolved_provider.edit_submit if operation == "edit" else resolved_provider.submit
-        active_variables = template_variables(active_submit.body) if active_submit is not None else set()
-        if req.complexity is not None and "complexity" not in active_variables:
-            raise UnprocessableRequestError("Provider mapping does not send complexity for this operation")
-        if req.output_format == "gif" and not {"frame_count", "frame_duration_ms"} <= active_variables:
-            raise UnprocessableRequestError("Provider mapping does not send animation controls for this operation")
-        if req.complexity is not None and not provider_caps.complexity:
-            raise UnprocessableRequestError("Provider mapping does not send complexity")
-        if req.output_format == "gif" and not provider_caps.animation:
-            raise UnprocessableRequestError("Provider mapping does not send animation controls")
-        if any(source.get("role") == "markup" for source in (edit_sources_payload or [])) and not provider_caps.markup:
-            raise UnprocessableRequestError("Provider mapping does not send markup")
-        if operation == "edit":
-            if not provider_caps.edit:
-                raise UnprocessableRequestError(
-                    "This provider mapping does not declare image edit support; "
-                    "add an edit_submit section to provider_config"
-                )
-            if (
-                any(str(source.get("role") or "") == "mask" for source in edit_sources_payload or [])
-                and not provider_caps.mask
-            ):
-                raise UnprocessableRequestError(
-                    "This provider mapping cannot send an edit mask; configure "
-                    "edit_submit.files.mask (multipart) or {{mask}} in a JSON body"
-                )
-        if getattr(req, "stream", False):
-            raise UnprocessableRequestError("Streaming preview is not available for async providers")
-        if req.background == "transparent" and not provider_caps.transparent_background:
-            raise UnprocessableRequestError(
-                "This provider mapping does not declare native transparent background "
-                "support; pick a chroma background or declare "
-                "capabilities.transparent_background in provider_config"
+        resolved_api_path = api_path(preset) if callable(api_path) else api_path
+        sources = [
+            edit_source_types.edit_source_from_payload(p)
+            for p in (edit_sources_payload or [])
+        ]
+        edit = (
+            EditInputs(
+                sources=tuple(s for s in sources if s.role not in {"mask", "markup"}),
+                mask=next((s for s in sources if s.role == "mask"), None),
+                markup=next((s for s in sources if s.role == "markup"), None),
             )
-        if req.output_format not in provider_caps.formats:
-            raise UnprocessableRequestError(
-                "This provider mapping supports output formats "
-                f"{'/'.join(provider_caps.formats)}; '{req.output_format}' was requested"
-            )
-
-    if getattr(req, "stream", False) and resolved_api_path not in {
-        "/v1/images/generations",
-        "/v1/images/edits",
-        "/v1/responses",
-    }:
-        raise UnprocessableRequestError(
-            "Streaming preview requires /v1/images/generations, /v1/images/edits or /v1/responses"
+            if sources
+            else None
         )
-
-    if not api_url:
-        raise InvalidRequestError("API URL not configured. Please set it in Settings.")
-    try:
-        ssrf.normalize_upstream_base_url(api_url)
-    except ValueError as e:
-        raise InvalidRequestError(str(e)) from e
-    get_effective_preset_api_key(active_preset)
-    get_upstream_socks5_proxy()
-
-    webhook_url = await asyncio.to_thread(
-        validate_job_webhook_url,
-        req.webhook_url or get_webhook_url(),
-    )
-    image_units = request_image_units(req)
-    job_id = job_id or str(uuid.uuid4())
-    pending_job = build_pending_job(
-        job_id=job_id,
-        req=req,
-        operation=operation,
-        message=queued_message,
-        api_path=resolved_api_path,
-        api_preset_name=api_preset_name,
-        image_units=image_units,
-        mask_applied=mask_applied,
-        api_preset_id=active_preset_id,
-    )
-    pending_job["webhook_url"] = webhook_url
-    pending_job["agent_turn_id"] = agent_turn_id
-    pending_job["agent_conversation_id"] = agent_conversation_id
-    pending_job["markup_applied"] = any(source.get("role") == "markup" for source in (edit_sources_payload or []))
-    request_payload = build_request_payload(req)
-    request_payload["_provider_snapshot"] = {
-        key: active_preset.get(key)
-        for key in ("api_url", "provider_kind", "provider_config", "prompt_guard", "supports_mask")
-    }
-    try:
-        stored_job, _units = await run_db_operation(
-            enqueue_image_job,
-            parent_job=pending_job,
-            operation=operation,
-            request=request_payload,
-            image_units=image_units,
-            api_preset_id=active_preset_id,
-            api_preset_name=api_preset_name,
+        admitted = admit_image_job(
+            req,
+            operation="edit",
+            preset=preset,
             api_path=resolved_api_path,
-            edit_sources=edit_sources_payload,
-            pending_edit_source_bytes=pending_edit_source_bytes,
-            max_active_generate_jobs=config.MAX_ACTIVE_GENERATE_JOBS,
-            max_queued_generate_jobs=config.MAX_QUEUED_GENERATE_JOBS,
-            max_pending_edit_source_bytes=get_max_pending_edit_source_bytes(),
-            metric_name="enqueue_image_job",
+            edit=edit,
+            mask_paste_back_default=config.MASK_PASTE_BACK_DEFAULT,
         )
-    except ImageJobQueueFullError as e:
-        metrics.increment("image_jobs.rejected.queue_full")
-        raise RateLimitedError("Generation job queue is full") from e
-    except EditSourceQueueFullError as e:
-        metrics.increment("image_jobs.rejected.edit_source_full")
-        raise RateLimitedError("Edit source queue is full") from e
-
-    remember_generate_job_memory(job_id, stored_job)
-    state.generate_job_last_persist_at.pop(job_id, None)
-    metrics.increment(f"image_jobs.{operation}.queued")
-    publish_generate_job(stored_job, list_debounce=False, list_reconcile=True)
-    kick_image_unit_dispatcher()
-
-    return GenerateJobResponse(
+    return await enqueue(
+        admitted,
+        queued_message=queued_message,
         job_id=job_id,
-        status="queued",
-        stage="queued",
-        message=queued_message,
-        operation=operation,
+        agent_turn_id=agent_turn_id,
+        agent_conversation_id=agent_conversation_id,
     )
 
 
 async def queue_edit_job(
     req: EditRequest,
-    image_sources: list[EditImageSource],
-    mask_source: EditImageSource | None = None,
+    image_sources: list[edit_source_types.EditImageSource],
+    mask_source: edit_source_types.EditImageSource | None = None,
     mask_coverage: float | None = None,
     mask_optimized_png: bytes | None = None,
-    markup_source: EditImageSource | None = None,
+    markup_source: edit_source_types.EditImageSource | None = None,
     *,
     agent_turn_id: str | None = None,
     agent_conversation_id: str | None = None,
     preset_snapshot: dict | None = None,
 ) -> GenerateJobResponse:
-    if mask_source is not None and req.output_format == "gif":
-        # Reject before the retry copy of the mask is written to MASKS_DIR.
-        raise UnprocessableRequestError("GIF output does not support edit masks")
-    job_id = str(uuid.uuid4())
-    if mask_source is not None:
-        if req.paste_back is None:
-            req.paste_back = config.MASK_PASTE_BACK_DEFAULT
-        mask_source = replace(mask_source, coverage=mask_coverage)
-        # The retry copy in MASKS_DIR is a re-encoded `LA` PNG built once,
-        # during the mask's single admission-time decode (see
-        # services.edit_masks.validate_edit_mask_file); the raw upload at
-        # mask_source.temp_path is untouched and still what gets sent
-        # upstream. mask_optimized_png is always set alongside mask_source —
-        # both come from the same successful validate_edit_mask() call.
-        if mask_optimized_png is None:
-            raise ValueError("mask_optimized_png is required when mask_source is set")
-        await asyncio.to_thread(
-            write_mask_file,
-            mask_optimized_png,
-            f"{job_id}.png",
-        )
-    edit_sources = [*image_sources, mask_source] if mask_source is not None else image_sources
-    if markup_source is not None:
-        await asyncio.to_thread(copy_mask_file, markup_source.temp_path, f"{job_id}-markup.png")
-        edit_sources = [*edit_sources, markup_source]
-    edit_source_bytes = sum(source.byte_size for source in edit_sources)
-
-    try:
-        return await queue_image_job(
-            req=req,
-            operation="edit",
-            api_path="/v1/images/edits",
-            queued_message="Queued image edit",
-            pending_edit_source_bytes=edit_source_bytes,
-            edit_sources_payload=[edit_source_to_payload(source) for source in edit_sources],
-            mask_applied=mask_source is not None,
-            job_id=job_id,
-            agent_turn_id=agent_turn_id,
-            agent_conversation_id=agent_conversation_id,
-            preset_snapshot=preset_snapshot,
-        )
-    except BaseException:
-        if markup_source is not None:
-            await asyncio.to_thread(delete_mask_file, f"{job_id}-markup.png")
-        if mask_source is not None:
-            await asyncio.to_thread(delete_mask_file, f"{job_id}.png")
-        raise
+    del mask_coverage, mask_optimized_png
+    admitted = await admit_edit(
+        req,
+        EditInputs(
+            sources=tuple(image_sources),
+            mask=mask_source,
+            markup=markup_source,
+        ),
+        preset_snapshot=preset_snapshot,
+    )
+    return await enqueue(
+        admitted,
+        queued_message="Queued image edit",
+        agent_turn_id=agent_turn_id,
+        agent_conversation_id=agent_conversation_id,
+    )

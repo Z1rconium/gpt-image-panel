@@ -15,8 +15,8 @@ from ..repositories.gallery.queries import get_gallery_entry
 from ..repositories.image_files import validate_and_normalize_image_file
 from ..repositories.db.execution import run_db_operation
 from ..runtime.blocking import run_image_operation
+from .edit_source_types import EditImageSource
 from .gallery_archive_shared import max_upload_bytes
-from .job_queue import EditImageSource
 from .uploads import validate_upload_image_bytes
 
 EDIT_SOURCE_SNIFF_BYTES = 512

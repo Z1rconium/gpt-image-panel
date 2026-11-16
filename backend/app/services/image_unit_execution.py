@@ -50,8 +50,8 @@ from .image_unit_session import (
     UnitLeaseLostError,
     image_unit_lease_expires_at,
 )
+from .edit_source_types import edit_source_from_payload
 from .job_queue import (
-    edit_source_from_payload,
     gallery_entry_job_result,
     get_preset_for_unit,
     kick_thumbnail_dispatcher,

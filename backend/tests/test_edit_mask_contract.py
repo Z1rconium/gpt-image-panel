@@ -958,13 +958,18 @@ def test_cancelled_masked_edit_cleans_mask_temp_file(tmp_path, monkeypatch):
 
 
 def test_legacy_edit_source_payload_without_role_rebuilds_as_image():
+    from backend.app.services.edit_source_types import (
+        edit_source_from_payload,
+        edit_source_to_payload,
+    )
+
     payload = {
         "temp_path": "/tmp/edit-source-legacy.png",
         "byte_size": 12,
         "filename": "legacy.png",
         "content_type": "image/png",
     }
-    source = job_queue.edit_source_from_payload(payload)
+    source = edit_source_from_payload(payload)
     assert source.role == "image"
     # Rows persisted before width/height existed default to 0 ("unknown"),
     # never a guessed size that could silently defeat the primary-size reuse
@@ -972,13 +977,13 @@ def test_legacy_edit_source_payload_without_role_rebuilds_as_image():
     assert source.width == 0
     assert source.height == 0
 
-    masked = job_queue.edit_source_from_payload({**payload, "role": "mask"})
+    masked = edit_source_from_payload({**payload, "role": "mask"})
     assert masked.role == "mask"
 
-    sized = job_queue.edit_source_from_payload({**payload, "width": 64, "height": 32})
+    sized = edit_source_from_payload({**payload, "width": 64, "height": 32})
     assert (sized.width, sized.height) == (64, 32)
-    assert job_queue.edit_source_to_payload(sized)["width"] == 64
-    assert job_queue.edit_source_to_payload(sized)["height"] == 32
+    assert edit_source_to_payload(sized)["width"] == 64
+    assert edit_source_to_payload(sized)["height"] == 32
 
 
 def _mask_path_for(job_id: str) -> Path:

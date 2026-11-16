@@ -11,16 +11,10 @@ from ..edit_limits import EDIT_MASK_FIELD_NAME, MAX_EDIT_MASK_BYTES, MAX_EDIT_SO
 from ..uploads import is_image_upload, resolve_upload_content_type
 from ...core import overall_config
 from ...core import settings as config
-from ...core.image_models import is_image_26
-from ...core.media import get_image_dimensions
+from ...core.media import EDIT_INPUT_LIMIT_BYTES, get_image_dimensions
 from ...runtime.blocking import run_image_operation
 from ...schemas.generation import EditRequest, GenerateJobResponse
-from ...services.edit_markup import validate_edit_markup
-from ...services.edit_masks import (
-    EditMaskInfo,
-    validate_edit_mask_against_primary,
-    validate_edit_mask_against_primary_path,
-)
+from ...services.edit_source_types import EditImageSource
 from ...services.edit_sources import (
     EDIT_SOURCE_SNIFF_BYTES,
     cleanup_edit_sources,
@@ -28,14 +22,8 @@ from ...services.edit_sources import (
     read_gallery_edit_source,
     read_gallery_reference_edit_sources,
 )
-from ...services.job_queue import (
-    EditImageSource,
-    build_edit_request_from_form,
-    get_active_preset,
-    get_api_presets,
-    queue_edit_job,
-    resolve_effective_model,
-)
+from ...services.image_admission import EditInputs, admit_edit
+from ...services.job_queue import build_edit_request_from_form, enqueue
 
 
 router = APIRouter()
@@ -260,54 +248,11 @@ async def read_upload_edit_markup(form: FormData) -> EditImageSource | None:
     upload = values[0]
     source = await run_image_operation(
         copy_edit_source_stream_to_temp, upload.file, upload.filename or "markup.png", "image/png",
-        max_bytes=min(config.MAX_FILE_SIZE_MB * 1024 * 1024, 50 * 1024 * 1024 - 1), validate=True,
+        max_bytes=min(config.MAX_FILE_SIZE_MB * 1024 * 1024, EDIT_INPUT_LIMIT_BYTES - 1), validate=True,
         empty_detail="Markup is empty", too_large_detail="Markup must be smaller than 50 MiB",
         read_error_detail="Failed to read markup", metric_name="copy_edit_markup",
     )
     return replace(source, role="markup")
-
-
-async def validate_uploaded_markup(markup: EditImageSource | None, primary: EditImageSource, req: EditRequest) -> None:
-    if markup is None:
-        return
-    requested_model = req.model if "model" in getattr(req, "model_fields_set", set()) else None
-    effective_model = resolve_effective_model(
-        requested_model,
-        api_preset_id=req.api_preset_id,
-        api_path="/v1/images/edits",
-        get_active=get_active_preset,
-        get_presets=get_api_presets,
-    )
-    if not is_image_26(effective_model):
-        raise HTTPException(status_code=422, detail="Markup requires GPT Image 2.6")
-    try:
-        await run_image_operation(validate_edit_markup, markup.temp_path, primary.width, primary.height, metric_name="validate_edit_markup")
-    except (ValueError, OSError) as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-
-async def validate_edit_mask(mask: EditImageSource, primary: EditImageSource) -> EditMaskInfo:
-    try:
-        if primary.width > 0 and primary.height > 0:
-            return await run_image_operation(
-                validate_edit_mask_against_primary,
-                mask.temp_path,
-                primary_width=primary.width,
-                primary_height=primary.height,
-                metric_name="validate_edit_mask",
-            )
-        # Defensive fallback for a primary admitted without a cached size
-        # (e.g. a legacy in-flight request); decodes the primary once more.
-        return await run_image_operation(
-            validate_edit_mask_against_primary_path,
-            mask.temp_path,
-            primary.temp_path,
-            primary_filename=primary.filename,
-            primary_content_type=primary.content_type,
-            metric_name="validate_edit_mask",
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e)) from e
 
 
 
@@ -378,24 +323,15 @@ async def _stage_and_queue_edit(
             raise HTTPException(status_code=422, detail="Upload image is required.")
 
         validate_edit_source_count(sources)
-        await validate_uploaded_markup(markup, sources[0], req)
-        if markup is not None:
-            req.paste_back = False
-        mask_coverage = None
-        mask_optimized_png = None
-        if mask is not None:
-            mask_info = await validate_edit_mask(mask, sources[0])
-            mask_coverage = mask_info.transparent_ratio
-            mask_optimized_png = mask_info.optimized_png
-
-        return await queue_edit_job(
-            req=req,
-            image_sources=sources,
-            mask_source=mask,
-            markup_source=markup,
-            mask_coverage=mask_coverage,
-            mask_optimized_png=mask_optimized_png,
+        admitted = await admit_edit(
+            req,
+            EditInputs(
+                sources=tuple(sources),
+                mask=mask,
+                markup=markup,
+            ),
         )
+        return await enqueue(admitted, queued_message="Queued image edit")
     except BaseException:
         cleanup_edit_sources([*sources, *([mask] if mask else []), *([markup] if markup else [])])
         raise

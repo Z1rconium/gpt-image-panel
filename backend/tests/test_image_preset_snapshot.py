@@ -6,13 +6,19 @@ from types import SimpleNamespace
 import pytest
 
 from backend.app.core.errors import UnprocessableRequestError
+from backend.app.repositories import db as db_repo
+from backend.app.repositories import image_jobs as image_jobs_repo
+from backend.app.repositories import settings as settings_repo
 from backend.app.schemas.agent import AgentTurnRequest
 from backend.app.schemas.generation import EditRequest, GenerateRequest
 from backend.app.services import agent_conversations, job_queue
+from backend.app.services.image_admission import EditInputs, admit_edit, admit_generation
 from backend.app.services.image_preset_snapshot import (
     apply_image_preset_snapshot,
     image_preset_snapshot,
 )
+from backend.app.services.preset_credentials import get_effective_preset_api_key
+from backend.tests.support.contract import _configure_runtime
 
 
 @pytest.fixture
@@ -52,50 +58,52 @@ async def test_acceptance_deep_copies_image_configuration_without_credentials(mo
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("operation", ["generation", "edit"])
-async def test_queue_uses_full_accepted_configuration_and_live_key(monkeypatch, preset, operation):
+async def test_queue_uses_full_accepted_configuration_and_live_key(
+    tmp_path, monkeypatch, preset, operation
+):
+    _configure_runtime(tmp_path)
+    db_repo._ensure_database()
+    monkeypatch.setenv("SNAPSHOT_TEST_KEY", "rotated-secret")
+
     frozen = image_preset_snapshot(preset)
     preset.update({
         "name": "Changed preset", "api_url": "https://images.example.com/new",
         "api_path": "/v1/images/generations", "default_model": "different-model",
         "provider_kind": "async_json", "provider_config": {}, "prompt_guard": False,
-        "supports_mask": False, "api_key": "rotated-secret", "default_response_format": "url",
+        "supports_mask": False, "api_key": "${SNAPSHOT_TEST_KEY}", "default_response_format": "url",
     })
-    stored, resolved = {}, []
+    settings_repo.save_settings({"active_preset_id": preset["id"], "presets": [preset]})
 
-    async def db(callback, *args, **kwargs):
-        if callback is job_queue.enqueue_image_job:
-            stored.update(kwargs)
-            return kwargs["parent_job"], []
-        assert callback is job_queue.load_api_settings
-
-    monkeypatch.setattr(job_queue, "state", SimpleNamespace(generate_job_last_persist_at={}))
-    monkeypatch.setattr(job_queue, "run_db_operation", db)
-    monkeypatch.setattr(job_queue, "get_active_preset", lambda: preset)
-    monkeypatch.setattr(job_queue, "get_api_presets", lambda: [preset])
-    monkeypatch.setattr(job_queue, "get_effective_preset_api_key", lambda p: resolved.append(p["api_key"]) or p["api_key"])
-    monkeypatch.setattr(job_queue, "get_upstream_socks5_proxy", lambda: None)
-    monkeypatch.setattr(job_queue, "get_webhook_url", lambda: None)
-    monkeypatch.setattr(job_queue, "remember_generate_job_memory", lambda *args: None)
-    monkeypatch.setattr(job_queue, "publish_generate_job", lambda *args, **kwargs: None)
-    monkeypatch.setattr(job_queue, "kick_image_unit_dispatcher", lambda: None)
-    req = (EditRequest if operation == "edit" else GenerateRequest)(prompt="draw", api_preset_id="pinned")
+    req = (EditRequest if operation == "edit" else GenerateRequest)(
+        prompt="draw", api_preset_id="pinned"
+    )
     if operation == "edit":
-        await job_queue.queue_edit_job(req, [], preset_snapshot=frozen)
+        admitted = await admit_edit(req, EditInputs(sources=()), preset_snapshot=frozen)
     else:
-        await job_queue.queue_image_job(
-            req=req, operation="generation", api_path=lambda p: p["api_path"],
-            queued_message="Queued", preset_snapshot=frozen,
+        admitted = await admit_generation(
+            req, api_path_for=lambda p: p["api_path"], preset_snapshot=frozen
         )
-    assert stored["api_path"] == ("/v1/images/edits" if operation == "edit" else "/v1/responses")
-    assert stored["api_preset_name"] == "Accepted preset"
-    assert stored["request"]["model"] == "gpt-image-2"
-    assert stored["request"]["response_format"] == "b64_json"
-    assert stored["request"]["_provider_snapshot"] == {
+
+    assert get_effective_preset_api_key(admitted.preset) == "rotated-secret"
+    queued = await job_queue.enqueue(admitted)
+
+    stored_job = image_jobs_repo.get_generate_job(queued.job_id)
+    aggregate = image_jobs_repo.aggregate_image_job_units(queued.job_id)
+    unit_request = aggregate["units"][0]["request"]
+    assert stored_job is not None
+    assert stored_job["api_path"] == (
+        "/v1/images/edits" if operation == "edit" else "/v1/responses"
+    )
+    assert stored_job["api_preset_name"] == "Accepted preset"
+    assert unit_request["model"] == "gpt-image-2"
+    assert unit_request["response_format"] == "b64_json"
+    assert unit_request["_provider_snapshot"] == {
         "api_url": "https://images.example.com/old", "provider_kind": "openai",
         "provider_config": {"nested": {"path": "/old"}}, "prompt_guard": True, "supports_mask": True,
     }
-    assert resolved == ["rotated-secret"]
-    assert "secret" not in json.dumps(stored)
+    assert "secret" not in json.dumps(stored_job)
+    assert "secret" not in json.dumps(aggregate)
+    assert "SNAPSHOT_TEST_KEY" not in json.dumps(aggregate)
 
 
 @pytest.mark.parametrize("change", [

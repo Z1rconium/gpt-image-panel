@@ -89,6 +89,7 @@ THUMBNAIL_EXTENSION = ".webp"
 THUMBNAIL_CONTENT_TYPE = "image/webp"
 MASK_EXTENSION = ".png"
 MASK_CONTENT_TYPE = "image/png"
+EDIT_INPUT_LIMIT_BYTES = 50 * 1024 * 1024
 PILLOW_FORMATS = {
     "AVIF": "avif",
     "BMP": "bmp",
@@ -108,6 +109,11 @@ EXIF_ORIENTATION_TAG = 274
 ORIENTATION_REWRITE_FORMATS = {"jpeg", "png", "tiff", "webp"}
 # Orientations 5-8 describe a quarter turn, which swaps the two dimensions.
 ORIENTATION_SWAPS_AXES = {5, 6, 7, 8}
+
+
+def is_below_edit_input_limit(size: int) -> bool:
+    """Return True when an edit input byte size is strictly below 50 MiB."""
+    return int(size) < EDIT_INPUT_LIMIT_BYTES
 
 
 def image_content_type_for_filename(filename: str | Path) -> str:

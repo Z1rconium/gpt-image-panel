@@ -37,7 +37,7 @@ from backend.app.services import gallery_common, gallery_jobs, gallery_maintenan
 from backend.app.api.routers import metrics as metrics_router
 from backend.app.api.routers import settings as settings_router
 from backend.app.api.routers import static as static_router
-from backend.app.services.job_queue import EditImageSource
+from backend.app.services.edit_source_types import EditImageSource
 from backend.app.core import overall_config
 from backend.app.core import settings as config
 from backend.app.integrations.r2 import sync as r2_sync

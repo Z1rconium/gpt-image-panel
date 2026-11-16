@@ -125,26 +125,53 @@ def test_svg_usage_preserves_raw_without_inventing_image_tokens():
 
 @pytest.mark.parametrize('cancel', [False, True])
 def test_markup_copy_removed_on_queue_rejection_or_cancel(tmp_path, monkeypatch, cancel):
-    import asyncio
+    from pathlib import Path
+    from PIL import Image
+    from backend.app.core import settings as config
+    from backend.app.core.errors import RateLimitedError
+    from backend.app.repositories import db as db_repo
+    from backend.app.repositories.db import ImageJobQueueFullError
     from backend.app.services import job_queue
+    from backend.app.services.edit_source_types import EditImageSource
+    from backend.app.services.image_admission import EditInputs, admit_edit
+    from backend.tests.support.contract import _configure_runtime
+
+    _configure_runtime(tmp_path)
+    db_repo._ensure_database()
     source_path = tmp_path / 'source.png'
-    source_path.write_bytes(b'original')
-    persisted = {}
-    monkeypatch.setattr(job_queue, 'write_mask_file', lambda data, name: persisted.update({name: data}))
-    monkeypatch.setattr(job_queue, 'copy_mask_file', lambda src, name: persisted.update({name: src.read_bytes()}))
-    monkeypatch.setattr(job_queue, 'delete_mask_file', lambda name: persisted.pop(name, None))
-    async def reject(**kwargs):
-        assert any(s['role'] == 'markup' for s in kwargs['edit_sources_payload'])
-        assert persisted
+    markup_path = tmp_path / 'markup.png'
+    Image.new('RGB', (16, 16), (255, 0, 0)).save(source_path)
+    Image.new('RGBA', (16, 16), (0, 0, 0, 0)).save(markup_path)
+    source = EditImageSource(
+        temp_path=source_path, filename='source.png',
+        byte_size=source_path.stat().st_size, content_type='image/png',
+        width=16, height=16,
+    )
+    markup = EditImageSource(
+        temp_path=markup_path, filename='markup.png',
+        byte_size=markup_path.stat().st_size, content_type='image/png',
+        width=16, height=16, role='markup',
+    )
+    admitted = asyncio.run(
+        admit_edit(
+            EditRequest(prompt='x', model='gpt-image-2.6-flare'),
+            EditInputs(sources=(source,), markup=markup),
+        )
+    )
+    masks_dir = Path(config.MASKS_DIR)
+    assert not list(masks_dir.glob('*')) if masks_dir.exists() else True
+
+    def reject(**kwargs):
+        assert any(s['role'] == 'markup' for s in kwargs['edit_sources'])
+        assert list(masks_dir.glob('*-markup.png'))
         if cancel:
             raise asyncio.CancelledError()
-        raise RuntimeError('queue full')
-    monkeypatch.setattr(job_queue, 'queue_image_job', reject)
-    source = job_queue.EditImageSource(temp_path=source_path, filename='source.png', byte_size=8, content_type='image/png')
-    markup = job_queue.replace(source, role='markup')
-    with pytest.raises(asyncio.CancelledError if cancel else RuntimeError):
-        asyncio.run(job_queue.queue_edit_job(EditRequest(prompt='x'), [source], markup_source=markup))
-    assert persisted == {}
+        raise ImageJobQueueFullError('queue full')
+
+    monkeypatch.setattr(job_queue, 'enqueue_image_job', reject)
+    with pytest.raises(asyncio.CancelledError if cancel else RateLimitedError):
+        asyncio.run(job_queue.enqueue(admitted))
+    assert list(masks_dir.glob('*')) == []
 
 
 @pytest.mark.parametrize('body_format', ['json', 'multipart'])
@@ -173,17 +200,29 @@ def test_provider_markup_actual_submit_wire(tmp_path, body_format):
         assert by_name['frames'][2] == '9'
 
 
-def test_markup_uses_saved_preset_default_model(tmp_path, monkeypatch):
-    from backend.app.api.routers.edits import validate_uploaded_markup
-    from backend.app.services import job_queue
+def test_markup_uses_saved_preset_default_model(tmp_path):
     from PIL import Image
+    from backend.app.services.edit_source_types import EditImageSource
+    from backend.app.services.image_admission import EditInputs, admit_image_job
+
     path = tmp_path / 'markup.png'
     Image.new('RGBA', (16, 16), (0, 0, 0, 0)).save(path)
-    source = job_queue.EditImageSource(temp_path=path, byte_size=path.stat().st_size, filename='markup.png', content_type='image/png', width=16, height=16, role='markup')
-    monkeypatch.setattr('backend.app.api.routers.edits.get_active_preset', lambda: {'default_model': 'gpt-image-2.6-flare'})
+    source = EditImageSource(
+        temp_path=path, byte_size=path.stat().st_size,
+        filename='markup.png', content_type='image/png',
+        width=16, height=16, role='markup',
+    )
     req = EditRequest(prompt='x', model='')
-    asyncio.run(validate_uploaded_markup(source, source, req))
+    admitted = admit_image_job(
+        req,
+        operation='edit',
+        preset={'id': 'default', 'default_model': 'gpt-image-2.6-flare'},
+        api_path='/v1/images/edits',
+        edit=EditInputs(sources=(source,), markup=source),
+    )
     assert req.paste_back is None
+    assert admitted.model == 'gpt-image-2.6-flare'
+    assert admitted.request.paste_back is False
 
 
 def test_edit_complexity_requires_edit_template_not_generation_template(client, monkeypatch):
