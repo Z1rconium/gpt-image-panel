@@ -5,7 +5,9 @@ from fastapi import APIRouter, Body, HTTPException
 from ...repositories.db.execution import run_db_operation
 from ...core.errors import DomainError
 from ...services.presets import (
+    get_ai_assistant_settings,
     get_prompt_optimizer_settings,
+    normalize_ai_assistant_settings,
     normalize_prompt_optimizer_settings,
     resolve_prompt_optimizer_api_key,
 )
@@ -40,7 +42,9 @@ def _resolve_prompt_optimizer_runtime(
     include_credentials: bool = True,
 ) -> tuple[str, str, int, str]:
     normalized = normalize_prompt_optimizer_settings(settings)
-    if not normalized.get("enabled"):
+    # ai_assistant.enabled is the single unified toggle; prompt_optimizer.enabled
+    # is retained for storage compatibility but no longer gates this endpoint.
+    if not normalize_ai_assistant_settings(get_ai_assistant_settings()).get("enabled"):
         raise HTTPException(status_code=400, detail="Prompt optimizer is not enabled")
 
     api_url = str(normalized.get("api_url", "")).strip()

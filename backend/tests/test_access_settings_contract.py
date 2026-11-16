@@ -1890,10 +1890,53 @@ def test_prompt_optimizer_system_prompt_file_roundtrip(client):
 
 
 def test_prompt_optimize_disabled_returns_400(client):
+    settings = client.get("/api/settings").json()
+    disabled = client.post(
+        "/api/settings",
+        json=_settings_payload(
+            settings,
+            ai_assistant={"enabled": False},
+            prompt_optimizer={"enabled": True},
+        ),
+    )
+    assert disabled.status_code == 200
+
     resp = client.post("/api/prompt/optimize", json={"prompt": "tiny robot"})
 
     assert resp.status_code == 400
     assert "not enabled" in resp.json()["detail"]
+
+
+def test_prompt_optimize_gated_by_ai_assistant_not_optimizer_flag(client, monkeypatch):
+    from backend.app.api.routers import prompt as prompt_router
+
+    async def fake_optimize(**kwargs):
+        return "better prompt", "prompt-model", 5
+
+    monkeypatch.setattr(prompt_router, "validate_optimizer_endpoint", lambda _url: None)
+    monkeypatch.setattr(prompt_router, "optimize_prompt", fake_optimize)
+    monkeypatch.setenv("TEST_PROMPT_OPTIMIZER_API_KEY", "sk-test")
+    settings = client.get("/api/settings").json()
+    configured = client.post(
+        "/api/settings",
+        json=_settings_payload(
+            settings,
+            ai_assistant={"enabled": True},
+            prompt_optimizer={
+                "enabled": False,
+                "api_url": "https://example.com/v1/chat/completions",
+                "model": "prompt-model",
+                "timeout_seconds": 45,
+                "api_key": "${TEST_PROMPT_OPTIMIZER_API_KEY}",
+            },
+        ),
+    )
+    assert configured.status_code == 200
+
+    resp = client.post("/api/prompt/optimize", json={"prompt": "tiny robot"})
+
+    assert resp.status_code == 200
+    assert resp.json()["optimized_prompt"] == "better prompt"
 
 
 def test_prompt_optimize_success_uses_configured_upstream(client, monkeypatch):
