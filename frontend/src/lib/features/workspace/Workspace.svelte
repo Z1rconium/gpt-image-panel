@@ -1,23 +1,17 @@
 <script lang="ts">
-  import { onMount, tick } from 'svelte';
+  import { onMount, tick, untrack } from 'svelte';
   import { OPEN_COMPLETION_EVENT, type CompletionTarget } from '$lib/utils/completionNotifications';
   import AccessGate from '$lib/components/AccessGate.svelte';
   import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
   import { isImage26 } from '$lib/utils/imageModels';
-  import {
-    attachMarkup,
-    installMarkup,
-    markupRejectionMessage,
-    MarkupRejectedError,
-    validatePaintedMarkup,
-    type MarkupApplyPayload
-  } from '$lib/features/workspace/markup';
+  import { attachMarkup, type MarkupApplyPayload } from '$lib/features/workspace/markup';
+  import { createEditSession } from '$lib/features/workspace/editSession';
   import EditSourcePicker from '$lib/components/EditSourcePicker.svelte';
   import Header from '$lib/components/Header.svelte';
   import PreviewPanel from '$lib/components/PreviewPanel.svelte';
   import PromptForm from '$lib/components/PromptForm.svelte';
   import ToastHost from '$lib/components/ToastHost.svelte';
-  import { ApiError, apiFetch } from '$lib/api/client';
+  import { apiFetch } from '$lib/api/client';
   import { language, t } from '$lib/i18n';
   import type { AssistantJobDiagnoseResponse, AssistantRecommendParamsResponse } from '$lib/api/types/assistant';
   import type { GalleryEntry } from '$lib/api/types/gallery';
@@ -27,10 +21,9 @@
   import { accessStore } from '$lib/stores/access';
   import { assistantStore, isAbortError } from '$lib/stores/assistant';
   import { confirmStore } from '$lib/stores/confirm';
-  import { editMarkupDiscards, editMaskDiscards, editSourceCount, editSourceStore, findEditSource, isMaskValid, MAX_EDIT_SOURCE_IMAGES, primaryEditSource as selectPrimaryEditSource, primaryEditSourceId, primaryRestoreSource, type EditGalleryReferenceSource, type EditMask } from '$lib/stores/editSource';
+  import { editSourceCount, editSourceDiscards, editSourceStore, findEditSource, isMaskValid, MASK_PASTE_BACK_PREF_KEY, MAX_EDIT_SOURCE_IMAGES, primaryEditSource as selectPrimaryEditSource, primaryEditSourceId, primaryRestoreSource, type EditGalleryReferenceSource, type EditMask } from '$lib/stores/editSource';
   import { galleryActivityStore, galleryStore } from '$lib/stores/gallery';
   import { jobsStore } from '$lib/stores/jobs';
-  import type { JobMaskFetch } from '$lib/features/workspace/jobMaskRestore';
   import { lightboxStore } from '$lib/stores/lightbox';
   import { nodeImageResult } from '$lib/stores/nodeImage';
   import { initialPromptFormState, previewStore, type PromptFormState, type SubmitOptions } from '$lib/stores/preview';
@@ -68,7 +61,6 @@
     snippetsPanel
   } from '$lib/features/workspace/panels';
   import { promptForm } from '$lib/features/workspace/formState.svelte';
-  import type { MaskMeasurements } from '$lib/features/mask/maskImage';
   import { createLightboxController } from '$lib/features/workspace/lightbox';
   import { createPanelController } from '$lib/features/workspace/panelController';
   import { installWorkspaceLifecycle } from '$lib/features/workspace/lifecycle';
@@ -136,15 +128,14 @@
       showToast($t.promptForm.markupUnavailable, 'status');
     }
   });
-  // A markup dropped by a primary-image change happens inside the store; as with
-  // the mask, the store only bumps a counter and the warning lives here.
-  let markupDiscardCount = 0;
+  // Subscribe once to the store's discard-notice channel so invalidated mask
+  // or markup layers surface a toast without diffing per-kind counters.
   $effect(() => {
-    const count = $editMarkupDiscards;
-    if (count > markupDiscardCount) {
-      markupDiscardCount = count;
-      showToast($t.markupEditor.discarded);
-    }
+    const notice = $editSourceDiscards;
+    if (!notice) return;
+    untrack(() => {
+      showToast(notice.kind === 'markup' ? $t.markupEditor.discarded : $t.messages.editMaskDiscarded);
+    });
   });
   // The drawing session is bound to one primary image and one capability set.
   // If either goes away while the editor is open, the session is invalidated:
@@ -241,6 +232,11 @@
     onError: showError
   });
 
+  const editSession = createEditSession({
+    confirm: confirmStore.confirm,
+    toast: (message, variant) => showToast(message, variant)
+  });
+
   const {
     loadingPanel,
     ensurePanel,
@@ -264,16 +260,6 @@
   });
   $effect(() => {
     if (optimizerAssistantVisible) void ensurePanel('optimizer', false);
-  });
-  // A mask discarded by a primary-image change happens inside the store; the
-  // store only bumps a counter, so the warning lives here.
-  let maskDiscardCount = 0;
-  $effect(() => {
-    const count = $editMaskDiscards;
-    if (count > maskDiscardCount) {
-      maskDiscardCount = count;
-      showToast($t.messages.editMaskDiscarded);
-    }
   });
   // The active preset can be switched to one whose gateway ignores masks; drop
   // any stored mask so it cannot be submitted against a preset that ignores it.
@@ -999,25 +985,7 @@
   }
 
   async function applyEditMask(mask: EditMask) {
-    // A request carries a mask or a markup layer, never both. Applying a mask
-    // over an existing markup is confirmed; declining keeps both untouched.
-    if ($editSourceStore.markup) {
-      const replace = await confirmStore.confirm({
-        title: $t.markupEditor.replaceMarkupTitle,
-        message: $t.markupEditor.replaceMarkupMessage,
-        confirmLabel: $t.markupEditor.replaceMarkupConfirm,
-        cancelLabel: $t.confirm.cancel,
-        closeLabel: $t.confirm.closeLabel,
-        variant: 'default'
-      });
-      if (!replace || primaryEditSourceId($editSourceStore) !== mask.sourceId) {
-        URL.revokeObjectURL(mask.previewUrl);
-        return;
-      }
-    }
-    editSourceStore.setMask(mask);
-    showToast($t.messages.editMaskApplied((mask.coverage * 100).toFixed(1)));
-    closeMaskEditor();
+    await editSession.applyEditMask(mask, { onApplied: closeMaskEditor });
   }
 
   async function openMarkupEditor() {
@@ -1036,63 +1004,21 @@
     closeUiPanel('markupEditor', 'markupEditorOpen');
   }
 
-  async function confirmReplaceMaskForMarkup(): Promise<boolean> {
-    if (!$editSourceStore.mask) return true;
-    return confirmStore.confirm({
-      title: $t.markupEditor.replaceMaskTitle,
-      message: $t.markupEditor.replaceMaskMessage,
-      confirmLabel: $t.markupEditor.replaceMaskConfirm,
-      cancelLabel: $t.confirm.cancel,
-      closeLabel: $t.confirm.closeLabel,
-      variant: 'default'
-    });
-  }
-
-  /**
-   * Final, atomic step of "Apply markup". Returns true only when the new markup
-   * is installed; on any refusal the previous markup, mask and the editor's
-   * working copy are left exactly as they were.
-   */
   async function applyPaintedMarkup(payload: MarkupApplyPayload): Promise<boolean> {
     const session = markupSession;
-    const current = () =>
-      Boolean(
-        session &&
-          markupSession?.id === session.id &&
-          payload.sessionId === session.id &&
-          payload.sourceId === session.sourceId &&
-          $uiStore.markupEditorOpen &&
-          markupAvailable &&
-          primaryEditSourceId($editSourceStore) === session.sourceId &&
-          ($editSourceStore.markup?.previewUrl ?? null) === session.markupRef
-      );
-    if (!current()) return false;
-    try {
-      await validatePaintedMarkup(payload.blob, payload.width, payload.height);
-      if (!current()) throw new MarkupRejectedError('source');
-      if ($editSourceStore.mask) {
-        const replace = await confirmReplaceMaskForMarkup();
-        if (!replace) return false;
-        if (!current()) throw new MarkupRejectedError('source');
-      }
-      installMarkup(
-        {
-          sourceId: payload.sourceId,
-          blob: payload.blob,
-          width: payload.width,
-          height: payload.height,
-          origin: payload.origin,
-          editorState: payload.editorState
-        },
-        current
-      );
-      showToast($t.markupEditor.applied);
-      closeMarkupEditor();
-      return true;
-    } catch (error) {
-      showToast(markupRejectionMessage(error), 'error');
-      return false;
-    }
+    return editSession.applyPaintedMarkup(payload, {
+      expectedMarkupRef: session?.markupRef ?? null,
+      isEditorCurrent: () =>
+        Boolean(
+          session &&
+            markupSession?.id === session.id &&
+            payload.sessionId === session.id &&
+            payload.sourceId === session.sourceId &&
+            $uiStore.markupEditorOpen &&
+            markupAvailable
+        ),
+      onApplied: closeMarkupEditor
+    });
   }
 
   function removeMarkupFromEditor() {
@@ -1366,8 +1292,7 @@
       const restoreSource = primaryRestoreSource($editSourceStore);
       try {
         if (!restoreSource) throw new Error('no restorable primary source');
-        const { fetchJobMaskBlob } = await import('$lib/features/workspace/jobMaskRestore');
-        const fetched = await fetchJobMaskBlob(job.job_id, restoreSource, 'markup');
+        const fetched = await editSession.fetchJobMaskBlob(job.job_id, restoreSource, 'markup');
         await attachMarkup(fetched.blob, { origin: 'restored' });
       } catch {
         previewStore.setError($t.promptForm.markupRestoreFailed);
@@ -1378,7 +1303,7 @@
       // Clear any current selection before the identity check. A failed
       // restore must never leave a mask available for this retry.
       editSourceStore.removeMask();
-      const outcome = await restoreMaskFromJob(job);
+      const outcome = await editSession.restoreMaskFromJob(job);
       if (outcome !== 'restored') {
         showToast(outcome === 'mismatch' ? $t.messages.editRetryMaskMismatch : $t.messages.editRetryMaskMissing, 'error');
         const sourceId = primaryEditSourceId($editSourceStore);
@@ -1391,66 +1316,6 @@
       showToast($t.messages.editRetryMaskCleared, 'status');
     }
     void editImage(options);
-  }
-
-  async function restoreMaskFromJob(job: GenerateJobStatus): Promise<'restored' | 'missing' | 'mismatch'> {
-    const sourceId = primaryEditSourceId($editSourceStore);
-    if (!sourceId) return 'missing';
-    let fetched: JobMaskFetch;
-    let maskHelpers: typeof import('$lib/features/mask/maskImage');
-    try {
-      const [{ fetchJobMaskBlob }, helpers] = await Promise.all([
-        import('$lib/features/workspace/jobMaskRestore'),
-        import('$lib/features/mask/maskImage')
-      ]);
-      maskHelpers = helpers;
-      const restoreSource = primaryRestoreSource($editSourceStore);
-      if (!restoreSource) return 'missing';
-      fetched = await fetchJobMaskBlob(job.job_id, restoreSource);
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 409) return 'mismatch';
-      return 'missing';
-    }
-    const { blob } = fetched;
-
-    // The server already validated this mask and knows its coverage (see
-    // X-Mask-Coverage on GET .../mask), and its size is a plain IHDR read —
-    // neither needs a canvas decode. Only fall back to the full decode in
-    // measureMaskBlob() when either fast path comes back empty (an older
-    // server build, or an unreadable/never-PNG response).
-    let measurements: MaskMeasurements;
-    const fastSize = fetched.coverage !== null ? maskHelpers.readPngSize(new Uint8Array(await blob.arrayBuffer())) : null;
-    if (fastSize && fetched.coverage !== null) {
-      measurements = { width: fastSize.width, height: fastSize.height, coverage: fetched.coverage };
-    } else {
-      try {
-        measurements = await maskHelpers.measureMaskBlob(blob);
-      } catch {
-        return 'missing';
-      }
-    }
-
-    // Keep the dimension check as a consistency guard after server identity
-    // verification, including for oriented photos displayed upright.
-    const primary = primaryEditSource;
-    if (primary) {
-      if (primary.width > 0 && primary.height > 0 &&
-          (primary.width !== measurements.width || primary.height !== measurements.height)) {
-        return 'mismatch';
-      }
-    }
-    if (primaryEditSourceId($editSourceStore) !== sourceId) return 'mismatch';
-    editSourceStore.setMask({
-      sourceId,
-      blob,
-      width: measurements.width,
-      height: measurements.height,
-      coverage: measurements.coverage,
-      previewUrl: URL.createObjectURL(blob),
-      origin: 'restored'
-    });
-    showToast($t.messages.editMaskRestored((measurements.coverage * 100).toFixed(1)));
-    return 'restored';
   }
 
   async function diagnoseJob(job: GenerateJobStatus) {
@@ -1774,7 +1639,7 @@
           pasteBack={promptForm.pasteBack}
           onPasteBackChange={(enabled: boolean) => {
             promptForm.pasteBack = enabled;
-            try { localStorage.setItem('maskEditor.pasteBack', String(enabled)); } catch { /* storage may be disabled */ }
+            try { localStorage.setItem(MASK_PASTE_BACK_PREF_KEY, String(enabled)); } catch { /* storage may be disabled */ }
           }}
           {maskSupported}
         />
@@ -1804,7 +1669,7 @@
                 event.currentTarget.value = '';
                 if (!file) return;
                 try {
-                  await attachMarkup(file, { confirmReplaceMask: confirmReplaceMaskForMarkup });
+                  await attachMarkup(file, { confirmReplaceMask: editSession.confirmReplaceMask });
                 } catch (error) {
                   previewStore.setError(error instanceof Error ? error.message : $t.promptForm.invalidMarkup);
                 }

@@ -1,6 +1,6 @@
 import { get } from 'svelte/store';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { editMaskDiscards, editSourceStore, initialEditSourceState, primaryEditSourceId } from '$lib/stores/editSource';
+import { editSourceDiscards, editSourceStore, primaryEditSourceId } from '$lib/stores/editSource';
 import { attachMarkup, installMarkup, MarkupRejectedError, markupRejectionMessage, validatePaintedMarkup } from '$lib/features/workspace/markup';
 
 vi.mock('$lib/features/workspace/editPrimaryImage', () => ({
@@ -25,7 +25,7 @@ beforeEach(() => {
   let counter = 0;
   (URL as unknown as { createObjectURL: () => string }).createObjectURL = () => `blob:test-${(counter += 1)}`;
   (URL as unknown as { revokeObjectURL: (url: string) => void }).revokeObjectURL = revokeSpy;
-  editSourceStore.set({ ...initialEditSourceState });
+  editSourceStore.reset();
   editSourceStore.addFiles([new File([new Uint8Array([1])], 'a.png', { type: 'image/png' })], () => {});
 });
 
@@ -109,7 +109,7 @@ describe('attachMarkup (mask replacement confirmation)', () => {
       previewUrl: 'blob:existing-mask',
       origin: 'painted'
     });
-    const discardsBefore = get(editMaskDiscards);
+    const discardSeqBefore = get(editSourceDiscards)?.seq ?? 0;
     const closeSpy = vi.fn();
     (globalThis as unknown as { createImageBitmap: () => Promise<unknown> }).createImageBitmap = vi
       .fn()
@@ -131,14 +131,18 @@ describe('attachMarkup (mask replacement confirmation)', () => {
     expect(decline).toHaveBeenCalledTimes(1);
     expect(get(editSourceStore).mask?.previewUrl).toBe('blob:existing-mask');
     expect(get(editSourceStore).markup).toBeNull();
-    expect(get(editMaskDiscards)).toBe(discardsBefore);
+    expect(get(editSourceDiscards)?.seq ?? 0).toBe(discardSeqBefore);
 
     const accept = vi.fn().mockResolvedValue(true);
     await expect(attachMarkup(pngHeader(8, 8), { confirmReplaceMask: accept })).resolves.toBe(true);
     expect(accept).toHaveBeenCalledTimes(1);
     expect(get(editSourceStore).mask).toBeNull();
     expect(get(editSourceStore).markup?.origin).toBe('uploaded');
-    expect(get(editMaskDiscards)).toBe(discardsBefore + 1);
+    expect(get(editSourceDiscards)).toMatchObject({
+      seq: discardSeqBefore + 1,
+      kind: 'mask',
+      reason: 'replaced'
+    });
     expect(closeSpy).toHaveBeenCalledTimes(2);
   });
 });

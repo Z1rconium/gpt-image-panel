@@ -46,7 +46,7 @@ beforeEach(() => {
   let counter = 0;
   (URL as unknown as { createObjectURL: () => string }).createObjectURL = () => `blob:test-${(counter += 1)}`;
   (URL as unknown as { revokeObjectURL: (url: string) => void }).revokeObjectURL = () => {};
-  editSourceStore.set({ ...initialEditSourceState });
+  editSourceStore.reset();
   apiFetchMock.mockReset();
   apiFetchMock.mockResolvedValue({ job_id: 'job-1' } as never);
 });

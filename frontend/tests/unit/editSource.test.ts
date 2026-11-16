@@ -1,9 +1,8 @@
 import { get } from 'svelte/store';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  editMarkupDiscards,
-  editMaskDiscards,
   editSourceCount,
+  editSourceDiscards,
   editSourceStore,
   existingGalleryImageIds,
   findEditSource,
@@ -48,9 +47,7 @@ beforeEach(() => {
   (URL as unknown as { createObjectURL: () => string }).createObjectURL = () =>
     `blob:test-${(counter += 1)}`;
   (URL as unknown as { revokeObjectURL: (url: string) => void }).revokeObjectURL = revokeSpy;
-  editSourceStore.set({ ...initialEditSourceState });
-  editMaskDiscards.set(0);
-  editMarkupDiscards.set(0);
+  editSourceStore.reset();
 });
 
 describe('edit source primary selection', () => {
@@ -90,10 +87,10 @@ describe('mask binding', () => {
     editSourceStore.remove(referenceId);
     expect(isMaskValid(get(editSourceStore))).toBe(true);
     expect(get(editSourceStore).mask?.sourceId).toBe(primaryId);
-    expect(get(editMaskDiscards)).toBe(0);
+    expect(get(editSourceDiscards)).toBeNull();
   });
 
-  it('drops the mask and counts a discard when the primary upload is removed', () => {
+  it('drops the mask and emits a discard notice when the primary upload is removed', () => {
     editSourceStore.addFiles([makeFile('a.png'), makeFile('b.png')], () => {});
     const [primary, reference] = uploads();
     editSourceStore.setMask(makeMask(primary.id, 'blob:mask'));
@@ -103,7 +100,7 @@ describe('mask binding', () => {
 
     editSourceStore.remove(primary.id);
     expect(get(editSourceStore).mask).toBeNull();
-    expect(get(editMaskDiscards)).toBe(1);
+    expect(get(editSourceDiscards)).toMatchObject({ kind: 'mask', reason: 'primary-changed' });
   });
 
   it('drops the mask when the gallery primary is cleared', () => {
@@ -113,10 +110,10 @@ describe('mask binding', () => {
 
     editSourceStore.clearGallerySource('gallery-1');
     expect(get(editSourceStore).mask).toBeNull();
-    expect(get(editMaskDiscards)).toBe(1);
+    expect(get(editSourceDiscards)).toMatchObject({ kind: 'mask', reason: 'primary-changed' });
   });
 
-  it('counts a discard when every source is cleared', () => {
+  it('emits a discard notice when every source is cleared', () => {
     editSourceStore.addFiles([makeFile('a.png')], () => {});
     const primaryId = uploads()[0].id;
     editSourceStore.setMask(makeMask(primaryId, 'blob:mask'));
@@ -124,7 +121,7 @@ describe('mask binding', () => {
     editSourceStore.clear();
     expect(editSourceCount(get(editSourceStore))).toBe(0);
     expect(get(editSourceStore).mask).toBeNull();
-    expect(get(editMaskDiscards)).toBe(1);
+    expect(get(editSourceDiscards)).toMatchObject({ kind: 'mask', reason: 'cleared' });
   });
 });
 
@@ -238,17 +235,17 @@ describe('markup editor state (browser-only, optional)', () => {
     expect(get(editSourceStore).markup?.editorState?.commands).toHaveLength(2);
   });
 
-  it('counts a discard only when a primary change drops the markup, not for reference changes', () => {
+  it('emits a discard notice only when a primary change drops the markup, not for reference changes', () => {
     editSourceStore.addFiles([makeFile('primary.png'), makeFile('reference.png')], () => {});
     const [primary, reference] = uploads();
     editSourceStore.setMarkup({ sourceId: primary.id, blob: makeFile('markup.png'), width: 8, height: 8, previewUrl: 'blob:markup', origin: 'painted', editorState: state() });
     editSourceStore.remove(reference.id);
     editSourceStore.addFiles([makeFile('another.png')], () => {});
     expect(get(editSourceStore).markup?.sourceId).toBe(primary.id);
-    expect(get(editMarkupDiscards)).toBe(0);
+    expect(get(editSourceDiscards)).toBeNull();
     editSourceStore.remove(primary.id);
     expect(get(editSourceStore).markup).toBeNull();
-    expect(get(editMarkupDiscards)).toBe(1);
+    expect(get(editSourceDiscards)).toMatchObject({ kind: 'markup', reason: 'primary-changed' });
   });
 
   it('removeMarkup revokes the preview and drops the editor state with it', () => {
@@ -315,12 +312,12 @@ describe('gallery references (Phase 2)', () => {
       }
     ]);
     expect(isMaskValid(get(editSourceStore))).toBe(true);
-    expect(get(editMaskDiscards)).toBe(0);
+    expect(get(editSourceDiscards)).toBeNull();
 
     // Removing gallery reference must NOT discard the mask
     editSourceStore.remove('ref-1');
     expect(isMaskValid(get(editSourceStore))).toBe(true);
-    expect(get(editMaskDiscards)).toBe(0);
+    expect(get(editSourceDiscards)).toBeNull();
   });
 
   it('filters out SVG and GIF files when adding gallery references', () => {
@@ -458,7 +455,7 @@ describe('unified sources array', () => {
     editSourceStore.setMask(makeMask('ref-1', 'blob:mask'));
     editSourceStore.addFiles([makeFile('a.png')], () => {});
     expect(get(editSourceStore).mask).toBeNull();
-    expect(get(editMaskDiscards)).toBe(1);
+    expect(get(editSourceDiscards)).toMatchObject({ kind: 'mask', reason: 'primary-changed' });
   });
 
   it('replaces the gallery primary instead of adding a second one', () => {
@@ -515,7 +512,7 @@ describe('unified sources array', () => {
   });
 
   it('findEditSource prefers an exact id over a reference image id', () => {
-    editSourceStore.set({
+    editSourceStore.reset({
       ...initialEditSourceState,
       sources: [
         {
@@ -571,7 +568,7 @@ describe('unified sources array', () => {
     expect(get(editSourceStore).sources.map((item) => item.kind)).toEqual(['upload', 'gallery_reference']);
     expect(get(editSourceStore).sources[1]).toMatchObject({ imageId: 'gal-3' });
     expect(get(editSourceStore).mask).toBeNull();
-    expect(get(editMaskDiscards)).toBe(1);
+    expect(get(editSourceDiscards)).toMatchObject({ kind: 'mask', reason: 'primary-changed' });
 
     editSourceStore.removeGallerySourcesByImageIds();
     expect(get(editSourceStore).sources.map((item) => item.kind)).toEqual(['upload']);
@@ -597,8 +594,8 @@ describe('unified sources array', () => {
     expect(galleryRefs()).toHaveLength(2);
   });
 
-  it('increments editMaskDiscards when setMarkup replaces an active mask', () => {
-    const discardsBefore = get(editMaskDiscards);
+  it('emits a mask discard notice when setMarkup replaces an active mask', () => {
+    const seqBefore = get(editSourceDiscards)?.seq ?? 0;
     editSourceStore.addFiles([makeFile('a.png')], () => {});
     const primaryId = primaryEditSourceId(get(editSourceStore));
     editSourceStore.setMask(makeMask(primaryId, 'blob:mask-1'));
@@ -612,6 +609,6 @@ describe('unified sources array', () => {
     });
     expect(get(editSourceStore).mask).toBeNull();
     expect(revokeSpy).toHaveBeenCalledWith('blob:mask-1');
-    expect(get(editMaskDiscards)).toBe(discardsBefore + 1);
+    expect(get(editSourceDiscards)).toMatchObject({ seq: seqBefore + 1, kind: 'mask', reason: 'replaced' });
   });
 });

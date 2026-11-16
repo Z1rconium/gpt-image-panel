@@ -7,10 +7,11 @@ import {
   editSourceStore,
   galleryPrimarySource,
   galleryReferenceSources,
-  isMaskValid,
   primaryEditSource,
+  submitBlocker,
   uploadSources,
-  type EditSourceState
+  type EditSourceState,
+  type EditSourceSubmitBlocker
 } from '$lib/stores/editSource';
 import type { ApiPath, ResponseFormatDefault } from '$lib/api/types/common';
 import type { GenerateRequestBody } from '$lib/api/types/generation';
@@ -378,32 +379,32 @@ function createPreviewStore() {
     }
   }
 
+  function editSourceBlockerMessage(blocker: EditSourceSubmitBlocker): string {
+    const catalog = get(t);
+    switch (blocker) {
+      case 'no_sources':
+        return catalog.messages.editSourceRequired;
+      case 'too_many_sources':
+        return catalog.messages.editSourceLimit(MAX_EDIT_SOURCE_IMAGES);
+      case 'invalid_markup':
+        return catalog.promptForm.invalidMarkup;
+      case 'stale_mask':
+        return catalog.messages.editMaskStale;
+    }
+  }
+
   async function editImage(
     form: PromptFormState,
     editSource: EditSourceState,
     callbacks: PreviewCallbacks,
     options: SubmitOptions = {}
   ): Promise<boolean> {
+    const blocker = submitBlocker(editSource);
+    if (blocker) {
+      setError(editSourceBlockerMessage(blocker));
+      return false;
+    }
     const sourceCount = editSourceCount(editSource);
-    if (sourceCount === 0) {
-      setError(get(t).messages.editSourceRequired);
-      return false;
-    }
-    if (sourceCount > MAX_EDIT_SOURCE_IMAGES) {
-      setError(get(t).messages.editSourceLimit(MAX_EDIT_SOURCE_IMAGES));
-      return false;
-    }
-    // Markup can only sit on a gallery primary or an upload, never on a bare reference.
-    const primary = primaryEditSource(editSource);
-    const markupSourceId = primary && primary.kind !== 'gallery_reference' ? primary.id : undefined;
-    if (editSource.markup && (editSource.mask || editSource.markup.sourceId !== markupSourceId)) {
-      setError(get(t).promptForm.invalidMarkup);
-      return false;
-    }
-    if (editSource.mask && !isMaskValid(editSource)) {
-      setError(get(t).messages.editMaskStale);
-      return false;
-    }
 
     const body = buildRequestBody(form);
     if (body.background === 'chroma_green' || body.background === 'chroma_magenta') body.background = 'auto';

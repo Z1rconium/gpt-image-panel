@@ -8,6 +8,7 @@ import type { MaskRegionPreferences } from '$lib/features/mask/maskRegion';
 import type { MarkupEditorState } from '$lib/features/markup/markupDocument';
 
 export const MAX_EDIT_SOURCE_IMAGES = 16;
+export const MASK_PASTE_BACK_PREF_KEY = 'maskEditor.pasteBack';
 
 type EditSourceBase = {
   id: string;
@@ -106,12 +107,45 @@ export const initialEditSourceState: EditSourceState = {
 
 let nextEditSourceId = 0;
 
-// Bumped whenever a mutation invalidates the mask by moving the primary image.
-// Workspace subscribes so it can warn once without every caller threading a
-// return flag through its own signature.
-export const editMaskDiscards = writable(0);
-// Same idea for the markup layer, which is also bound to the primary image.
-export const editMarkupDiscards = writable(0);
+export type EditSourceDiscardKind = 'mask' | 'markup';
+export type EditSourceDiscardReason = 'primary-changed' | 'replaced' | 'cleared';
+
+export type EditSourceDiscardNotice = {
+  seq: number;
+  kind: EditSourceDiscardKind;
+  reason: EditSourceDiscardReason;
+};
+
+let discardSeq = 0;
+const discardStore = writable<EditSourceDiscardNotice | null>(null);
+const discardListeners = new Set<(notice: EditSourceDiscardNotice) => void>();
+
+function emitDiscard(kind: EditSourceDiscardKind, reason: EditSourceDiscardReason) {
+  discardSeq += 1;
+  const notice: EditSourceDiscardNotice = { seq: discardSeq, kind, reason };
+  discardStore.set(notice);
+  for (const listener of discardListeners) listener(notice);
+}
+
+function resetDiscardChannel() {
+  discardSeq = 0;
+  discardStore.set(null);
+}
+
+/**
+ * Single discard-notice channel for unexpected mask/markup invalidation
+ * (primary change, replacement by the mutually-exclusive layer, or source clear).
+ * Workspace subscribes once via `onDiscard` instead of diffing counters.
+ */
+export const editSourceDiscards = {
+  subscribe: discardStore.subscribe,
+  onDiscard(listener: (notice: EditSourceDiscardNotice) => void): () => void {
+    discardListeners.add(listener);
+    return () => {
+      discardListeners.delete(listener);
+    };
+  }
+};
 
 export function primaryEditSource(source: EditSourceState): EditSource | null {
   return source.sources[0] ?? null;
@@ -176,6 +210,28 @@ export function isMaskValid(source: EditSourceState) {
   return Boolean(source.mask && source.mask.sourceId === primaryEditSourceId(source));
 }
 
+export type EditSourceSubmitBlocker = 'no_sources' | 'too_many_sources' | 'invalid_markup' | 'stale_mask';
+
+/**
+ * Pure edit-source validation run before building an edit request. Returns the
+ * first invariant violation key, or null when the source state is submittable.
+ */
+export function submitBlocker(source: EditSourceState): EditSourceSubmitBlocker | null {
+  const count = editSourceCount(source);
+  if (count === 0) return 'no_sources';
+  if (count > MAX_EDIT_SOURCE_IMAGES) return 'too_many_sources';
+  // Markup can only sit on a gallery primary or an upload, never on a bare reference.
+  const primary = primaryEditSource(source);
+  const markupSourceId = primary && primary.kind !== 'gallery_reference' ? primary.id : undefined;
+  if (source.markup && (source.mask || source.markup.sourceId !== markupSourceId)) {
+    return 'invalid_markup';
+  }
+  if (source.mask && !isMaskValid(source)) {
+    return 'stale_mask';
+  }
+  return null;
+}
+
 export function isImageFile(file: File): boolean {
   if (file.type.startsWith('image/') && file.type !== 'image/svg+xml') return true;
   return /\.(avif|bmp|gif|heic|heif|ico|jpe?g|png|tiff?|webp)$/i.test(file.name);
@@ -205,12 +261,12 @@ function revokeMaskUrl(mask: EditMask | null) {
 function dropStaleMask(next: EditSourceState): EditSourceState {
   if (next.markup && next.markup.sourceId !== primaryEditSourceId(next)) {
     URL.revokeObjectURL(next.markup.previewUrl);
-    editMarkupDiscards.update((count) => count + 1);
+    emitDiscard('markup', 'primary-changed');
     next = { ...next, markup: null };
   }
   if (next.mask && next.mask.sourceId !== primaryEditSourceId(next)) {
     revokeMaskUrl(next.mask);
-    editMaskDiscards.update((count) => count + 1);
+    emitDiscard('mask', 'primary-changed');
     return { ...next, mask: null };
   }
   return next;
@@ -311,14 +367,17 @@ function createEditSourceStore() {
 
   return {
     subscribe,
-    set,
-    update,
+    /** Reset store state and discard channel directly (intended for tests). */
+    reset(next?: EditSourceState) {
+      resetDiscardChannel();
+      set(next ? { ...next, sources: [...next.sources] } : { ...initialEditSourceState, sources: [] });
+    },
     addFiles,
     updateUploadSize,
     clear(input?: HTMLInputElement) {
       if (state.markup) URL.revokeObjectURL(state.markup.previewUrl);
       revokeEditSourceUrls(state);
-      if (state.mask) editMaskDiscards.update((count) => count + 1);
+      if (state.mask) emitDiscard('mask', 'cleared');
       revokeMaskUrl(state.mask);
       set({ ...initialEditSourceState, sources: [] });
       if (input) input.value = '';
@@ -441,7 +500,7 @@ function createEditSourceStore() {
     },
     setMarkup(markup: EditMarkup) {
       if (state.markup) URL.revokeObjectURL(state.markup.previewUrl);
-      if (state.mask) editMaskDiscards.update((count) => count + 1);
+      if (state.mask) emitDiscard('mask', 'replaced');
       revokeMaskUrl(state.mask);
       update((source) => ({ ...source, mask: null, markup }));
     },

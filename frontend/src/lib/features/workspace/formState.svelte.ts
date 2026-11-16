@@ -2,6 +2,7 @@ import { untrack } from 'svelte';
 import type { ApiPath, ResponseFormatDefault } from '$lib/api/types/common';
 import type { SettingsResponse } from '$lib/api/types/settings';
 import { initialPromptFormState, type PromptFormState } from '$lib/stores/preview';
+import { MASK_PASTE_BACK_PREF_KEY } from '$lib/stores/editSource';
 import {
   activePreset,
   presetApiPath,
@@ -32,7 +33,7 @@ class PromptFormController {
   responseFormat = $state<ResponseFormatDefault>(initialPromptFormState.responseFormat);
   stream = $state(initialPromptFormState.stream);
   partialImages = $state(initialPromptFormState.partialImages);
-  pasteBack = $state(typeof localStorage === 'undefined' ? true : localStorage.getItem('maskEditor.pasteBack') !== 'false');
+  pasteBack = $state(typeof localStorage === 'undefined' ? true : localStorage.getItem(MASK_PASTE_BACK_PREF_KEY) !== 'false');
   safetyIdentifier = $state<string>('');
 
   #lastPresetId = '';
