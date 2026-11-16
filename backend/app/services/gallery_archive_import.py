@@ -251,24 +251,30 @@ def _read_import_metadata_json(zf: zipfile.ZipFile) -> dict[str, Any]:
     return metadata
 
 
-def _iter_import_metadata_ndjson(zf: zipfile.ZipFile) -> Iterator[dict[str, Any]]:
+def _iter_ndjson_records(zf: zipfile.ZipFile) -> Iterator[dict[str, Any]]:
     try:
         stream = zf.open("metadata.ndjson")
     except KeyError as e:
         raise InvalidRequestError("metadata.ndjson is required") from e
 
+    line_limit = max(
+        0,
+        min(
+            config.IMPORT_MAX_METADATA_BYTES,
+            getattr(config, "IMPORT_MAX_METADATA_LINE_BYTES", 1048576),
+        ),
+    )
     with stream:
         total_bytes = 0
-        image_records = 0
         while True:
-            raw_line = stream.readline(config.IMPORT_MAX_METADATA_BYTES + 1)
+            raw_line = stream.readline(line_limit + 1)
             if not raw_line:
                 break
             total_bytes += len(raw_line)
-            if len(raw_line) > config.IMPORT_MAX_METADATA_BYTES:
-                raise InvalidRequestError("metadata.ndjson line is too large")
             if total_bytes > config.IMPORT_MAX_METADATA_BYTES:
                 raise InvalidRequestError("metadata.ndjson is too large")
+            if len(raw_line) > line_limit:
+                raise InvalidRequestError("metadata.ndjson line is too large")
             line = raw_line.strip()
             if not line:
                 continue
@@ -276,16 +282,21 @@ def _iter_import_metadata_ndjson(zf: zipfile.ZipFile) -> Iterator[dict[str, Any]
                 record = json.loads(line.decode("utf-8"))
             except (UnicodeDecodeError, json.JSONDecodeError) as e:
                 raise InvalidRequestError("metadata.ndjson is invalid") from e
-            if not isinstance(record, dict):
-                continue
-            if str(record.get("type") or "") != "image":
-                continue
-            image = record.get("image")
-            if isinstance(image, dict):
-                image_records += 1
-                if image_records > config.IMPORT_MAX_ENTRIES:
-                    raise InvalidRequestError("Import metadata contains too many entries")
-                yield image
+            if isinstance(record, dict):
+                yield record
+
+
+def _iter_import_metadata_ndjson(zf: zipfile.ZipFile) -> Iterator[dict[str, Any]]:
+    image_records = 0
+    for record in _iter_ndjson_records(zf):
+        if str(record.get("type") or "") != "image":
+            continue
+        image = record.get("image")
+        if isinstance(image, dict):
+            image_records += 1
+            if image_records > config.IMPORT_MAX_ENTRIES:
+                raise InvalidRequestError("Import metadata contains too many entries")
+            yield image
 
 
 def _metadata_entry_has_importable_image(raw_entry: dict[str, Any], names: set[str]) -> bool:
@@ -430,18 +441,11 @@ def read_archive_collections(zip_path: Path) -> list[dict[str, Any]]:
             source_ids = []
             if manifest.use_ndjson:
                 raw_collections = []
-                with zf.open("metadata.ndjson") as stream:
-                    for line in stream:
-                        if not line.strip():
-                            continue
-                        try:
-                            record = json.loads(line)
-                        except (ValueError, UnicodeDecodeError) as exc:
-                            raise InvalidRequestError("metadata.ndjson is invalid") from exc
-                        if isinstance(record, dict) and record.get("type") == "collection":
-                            raw_collections.append(record.get("collection"))
-                        elif isinstance(record, dict) and record.get("type") == "image" and isinstance(record.get("image"), dict):
-                            source_ids.append(str(record["image"].get("id") or ""))
+                for record in _iter_ndjson_records(zf):
+                    if record.get("type") == "collection":
+                        raw_collections.append(record.get("collection"))
+                    elif record.get("type") == "image" and isinstance(record.get("image"), dict):
+                        source_ids.append(str(record["image"].get("id") or ""))
             else:
                 metadata = _read_import_metadata_json(zf)
                 raw_collections = metadata.get("collections", [])

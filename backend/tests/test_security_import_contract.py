@@ -201,6 +201,38 @@ def test_import_archive_rejects_large_metadata(client):
     assert resp.json()["detail"] == "metadata.json is too large"
 
 
+def test_import_archive_precheck_accepts_large_ndjson_within_10k_limit(client, tmp_path):
+    from backend.app.services.gallery_archive_import import (
+        count_import_gallery_entries,
+        read_archive_collections,
+    )
+
+    zip_path = tmp_path / "large-ndjson.zip"
+    prompt = "x" * 900
+    header_line = json.dumps({"type": "header", "schema_version": 1})
+    lines = [header_line]
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_STORED) as zf:
+        for index in range(2500):
+            filename = f"images/item-{index:04d}.png"
+            zf.writestr(filename, PNG_BYTES)
+            record = {
+                "type": "image",
+                "image": {
+                    "id": f"id-{index:04d}",
+                    "filename": filename,
+                    "prompt": prompt,
+                    "size": "auto",
+                },
+            }
+            lines.append(json.dumps(record))
+        ndjson_bytes = ("\n".join(lines) + "\n").encode("utf-8")
+        assert len(ndjson_bytes) > 2 * 1024 * 1024
+        zf.writestr("metadata.ndjson", ndjson_bytes)
+
+    assert count_import_gallery_entries(zip_path) == 2500
+    assert read_archive_collections(zip_path) == []
+
+
 def test_import_archive_rejects_duplicate_metadata_member(client):
     metadata = {
         "schema_version": 1,
