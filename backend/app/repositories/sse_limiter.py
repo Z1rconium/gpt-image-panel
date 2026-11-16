@@ -90,13 +90,19 @@ class SSELimiter:
             metrics.increment("sse.refresh_missed")
         return refreshed
 
-    async def refresh_if_needed(self, lease: SSELease, last_refresh_at: float) -> float | None:
-        now = time.monotonic()
-        if now - last_refresh_at < self.refresh_interval_seconds:
+    async def refresh_if_needed(
+        self,
+        lease: SSELease,
+        last_refresh_at: float,
+        *,
+        now: float | None = None,
+    ) -> float | None:
+        current = time.monotonic() if now is None else now
+        if current - last_refresh_at < self.refresh_interval_seconds:
             return last_refresh_at
         if not await self.refresh(lease):
             return None
-        return now
+        return current
 
     async def release(self, lease: SSELease | str) -> None:
         connection_id = lease.connection_id if isinstance(lease, SSELease) else str(lease)

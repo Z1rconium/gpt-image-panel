@@ -2,8 +2,8 @@ import asyncio
 
 from backend.tests.support.contract import *  # noqa: F403
 
-from backend.app.api.app import app
-from backend.app.api.routers import generate as generate_router
+from backend.app.core.utils import utc_now
+from backend.app.services.generate_job_sse import generate_feed
 from backend.app.services.poll_backoff import next_poll_delay
 
 
@@ -58,47 +58,41 @@ def test_next_poll_delay_doubles_while_idle_and_resets_on_change():
     )
 
 
-class _AsyncioStub:
-    """Contain the sleep stub so the real asyncio module is left alone."""
+def test_generate_sse_poller_backs_off_while_idle(tmp_path):
+    _configure_runtime(tmp_path)
+    now = utc_now()
+    image_jobs_repo.upsert_generate_job(
+        {
+            "job_id": "job-x",
+            "status": "running",
+            "stage": "generating",
+            "message": "Running",
+            "n": 1,
+            "created_at": now,
+            "updated_at": now,
+        }
+    )
 
-    def __init__(self, sleep):
-        self._sleep = sleep
-
-    async def sleep(self, seconds):
-        await self._sleep(seconds)
-
-    def current_task(self):
-        return asyncio.current_task()
-
-
-def test_generate_sse_poller_backs_off_while_idle(monkeypatch):
     base = config.IMAGE_JOB_UNIT_POLL_INTERVAL_SECONDS
     cap = config.SSE_IDLE_BACKOFF_MAX_SECONDS
     sleeps: list[float] = []
 
     async def scenario():
-        queue: asyncio.Queue = asyncio.Queue()
-        subscribers = generate_router.get_job_subscribers().setdefault("job-x", set())
-        subscribers.add(queue)
+        subscription = generate_feed.subscribe("job-x", start_poller=False)
+        queue = await subscription.__aenter__()
 
-        async def fake_sleep(seconds):
+        async def fake_sleep(seconds: float):
             sleeps.append(seconds)
             if len(sleeps) >= 4:
-                subscribers.discard(queue)
+                await subscription.__aexit__(None, None, None)
 
-        async def fake_db(callback, *args, **kwargs):
-            if callback is generate_router.get_generate_sse_edges:
-                return None, {"job-x": "t0"}
-            return {"job_id": "job-x", "status": "running"}
+        await generate_feed.run_poller(sleep=fake_sleep)
+        return queue.get_nowait()
 
-        monkeypatch.setattr(generate_router, "asyncio", _AsyncioStub(fake_sleep))
-        monkeypatch.setattr(generate_router, "run_db_operation", fake_db)
-        await generate_router._poll_generate_sse()
-        generate_router.get_job_subscribers().pop("job-x", None)
+    first_event = asyncio.run(scenario())
 
-    app.state.generate_jobs_sse_poller_task = None
-    asyncio.run(scenario())
-
+    assert first_event["event"] == "job"
+    assert first_event["data"]["job_id"] == "job-x"
     # First cycle observes a new job edge, so it stays at the base cadence.
     assert sleeps[:3] == [base, base * 2, base * 4]
     assert sleeps[3] == cap

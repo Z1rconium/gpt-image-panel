@@ -3,6 +3,7 @@ from datetime import datetime
 from backend.app.core.observability import record_upstream_usage
 from backend.app.core.utils import utc_now
 from backend.app.services import job_persistence
+from backend.app.services.generate_job_sse import generate_feed
 from backend.tests.support.contract import *  # noqa: F403
 
 def test_generate_and_sse_contract(client):
@@ -36,22 +37,20 @@ def test_generate_and_sse_contract(client):
 
 
 def test_global_jobs_feed_receives_tracked_job_updates(client):
-    queue = asyncio.Queue()
-    subscribers = job_events.get_jobs_subscribers()
-    subscribers.add(queue)
-    try:
-        job_events.publish_generate_job(
-            {
-                "job_id": "global-feed-job",
-                "status": "success",
-                "stage": "completed",
-                "message": "done",
-            },
-            list_debounce=False,
-        )
-        event = queue.get_nowait()
-    finally:
-        subscribers.discard(queue)
+    async def scenario():
+        async with generate_feed.subscribe(None, start_poller=False) as queue:
+            job_events.publish_generate_job(
+                {
+                    "job_id": "global-feed-job",
+                    "status": "success",
+                    "stage": "completed",
+                    "message": "done",
+                },
+                list_debounce=False,
+            )
+            return queue.get_nowait()
+
+    event = asyncio.run(scenario())
 
     assert event["event"] == "job"
     assert event["data"]["job_id"] == "global-feed-job"
@@ -325,60 +324,58 @@ def test_multi_image_job_publishes_and_persists_incremental_results(client, monk
     )
     assert resp.status_code == 202
     job_id = resp.json()["job_id"]
-    event_queue = asyncio.Queue(maxsize=20)
-    subscribers = job_events.get_job_subscribers().setdefault(job_id, set())
 
-    try:
-        assert both_started.wait(2)
-        subscribers.add(event_queue)
-        release_units[1].set()
+    async def observe_incremental():
+        async with generate_feed.subscribe(job_id, start_poller=False) as event_queue:
+            try:
+                assert await asyncio.to_thread(both_started.wait, 2)
+                release_units[1].set()
 
-        deadline = time.time() + 3
-        intermediate = None
-        while time.time() < deadline:
-            current = client.get(f"/api/generate/{job_id}")
-            assert current.status_code == 200
-            candidate = current.json()
-            if candidate.get("status") == "running" and candidate.get("completed_count") == 1:
-                intermediate = candidate
-                break
-            time.sleep(0.025)
+                deadline = time.time() + 3
+                intermediate = None
+                while time.time() < deadline:
+                    current = await asyncio.to_thread(client.get, f"/api/generate/{job_id}")
+                    assert current.status_code == 200
+                    candidate = current.json()
+                    if candidate.get("status") == "running" and candidate.get("completed_count") == 1:
+                        intermediate = candidate
+                        break
+                    await asyncio.sleep(0.025)
 
-        assert intermediate is not None
-        assert intermediate["message"] == "Generating images (1/2 completed)"
-        assert intermediate["success_count"] == 1
-        assert intermediate["failure_count"] == 0
-        assert [image["image_id"] for image in intermediate["images"]] == [
-            finished_entries[1].id
-        ]
+                assert intermediate is not None
+                assert intermediate["message"] == "Generating images (1/2 completed)"
+                assert intermediate["success_count"] == 1
+                assert intermediate["failure_count"] == 0
+                assert [image["image_id"] for image in intermediate["images"]] == [
+                    finished_entries[1].id
+                ]
 
-        persisted = image_jobs_repo.get_generate_job(job_id)
-        assert persisted["completed_count"] == 1
-        assert persisted["success_count"] == 1
-        assert persisted["failure_count"] == 0
-        assert [image["image_id"] for image in persisted["images"]] == [
-            image["image_id"] for image in intermediate["images"]
-        ]
+                persisted = image_jobs_repo.get_generate_job(job_id)
+                assert persisted["completed_count"] == 1
+                assert persisted["success_count"] == 1
+                assert persisted["failure_count"] == 0
+                assert [image["image_id"] for image in persisted["images"]] == [
+                    image["image_id"] for image in intermediate["images"]
+                ]
 
-        published = []
-        while not event_queue.empty():
-            published.append(event_queue.get_nowait())
-        incremental_events = [
-            event["data"]
-            for event in published
-            if event.get("event") == "job"
-            and event.get("data", {}).get("completed_count") == 1
-        ]
-        assert incremental_events
-        assert [image["image_id"] for image in incremental_events[-1]["images"]] == [
-            image["image_id"] for image in intermediate["images"]
-        ]
-    finally:
-        release_units[0].set()
-        release_units[1].set()
-        subscribers.discard(event_queue)
-        if not subscribers:
-            job_events.get_job_subscribers().pop(job_id, None)
+                published = []
+                while not event_queue.empty():
+                    published.append(event_queue.get_nowait())
+                incremental_events = [
+                    event["data"]
+                    for event in published
+                    if event.get("event") == "job"
+                    and event.get("data", {}).get("completed_count") == 1
+                ]
+                assert incremental_events
+                assert [image["image_id"] for image in incremental_events[-1]["images"]] == [
+                    image["image_id"] for image in intermediate["images"]
+                ]
+            finally:
+                release_units[0].set()
+                release_units[1].set()
+
+    asyncio.run(observe_incremental())
 
     job = _wait_for_job(client, job_id)
     assert job["status"] == "success"
@@ -1569,10 +1566,7 @@ def test_generate_jobs_list_broadcast_debounces_without_db_reads(client, monkeyp
     monkeypatch.setattr(job_events, "list_generate_jobs", tracking_list_generate_jobs)
 
     async def run_updates():
-        queue: asyncio.Queue = asyncio.Queue(maxsize=20)
-        subscribers = job_events.get_jobs_subscribers()
-        subscribers.add(queue)
-        try:
+        async with generate_feed.subscribe(None, start_poller=False) as queue:
             for index in range(3):
                 job_persistence.store_generate_job(
                     "job-memory-broadcast",
@@ -1593,8 +1587,6 @@ def test_generate_jobs_list_broadcast_debounces_without_db_reads(client, monkeyp
             while not queue.empty():
                 events.append(queue.get_nowait())
             return events
-        finally:
-            subscribers.discard(queue)
 
     events = asyncio.run(run_updates())
 
@@ -2073,25 +2065,22 @@ def test_streaming_generation_job_delivers_previews_and_completes(client, monkey
 
 
 def test_job_preview_publish_pushes_to_subscriber_and_caches_latest(client):
-    queue = asyncio.Queue()
-    subscribers = job_events.get_job_subscribers().setdefault("preview-unit-job", set())
-    subscribers.add(queue)
-    try:
-        job_events.publish_generate_job_preview(
-            "preview-unit-job",
-            {
-                "job_id": "preview-unit-job",
-                "unit_index": 0,
-                "partial_image_index": 0,
-                "sequence": 1,
-                "mime_type": "image/png",
-                "data_url": "data:image/png;base64,AAAA",
-            },
-        )
-        event = queue.get_nowait()
-    finally:
-        subscribers.discard(queue)
-        job_events.get_job_subscribers().pop("preview-unit-job", None)
+    async def scenario():
+        async with generate_feed.subscribe("preview-unit-job", start_poller=False) as queue:
+            job_events.publish_generate_job_preview(
+                "preview-unit-job",
+                {
+                    "job_id": "preview-unit-job",
+                    "unit_index": 0,
+                    "partial_image_index": 0,
+                    "sequence": 1,
+                    "mime_type": "image/png",
+                    "data_url": "data:image/png;base64,AAAA",
+                },
+            )
+            return queue.get_nowait()
+
+    event = asyncio.run(scenario())
 
     assert event["event"] == "preview"
     assert event["data"]["sequence"] == 1

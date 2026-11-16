@@ -14,7 +14,6 @@ import uuid
 import pytest
 from starlette.requests import Request
 
-from backend.app.api.routers import generate as generate_router
 from backend.app.core import settings as config
 from backend.app.core.utils import utc_now
 from backend.app.repositories import agent as agent_repo
@@ -23,7 +22,7 @@ from backend.app.repositories import image_jobs as image_jobs_repo
 from backend.app.repositories import sse_limiter as sse_limiter_mod
 from backend.app.repositories.sse_limiter import sse_limiter
 from backend.app.runtime.state import utc_lease_expires_at
-from backend.app.services import agent_stream, gallery_job_sse, job_events
+from backend.app.services import agent_stream, gallery_job_sse, generate_job_sse, job_events, sse_feed
 
 
 class _FakeClock:
@@ -73,12 +72,12 @@ def _patch_sse_runtime(
     clock = _FakeClock(100.0)
     time_stub = types.SimpleNamespace(monotonic=clock.monotonic)
     monkeypatch.setattr(config, "SSE_CONNECTION_TTL_SECONDS", ttl_seconds)
-    monkeypatch.setattr(generate_router, "SSE_IDLE_CHECK_SECONDS", 0.01)
+    monkeypatch.setattr(generate_job_sse, "SSE_IDLE_CHECK_SECONDS", 0.01)
     monkeypatch.setattr(gallery_job_sse, "GALLERY_JOB_SSE_IDLE_CHECK_SECONDS", 0.01)
     monkeypatch.setattr(agent_stream, "EVENT_POLL_SECONDS", 0.01)
     if keepalive_seconds is not None:
         monkeypatch.setattr(agent_stream, "KEEP_ALIVE_SECONDS", keepalive_seconds)
-    for mod in (generate_router, gallery_job_sse, agent_stream, sse_limiter_mod):
+    for mod in (sse_feed, sse_limiter_mod):
         monkeypatch.setattr(mod, "time", time_stub)
     return clock
 

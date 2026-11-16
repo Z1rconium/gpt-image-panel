@@ -27,19 +27,11 @@ from ..repositories.db.execution import run_db_operation
 logger = logging.getLogger(__name__)
 
 def get_job_subscribers() -> dict[str, set[asyncio.Queue]]:
-    subscribers = getattr(state, "generate_job_subscribers", None)
-    if not isinstance(subscribers, dict):
-        subscribers = {}
-        state.generate_job_subscribers = subscribers
-    return subscribers
+    return state.generate_job_subscribers
 
 
 def get_jobs_subscribers() -> set[asyncio.Queue]:
-    subscribers = getattr(state, "generate_jobs_subscribers", None)
-    if not isinstance(subscribers, set):
-        subscribers = set()
-        state.generate_jobs_subscribers = subscribers
-    return subscribers
+    return state.generate_jobs_subscribers
 
 
 def get_generate_job_preview_cache() -> dict[tuple[str, int, int], dict]:
@@ -48,11 +40,7 @@ def get_generate_job_preview_cache() -> dict[tuple[str, int, int], dict]:
     reconnecting client either gets this cached frame or waits for the next
     one; a restarted/other worker process has nothing to replay, which is an
     accepted tradeoff for keeping base64 image data out of shared storage."""
-    cache = getattr(state, "generate_job_preview_cache", None)
-    if not isinstance(cache, dict):
-        cache = {}
-        state.generate_job_preview_cache = cache
-    return cache
+    return state.generate_job_preview_cache
 
 
 def publish_generate_job_preview(job_id: str, payload: dict) -> None:
@@ -199,11 +187,7 @@ def get_generate_job_seen_at() -> dict[str, float]:
     Tracked in a side table rather than inside the job dict so it never leaks
     into API responses or SSE payloads.
     """
-    seen = getattr(state, "generate_job_seen_at", None)
-    if not isinstance(seen, dict):
-        seen = {}
-        state.generate_job_seen_at = seen
-    return seen
+    return state.generate_job_seen_at
 
 
 def remember_generate_job_memory(job_id: str, job: dict) -> None:
@@ -223,7 +207,7 @@ def has_stale_generate_job_memory() -> bool:
     for two persist windows, so another worker (or a finished job) likely owns
     the real state."""
     now = time.monotonic()
-    jobs = getattr(state, "generate_jobs", {}) or {}
+    jobs = state.generate_jobs
     seen = get_generate_job_seen_at()
     return any(
         now - seen.get(job_id, 0.0) > 2 * GENERATE_JOB_PERSIST_INTERVAL_SECONDS
@@ -251,10 +235,9 @@ async def reconcile_stale_generate_job_memory() -> bool:
 
 
 def snapshot_active_generate_jobs_from_memory() -> list[dict]:
-    generate_jobs = getattr(state, "generate_jobs", {})
     jobs = [
         public_generate_job(job)
-        for job in generate_jobs.values()
+        for job in state.generate_jobs.values()
         if job.get("status") in ACTIVE_GENERATE_JOB_STATUSES
     ]
     return sort_generate_jobs(jobs)
@@ -262,7 +245,7 @@ def snapshot_active_generate_jobs_from_memory() -> list[dict]:
 
 def reconcile_active_generate_jobs(storage_jobs: list[dict]) -> list[dict]:
     jobs_by_id = {job["job_id"]: job for job in storage_jobs}
-    local_jobs = getattr(state, "generate_jobs", {})
+    local_jobs = state.generate_jobs
     for job_id, job in local_jobs.items():
         if job.get("status") not in ACTIVE_GENERATE_JOB_STATUSES:
             continue

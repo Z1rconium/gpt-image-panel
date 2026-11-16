@@ -2,19 +2,17 @@
 
 import asyncio
 import logging
-import time
 from typing import Any
 
-from ..core import settings as config
-from ..core.errors import NotFoundError, RateLimitedError
+from ..core.errors import NotFoundError
 from ..core.streaming import StreamedBody
 from ..repositories import agent as agent_repo
-from ..repositories.sse_limiter import sse_limiter
 from ..repositories.db.execution import run_db_operation
 from ..runtime.state import state
 from .agent_event_writer import TERMINAL_EVENT_TYPES
 from .gallery_common import PRIVATE_GALLERY_CACHE_CONTROL
 from .job_events import serialize_sse_event
+from .sse_feed import SseConnection
 
 logger = logging.getLogger(__name__)
 
@@ -44,24 +42,20 @@ async def stream_turn_events(
     turn = await run_db_operation(agent_repo.get_turn, turn_id, metric_name="agent_get_turn")
     if turn is None:
         raise NotFoundError("Agent turn not found")
-    sse_lease = await sse_limiter.acquire(client_ip)
-    if not sse_lease:
-        raise RateLimitedError("Too many SSE connections")
+    conn = await SseConnection.open(
+        client_ip,
+        is_disconnected=is_disconnected,
+        keepalive_seconds=KEEP_ALIVE_SECONDS,
+        idle_ttl_only=True,
+    )
 
     async def event_stream():
-        start = time.monotonic()
-        last_refresh_at = start
-        last_sent = start
-        last_sweep = start
+        last_sweep = conn.now()
         cursor = max(0, int(after))
         try:
             while True:
-                if await is_disconnected():
+                if await conn.heartbeat(idle=False) == "stop":
                     return
-                refreshed_at = await sse_limiter.refresh_if_needed(sse_lease, last_refresh_at)
-                if refreshed_at is None:
-                    return
-                last_refresh_at = refreshed_at
                 events = await run_db_operation(
                     agent_repo.list_turn_events,
                     turn_id,
@@ -71,7 +65,7 @@ async def stream_turn_events(
                 )
                 for event in events:
                     cursor = event["seq"]
-                    last_sent = time.monotonic()
+                    conn.mark_sent()
                     yield serialize_sse_event(event["type"], event["data"], event_id=cursor)
                     if event["type"] in TERMINAL_EVENT_TYPES:
                         return
@@ -86,20 +80,20 @@ async def stream_turn_events(
                     event_type, data = _terminal_event_for(current)
                     yield serialize_sse_event(event_type, data, event_id=min(MAX_CURSOR, cursor + 1))
                     return
-                now = time.monotonic()
-                if now - start > config.SSE_CONNECTION_TTL_SECONDS:
+                idle_action = conn.check_idle()
+                if idle_action == "stop":
                     return
+                now = conn.now()
                 if now - last_sweep >= STALE_SWEEP_SECONDS:
                     last_sweep = now
                     await run_db_operation(agent_repo.sweep_stale_turns, metric_name="agent_sweep_stale_turns")
-                if now - last_sent >= KEEP_ALIVE_SECONDS:
-                    last_sent = now
-                    yield ": keep-alive\n\n"
+                if idle_action == "keepalive":
+                    yield SseConnection.KEEPALIVE_FRAME
                 # The runner owns the wake-up event; a turn running on another worker
                 # has none here, so fall back to plain polling.
                 wakeup = state.agent_turn_wakeups.get(turn_id)
                 if wakeup is None:
-                    await asyncio.sleep(EVENT_POLL_SECONDS)
+                    await conn.sleep(EVENT_POLL_SECONDS)
                     continue
                 wakeup.clear()
                 try:
@@ -113,7 +107,7 @@ async def stream_turn_events(
             # reconnects and resumes from Last-Event-ID.
             logger.exception("Agent event stream for turn %s failed", turn_id)
         finally:
-            await sse_limiter.release(sse_lease)
+            await conn.close()
 
     return StreamedBody(
         chunks=event_stream(),

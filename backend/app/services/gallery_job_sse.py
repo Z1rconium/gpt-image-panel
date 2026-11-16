@@ -4,22 +4,15 @@ Subscribers are per worker process; updates written by another worker are
 picked up by polling each job's updated_at edge (see job_events)."""
 
 import asyncio
-import logging
-import time
 
 from ..core import settings as config
-from ..core.errors import (
-    NotFoundError,
-    RateLimitedError,
-)
-from ..core.observability import metrics
+from ..core.errors import NotFoundError
 from ..core.streaming import StreamedBody
 from ..repositories.coordination import (
     get_gallery_job,
     get_gallery_jobs_updated_at_edges,
 )
 from ..repositories.db.execution import run_db_operation
-from ..repositories.sse_limiter import sse_limiter
 from ..runtime.state import state
 from .gallery_common import (
     GALLERY_JOB_DISPATCH_INTERVAL_SECONDS,
@@ -31,30 +24,59 @@ from .gallery_job_payloads import (
     _gallery_job_event_name,
     _gallery_job_payload,
 )
-from .job_events import publish_job_edges, publish_queue, serialize_sse_event
-from .poll_backoff import next_poll_delay
+from .job_events import serialize_sse_event
+from .sse_feed import KeyedFeed, SseConnection
 
-logger = logging.getLogger(__name__)
+_GALLERY_FEEDS: dict[str, KeyedFeed] = {}
 
 
 def _get_gallery_job_subscribers(kind: str) -> dict[str, set[asyncio.Queue]]:
-    all_subscribers = getattr(state, "gallery_job_subscribers", None)
-    if not isinstance(all_subscribers, dict):
-        all_subscribers = {}
-        state.gallery_job_subscribers = all_subscribers
-    subscribers = all_subscribers.get(kind)
-    if not isinstance(subscribers, dict):
-        subscribers = {}
-        all_subscribers[kind] = subscribers
-    return subscribers
+    return state.gallery_job_subscribers.setdefault(kind, {})
 
 
-def _get_gallery_job_sse_poller_tasks() -> dict[str, asyncio.Task]:
-    tasks = getattr(state, "gallery_job_sse_poller_tasks", None)
-    if not isinstance(tasks, dict):
-        tasks = {}
-        state.gallery_job_sse_poller_tasks = tasks
-    return tasks
+def gallery_feed(kind: str) -> KeyedFeed:
+    """Return the shared keyed SSE feed for gallery jobs of ``kind``."""
+    feed = _GALLERY_FEEDS.get(kind)
+    if feed is not None:
+        return feed
+
+    async def read_edges(job_ids: set[str], _include_list_edge: bool) -> tuple[None, dict[str, str]]:
+        edges = await run_db_operation(
+            get_gallery_jobs_updated_at_edges,
+            kind,
+            job_ids,
+        )
+        return None, edges
+
+    async def read_event(job_id: str) -> dict:
+        job = await run_db_operation(get_gallery_job, kind, job_id)
+        return (
+            {
+                "event": _gallery_job_event_name(kind),
+                "data": _gallery_job_payload(kind, job),
+            }
+            if job
+            else {"event": "_missing", "data": None}
+        )
+
+    feed = KeyedFeed(
+        name=f"Gallery {kind}",
+        get_keyed_subscribers=lambda: state.gallery_job_subscribers.setdefault(kind, {}),
+        get_poller_task=lambda: state.gallery_job_sse_poller_tasks.get(kind),
+        set_poller_task=lambda task: (
+            state.gallery_job_sse_poller_tasks.__setitem__(kind, task)
+            if task is not None
+            else state.gallery_job_sse_poller_tasks.pop(kind, None)
+        ),
+        read_edges=read_edges,
+        read_event=read_event,
+        poll_metric_name=f"sse.poll_queries.gallery_{kind}",
+        base_interval=GALLERY_JOB_DISPATCH_INTERVAL_SECONDS,
+        max_backoff=lambda: config.SSE_IDLE_BACKOFF_MAX_SECONDS,
+        default_queue_maxsize=GALLERY_JOB_SSE_QUEUE_MAXSIZE,
+    )
+    _GALLERY_FEEDS[kind] = feed
+    return feed
 
 
 def _publish_gallery_job_sse(job: dict) -> None:
@@ -62,79 +84,13 @@ def _publish_gallery_job_sse(job: dict) -> None:
     job_id = str(job.get("job_id") or "")
     if not kind or not job_id:
         return
-    subscribers = _get_gallery_job_subscribers(kind).get(job_id, set())
-    if not subscribers:
-        return
-    event = {
-        "event": _gallery_job_event_name(kind),
-        "data": _gallery_job_payload(kind, job),
-    }
-    for queue in list(subscribers):
-        publish_queue(queue, event)
-
-
-def _start_gallery_job_sse_poller(kind: str) -> None:
-    tasks = _get_gallery_job_sse_poller_tasks()
-    task = tasks.get(kind)
-    if task and not task.done():
-        return
-    tasks[kind] = asyncio.create_task(_poll_gallery_job_sse(kind))
-
-
-async def _poll_gallery_job_sse(kind: str) -> None:
-    last_edges: dict[str, str] = {}
-    delay = GALLERY_JOB_DISPATCH_INTERVAL_SECONDS
-    try:
-        while True:
-            subscribers_by_job = {
-                job_id: list(subscribers)
-                for job_id, subscribers in _get_gallery_job_subscribers(kind).items()
-                if subscribers
-            }
-            if not subscribers_by_job:
-                break
-
-            current_edges = await run_db_operation(get_gallery_jobs_updated_at_edges,
-                kind,
-                set(subscribers_by_job),
-            )
-            metrics.increment(f"sse.poll_queries.gallery_{kind}")
-
-            async def read_event(job_id: str) -> dict:
-                job = await run_db_operation(get_gallery_job, kind, job_id)
-                return (
-                    {
-                        "event": _gallery_job_event_name(kind),
-                        "data": _gallery_job_payload(kind, job),
-                    }
-                    if job
-                    else {"event": "_missing", "data": None}
-                )
-
-            changed = await publish_job_edges(
-                subscribers_by_job=subscribers_by_job,
-                edges=current_edges,
-                last_edges=last_edges,
-                read_event=read_event,
-            )
-
-            delay = next_poll_delay(
-                base_interval=GALLERY_JOB_DISPATCH_INTERVAL_SECONDS,
-                current_delay=delay,
-                changed=changed,
-                max_backoff_seconds=config.SSE_IDLE_BACKOFF_MAX_SECONDS,
-            )
-            if delay > GALLERY_JOB_DISPATCH_INTERVAL_SECONDS:
-                metrics.increment("sse.poll_idle_backoff")
-            await asyncio.sleep(delay)
-    except asyncio.CancelledError:
-        raise
-    except Exception:
-        logger.warning("Gallery %s SSE poller stopped after error", kind, exc_info=True)
-    finally:
-        tasks = _get_gallery_job_sse_poller_tasks()
-        if tasks.get(kind) is asyncio.current_task():
-            tasks.pop(kind, None)
+    gallery_feed(kind).publish(
+        job_id,
+        {
+            "event": _gallery_job_event_name(kind),
+            "data": _gallery_job_payload(kind, job),
+        },
+    )
 
 
 async def stream_gallery_job(
@@ -147,81 +103,57 @@ async def stream_gallery_job(
     terminal_statuses: set[str],
     payload_builder,
     not_found_detail: str,
-):
+) -> StreamedBody:
     job = await run_db_operation(get_gallery_job, kind, job_id)
     if not job:
         raise NotFoundError(not_found_detail)
 
-    sse_lease = await sse_limiter.acquire(client_ip)
-    if not sse_lease:
-        raise RateLimitedError("Too many SSE connections")
+    conn = await SseConnection.open(client_ip, is_disconnected=is_disconnected)
+    feed = gallery_feed(kind)
 
     async def event_stream():
-        start = time.monotonic()
-        last_refresh_at = start
         last_updated_at: str | None = None
-        last_sent = 0.0
-        queue: asyncio.Queue = asyncio.Queue(maxsize=GALLERY_JOB_SSE_QUEUE_MAXSIZE)
-        subscribers = _get_gallery_job_subscribers(kind).setdefault(job_id, set())
-        subscribers.add(queue)
-        _start_gallery_job_sse_poller(kind)
         try:
-            current_job = await run_db_operation(get_gallery_job, kind, job_id)
-            if not current_job:
-                return
-            payload = payload_builder(current_job)
-            last_updated_at = str(payload.get("updated_at") or "")
-            last_sent = time.monotonic()
-            yield serialize_sse_event(event_name, payload)
-            if payload.get("status") in terminal_statuses:
-                return
-
-            while True:
-                if await is_disconnected():
-                    break
-                now = time.monotonic()
-                refreshed_at = await sse_limiter.refresh_if_needed(
-                    sse_lease,
-                    last_refresh_at,
-                )
-                if refreshed_at is None:
-                    break
-                last_refresh_at = refreshed_at
-                if now - start > config.SSE_CONNECTION_TTL_SECONDS:
-                    break
-                if now - last_sent >= 15:
-                    last_sent = now
-                    yield ": keep-alive\n\n"
-                    continue
-                wait_seconds = min(
-                    GALLERY_JOB_SSE_IDLE_CHECK_SECONDS,
-                    max(0.1, 15 - (now - last_sent)),
-                    max(0.1, config.SSE_CONNECTION_TTL_SECONDS - (now - start)),
-                )
-                try:
-                    event = await asyncio.wait_for(queue.get(), timeout=wait_seconds)
-                except asyncio.TimeoutError:
-                    continue
-                if event.get("event") == "_missing":
-                    break
-                if event.get("event") != event_name:
-                    continue
-                payload = event.get("data")
-                if not isinstance(payload, dict):
-                    break
-                updated_at = str(payload.get("updated_at") or "")
-                if updated_at == last_updated_at:
-                    continue
-                last_updated_at = updated_at
-                last_sent = time.monotonic()
+            async with feed.subscribe(job_id, maxsize=GALLERY_JOB_SSE_QUEUE_MAXSIZE) as queue:
+                current_job = await run_db_operation(get_gallery_job, kind, job_id)
+                if not current_job:
+                    return
+                payload = payload_builder(current_job)
+                last_updated_at = str(payload.get("updated_at") or "")
+                conn.mark_sent()
                 yield serialize_sse_event(event_name, payload)
                 if payload.get("status") in terminal_statuses:
-                    break
+                    return
+
+                while True:
+                    action = await conn.heartbeat()
+                    if action == "stop":
+                        break
+                    if action == "keepalive":
+                        yield SseConnection.KEEPALIVE_FRAME
+                        continue
+                    wait_seconds = conn.wait_timeout(GALLERY_JOB_SSE_IDLE_CHECK_SECONDS)
+                    try:
+                        event = await asyncio.wait_for(queue.get(), timeout=wait_seconds)
+                    except asyncio.TimeoutError:
+                        continue
+                    if event.get("event") == "_missing":
+                        break
+                    if event.get("event") != event_name:
+                        continue
+                    payload = event.get("data")
+                    if not isinstance(payload, dict):
+                        break
+                    updated_at = str(payload.get("updated_at") or "")
+                    if updated_at == last_updated_at:
+                        continue
+                    last_updated_at = updated_at
+                    conn.mark_sent()
+                    yield serialize_sse_event(event_name, payload)
+                    if payload.get("status") in terminal_statuses:
+                        break
         finally:
-            subscribers.discard(queue)
-            if not subscribers:
-                _get_gallery_job_subscribers(kind).pop(job_id, None)
-            await sse_limiter.release(sse_lease)
+            await conn.close()
 
     return StreamedBody(
         chunks=event_stream(),
