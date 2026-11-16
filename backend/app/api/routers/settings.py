@@ -1,4 +1,5 @@
 import asyncio
+import copy
 
 from fastapi import APIRouter, HTTPException
 
@@ -224,30 +225,31 @@ async def update_settings(req: SettingsRequest):
     if not preset:
         raise HTTPException(status_code=404, detail="Preset not found")
 
-    with api_settings_write(rollback_on_error=False):  # Removed in C8-S3
-        preset["name"] = (req.preset_name or preset.get("name") or "Untitled preset").strip()
-        previous_api_url = str(preset.get("api_url") or "")
+    with api_settings_write():
+        draft_preset = copy.deepcopy(preset)
+        draft_preset["name"] = (req.preset_name or draft_preset.get("name") or "Untitled preset").strip()
+        previous_api_url = str(draft_preset.get("api_url") or "")
         next_api_url = req.api_url.rstrip("/")
-        if preset.get("api_key") and not secrets.same_origin(previous_api_url, next_api_url):
-            preset["api_key"] = ""
-        preset["api_url"] = next_api_url
+        if draft_preset.get("api_key") and not secrets.same_origin(previous_api_url, next_api_url):
+            draft_preset["api_key"] = ""
+        draft_preset["api_url"] = next_api_url
         if req.api_key is not None:
-            preset["api_key"] = req.api_key.strip()
-        preset["api_path"] = normalize_api_path(req.api_path)
+            draft_preset["api_key"] = req.api_key.strip()
+        draft_preset["api_path"] = normalize_api_path(req.api_path)
         if req.default_model is not None:
-            preset["default_model"] = normalize_default_model(
+            draft_preset["default_model"] = normalize_default_model(
                 req.default_model,
-                preset["api_path"],
+                draft_preset["api_path"],
             )
         if req.default_response_format is not None:
-            preset["default_response_format"] = normalize_default_response_format(
+            draft_preset["default_response_format"] = normalize_default_response_format(
                 req.default_response_format
             )
         if req.supports_mask is not None:
-            preset["supports_mask"] = bool(req.supports_mask)
+            draft_preset["supports_mask"] = bool(req.supports_mask)
         if req.prompt_guard is not None:
-            preset["prompt_guard"] = bool(req.prompt_guard)
-        apply_preset_provider(preset, req.provider_kind, req.provider_config)
+            draft_preset["prompt_guard"] = bool(req.prompt_guard)
+        apply_preset_provider(draft_preset, req.provider_kind, req.provider_config)
         if req.upstream_socks5_proxy is not None:
             current_proxy = get_upstream_socks5_proxy(raw=True)
             requested_proxy = req.upstream_socks5_proxy.strip()
@@ -263,7 +265,9 @@ async def update_settings(req: SettingsRequest):
             else:
                 apply_webhook_url(requested_webhook_url)
             _validate_webhook_security()
-        validate_preset_secret_binding(preset)
+        validate_preset_secret_binding(draft_preset)
+        preset.clear()
+        preset.update(draft_preset)
         apply_api_preset(preset)
         await run_db_operation(persist_api_settings)
     if req.prompt_optimizer is not None:

@@ -68,7 +68,7 @@ def _save_baseline_settings(client):
     return resp.json()
 
 
-def test_post_settings_422_secret_binding_mutates_runtime_state_in_place_before_reload(
+def test_post_settings_422_secret_binding_preserves_runtime_state_without_reload(
     client, configured_secret_registry
 ):
     baseline = _save_baseline_settings(client)
@@ -93,32 +93,23 @@ def test_post_settings_422_secret_binding_mutates_runtime_state_in_place_before_
     assert failed.status_code == 422
     assert failed.json()["detail"] == "secret_id is not bound to the target origin"
 
-    # CHARACTERIZATION (defect to be fixed in C8-S3):
-    # update_settings mutates the live preset dict in state.api_presets and
-    # state.upstream_socks5_proxy / state.webhook_url BEFORE calling
-    # validate_preset_secret_binding(preset). On 422, persist_api_settings() is
-    # skipped, so SQLite retains the old baseline, while in-memory state stays
-    # mutated for any caller that reads state without calling load_api_settings()
-    # (such as POST /api/settings/presets/{id}/health).
+    # C8-S3 fix: update_settings validates a deep copy inside api_settings_write(),
+    # so a 422 leaves runtime state completely untouched even before reload.
     in_memory_preset = presets.get_active_preset()
-    assert in_memory_preset["name"] == "Mutated Unvalidated Preset"
-    assert in_memory_preset["api_key"] == "other-origin-upstream-secret"
-    assert in_memory_preset["api_path"] == "/v1/responses"
-    assert in_memory_preset["default_model"] == "gpt-5.4"
-    assert in_memory_preset["prompt_guard"] is True
-    assert state.upstream_socks5_proxy == "${TEST_UPSTREAM_PROXY_URL}"
-    assert state.webhook_url == "${TEST_WEBHOOK_URL}"
-
-    # apply_api_preset(preset) sits after validate_preset_secret_binding, so
-    # flat state.api_key / state.api_path stayed at the baseline while
-    # state.api_presets[0] holds the mutated preset.
+    assert in_memory_preset["name"] == "Baseline Preset"
+    assert in_memory_preset["api_key"] == "good-upstream-secret"
+    assert in_memory_preset["api_path"] == "/v1/images/generations"
+    assert in_memory_preset["default_model"] == "gpt-image-2"
+    assert in_memory_preset["prompt_guard"] is False
+    assert state.upstream_socks5_proxy == ""
+    assert state.webhook_url == ""
     assert state.api_key == "good-upstream-secret"
 
-    # Endpoints that do not call load_api_settings() observe the mutated preset.
+    # Endpoints that do not call load_api_settings() also observe the unmodified preset.
     health = client.post(f"/api/settings/presets/{preset_id}/health")
     assert health.status_code == 200
     path_check = next(c for c in health.json()["checks"] if c["name"] == "api_path")
-    assert "/v1/responses" in path_check["message"]
+    assert "/v1/images/generations" in path_check["message"]
 
     # GET /api/settings calls load_api_settings() first, which reloads from the
     # unmodified SQLite row and heals runtime state back to the old values.
