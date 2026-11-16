@@ -1,5 +1,5 @@
 import { get, writable } from 'svelte/store';
-import { apiFetch } from '$lib/api/client';
+import { EDITS_ENDPOINT, editFromGalleryUrl, postEditJob, postGenerateJob } from '$lib/api/jobs';
 import { t } from '$lib/i18n';
 import {
   MAX_EDIT_SOURCE_IMAGES,
@@ -16,12 +16,7 @@ import {
 import type { GenerateRequestBody } from '$lib/api/types/generation';
 import type { GeneratePreviewEvent, GenerateJobResponse, GenerateJobStatus } from '$lib/api/types/jobs';
 import { imageUrl, jobFailureMessage } from '$lib/utils/format';
-import {
-  DEFAULT_PROMPT_MODEL,
-  DEFAULT_QUANTITY,
-  initialPromptFormState,
-  type PromptFormState
-} from '$lib/utils/promptFormTypes';
+import { initialPromptFormState, type PromptFormState } from '$lib/utils/promptFormTypes';
 import { buildRequestBody, validateSubmission, type SubmissionErrorKey } from '$lib/utils/promptRules';
 import {
   MAX_CONCURRENT_SUBMISSIONS,
@@ -29,6 +24,7 @@ import {
   appendSubmission,
   applyJobToGroup,
   applyPreviewEventToGroup,
+  attachSubmissionJob,
   countActiveSubmissions,
   createPreviewGroup,
   createSubmission,
@@ -36,7 +32,6 @@ import {
   failSubmission,
   findSubmissionByJobId,
   normalizeUnitCount,
-  replaceSubmission,
   selectSlotInGroup,
   submissionFromJob,
   type PreviewCompareSource,
@@ -51,8 +46,6 @@ export type { PreviewCompareSource, PreviewImage, PreviewSlot, PreviewSlotStatus
 
 /** Derived view of the current preview group plus its identity. */
 export type PreviewState = PreviewView & { groupId: string };
-
-export { DEFAULT_PROMPT_MODEL, DEFAULT_QUANTITY, initialPromptFormState, type PromptFormState };
 
 /** Per-submission overrides that are not part of the editable form. */
 export type SubmitOptions = {
@@ -71,6 +64,8 @@ export type PreviewCallbacks = {
    */
   releaseJob?: (jobId: string) => void;
   loadJobs?: () => Promise<void>;
+  postGenerate?: (body: GenerateRequestBody) => Promise<GenerateJobResponse>;
+  postEdit?: (endpoint: string, formData: FormData) => Promise<GenerateJobResponse>;
 };
 
 function submissionErrorMessage(key: SubmissionErrorKey): string {
@@ -220,12 +215,36 @@ function createPreviewStore() {
   }
 
   function attachJob(submissionId: string, response: GenerateJobResponse, body: GenerateRequestBody) {
-    group = replaceSubmission(group, submissionId, (submission) =>
-      submission.id === submissionId
-        ? { ...submission, jobId: response.job_id, job: queuedJob(response, body), submitStatus: 'accepted', error: '' }
-        : submission
-    );
+    group = attachSubmissionJob(group, submissionId, response.job_id, queuedJob(response, body));
     publish();
+  }
+
+  async function submitAndTrack(
+    submissionId: string,
+    epoch: number,
+    body: GenerateRequestBody,
+    callbacks: PreviewCallbacks,
+    send: () => Promise<GenerateJobResponse>
+  ): Promise<boolean> {
+    try {
+      const response = await send();
+      // A late response still describes a real backend job, but it belongs to
+      // a preview group the user already left: never attach it to the new one.
+      if (epoch !== groupEpoch) return true;
+      attachJob(submissionId, response, body);
+      callbacks.trackJob(response.job_id, {
+        streaming: Boolean(body.stream),
+        status: response.status || 'queued'
+      });
+      if (callbacks.loadJobs) await callbacks.loadJobs();
+      return true;
+    } catch (error) {
+      if (epoch !== groupEpoch) return false;
+      const message = error instanceof Error ? error.message : get(t).messages.requestFailed;
+      group = failSubmission(group, submissionId, message);
+      publish();
+      return false;
+    }
   }
 
   async function generateImage(
@@ -267,34 +286,8 @@ function createPreviewStore() {
     groupError = '';
     publish();
     const epoch = groupEpoch;
-
-    try {
-      const response = await apiFetch<GenerateJobResponse>(
-        '/api/generate',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body)
-        },
-        'starting image generation'
-      );
-      // A late response still describes a real backend job, but it belongs to
-      // a preview group the user already left: never attach it to the new one.
-      if (epoch !== groupEpoch) return true;
-      attachJob(submission.id, response, body);
-      callbacks.trackJob(response.job_id, {
-        streaming: Boolean(body.stream),
-        status: response.status || 'queued'
-      });
-      if (callbacks.loadJobs) await callbacks.loadJobs();
-      return true;
-    } catch (error) {
-      if (epoch !== groupEpoch) return false;
-      const message = error instanceof Error ? error.message : get(t).messages.requestFailed;
-      group = failSubmission(group, submission.id, message);
-      publish();
-      return false;
-    }
+    const send = callbacks.postGenerate ?? postGenerateJob;
+    return submitAndTrack(submission.id, epoch, body, callbacks, () => send(body));
   }
 
   function editSourceBlockerMessage(blocker: EditSourceSubmitBlocker): string {
@@ -371,9 +364,7 @@ function createPreviewStore() {
     });
 
     const galleryPrimary = galleryPrimarySource(editSource);
-    const endpoint = galleryPrimary
-      ? `/api/edits/from-gallery/${encodeURIComponent(galleryPrimary.imageId)}`
-      : '/api/edits';
+    const endpoint = galleryPrimary ? editFromGalleryUrl(galleryPrimary.imageId) : EDITS_ENDPOINT;
     const uploadFieldName = sourceCount > 1 ? 'image[]' : 'image';
     uploadSources(editSource).forEach((source) => {
       formData.append(uploadFieldName, source.file, source.file.name);
@@ -387,30 +378,8 @@ function createPreviewStore() {
       formData.append('paste_back', String(form.pasteBack));
     }
 
-    try {
-      const response = await apiFetch<GenerateJobResponse>(
-        endpoint,
-        {
-          method: 'POST',
-          body: formData
-        },
-        'starting image edit'
-      );
-      if (epoch !== groupEpoch) return true;
-      attachJob(submission.id, response, body);
-      callbacks.trackJob(response.job_id, {
-        streaming: Boolean(body.stream),
-        status: response.status || 'queued'
-      });
-      if (callbacks.loadJobs) await callbacks.loadJobs();
-      return true;
-    } catch (error) {
-      if (epoch !== groupEpoch) return false;
-      const message = error instanceof Error ? error.message : get(t).messages.requestFailed;
-      group = failSubmission(group, submission.id, message);
-      publish();
-      return false;
-    }
+    const send = callbacks.postEdit ?? postEditJob;
+    return submitAndTrack(submission.id, epoch, body, callbacks, () => send(endpoint, formData));
   }
 
   function regenerate(

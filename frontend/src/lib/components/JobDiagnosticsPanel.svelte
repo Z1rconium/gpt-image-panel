@@ -1,6 +1,6 @@
 <script lang="ts">
   import { t } from '$lib/i18n';
-  import { apiFetch } from '$lib/api/client';
+  import { fetchJobDiagnostics } from '$lib/api/jobs';
   import { copyText } from '$lib/utils/format';
   import type { JobDiagnosticsResponse, JobUnitDiagnostics } from '$lib/api/types/jobs';
 
@@ -32,11 +32,7 @@
     loading = true;
     errorMessage = '';
     try {
-      response = await apiFetch<JobDiagnosticsResponse>(
-        `/api/generate/${encodeURIComponent(jobId)}/diagnostics`,
-        {},
-        'loading job diagnostics'
-      );
+      response = await fetchJobDiagnostics(jobId);
       loaded = true;
     } catch (error) {
       errorMessage = error instanceof Error ? error.message : String(error);

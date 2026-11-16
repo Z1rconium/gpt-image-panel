@@ -1,5 +1,6 @@
 import { get } from 'svelte/store';
 import { ApiError, DEFAULT_API_TIMEOUT_MS, apiFetchRaw } from '$lib/api/client';
+import { generateJobMaskRestoreUrl } from '$lib/api/jobs';
 import type { GenerateJobStatus } from '$lib/api/types/jobs';
 import { t } from '$lib/i18n';
 import { confirmStore } from '$lib/stores/confirm';
@@ -81,7 +82,7 @@ export async function fetchJobMaskBlob(
   }
   let response: Response;
   try {
-    response = await fetchRaw(`/api/generate/${encodeURIComponent(jobId)}/${kind}/restore`, {
+    response = await fetchRaw(generateJobMaskRestoreUrl(jobId, kind), {
       method: 'POST',
       headers: { Accept: 'image/png' },
       body: form,

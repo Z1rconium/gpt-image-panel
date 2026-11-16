@@ -1,9 +1,16 @@
 import { get } from 'svelte/store';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiFetch } from '$lib/api/client';
-import { initialPromptFormState, previewStore } from '$lib/stores/preview';
-import { MAX_CONCURRENT_SUBMISSIONS, sameJobSnapshot } from '$lib/stores/previewGroup';
+import { previewStore } from '$lib/stores/preview';
+import {
+  MAX_CONCURRENT_SUBMISSIONS,
+  attachSubmissionJob,
+  createPreviewGroup,
+  createSubmission,
+  sameJobSnapshot
+} from '$lib/stores/previewGroup';
 import { editSourceStore } from '$lib/stores/editSource';
+import { initialPromptFormState } from '$lib/utils/promptFormTypes';
 import type { GenerateJobStatus } from '$lib/api/types/jobs';
 
 vi.mock('$lib/api/client', async (importOriginal) => ({
@@ -555,5 +562,52 @@ describe('continuous generation submissions', () => {
     expect(get(previewStore).activeSubmissionCount).toBe(MAX_CONCURRENT_SUBMISSIONS);
     expect(await previewStore.generateImage(form('overflow'), { trackJob })).toBe(false);
     expect(get(previewStore).error).not.toBe('');
+  });
+
+  it('attachSubmissionJob attaches jobId and accepted status to the matching submission only', () => {
+    const group = {
+      ...createPreviewGroup('g1'),
+      submissions: [
+        createSubmission({ id: 'sub-1', operation: 'generation', prompt: 'first', expectedUnits: 1 }),
+        createSubmission({ id: 'sub-2', operation: 'generation', prompt: 'second', expectedUnits: 1 })
+      ]
+    };
+    const attachedJob = job('job-2', { status: 'queued' });
+    const updated = attachSubmissionJob(group, 'sub-2', 'job-2', attachedJob);
+    expect(updated.submissions[0]).toBe(group.submissions[0]);
+    expect(updated.submissions[1]).toMatchObject({
+      id: 'sub-2',
+      jobId: 'job-2',
+      job: attachedJob,
+      submitStatus: 'accepted',
+      error: ''
+    });
+    expect(attachSubmissionJob(updated, 'missing', 'job-x', attachedJob)).toBe(updated);
+  });
+
+  it('sameJobSnapshot checks preview-specific fields (streaming, mask/markup, unit_statuses, unit_index/result_index)', () => {
+    const base = job('job-snap', {
+      streaming: true,
+      mask_applied: true,
+      markup_applied: false,
+      unit_statuses: { '0': 'running' },
+      images: [{ image_id: 'i1', image_url: '/api/image/i1.png', filename: 'i1.png', unit_index: 0, result_index: 0 }]
+    });
+    expect(sameJobSnapshot(base, { ...base })).toBe(true);
+    expect(sameJobSnapshot(base, { ...base, streaming: false })).toBe(false);
+    expect(sameJobSnapshot(base, { ...base, mask_applied: false })).toBe(false);
+    expect(sameJobSnapshot(base, { ...base, markup_applied: true })).toBe(false);
+    expect(sameJobSnapshot(base, { ...base, unit_statuses: { '0': 'success' } })).toBe(false);
+    expect(sameJobSnapshot(job('job-snap'), job('job-snap', { unit_statuses: {} }))).toBe(false);
+    expect(sameJobSnapshot(base, {
+      ...base,
+      images: [{ ...base.images![0], unit_index: 1 }]
+    })).toBe(false);
+    expect(sameJobSnapshot(base, {
+      ...base,
+      images: [{ ...base.images![0], result_index: 1 }]
+    })).toBe(false);
+    // List-only metadata fields do not invalidate preview snapshot equality.
+    expect(sameJobSnapshot(base, { ...base, stage_timings: { total: 123 }, model: 'other-model' })).toBe(true);
   });
 });

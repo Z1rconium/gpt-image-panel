@@ -1,6 +1,5 @@
 /** Owns global job connections and requests; store state is applied by callbacks. */
-import { apiFetch } from '$lib/api/client';
-import { openJsonEventSource } from '$lib/api/events';
+import { fetchActiveGenerateJobs, openJobsEvents } from '$lib/api/jobs';
 import type { GenerateJobStatus } from '$lib/api/types/jobs';
 import { isPageVisible } from '$lib/utils/network';
 
@@ -44,7 +43,7 @@ export function createJobsFeedController(handlers: JobsFeedHandlers) {
     const seq = ++requestSeq;
     const revision = snapshotRevision;
     try {
-      const jobs = await apiFetch<GenerateJobStatus[]>('/api/generate/jobs', {}, 'loading jobs');
+      const jobs = await fetchActiveGenerateJobs();
       if (!active || epoch !== mine || seq !== requestSeq || revision !== snapshotRevision) return;
       snapshotRevision += 1;
       handlers.onSnapshot(jobs);
@@ -88,7 +87,7 @@ export function createJobsFeedController(handlers: JobsFeedHandlers) {
     activate();
     closeSource();
     const mine = epoch;
-    const next = openJsonEventSource<GenerateJobStatus[] | GenerateJobStatus>('/api/generate/jobs/events', {
+    const next = openJobsEvents({
       onEvent: ({ event, data }) => {
         if (!isCurrent()) return;
         stopPolling();
@@ -103,7 +102,7 @@ export function createJobsFeedController(handlers: JobsFeedHandlers) {
       },
       onNetworkError: handleError,
       onError: handleError
-    }, ['jobs', 'job']);
+    });
 
     function isCurrent() {
       return active && epoch === mine && source === next;

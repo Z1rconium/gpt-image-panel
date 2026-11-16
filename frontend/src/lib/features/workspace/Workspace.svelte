@@ -6,12 +6,12 @@
   import { isImage26 } from '$lib/utils/imageModels';
   import { attachMarkup, type MarkupApplyPayload } from '$lib/features/workspace/markup';
   import { createEditSession } from '$lib/features/workspace/editSession';
+  import { createGenerationSession } from '$lib/features/workspace/generationSession';
   import EditSourcePicker from '$lib/components/EditSourcePicker.svelte';
   import Header from '$lib/components/Header.svelte';
   import PreviewPanel from '$lib/components/PreviewPanel.svelte';
   import PromptForm from '$lib/components/PromptForm.svelte';
   import ToastHost from '$lib/components/ToastHost.svelte';
-  import { apiFetch } from '$lib/api/client';
   import { language, t } from '$lib/i18n';
   import type { AssistantJobDiagnoseResponse, AssistantRecommendParamsResponse } from '$lib/api/types/assistant';
   import type { GalleryEntry } from '$lib/api/types/gallery';
@@ -88,8 +88,6 @@
   let editPreviewLabel = $state('');
   let jobDiagnoses = $state<Record<string, AssistantJobDiagnoseResponse>>({});
   let optimizingPrompt = $state(false);
-  let gallerySuccessRefreshTimer: ReturnType<typeof setTimeout> | null = null;
-  const handledTerminalJobIds = new Set<string>();
 
   const hasEditSource = $derived(editSourceCount($editSourceStore) > 0);
   const hasEditMask = $derived(Boolean($editSourceStore.mask));
@@ -276,8 +274,7 @@
     const activeJob = $jobsStore.jobs[0];
     if (activeJob) {
       // Resume the newest active job as this page's preview group.
-      previewStore.openJob(activeJob);
-      trackJob(activeJob.job_id, { streaming: Boolean(activeJob.streaming), status: activeJob.status });
+      generationSession.resumeJob(activeJob);
     }
     urlSync.setReady();
     urlSync.flush();
@@ -570,61 +567,22 @@
     });
   }
 
-  function scheduleGalleryRefreshAfterSuccess() {
-    if (gallerySuccessRefreshTimer) clearTimeout(gallerySuccessRefreshTimer);
-    gallerySuccessRefreshTimer = setTimeout(() => {
-      gallerySuccessRefreshTimer = null;
-      if ($galleryStore.page !== 1) {
-        showNewGalleryImagesToast();
-        return;
-      }
-      void galleryStore.loadGallery(1, false, 'jump', { lightweight: true });
-    }, 350);
-  }
-
-  function updatePreviewFromJob(job: GenerateJobStatus) {
-    // Only the owning submission changes; every other job keeps its slots.
-    previewStore.applyJob(job);
-    if (job.status !== 'queued' && job.status !== 'running') {
-      if (handledTerminalJobIds.has(job.job_id)) return;
-      handledTerminalJobIds.add(job.job_id);
-      if (handledTerminalJobIds.size > 200) {
-        const oldestJobId = handledTerminalJobIds.values().next().value;
-        if (oldestJobId) handledTerminalJobIds.delete(oldestJobId);
-      }
-      if (jobsStore.shouldRefreshJobsAfterSubmit()) void jobsStore.loadJobs();
-      jobsStore.markHistoryStale();
-      if (job.status === 'success' || job.status === 'partial_failure') scheduleGalleryRefreshAfterSuccess();
-    }
-  }
-
-  function trackJob(jobId: string, meta?: { streaming?: boolean; status?: string }) {
-    jobsStore.trackJob(
-      jobId,
-      (job) => updatePreviewFromJob(job),
-      (message) => previewStore.failJobTracking(jobId, message),
-      previewStore.applyPreviewEvent,
-      meta
-    );
-  }
-
-  const previewCallbacks = {
-    trackJob,
-    releaseJobs: () => jobsStore.closeActiveJobSource(),
-    releaseJob: (jobId: string) => jobsStore.untrackJob(jobId),
-    get loadJobs() {
-      return jobsStore.shouldRefreshJobsAfterSubmit() ? jobsStore.loadJobs : undefined;
-    }
-  };
+  const generationSession = createGenerationSession({
+    preview: previewStore,
+    jobs: jobsStore,
+    onGalleryRefresh: () => galleryStore.loadGallery(1, false, 'jump', { lightweight: true }),
+    onShowNewGalleryToast: showNewGalleryImagesToast,
+    isGalleryFirstPage: () => $galleryStore.page === 1
+  });
 
   function generateImage(options?: SubmitOptions): Promise<boolean> {
     promptForm.normalizeQuantityForSubmit();
-    return previewStore.generateImage(promptForm.snapshot(), previewCallbacks, options);
+    return generationSession.submitGenerate(promptForm.snapshot(), options);
   }
 
   function editImage(options?: SubmitOptions): Promise<boolean> {
     promptForm.normalizeQuantityForSubmit();
-    return previewStore.editImage(promptForm.snapshot(), $editSourceStore, previewCallbacks, options);
+    return generationSession.submitEdit(promptForm.snapshot(), $editSourceStore, options);
   }
 
   async function submitPrompt(): Promise<boolean> {
@@ -877,9 +835,7 @@
   }
 
   function clearPreview() {
-    // Clearing ends display tracking only; the backend jobs keep running.
-    jobsStore.closeActiveJobSource();
-    previewStore.clearPreview();
+    generationSession.clearPreview();
   }
 
   function openGalleryEditDialog(image: GalleryEntry) {
@@ -1363,13 +1319,8 @@
         document.querySelector('[data-testid="agent-view"]')?.scrollIntoView({ block: 'start' });
       } else if (target?.kind === 'job') {
         try {
-          const job = await apiFetch<GenerateJobStatus>(`/api/generate/${encodeURIComponent(target.jobId)}`, {}, 'opening completed task');
-          jobsStore.closeActiveJobSource();
-          changeWorkspaceMode('studio');
-          previewStore.openJob(job);
-          if (job.status === 'queued' || job.status === 'running') {
-            trackJob(job.job_id, { streaming: Boolean(job.streaming), status: job.status });
-          }
+          const opened = await generationSession.openJob(target.jobId, () => changeWorkspaceMode('studio'));
+          if (!opened) return;
           await tick();
           document.getElementById('preview-panel')?.scrollIntoView({ block: 'start' });
         } catch (error) {
@@ -1432,8 +1383,7 @@
       },
       cleanup: () => {
         window.removeEventListener(OPEN_COMPLETION_EVENT, openCompletion);
-        if (gallerySuccessRefreshTimer) clearTimeout(gallerySuccessRefreshTimer);
-        gallerySuccessRefreshTimer = null;
+        generationSession.dispose();
         urlSync.destroy();
         jobsStore.cleanup();
         galleryStore.cleanup();
@@ -1600,7 +1550,7 @@
       <Panel
         conversationId={$workspaceModeStore.conversationId}
         onConversationChange={changeAgentConversation}
-        onImagesChanged={scheduleGalleryRefreshAfterSuccess}
+        onImagesChanged={generationSession.scheduleGalleryRefresh}
         onOpenGalleryImage={openLightbox}
       />
     {:else if $agentViewPanel.status === 'error'}

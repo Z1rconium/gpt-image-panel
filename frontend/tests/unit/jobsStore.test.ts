@@ -481,4 +481,31 @@ describe('global jobs feed lifecycle', () => {
     await vi.advanceTimersByTimeAsync(5000);
     expect(api.apiFetch).not.toHaveBeenCalled();
   });
+
+  it('sameJob checks list-specific fields (operation, prompt, size, model, stage_timings, image dimensions)', async () => {
+    const { sameJob } = await import('$lib/stores/jobsState');
+    const base = job('job-eq', {
+      operation: 'generation',
+      prompt: 'p1',
+      size: '1024x1024',
+      model: 'gpt-image-1.5',
+      stage_timings: { upstream: 120 },
+      images: [{ image_id: 'i1', image_url: '/api/image/i1.png', filename: 'i1.png', image_width: 1024, image_height: 1024 }]
+    });
+    expect(sameJob(base, { ...base })).toBe(true);
+    expect(sameJob(base, { ...base, operation: 'edit' })).toBe(false);
+    expect(sameJob(base, { ...base, prompt: 'p2' })).toBe(false);
+    expect(sameJob(base, { ...base, size: '512x512' })).toBe(false);
+    expect(sameJob(base, { ...base, model: 'gpt-image-2.6' })).toBe(false);
+    expect(sameJob(base, { ...base, stage_timings: { upstream: 200 } })).toBe(false);
+    expect(sameJob(job('job-eq'), job('job-eq', { stage_timings: {} }))).toBe(true);
+    expect(sameJob(base, {
+      ...base,
+      images: [{ ...base.images![0], image_width: 512 }]
+    })).toBe(false);
+    expect(sameJob(base, {
+      ...base,
+      images: [{ ...base.images![0], image_height: 512 }]
+    })).toBe(false);
+  });
 });

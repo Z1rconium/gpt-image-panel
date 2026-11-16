@@ -14,7 +14,8 @@ import {
   type EditMarkup,
   type EditSourceDiscardNotice
 } from '$lib/stores/editSource';
-import { initialPromptFormState, previewStore } from '$lib/stores/preview';
+import { previewStore } from '$lib/stores/preview';
+import { initialPromptFormState } from '$lib/utils/promptFormTypes';
 
 vi.mock('$lib/api/client', async (importOriginal) => ({
   ...(await importOriginal<typeof import('$lib/api/client')>()),

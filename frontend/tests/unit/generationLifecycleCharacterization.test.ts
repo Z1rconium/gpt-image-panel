@@ -35,7 +35,7 @@ let page: Page;
 let streams: Stream[];
 let jobsStore: typeof import('$lib/stores/jobs')['jobsStore'];
 let previewStore: typeof import('$lib/stores/preview')['previewStore'];
-let initialPromptFormState: typeof import('$lib/stores/preview')['initialPromptFormState'];
+let initialPromptFormState: typeof import('$lib/utils/promptFormTypes')['initialPromptFormState'];
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -161,7 +161,8 @@ beforeEach(async () => {
     return stream as unknown as EventSource;
   });
   ({ jobsStore } = await import('$lib/stores/jobs'));
-  ({ previewStore, initialPromptFormState } = await import('$lib/stores/preview'));
+  ({ previewStore } = await import('$lib/stores/preview'));
+  ({ initialPromptFormState } = await import('$lib/utils/promptFormTypes'));
 });
 
 afterEach(() => {

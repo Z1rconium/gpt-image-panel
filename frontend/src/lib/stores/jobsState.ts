@@ -1,4 +1,4 @@
-import type { GenerateJobStatus } from '$lib/api/types/jobs';
+import type { GenerateJobImage, GenerateJobStatus } from '$lib/api/types/jobs';
 
 export type JobsState = {
   jobs: GenerateJobStatus[];
@@ -25,64 +25,83 @@ export const initialJobsState: JobsState = {
 export const HISTORY_PAGE_SIZE = 50;
 const HISTORY_CACHE_LIMIT = 500;
 
-function sameJobImage(
-  left: NonNullable<GenerateJobStatus['images']>[number],
-  right: NonNullable<GenerateJobStatus['images']>[number]
-) {
+export function sameBaseJobImage(left: GenerateJobImage, right: GenerateJobImage): boolean {
   return (
     left.image_id === right.image_id &&
     left.image_url === right.image_url &&
-    left.filename === right.filename &&
-    left.image_width === right.image_width &&
-    left.image_height === right.image_height
+    left.filename === right.filename
   );
 }
 
-function sameJobImages(left: GenerateJobStatus['images'], right: GenerateJobStatus['images']) {
+export function sameJobImageList(
+  left: GenerateJobImage[] | undefined,
+  right: GenerateJobImage[] | undefined,
+  sameExtra: (a: GenerateJobImage, b: GenerateJobImage) => boolean
+): boolean {
+  if (left === right) return true;
   const leftImages = left || [];
   const rightImages = right || [];
   if (leftImages.length !== rightImages.length) return false;
   for (let index = 0; index < leftImages.length; index += 1) {
     const leftImage = leftImages[index];
     const rightImage = rightImages[index];
-    if (!rightImage || !sameJobImage(leftImage, rightImage)) return false;
+    if (!rightImage || !sameBaseJobImage(leftImage, rightImage) || !sameExtra(leftImage, rightImage)) {
+      return false;
+    }
   }
   return true;
 }
 
-function sameStageTimings(left: GenerateJobStatus['stage_timings'], right: GenerateJobStatus['stage_timings']) {
-  const leftTimings = left || {};
-  const rightTimings = right || {};
-  const leftKeys = Object.keys(leftTimings);
-  const rightKeys = Object.keys(rightTimings);
-  if (leftKeys.length !== rightKeys.length) return false;
+export function sameFlatRecord<T extends string | number>(
+  left: Record<string, T> | undefined,
+  right: Record<string, T> | undefined,
+  emptyMatchesUndefined = true
+): boolean {
+  if (left === right) return true;
+  if (!emptyMatchesUndefined && (!left || !right)) return !left && !right;
+  const leftEntries = left || {};
+  const rightEntries = right || {};
+  const leftKeys = Object.keys(leftEntries);
+  if (leftKeys.length !== Object.keys(rightEntries).length) return false;
   for (const key of leftKeys) {
-    if (leftTimings[key] !== rightTimings[key]) return false;
+    if (leftEntries[key] !== rightEntries[key]) return false;
   }
   return true;
 }
 
-function sameJob(left: GenerateJobStatus, right: GenerateJobStatus) {
+/** Shared top-level job fields checked by both jobs-list diffing and preview snapshots. */
+export function sameJobCore(left: GenerateJobStatus, right: GenerateJobStatus): boolean {
+  if (left === right) return true;
   return (
     left.job_id === right.job_id &&
     left.status === right.status &&
     left.stage === right.stage &&
     left.message === right.message &&
-    left.operation === right.operation &&
-    left.updated_at === right.updated_at &&
-    left.completed_at === right.completed_at &&
-    left.image_id === right.image_id &&
-    left.image_url === right.image_url &&
-    left.prompt === right.prompt &&
-    left.size === right.size &&
-    left.model === right.model &&
+    left.error === right.error &&
     left.completed_count === right.completed_count &&
     left.success_count === right.success_count &&
     left.failure_count === right.failure_count &&
+    left.image_id === right.image_id &&
+    left.image_url === right.image_url &&
     left.duration === right.duration &&
-    left.error === right.error &&
-    sameJobImages(left.images, right.images) &&
-    sameStageTimings(left.stage_timings, right.stage_timings)
+    left.completed_at === right.completed_at &&
+    left.updated_at === right.updated_at
+  );
+}
+
+export function sameJob(left: GenerateJobStatus, right: GenerateJobStatus) {
+  return (
+    sameJobCore(left, right) &&
+    left.operation === right.operation &&
+    left.prompt === right.prompt &&
+    left.size === right.size &&
+    left.model === right.model &&
+    sameJobImageList(
+      left.images,
+      right.images,
+      (a, b) => a.image_width === b.image_width && a.image_height === b.image_height
+    ) &&
+    sameFlatRecord(left.stage_timings, right.stage_timings)
   );
 }
 

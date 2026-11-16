@@ -4,6 +4,7 @@
  * ordering, de-duplication and error-isolation rules stay unit-testable.
  */
 import type { GenerateJobImage, GenerateJobStatus, GeneratePreviewEvent } from '$lib/api/types/jobs';
+import { sameFlatRecord, sameJobCore, sameJobImageList } from '$lib/stores/jobsState';
 import { filenameFromImageUrl, jobFailureMessage, thumbnailUrl } from '$lib/utils/format';
 import { isActiveJobStatus } from '$lib/utils/jobs';
 
@@ -448,58 +449,20 @@ function streamingStillRelevant(job: GenerateJobStatus, slot: StreamingPreviewSl
   return !unitStatus || isActiveJobStatus(unitStatus);
 }
 
-function sameUnitStatuses(
-  left: Record<string, string> | undefined,
-  right: Record<string, string> | undefined
-): boolean {
-  if (left === right) return true;
-  if (!left || !right) return !left && !right;
-  const leftKeys = Object.keys(left);
-  if (leftKeys.length !== Object.keys(right).length) return false;
-  return leftKeys.every((key) => left[key] === right[key]);
-}
-
-function sameJobImages(
-  left: GenerateJobImage[] | undefined,
-  right: GenerateJobImage[] | undefined
-): boolean {
-  if (left === right) return true;
-  if (!left || !right) return !left?.length && !right?.length;
-  if (left.length !== right.length) return false;
-  return left.every((item, index) => {
-    const other = right[index];
-    return (
-      item.image_id === other.image_id &&
-      item.image_url === other.image_url &&
-      item.filename === other.filename &&
-      item.unit_index === other.unit_index &&
-      item.result_index === other.result_index
-    );
-  });
-}
-
 export function sameJobSnapshot(left: GenerateJobStatus | null, right: GenerateJobStatus): boolean {
   if (left === right) return true;
   if (!left) return false;
   return (
-    left.job_id === right.job_id &&
-    left.status === right.status &&
-    left.stage === right.stage &&
-    left.message === right.message &&
-    left.error === right.error &&
-    left.completed_count === right.completed_count &&
-    left.success_count === right.success_count &&
-    left.failure_count === right.failure_count &&
-    left.image_id === right.image_id &&
-    left.image_url === right.image_url &&
-    left.duration === right.duration &&
-    left.completed_at === right.completed_at &&
-    left.updated_at === right.updated_at &&
+    sameJobCore(left, right) &&
     left.streaming === right.streaming &&
     left.mask_applied === right.mask_applied &&
     left.markup_applied === right.markup_applied &&
-    sameUnitStatuses(left.unit_statuses, right.unit_statuses) &&
-    sameJobImages(left.images, right.images)
+    sameFlatRecord(left.unit_statuses, right.unit_statuses, false) &&
+    sameJobImageList(
+      left.images,
+      right.images,
+      (a, b) => a.unit_index === b.unit_index && a.result_index === b.result_index
+    )
   );
 }
 

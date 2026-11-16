@@ -9,8 +9,8 @@
  * the global feed is unhealthy.
  */
 import { get } from 'svelte/store';
-import { ApiError, apiFetch } from '$lib/api/client';
-import { openJsonEventSource } from '$lib/api/events';
+import { ApiError } from '$lib/api/client';
+import { fetchGenerateJob, openGenerateJobEvents } from '$lib/api/jobs';
 import { t } from '$lib/i18n';
 import { isActiveJobStatus } from '$lib/utils/jobs';
 import { isPageVisible } from '$lib/utils/network';
@@ -136,11 +136,7 @@ export function createTrackedJobsController() {
     const epoch = tracker.epoch;
     tracker.pollToken = token;
     try {
-      const job = await apiFetch<GenerateJobStatus>(
-        `/api/generate/${encodeURIComponent(tracker.jobId)}`,
-        {},
-        'loading job'
-      );
+      const job = await fetchGenerateJob(tracker.jobId, 'loading job');
       if (!isCurrent(tracker, epoch) || tracker.pollToken !== token) return;
       await apply(tracker, job);
       if (!isCurrent(tracker, epoch)) return;
@@ -172,36 +168,32 @@ export function createTrackedJobsController() {
   function openSource(tracker: Tracker) {
     if (tracker.source) return;
     const epoch = tracker.epoch;
-    const source = openJsonEventSource<GenerateJobStatus | GeneratePreviewEvent>(
-      `/api/generate/${encodeURIComponent(tracker.jobId)}/events`,
-      {
-        onEvent: ({ event, data }) => {
-          if (!isCurrent(tracker, epoch) || tracker.source !== source) return;
-          if (event === 'preview') {
-            const previewEvent = data as GeneratePreviewEvent;
-            if (previewEvent.job_id !== tracker.jobId) return;
-            tracker.handlers.onPreview?.(previewEvent);
-            return;
-          }
-          const jobData = data as GenerateJobStatus;
-          if (jobData.job_id !== tracker.jobId) return;
-          tracker.healthy = true;
-          clearTimer(tracker);
-          void apply(tracker, jobData);
-        },
-        onNetworkError: () => {
-          if (!isCurrent(tracker, epoch) || tracker.source !== source) return;
-          tracker.healthy = false;
-          startPolling(tracker);
-        },
-        onError: () => {
-          if (!isCurrent(tracker, epoch) || tracker.source !== source) return;
-          closeSource(tracker);
-          startPolling(tracker);
+    const source = openGenerateJobEvents(tracker.jobId, {
+      onEvent: ({ event, data }) => {
+        if (!isCurrent(tracker, epoch) || tracker.source !== source) return;
+        if (event === 'preview') {
+          const previewEvent = data as GeneratePreviewEvent;
+          if (previewEvent.job_id !== tracker.jobId) return;
+          tracker.handlers.onPreview?.(previewEvent);
+          return;
         }
+        const jobData = data as GenerateJobStatus;
+        if (jobData.job_id !== tracker.jobId) return;
+        tracker.healthy = true;
+        clearTimer(tracker);
+        void apply(tracker, jobData);
       },
-      ['job', 'preview']
-    );
+      onNetworkError: () => {
+        if (!isCurrent(tracker, epoch) || tracker.source !== source) return;
+        tracker.healthy = false;
+        startPolling(tracker);
+      },
+      onError: () => {
+        if (!isCurrent(tracker, epoch) || tracker.source !== source) return;
+        closeSource(tracker);
+        startPolling(tracker);
+      }
+    });
     tracker.source = source;
   }
 

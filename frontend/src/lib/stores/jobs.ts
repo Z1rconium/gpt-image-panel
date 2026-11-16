@@ -1,5 +1,9 @@
 import { get, writable } from 'svelte/store';
-import { apiFetch } from '$lib/api/client';
+import {
+  cancelGenerateJob,
+  clearGenerateJobHistory,
+  fetchGenerateJobHistory
+} from '$lib/api/jobs';
 import { observeJobStatusChange } from '$lib/utils/completionNotifications';
 import type { GeneratePreviewEvent, GenerateJobStatus } from '$lib/api/types/jobs';
 import { createJobsFeedController } from './jobsFeed';
@@ -75,7 +79,7 @@ function createJobsStore() {
         params.set('before_job_id', cursorJob.job_id);
       }
       if (failedOnly) params.set('failed_only', 'true');
-      const historyJobs = await apiFetch<GenerateJobStatus[]>(`/api/generate/jobs?${params.toString()}`, {}, 'loading job history');
+      const historyJobs = await fetchGenerateJobHistory(params);
       if (seq !== historyRequestSeq) return;
       update((current) => {
         const mergedJobs = append ? mergeHistoryJobs(current.historyJobs, historyJobs) : historyJobs;
@@ -146,7 +150,7 @@ function createJobsStore() {
       historyNeedsRefresh: false
     }));
     try {
-      await apiFetch('/api/generate/jobs/history', { method: 'DELETE' }, 'clearing job history');
+      await clearGenerateJobHistory();
       if (seq !== historyRequestSeq) return;
       update((current) => ({
         ...current,
@@ -177,9 +181,7 @@ function createJobsStore() {
   async function cancelSelected() {
     const ids = [...state.selectedIds];
     await Promise.all(
-      ids.map((jobId) =>
-        apiFetch(`/api/generate/${encodeURIComponent(jobId)}`, { method: 'DELETE' }, 'cancelling job').catch(() => null)
-      )
+      ids.map((jobId) => cancelGenerateJob(jobId).catch(() => null))
     );
     update((current) => ({ ...current, selectedIds: new Set() }));
     await loadJobs();

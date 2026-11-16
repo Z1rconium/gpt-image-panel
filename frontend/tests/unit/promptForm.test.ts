@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { GalleryEntry } from '$lib/api/types/gallery';
 import type { GenerateJobStatus } from '$lib/api/types/jobs';
-import { initialPromptFormState, type PromptFormState } from '$lib/stores/preview';
+import { initialPromptFormState, type PromptFormState } from '$lib/utils/promptFormTypes';
 import {
   galleryEntryToEditForm,
   galleryEntryToPromptForm,
