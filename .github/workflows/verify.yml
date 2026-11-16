@@ -69,9 +69,17 @@ jobs:
           exit 1
 
   e2e:
-    name: Agent and settings browser tests
+    name: Browser tests (${{ matrix.shard }})
     runs-on: ubuntu-24.04
     timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard: core
+            specs: "agent access-settings"
+          - shard: workspace
+            specs: "markup-editor image-26 prompt-submit jobs-edit gallery-collections edit-mask"
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v6
@@ -96,5 +104,5 @@ jobs:
           done
           echo "::error::playwright install failed after 3 attempts"
           exit 1
-      - name: Agent, branches, search, access and settings specs
-        run: npm --prefix frontend run test:e2e -- agent access-settings
+      - name: Run Playwright shard (${{ matrix.shard }})
+        run: npm --prefix frontend run test:e2e -- ${{ matrix.specs }}

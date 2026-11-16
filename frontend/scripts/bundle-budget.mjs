@@ -46,7 +46,9 @@ const BUDGETS = {
   // upgrade); homepage JS drops by about 16 KiB gzip in the same upgrade.
   // 14.5 -> 15.0 KiB: AI Assistant and Prompt Optimizer unified disabled UI
   // styling across workspace controls (+100 B gzip).
-  mainCssGzipBytes: 15.0 * 1024,
+  // 15.0 -> 16.0 KiB: Batch 2 submission badge / already-added picker states
+  // headroom (from ~22 B remaining).
+  mainCssGzipBytes: 16.0 * 1024,
   oglGzipBytes: 39.4 * 1024,
   oglReduction: 0.2
 };
