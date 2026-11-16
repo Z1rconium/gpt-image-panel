@@ -417,13 +417,16 @@ async def _verify_restore_layer_source(
     aggregate = await run_db_operation(
         aggregate_image_job_units, job_id, metric_name="restore_generate_job_sources"
     )
+    sources = [
+        source
+        for unit in aggregate.get("units", [])
+        for source in unit.get("edit_sources") or []
+    ]
     primary = next(
-        (
-            source
-            for unit in aggregate.get("units", [])
-            for source in unit.get("edit_sources") or []
-            if source.get("role", "image") == "image"
-        ),
+        (source for source in sources if source.get("role", "image") == "image"),
+        None,
+    ) or next(
+        (source for source in sources if source.get("role") == "reference"),
         None,
     )
     expected = primary.get("raw_sha256") if primary else None

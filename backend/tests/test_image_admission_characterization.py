@@ -1264,11 +1264,11 @@ def test_generate_model_option_rule_precedence(client):
 
 
 # --------------------------------------------------------------------------- #
-# H. Latent role="reference" restore-layer behavior (pins current 409)        #
+# H. Reference-sourced primary restore-layer verification (C1-S8 fix)         #
 # --------------------------------------------------------------------------- #
 
 
-def test_reference_only_edit_pins_current_409_on_layer_restore(client, monkeypatch):
+def test_reference_only_edit_restores_layer_when_gallery_id_matches(client, monkeypatch):
     _install_generic_edit_stub(monkeypatch)
     gallery_mutations.add_to_gallery_sync(
         image_id="ref-only-primary",
@@ -1289,21 +1289,29 @@ def test_reference_only_edit_pins_current_409_on_layer_restore(client, monkeypat
     masked_job = _wait_for_job(client, masked.json()["job_id"])
     assert masked_job["status"] == "success"
     assert masked_job["mask_applied"] is True
-    assert client.get(f"/api/generate/{masked_job['job_id']}/mask").status_code == 200
+    mask_resp = client.get(f"/api/generate/{masked_job['job_id']}/mask")
+    assert mask_resp.status_code == 200
 
     units = aggregate_image_job_units(masked_job["job_id"])["units"]
     assert units[0]["edit_sources"][0]["role"] == "reference"
 
-    # Current behavior: _verify_restore_layer_source filters edit_sources by role == "image",
-    # so restoring mask for a reference-only edit returns 409.
+    # C1-S8: _verify_restore_layer_source recognizes role="reference" when no
+    # role="image" primary is present, verifying gallery_image_id + sha256.
     restore_mask_by_id = client.post(
         f"/api/generate/{masked_job['job_id']}/mask/restore",
         data={"gallery_image_id": "ref-only-primary"},
     )
-    assert restore_mask_by_id.status_code == 409
-    assert restore_mask_by_id.json()["detail"] == "Original edit source identity is unavailable"
+    assert restore_mask_by_id.status_code == 200
+    assert restore_mask_by_id.content == mask_resp.content
 
-    # Markup edit with reference_image_id only pins the same 409 behavior.
+    wrong_id = client.post(
+        f"/api/generate/{masked_job['job_id']}/mask/restore",
+        data={"gallery_image_id": "other-image"},
+    )
+    assert wrong_id.status_code == 409
+    assert wrong_id.json()["detail"] == "Edit source does not match this job"
+
+    # Markup edit with reference_image_id only also restores on matching gallery_image_id.
     marked = client.post(
         "/api/edits",
         data={
@@ -1317,11 +1325,12 @@ def test_reference_only_edit_pins_current_409_on_layer_restore(client, monkeypat
     marked_job = _wait_for_job(client, marked.json()["job_id"])
     assert marked_job["status"] == "success"
     assert marked_job["markup_applied"] is True
-    assert client.get(f"/api/generate/{marked_job['job_id']}/markup").status_code == 200
+    markup_resp = client.get(f"/api/generate/{marked_job['job_id']}/markup")
+    assert markup_resp.status_code == 200
 
     restore_markup_by_id = client.post(
         f"/api/generate/{marked_job['job_id']}/markup/restore",
         data={"gallery_image_id": "ref-only-primary"},
     )
-    assert restore_markup_by_id.status_code == 409
-    assert restore_markup_by_id.json()["detail"] == "Original edit source identity is unavailable"
+    assert restore_markup_by_id.status_code == 200
+    assert restore_markup_by_id.content == markup_resp.content
