@@ -1,5 +1,6 @@
+"""Gallery archive import parsing, validation, and streaming record iteration."""
+
 import json
-from typing import BinaryIO
 import os
 import re
 import tempfile
@@ -7,22 +8,15 @@ import uuid
 import zipfile
 from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, BinaryIO
 
-from ..runtime.blocking import run_file_operation
-
-from ..core.errors import InvalidRequestError
-from ..schemas.gallery import _normalize_asset_alias, _normalize_collection_name
 from ..core import settings as config
-from ..core.utils import utc_now
+from ..core.errors import InvalidRequestError
 from ..core.generated_media import validate_generated_image_bytes as validate_image_bytes
 from ..core.media import IMAGE_FILE_EXTENSIONS, image_content_type_for_filename
-
-# Archive admission is independent of raster-only edit uploads.
-IMAGE_UPLOAD_EXTENSIONS = IMAGE_FILE_EXTENSIONS
-IMAGE_UPLOAD_CONTENT_TYPES = {ext: image_content_type_for_filename("image" + ext) for ext in IMAGE_FILE_EXTENSIONS}
-
-GalleryZipProgressCallback = Callable[[dict[str, Any]], None]
+from ..core.utils import utc_now
+from ..runtime.blocking import run_file_operation
+from ..schemas.gallery import _normalize_asset_alias, _normalize_collection_name
 from .gallery_archive_shared import (
     IMPORT_FILENAME_DEDUPE_SUFFIX_BYTES,
     ImportZipManifest,
@@ -32,6 +26,12 @@ from .gallery_archive_shared import (
     import_max_uncompressed_bytes,
     max_upload_bytes,
 )
+
+# Archive admission is independent of raster-only edit uploads.
+IMAGE_UPLOAD_EXTENSIONS = IMAGE_FILE_EXTENSIONS
+IMAGE_UPLOAD_CONTENT_TYPES = {ext: image_content_type_for_filename("image" + ext) for ext in IMAGE_FILE_EXTENSIONS}
+
+GalleryZipProgressCallback = Callable[[dict[str, Any]], None]
 
 def sanitize_import_filename(filename: str, fallback_ext: str = ".png") -> str:
     name = Path(filename or "").name
@@ -442,6 +442,8 @@ def read_archive_collections(zip_path: Path) -> list[dict[str, Any]]:
                 raw_collections = []
                 for record in _iter_ndjson_records(zf):
                     if record.get("type") == "collection":
+                        if len(raw_collections) >= config.IMPORT_MAX_COLLECTIONS:
+                            raise InvalidRequestError("Import metadata contains too many collections")
                         raw_collections.append(record.get("collection"))
                     elif record.get("type") == "image" and isinstance(record.get("image"), dict):
                         if len(source_ids) >= config.IMPORT_MAX_ENTRIES:
@@ -455,6 +457,8 @@ def read_archive_collections(zip_path: Path) -> list[dict[str, Any]]:
         raise InvalidRequestError("Import file must be a valid ZIP") from exc
     if not isinstance(raw_collections, list):
         raise InvalidRequestError("Import collections must be a list")
+    if len(raw_collections) > config.IMPORT_MAX_COLLECTIONS:
+        raise InvalidRequestError("Import metadata contains too many collections")
     nonempty_ids = [image_id for image_id in source_ids if image_id]
     if raw_collections and len(nonempty_ids) != len(set(nonempty_ids)):
         raise InvalidRequestError("Import metadata has ambiguous image IDs")

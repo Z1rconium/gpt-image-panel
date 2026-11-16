@@ -117,7 +117,7 @@ def _write_thumbnail_from_path(
     if filename.lower().endswith(".svg"):
         try:
             raster = render_svg_thumbnail(image_path.read_bytes(), config.THUMBNAIL_MAX_SIDE)
-        except (ValueError, OSError, subprocess.SubprocessError) as exc:
+        except (ValueError, OSError, RuntimeError, subprocess.SubprocessError) as exc:
             logger.warning("Failed SVG thumbnail for %s: %s", filename, exc)
             return False
         return _render_thumbnail(lambda: Image.open(io.BytesIO(raster)), filename, thumbnail_path)

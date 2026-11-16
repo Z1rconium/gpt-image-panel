@@ -491,3 +491,43 @@ def test_archive_501_images_and_ordered_asset_pack_roundtrip(client):
     restored = next(c for c in client.get('/api/gallery/collections').json() if c['asset_alias'] == 'bulk_1')
     references = client.get(f"/api/gallery/collections/{restored['id']}/references").json()['images']
     assert [entry['prompt'] for entry in references] == list(reversed(ids))
+
+
+def test_archive_rejects_more_than_collection_limit(client):
+    metadata = {
+        'images': [],
+        'collections': [
+            {'name': f'Limit {n}', 'asset_alias': None, 'image_ids': []} for n in range(1001)
+        ],
+    }
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, 'w') as zf:
+        zf.writestr('metadata.json', json.dumps(metadata))
+    response = _post_import_archive(client, archive.getvalue())
+    assert response.status_code == 400
+    assert 'collections' in response.json()['detail'].lower()
+
+
+def test_restore_gallery_collections_deduplicates_duplicate_names_linearly(client):
+    from backend.app.repositories.gallery.collections import restore_gallery_collections
+
+    duplicate_batch = [
+        {'name': 'Same Pack', 'asset_alias': 'same_alias', 'image_ids': [], 'is_default': False}
+        for _ in range(1000)
+    ]
+    restore_gallery_collections(duplicate_batch, {})
+    rows = client.get('/api/gallery/collections').json()
+    assert len(rows) == 1000
+    assert rows[0]['name'] == 'Same Pack'
+    assert rows[1]['name'] == 'Same Pack (1)'
+    assert rows[-1]['name'] == 'Same Pack (999)'
+    assert rows[-1]['asset_alias'] == 'same_alias_999'
+
+
+def test_unicode_casefold_alias_and_name_uniqueness(client):
+    first = _create_collection(client, 'Café')
+    assert client.patch(f"/api/gallery/collections/{first['id']}", json={'asset_alias': 'Étoile'}).status_code == 200
+    assert client.post('/api/gallery/collections', json={'name': 'café'}).status_code == 409
+    second = _create_collection(client, 'Other')
+    dup_alias = client.patch(f"/api/gallery/collections/{second['id']}", json={'asset_alias': 'étoile'})
+    assert dup_alias.status_code == 409

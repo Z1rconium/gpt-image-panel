@@ -82,19 +82,21 @@ def _get_collection_on_conn(conn: sqlite3.Connection, collection_id: str) -> dic
 
 
 def _name_taken_on_conn(conn: sqlite3.Connection, name: str, *, exclude_id: str | None = None) -> bool:
-    row = conn.execute(
-        "SELECT id FROM gallery_collections WHERE name = ? COLLATE NOCASE AND id != ?",
-        (name, exclude_id or ""),
-    ).fetchone()
-    return row is not None
+    target = name.casefold()
+    rows = conn.execute(
+        "SELECT name FROM gallery_collections WHERE id != ?",
+        (exclude_id or "",),
+    ).fetchall()
+    return any(str(row["name"]).casefold() == target for row in rows)
 
 
 def _alias_taken_on_conn(conn: sqlite3.Connection, alias: str, *, exclude_id: str | None = None) -> bool:
-    row = conn.execute(
-        "SELECT id FROM gallery_collections WHERE asset_alias = ? COLLATE NOCASE AND id != ?",
-        (alias, exclude_id or ""),
-    ).fetchone()
-    return row is not None
+    target = alias.casefold()
+    rows = conn.execute(
+        "SELECT asset_alias FROM gallery_collections WHERE asset_alias IS NOT NULL AND id != ?",
+        (exclude_id or "",),
+    ).fetchall()
+    return any(str(row["asset_alias"]).casefold() == target for row in rows)
 
 
 def has_asset_collections() -> bool:
@@ -464,22 +466,31 @@ def restore_gallery_collections(collections: list[dict[str, Any]], image_ids: di
             existing = conn.execute('SELECT name, asset_alias FROM gallery_collections').fetchall()
             names = {row['name'].casefold() for row in existing}
             aliases = {row['asset_alias'].casefold() for row in existing if row['asset_alias']}
+            next_name_suffix: dict[str, int] = {}
+            next_alias_suffix: dict[str, int] = {}
             has_default = bool(conn.execute('SELECT 1 FROM gallery_collections WHERE is_default = 1 LIMIT 1').fetchone())
             for collection in collections:
                 original_name = collection['name']
                 name = original_name
-                suffix_number = 1
-                while name.casefold() in names:
-                    suffix = f' ({suffix_number})'
-                    name = original_name[:60-len(suffix)].rstrip() + suffix
-                    suffix_number += 1
+                name_key = original_name.casefold()
+                if name_key in names:
+                    suffix_number = next_name_suffix.get(name_key, 1)
+                    while name.casefold() in names:
+                        suffix = f' ({suffix_number})'
+                        name = original_name[:60-len(suffix)].rstrip() + suffix
+                        suffix_number += 1
+                    next_name_suffix[name_key] = suffix_number
                 original_alias = collection['asset_alias']
                 alias = original_alias
-                suffix_number = 1
-                while alias and alias.casefold() in aliases:
-                    suffix = f'_{suffix_number}'
-                    alias = original_alias[:32-len(suffix)] + suffix
-                    suffix_number += 1
+                if alias:
+                    alias_key = alias.casefold()
+                    if alias_key in aliases:
+                        suffix_number = next_alias_suffix.get(alias_key, 1)
+                        while alias.casefold() in aliases:
+                            suffix = f'_{suffix_number}'
+                            alias = original_alias[:32-len(suffix)] + suffix
+                            suffix_number += 1
+                        next_alias_suffix[alias_key] = suffix_number
                 names.add(name.casefold())
                 if alias:
                     aliases.add(alias.casefold())

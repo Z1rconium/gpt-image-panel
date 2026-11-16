@@ -1212,3 +1212,41 @@ def test_ai_assistant_gallery_batch_jobs_are_cleaned_by_gallery_job_gc(client):
 
     assert [job["job_id"] for job in stale] == ["assistant-batch-stale-success"]
     assert coordination_repo.get_gallery_job("ai_analyze", "assistant-batch-stale-success") is None
+
+
+def test_ai_assistant_gallery_batch_skips_svg_and_rejects_svg_only(client, monkeypatch):
+    settings = client.get("/api/settings").json()
+    assert client.post("/api/settings", json=_assistant_runtime_payload(settings)).status_code == 200
+
+    assert _fake_gallery_entry("batch-raster-1", "raster", "1024x1024", "batch-raster-1.png") is not None
+    gallery_mutations.add_to_gallery_sync(
+        image_id="batch-svg-1",
+        prompt="svg",
+        size="40x20",
+        filename="batch-svg-1.svg",
+        metadata={"output_format": "svg"},
+        image_bytes=b'<svg xmlns="http://www.w3.org/2000/svg" width="40" height="20"><rect width="40" height="20"/></svg>',
+    )
+
+    svg_only = client.post("/api/assistant/gallery/batch/analyze", json={"ids": ["batch-svg-1"]})
+    assert svg_only.status_code == 400
+
+    async def fake_request_assistant_json(**kwargs):
+        return (
+            {
+                "description": "ok",
+                "prompt": "ok prompt",
+                "analysis": {"subjects": [], "style": "", "composition": "", "lighting": "", "colors": []},
+                "warnings": [],
+            },
+            "assistant-vision-model",
+            5,
+        )
+
+    monkeypatch.setattr(assistant_router.assistant_client, "request_assistant_json", fake_request_assistant_json)
+    mixed = client.post("/api/assistant/gallery/batch/analyze", json={"ids": ["batch-raster-1", "batch-svg-1"]})
+    assert mixed.status_code == 202, mixed.text
+    job = _wait_for_gallery_batch_analyze_job(client, mixed.json()["job_id"])
+    assert job["requested_count"] == 1
+    assert job["analyzed_count"] == 1
+    assert job["failed_count"] == 0

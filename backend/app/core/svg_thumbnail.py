@@ -16,8 +16,17 @@ PNGSurface.convert(bytestring=sys.stdin.buffer.read(), unsafe=False,
     url_fetcher=deny, output_width=int(sys.argv[1]), output_height=int(sys.argv[2]),
     write_to=sys.stdout.buffer)
 '''
-    result = subprocess.run(
-        [sys.executable, '-c', script, str(max(1, round(width * scale))), str(max(1, round(height * scale)))],
-        input=data, capture_output=True, timeout=10, check=True,
-    )
+    try:
+        result = subprocess.run(
+            [sys.executable, '-c', script, str(max(1, round(width * scale))), str(max(1, round(height * scale)))],
+            input=data, capture_output=True, timeout=10, check=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        raw_stderr = exc.stderr.decode('utf-8', errors='replace') if isinstance(exc.stderr, (bytes, bytearray)) else str(exc.stderr or '')
+        lines = [line.strip() for line in raw_stderr.splitlines() if line.strip()]
+        tail = ' | '.join(lines[-5:])[-400:]
+        detail = f"SVG thumbnail subprocess exited with {exc.returncode}"
+        if tail:
+            detail = f"{detail}: {tail}"
+        raise RuntimeError(detail) from exc
     return result.stdout

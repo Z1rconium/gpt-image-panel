@@ -44,6 +44,12 @@ def test_svg_atomic_save_thumbnail_and_download(client):
     assert original.read_bytes() == SVG
     assert 'safe-original.svg' in scan_image_files()
     thumbnail = create_thumbnail_temp_from_path(original, original.name)
+    if thumbnail is None:
+        import subprocess
+        import sys
+        probe = subprocess.run([sys.executable, '-c', 'import cairosvg.surface'], capture_output=True)
+        if probe.returncode != 0:
+            pytest.skip('libcairo is unavailable for SVG thumbnail rendering')
     assert thumbnail is not None
     _, thumb = thumbnail
     with Image.open(thumb) as image:
@@ -224,3 +230,42 @@ def test_svg_transient_parse_failure_is_not_cached(monkeypatch):
     with pytest.raises(ValueError):
         svg_validation.validate_svg_bytes(data)
     assert svg_validation.validate_svg_bytes(data) == (47, 29)
+
+
+def test_validate_image_size_animated_keeps_pixel_ceiling():
+    from backend.app.schemas.generation import validate_image_size
+
+    assert validate_image_size('64x64', animated=True) == '64x64'
+    with pytest.raises(ValueError, match='8294400'):
+        validate_image_size('3840x3840', animated=True)
+
+
+def test_render_svg_thumbnail_surfaces_stderr_detail(monkeypatch):
+    import subprocess
+    from backend.app.core import svg_thumbnail
+
+    def fail_run(*args, **kwargs):
+        raise subprocess.CalledProcessError(1, ['python'], stderr=b'Traceback...\nOSError: no library called "cairo-2" was found\n')
+
+    monkeypatch.setattr(svg_thumbnail.subprocess, 'run', fail_run)
+    with pytest.raises(RuntimeError, match='cairo-2'):
+        svg_thumbnail.render_svg_thumbnail(SVG, 128)
+
+
+def test_validate_edit_markup_alpha_fast_path_and_copy_mask_file(tmp_path, client):
+    from backend.app.repositories.image_files import copy_mask_file
+    from backend.app.services.edit_markup import validate_edit_markup
+
+    transparent_path = tmp_path / 'markup.png'
+    opaque_path = tmp_path / 'opaque.png'
+    rgba = Image.new('RGBA', (8, 8), (255, 0, 0, 0))
+    rgba.save(transparent_path, 'PNG')
+    opaque = Image.new('RGBA', (8, 8), (255, 0, 0, 255))
+    opaque.save(opaque_path, 'PNG')
+
+    validate_edit_markup(transparent_path, 8, 8)
+    with pytest.raises(ValueError, match='transparent'):
+        validate_edit_markup(opaque_path, 8, 8)
+
+    copied = copy_mask_file(transparent_path, 'copy-test-markup.png')
+    assert copied.read_bytes() == transparent_path.read_bytes()

@@ -35,7 +35,6 @@ from ..schemas.assistant import (
     AssistantGalleryImageResponse,
 )
 
-logger = logging.getLogger(__name__)
 from .claim_loop import fail_open_precheck, run_claim_loop
 from .assistant_runtime import (
     AIAnalyzeJobLeaseLost,
@@ -55,6 +54,8 @@ from .gallery_common import AI_ANALYZE_JOB_KIND, _gallery_filters_from_selection
 from .gallery_job_payloads import _gallery_ai_analyze_payload as _ai_analyze_payload
 from .gallery_job_sse import stream_gallery_job
 from .lease_renewal import renew_lease_until_lost
+
+logger = logging.getLogger(__name__)
 
 AI_ANALYZE_DISPATCH_INTERVAL_SECONDS = 1.0
 AI_ANALYZE_DISPATCH_MAX_IDLE_BACKOFF_SECONDS = 5.0
@@ -96,6 +97,12 @@ async def _analyze_gallery_image_with_lease_renewal(
                     await task
 
 
+def _is_svg_gallery_entry(entry: Any) -> bool:
+    filename = str(getattr(entry, "filename", "") or "").lower()
+    output_format = str(getattr(entry, "output_format", "") or "").lower()
+    return filename.endswith(".svg") or output_format == "svg"
+
+
 async def batch_analyze_gallery(req: AssistantGalleryBatchRequest):
     if req.selection_token:
         filters = await _gallery_filters_from_selection_token(req.selection_token)
@@ -119,12 +126,16 @@ async def batch_analyze_gallery(req: AssistantGalleryBatchRequest):
             raise DomainError(f"Gallery AI analysis is limited to {config.AI_ASSISTANT_BATCH_MAX_IMAGES} images per batch", status_code=413)
         entries = await run_db_operation(get_gallery_entries_by_ids, ids)
         found_ids = {entry.id for entry in entries}
-        requested_ids = [image_id for image_id in ids if image_id in found_ids]
+        raster_ids = {entry.id for entry in entries if not _is_svg_gallery_entry(entry)}
+        if entries and not raster_ids:
+            raise DomainError("SVG images do not support AI analysis", status_code=400)
+        requested_ids = [image_id for image_id in ids if image_id in raster_ids]
         if not requested_ids:
             raise NotFoundError("Gallery entries not found")
+        svg_count = len(found_ids) - len(raster_ids)
         payload = {"ids": requested_ids, "target_language": req.target_language}
-        job_requested_count = len(ids)
-        missing_count = max(0, len(ids) - len(requested_ids))
+        job_requested_count = max(len(requested_ids), len(ids) - svg_count)
+        missing_count = max(0, len(ids) - len(found_ids))
     await _resolve_runtime_async(vision=True)
     job = await run_db_operation(reserve_gallery_job_capacity,
         job=_build_ai_analyze_job(

@@ -26,8 +26,10 @@ def validate_image_size(size: str, *, animated: bool = False) -> str:
         raise ValueError("size width and height must be multiples of 16")
     if aspect > 3:
         raise ValueError("size aspect ratio must not exceed 3:1")
-    if not animated and (pixels < 655360 or pixels > 8294400):
-        raise ValueError("size total pixels must be between 655360 and 8294400")
+    if pixels > 8294400:
+        raise ValueError("size total pixels must not exceed 8294400")
+    if not animated and pixels < 655360:
+        raise ValueError("size total pixels must be at least 655360")
 
     return f"{width}x{height}"
 
