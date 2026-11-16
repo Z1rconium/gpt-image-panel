@@ -9,6 +9,7 @@ import {
   providerConfigBlocksSave,
   r2SyncIntervalHoursValue,
   secretDraftValue,
+  unifiedAiAssistantEnabled,
   type SettingsDraft
 } from '$lib/features/settings/draft';
 import type { ApiPreset, SettingsResponse } from '$lib/api/types/settings';
@@ -169,6 +170,25 @@ describe('hasSettingsChanges', () => {
     };
     expect(hasSettingsChanges(draft, customSettings, activePreset)).toBe(false);
     expect(hasSettingsChanges({ ...draft, r2AccessKeyId: 'sec_changed' }, customSettings, activePreset)).toBe(true);
+  });
+
+  it('is not dirty for default settings where ai_assistant is enabled and prompt_optimizer is disabled', () => {
+    const defaultMismatchSettings = {
+      ...settings,
+      ai_assistant: { ...settings.ai_assistant, enabled: true },
+      prompt_optimizer: { ...settings.prompt_optimizer, enabled: false }
+    } as unknown as SettingsResponse;
+    const unified = unifiedAiAssistantEnabled(defaultMismatchSettings);
+    expect(unified).toBe(true);
+    const draft = {
+      ...pristineDraft(),
+      aiAssistantEnabled: unified,
+      promptOptimizerEnabled: unified
+    };
+    expect(hasSettingsChanges(draft, defaultMismatchSettings, activePreset)).toBe(false);
+    const payload = buildSettingsPayload(draft, defaultMismatchSettings);
+    expect(payload.ai_assistant?.enabled).toBe(true);
+    expect(payload.prompt_optimizer?.enabled).toBe(true);
   });
 });
 

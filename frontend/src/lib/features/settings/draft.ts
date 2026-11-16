@@ -118,6 +118,10 @@ export function secretDraftValue(
   return hasSecret ? MASKED_API_KEY_VALUE : '';
 }
 
+export function unifiedAiAssistantEnabled(settings: SettingsResponse | null | undefined): boolean {
+  return Boolean(settings?.ai_assistant?.enabled);
+}
+
 export function hasSettingsChanges(
   draft: SettingsDraft,
   settings: SettingsResponse | null,
@@ -148,7 +152,6 @@ export function hasSettingsChanges(
     providerConfigChanged(draft.providerConfigText, activePreset?.provider_config) ||
     proxyValue !== currentProxyMask ||
     webhookValue !== currentWebhookMask ||
-    draft.aiAssistantEnabled !== Boolean(settings?.ai_assistant?.enabled && settings?.prompt_optimizer?.enabled) ||
     draft.promptOptimizerApiUrl !== (settings?.prompt_optimizer?.api_url || '') ||
     draft.promptOptimizerModel !== (settings?.prompt_optimizer?.model || 'gpt-4o-mini') ||
     draft.promptOptimizerTimeoutSeconds !== (settings?.prompt_optimizer?.timeout_seconds || 60) ||
@@ -159,7 +162,7 @@ export function hasSettingsChanges(
         settings?.prompt_optimizer?.api_key_env_var,
         settings?.prompt_optimizer?.api_key_secret_id
       ) ||
-    draft.aiAssistantEnabled !== Boolean(settings?.ai_assistant?.enabled) ||
+    draft.aiAssistantEnabled !== unifiedAiAssistantEnabled(settings) ||
     draft.aiAssistantVisionModel !==
       (settings?.ai_assistant?.vision_model || settings?.prompt_optimizer?.model || 'gpt-4o-mini') ||
     draft.agentEnabled !== Boolean(settings?.ai_assistant?.agent_enabled) ||

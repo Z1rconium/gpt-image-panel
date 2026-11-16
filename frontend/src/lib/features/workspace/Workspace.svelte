@@ -176,7 +176,6 @@
   const aiAssistantAvailable = $derived(
     Boolean(
       aiAssistantSettings?.enabled &&
-        optimizerSettings?.enabled &&
         promptOptimizerConfigAvailable &&
         (aiAssistantSettings.vision_model.trim() || optimizerSettings?.model.trim())
     )

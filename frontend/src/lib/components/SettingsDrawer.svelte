@@ -17,6 +17,7 @@
     r2BackupPayload,
     r2SyncIntervalHoursValue,
     secretDraftValue,
+    unifiedAiAssistantEnabled,
     type SettingsDraft
   } from '$lib/features/settings/draft';
   import Overlay from '$lib/components/Overlay.svelte';
@@ -201,7 +202,7 @@
     draft.promptGuard = activePreset.prompt_guard ?? settings.prompt_guard ?? false;
     draft.upstreamSocks5Proxy = settings.has_upstream_socks5_proxy ? settings.upstream_socks5_proxy_masked : '';
     draft.webhookUrl = settings.has_webhook_url ? settings.webhook_url_masked : '';
-    const unifiedAiEnabled = Boolean(settings.ai_assistant?.enabled && settings.prompt_optimizer?.enabled);
+    const unifiedAiEnabled = unifiedAiAssistantEnabled(settings);
     draft.promptOptimizerEnabled = unifiedAiEnabled;
     draft.promptOptimizerApiUrl = settings.prompt_optimizer?.api_url || '';
     draft.promptOptimizerModel = settings.prompt_optimizer?.model || 'gpt-4o-mini';
