@@ -381,4 +381,3 @@ def test_cancel_deletes_temp_files_when_running_unit_finishes_before_tx(
     assert parent is not None and parent["status"] == "cancelled"
     assert image_jobs_repo.get_pending_edit_source_bytes() == 0
     assert source_path.exists() is False
-

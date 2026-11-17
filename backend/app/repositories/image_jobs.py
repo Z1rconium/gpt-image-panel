@@ -1293,45 +1293,6 @@ def clear_generate_job_history() -> int:
     return deleted
 
 
-def mark_active_generate_jobs_interrupted() -> int:
-    _ensure_database()
-    now = utc_now()
-    with _connect() as conn:
-        with _transaction(conn):
-            placeholders = ", ".join("?" for _ in ACTIVE_GENERATE_JOB_STATUSES)
-            rows = conn.execute(
-                f"""
-                SELECT job_id
-                FROM generate_jobs
-                WHERE status IN ({placeholders})
-                """,
-                tuple(sorted(ACTIVE_GENERATE_JOB_STATUSES)),
-            ).fetchall()
-            if not rows:
-                return 0
-            job_ids = [row["job_id"] for row in rows]
-            _release_reservation(conn, job_ids)
-            conn.executemany(
-                "DELETE FROM image_job_units WHERE parent_job_id = ?",
-                [(job_id,) for job_id in job_ids],
-            )
-
-            conn.execute(
-                f"""
-                UPDATE generate_jobs
-                SET status = 'interrupted',
-                    stage = 'interrupted',
-                    message = 'Job interrupted by server restart',
-                    error = 'Job interrupted by server restart',
-                    completed_at = ?,
-                    updated_at = ?
-                WHERE status IN ({placeholders})
-                """,
-                (now, now, *tuple(sorted(ACTIVE_GENERATE_JOB_STATUSES))),
-            )
-            return len(rows)
-
-
 def trim_generate_jobs(max_jobs: int):
     _ensure_database()
     job_ids: list[str] = []

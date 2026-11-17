@@ -550,25 +550,6 @@ def test_upstream_errors_are_reported_as_detailed_job_status(client, monkeypatch
     assert job["error"] == "upstream quota exhausted"
 
 
-def test_active_jobs_mark_interrupted_with_detailed_status(client):
-    image_jobs_repo.upsert_generate_job(
-        {
-            "job_id": "interrupted-job",
-            "status": "running",
-            "stage": "waiting_for_api",
-            "message": "Waiting for upstream API response",
-            "created_at": "2026-05-18T12:00:00Z",
-            "updated_at": "2026-05-18T12:00:01Z",
-        }
-    )
-
-    assert image_jobs_repo.mark_active_generate_jobs_interrupted() == 1
-    job = image_jobs_repo.get_generate_job("interrupted-job")
-    assert job is not None
-    assert job["status"] == "interrupted"
-    assert job["stage"] == "interrupted"
-
-
 def test_job_stage_timings_and_optional_metrics(client):
     disabled = client.get("/api/metrics")
     assert disabled.status_code == 404

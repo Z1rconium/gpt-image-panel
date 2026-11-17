@@ -40,13 +40,18 @@ jobs:
             backend/app/services/agent_tool_executor.py
             backend/app/services/agent_turn_errors.py
             backend/app/services/agent_turns.py
+            backend/app/services/edit_source_types.py
+            backend/app/services/gallery_job_kinds.py
+            backend/app/services/generate_job_sse.py
+            backend/app/services/image_admission.py
             backend/app/services/image_job_aggregate.py
+            backend/app/services/image_job_terminal.py
             backend/app/services/image_preset_snapshot.py
             backend/app/services/image_unit_execution.py
             backend/app/services/image_unit_session.py
-            backend/app/services/job_executor.py
             backend/app/services/preset_package.py
             backend/app/services/presets.py
+            backend/app/services/sse_feed.py
         run: |
           # shellcheck disable=SC2086
           pipx run --spec ruff==0.16.10 ruff check --select F401,F841 $FILES
