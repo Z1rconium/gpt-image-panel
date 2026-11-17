@@ -1,8 +1,10 @@
 """NodeImage upload jobs: per-image uploads with a shared concurrency slot
 and an auth probe that stops the batch on the first rejection."""
 
+from .gallery_job_kinds import register_gallery_job_runner
 from .gallery_job_shared import (
     _gallery_job_lease_expires_at,
+    terminal_update,
 )
 
 import asyncio
@@ -470,21 +472,17 @@ async def _run_nodeimage_upload_job(job: dict) -> None:
         await _publish_nodeimage_job(
             job_id,
             lease_owner,
-            {
-                "status": terminal_status,
-                "stage": "completed" if terminal_status != "cancelled" else "cancelled",
-                "message": terminal_message,
-                "progress": 100,
-                "requested_count": requested_count,
-                "processed_count": len(results),
-                "uploaded_count": uploaded_count,
-                "failed_count": failed_count,
-                "completed_at": utc_now(),
-                "lease_owner": None,
-                "lease_expires_at": None,
-                "payload": payload,
-                "error": None,
-            },
+            terminal_update(
+                terminal_status,
+                stage="completed" if terminal_status != "cancelled" else "cancelled",
+                message=terminal_message,
+                progress=100,
+                requested_count=requested_count,
+                processed_count=len(results),
+                uploaded_count=uploaded_count,
+                failed_count=failed_count,
+                payload=payload,
+            ),
         )
     except _NodeImageLeaseLost:
         logger.info("NodeImage upload job %s stopped after losing its lease", job_id)
@@ -508,21 +506,18 @@ async def _run_nodeimage_upload_job(job: dict) -> None:
             await _publish_nodeimage_job(
                 job_id,
                 lease_owner,
-                {
-                    "status": "error",
-                    "stage": "error",
-                    "message": "NodeImage upload failed",
-                    "progress": 100,
-                    "requested_count": requested_count,
-                    "processed_count": len(payload["results"]),
-                    "uploaded_count": uploaded_count,
-                    "failed_count": failed_count,
-                    "completed_at": utc_now(),
-                    "lease_owner": None,
-                    "lease_expires_at": None,
-                    "payload": payload,
-                    "error": remaining_error,
-                },
+                terminal_update(
+                    "error",
+                    stage="error",
+                    message="NodeImage upload failed",
+                    progress=100,
+                    error=remaining_error,
+                    requested_count=requested_count,
+                    processed_count=len(payload["results"]),
+                    uploaded_count=uploaded_count,
+                    failed_count=failed_count,
+                    payload=payload,
+                ),
             )
         except _NodeImageLeaseLost:
             logger.info("NodeImage upload job %s stopped after losing its lease", job_id)
@@ -531,3 +526,6 @@ async def _run_nodeimage_upload_job(job: dict) -> None:
         if not renew_task.done():
             renew_task.cancel()
         await asyncio.gather(renew_task, return_exceptions=True)
+
+
+register_gallery_job_runner(NODEIMAGE_UPLOAD_JOB_KIND, _run_nodeimage_upload_job)

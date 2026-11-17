@@ -53,6 +53,7 @@ from .assistant_slots import AI_ASSISTANT_SLOT_RETRY_SECONDS
 from .assistant_vision import _analyze_gallery_image
 from .gallery_common import AI_ANALYZE_JOB_KIND, _gallery_filters_from_selection_token
 from .gallery_job_payloads import _gallery_ai_analyze_payload as _ai_analyze_payload
+from .gallery_job_shared import terminal_update
 from .gallery_job_sse import stream_gallery_job
 from .lease_renewal import renew_lease_until_lost
 
@@ -452,20 +453,17 @@ async def _run_ai_analyze_job(job: dict[str, Any]) -> None:
         await _update_ai_analyze_job(
             job_id,
             lease_owner,
-            {
-                "status": status,
-                "stage": "completed" if status == "success" else "error",
-                "message": complete_message if status == "success" else "Gallery AI analysis finished with skipped images",
-                "progress": 100,
-                "processed_count": processed,
-                "exported_count": analyzed,
-                "missing_count": missing,
-                "failed_count": failed,
-                "completed_at": utc_now(),
-                "lease_owner": None,
-                "lease_expires_at": None,
-                "error": None if status == "success" else f"{missing} image(s) missing, {failed} image(s) failed",
-            },
+            terminal_update(
+                status,
+                stage="completed" if status == "success" else "error",
+                message=complete_message if status == "success" else "Gallery AI analysis finished with skipped images",
+                progress=100,
+                error=None if status == "success" else f"{missing} image(s) missing, {failed} image(s) failed",
+                processed_count=processed,
+                exported_count=analyzed,
+                missing_count=missing,
+                failed_count=failed,
+            ),
         )
     except AIAnalyzeJobLeaseLost:
         logger.warning("Could not complete gallery AI analysis job %s after losing its lease", job_id)

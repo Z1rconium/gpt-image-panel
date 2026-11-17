@@ -4,12 +4,14 @@ per-kind gallery job runners."""
 import asyncio
 import logging
 import time
+from typing import Any
 
 from .gallery_job_sse import (
     _publish_gallery_job_sse,
 )
 
 
+from ..core.utils import utc_now
 from ..repositories.db.execution import run_db_operation, run_db_operation_in_current_thread
 from ..runtime.state import utc_lease_expires_at
 from ..repositories.coordination import (
@@ -74,12 +76,6 @@ async def _sleep_while_renewing_background_lease(
             return False
 
 
-def _claim_counted_gallery_kinds(kind: str) -> tuple[str, ...]:
-    if kind == "export":
-        return ("export", "export_direct")
-    return (kind,)
-
-
 async def _publish_gallery_job(job_id: str, updates: dict) -> dict | None:
     job = await run_db_operation(
         update_gallery_job,
@@ -128,3 +124,29 @@ def _publish_gallery_job_from_worker(job_id: str, updates: dict) -> dict | None:
         updates,
         metric_name="update_gallery_job",
     )
+
+
+def terminal_update(
+    status: str,
+    *,
+    stage: str,
+    message: str,
+    progress: int | None = None,
+    error: str | None = None,
+    completed_at: str | None = None,
+    **fields: Any,
+) -> dict[str, Any]:
+    """Build a lease-cleared terminal state update dict for a gallery job."""
+    updates: dict[str, Any] = {
+        "status": status,
+        "stage": stage,
+        "message": message,
+        "error": error,
+        "completed_at": completed_at or utc_now(),
+        "lease_owner": None,
+        "lease_expires_at": None,
+        **fields,
+    }
+    if progress is not None:
+        updates["progress"] = progress
+    return updates

@@ -23,6 +23,7 @@ from backend.app.integrations.nodeimage import client as nodeimage_client
 from backend.app.repositories.coordination import create_gallery_job, get_gallery_job
 from backend.app.schemas.gallery import GalleryEntry
 from backend.app.services import gallery_jobs
+from backend.app.services import gallery_maintenance
 from backend.app.services import nodeimage_upload_jobs
 
 
@@ -625,8 +626,8 @@ def test_nodeimage_batch_recovery_skips_persisted_completed_items(client, monkey
     job.update(
         status="running",
         stage="uploading",
-        lease_owner="recovery-worker",
-        lease_expires_at=gallery_jobs._gallery_job_lease_expires_at(),
+        lease_owner="crashed-worker",
+        lease_expires_at="2020-01-01T00:00:00+00:00",
         payload={"ids": ids, "results": [first_result], "cancel_requested": False},
     )
     stored_job = create_gallery_job(**job)
@@ -639,13 +640,12 @@ def test_nodeimage_batch_recovery_skips_persisted_completed_items(client, monkey
         )
 
     monkeypatch.setattr(nodeimage_upload_jobs, "upload_image_file", fake_upload)
-    asyncio.run(gallery_jobs._run_nodeimage_upload_job(stored_job))
-    recovered = get_gallery_job("nodeimage_upload", stored_job["job_id"])
+    gallery_maintenance.kick_gallery_job_dispatchers()
+    recovered = _wait_for_nodeimage_job(client, stored_job["job_id"])
 
-    assert recovered is not None
     assert recovered["status"] == "success"
     assert calls == [f"{ids[1]}.png"]
-    assert [item["image_id"] for item in recovered["payload"]["results"]] == ids
+    assert [item["image_id"] for item in recovered["results"]] == ids
 
 
 def test_nodeimage_upload_job_stops_cleanly_after_losing_its_lease(client, monkeypatch, caplog):
@@ -658,7 +658,7 @@ def test_nodeimage_upload_job_stops_cleanly_after_losing_its_lease(client, monke
         status="running",
         stage="uploading",
         lease_owner="current-worker",
-        lease_expires_at=gallery_jobs._gallery_job_lease_expires_at(),
+        lease_expires_at="2099-01-01T00:00:00+00:00",
     )
     stored_job = create_gallery_job(**job)
     # A different lease_owner simulates another worker having reclaimed the
@@ -674,7 +674,7 @@ def test_nodeimage_upload_job_stops_cleanly_after_losing_its_lease(client, monke
 
     monkeypatch.setattr(nodeimage_upload_jobs, "upload_image_file", fake_upload)
     with caplog.at_level(logging.INFO):
-        asyncio.run(gallery_jobs._run_nodeimage_upload_job(stale_job))
+        asyncio.run(gallery_jobs.run_gallery_job_once("nodeimage_upload", stale_job))
 
     assert "stopped after losing its lease" in caplog.text
     current = get_gallery_job("nodeimage_upload", stored_job["job_id"])

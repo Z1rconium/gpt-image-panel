@@ -99,3 +99,41 @@ def test_stream_gallery_job_emits_initial_and_terminal_update(tmp_path):
 
     frames = asyncio.run(scenario())
     assert [frame["data"]["status"] for frame in frames] == ["running", "success"]
+
+
+def test_stream_gallery_job_resolves_kind_descriptor_defaults(tmp_path):
+    _configure_runtime(tmp_path)
+    ts0 = utc_now()
+    job_id = "gallery-stream-descriptor-1"
+    coordination_repo.create_gallery_job(
+        job_id=job_id,
+        kind="sync",
+        status="success",
+        stage="completed",
+        message="Done",
+        progress=100,
+        total_count=1,
+        compared_count=1,
+        uploaded_count=1,
+        created_at=ts0,
+        updated_at=ts0,
+        payload={"dry_run": False},
+    )
+
+    async def scenario():
+        async def is_disconnected():
+            return False
+
+        body = await gallery_job_sse.stream_gallery_job(
+            kind="sync",
+            job_id=job_id,
+            client_ip="127.0.0.1",
+            is_disconnected=is_disconnected,
+        )
+        return await _collect_stream(body)
+
+    frames = asyncio.run(scenario())
+    assert len(frames) == 1
+    assert frames[0]["event"] == "sync"
+    assert frames[0]["data"]["status"] == "success"
+    assert frames[0]["data"]["uploaded_count"] == 1

@@ -1,6 +1,7 @@
 """Gallery export jobs: archive building, direct-download slots, and the
 export runner (including its R2 mirror when backup is configured)."""
 
+from .gallery_job_kinds import register_gallery_job_runner
 from .gallery_job_shared import (
     _direct_export_slot_expires_at,
     _gallery_job_lease_expires_at,
@@ -8,6 +9,7 @@ from .gallery_job_shared import (
     _publish_gallery_job,
     _publish_gallery_job_from_worker,
     _publish_gallery_job_progress_from_worker,
+    terminal_update,
 )
 
 import asyncio
@@ -163,15 +165,12 @@ async def _gallery_zip_response(
         except Exception as e:
             if direct_job_id and not cleanup_direct_job:
                 await mark_direct_job(
-                    {
-                        "status": "error",
-                        "stage": "error",
-                        "message": "Failed to prepare ZIP archive",
-                        "error": str(e),
-                        "completed_at": utc_now(),
-                        "lease_owner": None,
-                        "lease_expires_at": None,
-                    }
+                    terminal_update(
+                        "error",
+                        stage="error",
+                        message="Failed to prepare ZIP archive",
+                        error=str(e),
+                    )
                 )
             if cleanup_direct_job and direct_job_id:
                 _release_gallery_export_direct_slot(direct_job_id)
@@ -209,51 +208,41 @@ async def _gallery_zip_response(
             if direct_job_id:
                 _publish_gallery_job_from_worker(
                     direct_job_id,
-                    {
-                        "status": "success",
-                        "stage": "ready",
-                        "message": "ZIP archive streamed",
-                        "progress": 100,
-                        "processed_count": result.requested_count,
-                        "requested_count": result.requested_count,
-                        "exported_count": result.exported_count,
-                        "missing_count": result.missing_count,
-                        "bytes_total": result.bytes_total,
-                        "bytes_written": result.bytes_total,
-                        "completed_at": utc_now(),
-                        "lease_owner": None,
-                        "lease_expires_at": None,
-                        "error": None,
-                    }
+                    terminal_update(
+                        "success",
+                        stage="ready",
+                        message="ZIP archive streamed",
+                        progress=100,
+                        processed_count=result.requested_count,
+                        requested_count=result.requested_count,
+                        exported_count=result.exported_count,
+                        missing_count=result.missing_count,
+                        bytes_total=result.bytes_total,
+                        bytes_written=result.bytes_total,
+                    ),
                 )
         except (GeneratorExit, asyncio.CancelledError):
             if direct_job_id and not cleanup_direct_job:
                 _publish_gallery_job_from_worker(
                     direct_job_id,
-                    {
-                        "status": "error",
-                        "stage": "error",
-                        "message": "Direct ZIP download interrupted",
-                        "error": "Client disconnected before ZIP streaming completed",
-                        "completed_at": utc_now(),
-                        "lease_owner": None,
-                        "lease_expires_at": None,
-                    }
+                    terminal_update(
+                        "error",
+                        stage="error",
+                        message="Direct ZIP download interrupted",
+                        error="Client disconnected before ZIP streaming completed",
+                    ),
                 )
             raise
         except Exception as e:
             if direct_job_id and not cleanup_direct_job:
                 _publish_gallery_job_from_worker(
                     direct_job_id,
-                    {
-                        "status": "error",
-                        "stage": "error",
-                        "message": "Failed to stream ZIP archive",
-                        "error": str(e),
-                        "completed_at": utc_now(),
-                        "lease_owner": None,
-                        "lease_expires_at": None,
-                    }
+                    terminal_update(
+                        "error",
+                        stage="error",
+                        message="Failed to stream ZIP archive",
+                        error=str(e),
+                    ),
                 )
             raise
         finally:
@@ -458,23 +447,19 @@ async def _run_gallery_export_job(job: dict) -> None:
         )
         await _publish_gallery_job(
             job_id,
-            {
-                "status": "success",
-                "stage": "ready",
-                "message": "ZIP archive ready",
-                "progress": 100,
-                "processed_count": result.requested_count,
-                "requested_count": result.requested_count,
-                "exported_count": result.exported_count,
-                "missing_count": result.missing_count,
-                "bytes_total": result.bytes_total,
-                "bytes_written": result.bytes_total,
-                "download_url": f"/api/gallery/export-jobs/{job_id}/download",
-                "completed_at": utc_now(),
-                "lease_owner": None,
-                "lease_expires_at": None,
-                "error": None,
-            },
+            terminal_update(
+                "success",
+                stage="ready",
+                message="ZIP archive ready",
+                progress=100,
+                processed_count=result.requested_count,
+                requested_count=result.requested_count,
+                exported_count=result.exported_count,
+                missing_count=result.missing_count,
+                bytes_total=result.bytes_total,
+                bytes_written=result.bytes_total,
+                download_url=f"/api/gallery/export-jobs/{job_id}/download",
+            ),
         )
     except asyncio.CancelledError:
         raise
@@ -483,13 +468,13 @@ async def _run_gallery_export_job(job: dict) -> None:
         _unlink_trusted_gallery_job_path(job.get("path"), kind="export", job_id=job_id)
         await _publish_gallery_job(
             job_id,
-            {
-                "status": "error",
-                "stage": "error",
-                "message": "Failed to build ZIP archive",
-                "error": str(e),
-                "completed_at": utc_now(),
-                "lease_owner": None,
-                "lease_expires_at": None,
-            },
+            terminal_update(
+                "error",
+                stage="error",
+                message="Failed to build ZIP archive",
+                error=str(e),
+            ),
         )
+
+
+register_gallery_job_runner("export", _run_gallery_export_job)

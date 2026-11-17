@@ -1,10 +1,12 @@
 """Gallery sync jobs: reconciling SQLite rows with Cloudflare R2."""
 
 from ..repositories.db.execution import run_db_operation
+from .gallery_job_kinds import register_gallery_job_runner
 from .gallery_job_shared import (
     _gallery_job_lease_expires_at,
     _gallery_job_progress_throttler,
     _publish_gallery_job,
+    terminal_update,
 )
 
 import asyncio
@@ -170,18 +172,14 @@ async def _run_gallery_sync_job(job: dict) -> None:
         payload.pop("start_after_filename", None)
         await _publish_gallery_job(
             job_id,
-            {
-                "status": "success",
-                "stage": "completed",
-                "message": "R2 gallery sync dry run complete" if dry_run else "R2 gallery sync complete",
-                "progress": 100,
-                "error": None,
-                "completed_at": utc_now(),
-                "lease_owner": None,
-                "lease_expires_at": None,
-                "payload": payload,
+            terminal_update(
+                "success",
+                stage="completed",
+                message="R2 gallery sync dry run complete" if dry_run else "R2 gallery sync complete",
+                progress=100,
+                payload=payload,
                 **result.to_updates(),
-            },
+            ),
         )
     except asyncio.CancelledError:
         raise
@@ -189,29 +187,26 @@ async def _run_gallery_sync_job(job: dict) -> None:
         logger.warning("Gallery R2 sync job %s finished with upload errors", job_id)
         await _publish_gallery_job(
             job_id,
-            {
-                "status": "error",
-                "stage": "error",
-                "message": "R2 gallery sync failed",
-                "progress": 100,
-                "error": str(e),
-                "completed_at": utc_now(),
-                "lease_owner": None,
-                "lease_expires_at": None,
+            terminal_update(
+                "error",
+                stage="error",
+                message="R2 gallery sync failed",
+                progress=100,
+                error=str(e),
                 **e.result.to_updates(),
-            },
+            ),
         )
     except Exception as e:
         logger.warning("Gallery R2 sync job %s failed", job_id, exc_info=True)
         await _publish_gallery_job(
             job_id,
-            {
-                "status": "error",
-                "stage": "error",
-                "message": "R2 gallery sync failed",
-                "error": str(e),
-                "completed_at": utc_now(),
-                "lease_owner": None,
-                "lease_expires_at": None,
-            },
+            terminal_update(
+                "error",
+                stage="error",
+                message="R2 gallery sync failed",
+                error=str(e),
+            ),
         )
+
+
+register_gallery_job_runner("sync", _run_gallery_sync_job)

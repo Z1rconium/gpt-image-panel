@@ -4,6 +4,7 @@ Subscribers are per worker process; updates written by another worker are
 picked up by polling each job's updated_at edge (see job_events)."""
 
 import asyncio
+from collections.abc import Collection
 
 from ..core import settings as config
 from ..core.errors import NotFoundError
@@ -20,9 +21,10 @@ from .gallery_common import (
     GALLERY_JOB_SSE_QUEUE_MAXSIZE,
     PRIVATE_GALLERY_CACHE_CONTROL,
 )
-from .gallery_job_payloads import (
-    _gallery_job_event_name,
-    _gallery_job_payload,
+from .gallery_job_kinds import (
+    gallery_job_event_name,
+    gallery_job_payload,
+    get_gallery_job_kind,
 )
 from .job_events import serialize_sse_event
 from .sse_feed import KeyedFeed, SseConnection
@@ -52,8 +54,8 @@ def gallery_feed(kind: str) -> KeyedFeed:
         job = await run_db_operation(get_gallery_job, kind, job_id)
         return (
             {
-                "event": _gallery_job_event_name(kind),
-                "data": _gallery_job_payload(kind, job),
+                "event": gallery_job_event_name(kind),
+                "data": gallery_job_payload(kind, job),
             }
             if job
             else {"event": "_missing", "data": None}
@@ -87,8 +89,8 @@ def _publish_gallery_job_sse(job: dict) -> None:
     gallery_feed(kind).publish(
         job_id,
         {
-            "event": _gallery_job_event_name(kind),
-            "data": _gallery_job_payload(kind, job),
+            "event": gallery_job_event_name(kind),
+            "data": gallery_job_payload(kind, job),
         },
     )
 
@@ -99,14 +101,24 @@ async def stream_gallery_job(
     job_id: str,
     client_ip: str,
     is_disconnected,
-    event_name: str,
-    terminal_statuses: set[str],
-    payload_builder,
-    not_found_detail: str,
+    event_name: str | None = None,
+    terminal_statuses: Collection[str] | None = None,
+    payload_builder=None,
+    not_found_detail: str | None = None,
 ) -> StreamedBody:
+    descriptor = get_gallery_job_kind(kind)
+    resolved_event_name = event_name if event_name is not None else descriptor.event_name
+    resolved_terminal_statuses = (
+        terminal_statuses if terminal_statuses is not None else descriptor.terminal_statuses
+    )
+    resolved_payload_builder = payload_builder if payload_builder is not None else descriptor.payload
+    resolved_not_found_detail = (
+        not_found_detail if not_found_detail is not None else descriptor.not_found_detail
+    )
+
     job = await run_db_operation(get_gallery_job, kind, job_id)
     if not job:
-        raise NotFoundError(not_found_detail)
+        raise NotFoundError(resolved_not_found_detail)
 
     conn = await SseConnection.open(client_ip, is_disconnected=is_disconnected)
     feed = gallery_feed(kind)
@@ -118,11 +130,11 @@ async def stream_gallery_job(
                 current_job = await run_db_operation(get_gallery_job, kind, job_id)
                 if not current_job:
                     return
-                payload = payload_builder(current_job)
+                payload = resolved_payload_builder(current_job)
                 last_updated_at = str(payload.get("updated_at") or "")
                 conn.mark_sent()
-                yield serialize_sse_event(event_name, payload)
-                if payload.get("status") in terminal_statuses:
+                yield serialize_sse_event(resolved_event_name, payload)
+                if payload.get("status") in resolved_terminal_statuses:
                     return
 
                 while True:
@@ -139,7 +151,7 @@ async def stream_gallery_job(
                         continue
                     if event.get("event") == "_missing":
                         break
-                    if event.get("event") != event_name:
+                    if event.get("event") != resolved_event_name:
                         continue
                     payload = event.get("data")
                     if not isinstance(payload, dict):
@@ -149,8 +161,8 @@ async def stream_gallery_job(
                         continue
                     last_updated_at = updated_at
                     conn.mark_sent()
-                    yield serialize_sse_event(event_name, payload)
-                    if payload.get("status") in terminal_statuses:
+                    yield serialize_sse_event(resolved_event_name, payload)
+                    if payload.get("status") in resolved_terminal_statuses:
                         break
         finally:
             await conn.close()

@@ -46,19 +46,13 @@ from ...schemas.gallery import (
 from ...schemas.nodeimage import NodeImageUploadJobStatus
 from ...services.gallery_common import (
     EXPORT_FILE_STREAM_CHUNK_SIZE,
-    GALLERY_SYNC_TERMINAL_STATUSES,
+    NODEIMAGE_UPLOAD_JOB_KIND,
+    PRIVATE_GALLERY_CACHE_CONTROL,
     TRACKED_EXPORT_STREAMING_BYTES_THRESHOLD,
     _gallery_filters_from_selection_token,
-    collection_filename_slug,
-)
-from ...services.gallery_common import (
-    GALLERY_EXPORT_TERMINAL_STATUSES,
-    GALLERY_IMPORT_TERMINAL_STATUSES,
-    NODEIMAGE_UPLOAD_JOB_KIND,
-    NODEIMAGE_UPLOAD_TERMINAL_STATUSES,
-    PRIVATE_GALLERY_CACHE_CONTROL,
     _resolve_trusted_gallery_job_path,
     _unlink_trusted_gallery_job_path,
+    collection_filename_slug,
 )
 from ...services.gallery_job_payloads import (
     _gallery_export_payload,
@@ -76,7 +70,10 @@ from ...services.gallery_export_jobs import (
     _reserve_gallery_export_direct_slot,
 )
 from ...services.gallery_import_jobs import _create_reserved_gallery_import_job
-from ...services.gallery_job_shared import _direct_export_slot_expires_at
+from ...services.gallery_job_shared import (
+    _direct_export_slot_expires_at,
+    terminal_update,
+)
 from ...services.gallery_sync_jobs import _create_reserved_gallery_sync_job
 from ...services.gallery_maintenance import kick_gallery_job_dispatchers
 
@@ -173,10 +170,6 @@ async def stream_gallery_export_job(job_id: str, request: Request):
         job_id=job_id,
         client_ip=auth.get_client_ip(request),
         is_disconnected=request.is_disconnected,
-        event_name="export",
-        terminal_statuses=GALLERY_EXPORT_TERMINAL_STATUSES,
-        payload_builder=_gallery_export_payload,
-        not_found_detail="Gallery export job not found",
     )
     return streaming_response(body)
 
@@ -188,10 +181,6 @@ async def stream_gallery_direct_export_job(job_id: str, request: Request):
         job_id=job_id,
         client_ip=auth.get_client_ip(request),
         is_disconnected=request.is_disconnected,
-        event_name="export",
-        terminal_statuses=GALLERY_EXPORT_TERMINAL_STATUSES,
-        payload_builder=_gallery_export_payload,
-        not_found_detail="Direct gallery export job not found",
     )
     return streaming_response(body)
 
@@ -304,10 +293,6 @@ async def stream_gallery_sync_job(job_id: str, request: Request):
         job_id=job_id,
         client_ip=auth.get_client_ip(request),
         is_disconnected=request.is_disconnected,
-        event_name="sync",
-        terminal_statuses=GALLERY_SYNC_TERMINAL_STATUSES,
-        payload_builder=_gallery_sync_payload,
-        not_found_detail="Gallery sync job not found",
     )
     return streaming_response(body)
 
@@ -327,10 +312,6 @@ async def stream_gallery_import_job(job_id: str, request: Request):
         job_id=job_id,
         client_ip=auth.get_client_ip(request),
         is_disconnected=request.is_disconnected,
-        event_name="import",
-        terminal_statuses=GALLERY_IMPORT_TERMINAL_STATUSES,
-        payload_builder=_gallery_import_payload,
-        not_found_detail="Gallery import job not found",
     )
     return streaming_response(body)
 
@@ -350,10 +331,6 @@ async def stream_gallery_nodeimage_upload_job(job_id: str, request: Request):
         job_id=job_id,
         client_ip=auth.get_client_ip(request),
         is_disconnected=request.is_disconnected,
-        event_name="nodeimage_upload",
-        terminal_statuses=NODEIMAGE_UPLOAD_TERMINAL_STATUSES,
-        payload_builder=_nodeimage_upload_payload,
-        not_found_detail="NodeImage upload job not found",
     )
     return streaming_response(body)
 
@@ -394,15 +371,12 @@ async def download_all_images(export_job_id: str = Query(...)):
     if gallery_count == 0 and not await run_db_operation(has_asset_collections):
         await run_db_operation(update_gallery_job,
             export_job_id,
-            {
-                "status": "error",
-                "stage": "error",
-                "message": "No images in gallery",
-                "error": "No images in gallery",
-                "completed_at": utc_now(),
-                "lease_owner": None,
-                "lease_expires_at": None,
-            },
+            terminal_update(
+                "error",
+                stage="error",
+                message="No images in gallery",
+                error="No images in gallery",
+            ),
         )
         raise HTTPException(status_code=404, detail="No images in gallery")
 

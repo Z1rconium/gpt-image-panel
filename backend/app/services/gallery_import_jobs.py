@@ -1,10 +1,12 @@
 """Gallery import jobs: ingesting an uploaded archive and its metadata."""
 
 from ..repositories.db.execution import run_db_operation
+from .gallery_job_kinds import register_gallery_job_runner
 from .gallery_job_shared import (
     _gallery_job_lease_expires_at,
     _gallery_job_progress_throttler,
     _publish_gallery_job,
+    terminal_update,
 )
 
 import asyncio
@@ -150,20 +152,16 @@ async def _run_gallery_import_job(job: dict) -> None:
         skipped_count = max(last_counts["missing_count"], processed_count - imported_count)
         await _publish_gallery_job(
             job_id,
-            {
-                "status": "success",
-                "stage": "completed",
-                "message": "Gallery import complete",
-                "progress": 100,
-                "requested_count": max(requested_count, processed_count),
-                "processed_count": processed_count,
-                "exported_count": imported_count,
-                "missing_count": skipped_count,
-                "completed_at": utc_now(),
-                "lease_owner": None,
-                "lease_expires_at": None,
-                "error": None,
-            },
+            terminal_update(
+                "success",
+                stage="completed",
+                message="Gallery import complete",
+                progress=100,
+                requested_count=max(requested_count, processed_count),
+                processed_count=processed_count,
+                exported_count=imported_count,
+                missing_count=skipped_count,
+            ),
         )
         kick_thumbnail_dispatcher()
     except asyncio.CancelledError:
@@ -173,33 +171,30 @@ async def _run_gallery_import_job(job: dict) -> None:
         logger.warning("Gallery import job %s failed: %s", job_id, detail)
         await _publish_gallery_job(
             job_id,
-            {
-                "status": "error",
-                "stage": "error",
-                "message": "Gallery import failed",
-                "progress": 100,
-                "error": detail,
-                "completed_at": utc_now(),
-                "lease_owner": None,
-                "lease_expires_at": None,
-            },
+            terminal_update(
+                "error",
+                stage="error",
+                message="Gallery import failed",
+                progress=100,
+                error=detail,
+            ),
         )
     except Exception as e:
         logger.warning("Gallery import job %s failed", job_id, exc_info=True)
         await _publish_gallery_job(
             job_id,
-            {
-                "status": "error",
-                "stage": "error",
-                "message": "Gallery import failed",
-                "progress": 100,
-                "error": str(e),
-                "completed_at": utc_now(),
-                "lease_owner": None,
-                "lease_expires_at": None,
-            },
+            terminal_update(
+                "error",
+                stage="error",
+                message="Gallery import failed",
+                progress=100,
+                error=str(e),
+            ),
         )
     finally:
         _unlink_trusted_gallery_job_path(job.get("path"), kind="import", job_id=job_id)
         if reservation_id:
             await run_db_operation(release_import_upload_reservation, reservation_id)
+
+
+register_gallery_job_runner("import", _run_gallery_import_job)

@@ -81,10 +81,13 @@ def test_gallery_import_job_rejects_untrusted_db_path(client):
         payload={},
     )
 
-    asyncio.run(gallery_jobs._run_gallery_import_job(coordination_repo.get_gallery_job("import", "polluted-import-path")))
+    gallery_maintenance.kick_gallery_job_dispatchers()
+    finished = _wait_for_gallery_import_job(client, "polluted-import-path")
 
     assert outside_path.exists()
     assert gallery_queries.get_gallery_entry("import-1") is None
+    assert finished["status"] == "error"
+    assert finished["error"] == "Import archive path is invalid"
     job = coordination_repo.get_gallery_job("import", "polluted-import-path")
     assert job["status"] == "error"
     assert job["error"] == "Import archive path is invalid"

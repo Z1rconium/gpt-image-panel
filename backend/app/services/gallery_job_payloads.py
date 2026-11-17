@@ -8,7 +8,6 @@ from urllib.parse import quote
 
 
 from ..schemas.nodeimage import NodeImageBatchUploadItem
-from .gallery_common import NODEIMAGE_UPLOAD_JOB_KIND
 
 
 def _gallery_export_payload(job: dict) -> dict:
@@ -142,18 +141,6 @@ def _nodeimage_upload_payload(job: dict) -> dict:
     }
 
 
-def _gallery_job_event_name(kind: str) -> str:
-    if kind == "sync":
-        return "sync"
-    if kind == "import":
-        return "import"
-    if kind == "ai_analyze":
-        return "analysis"
-    if kind == NODEIMAGE_UPLOAD_JOB_KIND:
-        return "nodeimage_upload"
-    return "export"
-
-
 def _gallery_ai_analyze_payload(job: dict) -> dict:
     return {
         "job_id": job.get("job_id"),
@@ -170,15 +157,3 @@ def _gallery_ai_analyze_payload(job: dict) -> dict:
         "updated_at": job.get("updated_at"),
         "error": job.get("error"),
     }
-
-
-def _gallery_job_payload(kind: str, job: dict) -> dict:
-    if kind == "sync":
-        return _gallery_sync_payload(job)
-    if kind == "import":
-        return _gallery_import_payload(job)
-    if kind == "ai_analyze":
-        return _gallery_ai_analyze_payload(job)
-    if kind == NODEIMAGE_UPLOAD_JOB_KIND:
-        return _nodeimage_upload_payload(job)
-    return _gallery_export_payload(job)
