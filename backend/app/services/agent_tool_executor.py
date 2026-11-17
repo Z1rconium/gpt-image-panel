@@ -255,6 +255,7 @@ class AgentToolExecutor:
                         "This older turn has no image preset configuration snapshot. Start a new turn to create images."
                     )
                 common["api_preset_id"] = str(pinned_preset)
+            origin = job_queue.AgentOrigin(self.run.turn_id, self.run.conversation_id, preset_snapshot)
             if ref_rows:
                 request = EditRequest(**common)
                 for ref in ref_rows:
@@ -262,8 +263,7 @@ class AgentToolExecutor:
                 await self.run.check_cancel()
                 job = await self.queue_owned(job_queue.queue_edit_job(
                     req=request, image_sources=sources,
-                    agent_turn_id=self.run.turn_id, agent_conversation_id=self.run.conversation_id,
-                    preset_snapshot=preset_snapshot,
+                    agent=origin,
                 ))
                 sources = []
             else:
@@ -275,9 +275,7 @@ class AgentToolExecutor:
                         str(preset.get("api_path") or "/v1/images/generations")
                     ),
                     queued_message="Queued image generation",
-                    agent_turn_id=self.run.turn_id,
-                    agent_conversation_id=self.run.conversation_id,
-                    preset_snapshot=preset_snapshot,
+                    agent=origin,
                 ))
         except (asyncio.CancelledError, TurnCancelled):
             edit_sources.cleanup_edit_sources(sources)

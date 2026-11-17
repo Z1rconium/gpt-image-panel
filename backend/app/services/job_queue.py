@@ -3,6 +3,7 @@
 import asyncio
 import uuid
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
@@ -503,6 +504,15 @@ async def enqueue(
     )
 
 
+@dataclass(frozen=True)
+class AgentOrigin:
+    """Agent turn that owns a queued job, plus the preset snapshot pinned to it."""
+
+    turn_id: str
+    conversation_id: str
+    preset_snapshot: dict | None = None
+
+
 async def queue_image_job(
     *,
     req: GenerateRequest | EditRequest,
@@ -513,11 +523,10 @@ async def queue_image_job(
     edit_sources_payload: list[dict] | None = None,
     mask_applied: bool = False,
     job_id: str | None = None,
-    agent_turn_id: str | None = None,
-    agent_conversation_id: str | None = None,
-    preset_snapshot: dict | None = None,
+    agent: AgentOrigin | None = None,
 ) -> GenerateJobResponse:
     del pending_edit_source_bytes, mask_applied
+    preset_snapshot = agent.preset_snapshot if agent else None
     if operation == "generation":
         admitted = await admit_generation(
             req,
@@ -558,8 +567,8 @@ async def queue_image_job(
         admitted,
         queued_message=queued_message,
         job_id=job_id,
-        agent_turn_id=agent_turn_id,
-        agent_conversation_id=agent_conversation_id,
+        agent_turn_id=agent.turn_id if agent else None,
+        agent_conversation_id=agent.conversation_id if agent else None,
     )
 
 
@@ -571,9 +580,7 @@ async def queue_edit_job(
     mask_optimized_png: bytes | None = None,
     markup_source: edit_source_types.EditImageSource | None = None,
     *,
-    agent_turn_id: str | None = None,
-    agent_conversation_id: str | None = None,
-    preset_snapshot: dict | None = None,
+    agent: AgentOrigin | None = None,
 ) -> GenerateJobResponse:
     del mask_coverage, mask_optimized_png
     admitted = await admit_edit(
@@ -583,11 +590,11 @@ async def queue_edit_job(
             mask=mask_source,
             markup=markup_source,
         ),
-        preset_snapshot=preset_snapshot,
+        preset_snapshot=agent.preset_snapshot if agent else None,
     )
     return await enqueue(
         admitted,
         queued_message="Queued image edit",
-        agent_turn_id=agent_turn_id,
-        agent_conversation_id=agent_conversation_id,
+        agent_turn_id=agent.turn_id if agent else None,
+        agent_conversation_id=agent.conversation_id if agent else None,
     )
