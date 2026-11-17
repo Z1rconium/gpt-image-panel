@@ -12,12 +12,12 @@ from ..runtime.state import state
 from .agent_event_writer import TERMINAL_EVENT_TYPES
 from .gallery_common import PRIVATE_GALLERY_CACHE_CONTROL
 from .job_events import serialize_sse_event
-from .sse_feed import SseConnection
+from .sse_feed import DEFAULT_KEEPALIVE_SECONDS, SseConnection
 
 logger = logging.getLogger(__name__)
 
 EVENT_POLL_SECONDS = 0.4
-KEEP_ALIVE_SECONDS = 15.0
+KEEP_ALIVE_SECONDS = DEFAULT_KEEPALIVE_SECONDS
 STALE_SWEEP_SECONDS = 30.0
 EVENT_BATCH = 200
 MAX_CURSOR = (1 << 63) - 1

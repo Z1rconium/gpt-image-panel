@@ -1,6 +1,5 @@
-# Keeps the modules cleaned up in the v1.7.0-v1.7.8 review free of unused
-# imports and variables. Extend FILES as more modules are cleaned; the legacy
-# re-export facades under backend/app/repositories/db are intentionally excluded.
+# Keeps backend/app free of unused imports and variables. The legacy re-export
+# facades under backend/app/repositories/db are intentionally excluded.
 name: Lint
 
 on:
@@ -19,39 +18,5 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Check unused imports and variables
-        env:
-          FILES: >-
-            backend/app/api/routers/settings.py
-            backend/app/core/diagnostics.py
-            backend/app/core/overall_config.py
-            backend/app/core/redaction.py
-            backend/app/integrations/upstream/async_provider.py
-            backend/app/integrations/upstream/generation.py
-            backend/app/integrations/upstream/payloads.py
-            backend/app/api/body_limit.py
-            backend/app/core/secrets.py
-            backend/app/integrations/agent_parsers.py
-            backend/app/integrations/agent_types.py
-            backend/app/services/agent_event_writer.py
-            backend/app/services/agent_model_round.py
-            backend/app/services/agent_run_context.py
-            backend/app/services/agent_run_lifecycle.py
-            backend/app/services/agent_refs.py
-            backend/app/services/agent_tool_executor.py
-            backend/app/services/agent_turn_errors.py
-            backend/app/services/agent_turns.py
-            backend/app/services/edit_source_types.py
-            backend/app/services/gallery_job_kinds.py
-            backend/app/services/generate_job_sse.py
-            backend/app/services/image_admission.py
-            backend/app/services/image_job_aggregate.py
-            backend/app/services/image_job_terminal.py
-            backend/app/services/image_preset_snapshot.py
-            backend/app/services/image_unit_execution.py
-            backend/app/services/image_unit_session.py
-            backend/app/services/preset_package.py
-            backend/app/services/presets.py
-            backend/app/services/sse_feed.py
         run: |
-          # shellcheck disable=SC2086
-          pipx run --spec ruff==0.16.10 ruff check --select F401,F841 $FILES
+          pipx run --spec ruff==0.16.10 ruff check backend/app --select F401,F841 --extend-exclude backend/app/repositories/db
