@@ -1,5 +1,19 @@
 # Changelog
 
+## v2.0.0
+
+Architecture release. The backend and frontend were restructured around deeper modules; there are no database migrations and no request or response schema changes, so upgrading from v1.9.x needs no migration.
+
+- Fix: restoring a mask or markup layer for an edit whose primary source was a gallery reference image now verifies the reference's gallery id and hash instead of failing with 409; a mismatched id still returns 409.
+- Fix: cancelling an edit job decides whether to keep its staged source files inside the cancel transaction, so a unit that is claimed while the cancel is in flight no longer loses the files it is still reading.
+- Fix: saving settings validates a copy of the preset and every settings group before persisting any of them, so a rejected save (422) no longer leaves runtime settings or earlier groups changed.
+- Image job admission is concentrated in one module that owns the preset, model, capability and size rules for generation, edits and the Agent; rejections still happen before any file is staged, leaving no temporary files behind, and the 50 MiB edit-input limit is defined once.
+- Image job terminal states go through one transition that writes, publishes, trims and releases edit sources, and the repeated reservation cleanup is a single helper.
+- The jobs-list, per-job, gallery and Agent event streams share one connection lifecycle (slot lease, refresh, TTL, keep-alive, release) and one keyed fan-out; the 429 response for exhausted stream slots is unchanged.
+- Gallery background jobs (export, sync, import, NodeImage upload, AI analysis) are declared in one descriptor table with a shared terminal-state helper; payload field names are unchanged.
+- API settings writes run inside one context manager that holds the reload guard and restores runtime state when a write fails.
+- Frontend: the edit-source session (mask restore and apply, markup apply, discard notices) has a single owner; prompt-form capability rules live in one pure module shared by the form and by submit; the generation job lifecycle and its `/api/generate` endpoints live in a session module and an endpoint module instead of `Workspace.svelte`.
+
 ## v1.9.6
 
 - Faster markup editing: cache primary image dimensions, add undo checkpoints that fold old history without losing visible marks, and reduce memory and copying in the backend markup pipeline with unified layer endpoints.
