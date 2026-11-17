@@ -1,5 +1,6 @@
 <script lang="ts">
   import Overlay from '$lib/components/Overlay.svelte';
+  import { ApiError } from '$lib/api/client';
   import { t } from '$lib/i18n';
   import { confirmStore } from '$lib/stores/confirm';
   import { galleryActivityStore, galleryStore } from '$lib/stores/gallery';
@@ -123,10 +124,10 @@
         editingAliasId = '';
         aliasValue = '';
       } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : String(e);
-        if (msg.includes('409') || msg.toLowerCase().includes('conflict')) {
+        const status = e instanceof ApiError ? e.status : 0;
+        if (status === 409) {
           aliasError = $t.collections.aliasConflict;
-        } else if (msg.includes('422')) {
+        } else if (status === 422) {
           aliasError = $t.collections.aliasInvalid;
         } else {
           showError(e);
