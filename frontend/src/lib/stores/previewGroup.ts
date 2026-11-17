@@ -449,6 +449,10 @@ function streamingStillRelevant(job: GenerateJobStatus, slot: StreamingPreviewSl
   return !unitStatus || isActiveJobStatus(unitStatus);
 }
 
+/**
+ * Preview snapshot = sameJobCore + streaming/mask_applied/markup_applied + unit_statuses + image unit/result index.
+ * Field policy matrix (with jobsState.sameJob): tests/unit/jobEqualityFields.test.ts.
+ */
 export function sameJobSnapshot(left: GenerateJobStatus | null, right: GenerateJobStatus): boolean {
   if (left === right) return true;
   if (!left) return false;

@@ -89,6 +89,10 @@ export function sameJobCore(left: GenerateJobStatus, right: GenerateJobStatus): 
   );
 }
 
+/**
+ * Jobs-list diffing = sameJobCore + operation/prompt/size/model + image dimensions + stage_timings.
+ * Field policy matrix (with previewGroup.sameJobSnapshot): tests/unit/jobEqualityFields.test.ts.
+ */
 export function sameJob(left: GenerateJobStatus, right: GenerateJobStatus) {
   return (
     sameJobCore(left, right) &&
